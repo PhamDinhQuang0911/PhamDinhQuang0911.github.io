@@ -115,10 +115,16 @@
                     <div class="absolute inset-0 flex items-center">
                         <div class="w-full border-t border-gray-200"></div>
                     </div>
-                    <span class="relative z-10 bg-white px-4 text-xs text-gray-400 uppercase font-bold">Hoặc</span>
+                    <span class="relative z-10 bg-white px-4 text-xs text-gray-400 uppercase font-bold">Hoặc tiếp tục với</span>
                 </div>
 
-                <p class="text-center text-gray-600 text-sm">
+                <!-- Nút Đăng nhập Google MỚI -->
+                <button type="button" id="googleLoginBtn" class="w-full bg-white hover:bg-gray-50 text-gray-700 font-bold py-3 rounded-xl border border-gray-300 shadow-sm transition-all flex justify-center items-center gap-2 transform active:scale-95">
+                    <i class="fa-brands fa-google text-red-500 text-xl"></i>
+                    <span>Đăng nhập bằng Google</span>
+                </button>
+
+                <p class="text-center text-gray-600 text-sm mt-4">
                     Chưa có tài khoản? 
                     <!-- Nút đăng ký nhanh -->
                     <button type="button" id="quickRegisterBtn" class="font-bold text-orange-custom hover:underline">Đăng ký mới ngay</button>
@@ -132,9 +138,9 @@
 
     <!-- CODE XỬ LÝ FIREBASE -->
     <script type="module">
-        // Import các hàm cần thiết
+        // Import thêm GoogleAuthProvider và signInWithPopup
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-        import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+        import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, GoogleAuthProvider, signInWithPopup } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
         import { getFirestore, doc, setDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
         // --- CẤU HÌNH ĐÃ LẤY TỪ ẢNH CỦA BẠN ---
@@ -151,6 +157,9 @@
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
         const db = getFirestore(app);
+        
+        // Khởi tạo Google Provider
+        const googleProvider = new GoogleAuthProvider();
 
         // Các thành phần giao diện
         const loginForm = document.getElementById('loginForm');
@@ -158,6 +167,7 @@
         const passwordInput = document.getElementById('passwordInput');
         const submitBtn = document.getElementById('submitBtn');
         const quickRegisterBtn = document.getElementById('quickRegisterBtn');
+        const googleLoginBtn = document.getElementById('googleLoginBtn'); // Nút Google
         const messageArea = document.getElementById('messageArea');
 
         // Hàm hiển thị thông báo
@@ -172,49 +182,35 @@
             }
         }
 
-        // --- XỬ LÝ ĐĂNG NHẬP ---
+        // --- XỬ LÝ ĐĂNG NHẬP EMAIL/PASS (CŨ) ---
         loginForm.addEventListener('submit', async (e) => {
             e.preventDefault(); 
-            
             const email = emailInput.value;
             const password = passwordInput.value;
 
-            // Hiệu ứng đang tải
             submitBtn.disabled = true;
             submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang xử lý...';
 
             try {
-                // Đăng nhập
                 const userCredential = await signInWithEmailAndPassword(auth, email, password);
                 const user = userCredential.user;
 
-                // Ghi dữ liệu đăng nhập vào Firestore (để test database luôn)
-                try {
-                    await setDoc(doc(db, "users", user.uid), {
-                        email: user.email,
-                        lastLogin: new Date().toISOString()
-                    }, { merge: true });
-                } catch (dbError) {
-                    console.error("Lỗi ghi database:", dbError);
-                    // Không chặn đăng nhập nếu lỗi ghi DB (có thể do chưa chỉnh Rules)
-                }
+                // Ghi dữ liệu vào DB
+                await setDoc(doc(db, "users", user.uid), {
+                    email: user.email,
+                    lastLogin: new Date().toISOString(),
+                    authType: "email"
+                }, { merge: true });
 
                 showMessage(`Đăng nhập thành công! Chào ${user.email}`);
-                
-                // Giả lập chuyển trang sau 1s
                 setTimeout(() => {
-                    alert(`Xin chào ${user.email}! Bạn đã đăng nhập thành công vào hệ thống.`);
-                    // window.location.href = "trang-chu.html"; // Sau này sẽ dùng dòng này
+                    alert(`Xin chào ${user.email}! Bạn đã đăng nhập thành công.`);
                 }, 500);
 
             } catch (error) {
                 console.error(error);
                 let msg = "Đăng nhập thất bại.";
-                if (error.code === 'auth/invalid-credential' || error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
-                    msg = "Sai email hoặc mật khẩu rồi!";
-                } else if (error.code === 'auth/too-many-requests') {
-                    msg = "Thử lại nhiều quá. Hãy đợi một chút!";
-                }
+                if (error.code === 'auth/invalid-credential') msg = "Sai email hoặc mật khẩu!";
                 showMessage(msg, "error");
             } finally {
                 submitBtn.disabled = false;
@@ -222,18 +218,13 @@
             }
         });
 
-        // --- XỬ LÝ ĐĂNG KÝ NHANH ---
+        // --- XỬ LÝ ĐĂNG KÝ NHANH (CŨ) ---
         quickRegisterBtn.addEventListener('click', async () => {
             const email = emailInput.value;
             const password = passwordInput.value;
 
-            if (!email || !password) {
-                return showMessage("Nhập Email và Mật khẩu để đăng ký nhé!", "error");
-            }
-
-            if (password.length < 6) {
-                return showMessage("Mật khẩu phải dài hơn 6 ký tự!", "error");
-            }
+            if (!email || !password) return showMessage("Nhập Email và Mật khẩu để đăng ký!", "error");
+            if (password.length < 6) return showMessage("Mật khẩu phải dài hơn 6 ký tự!", "error");
 
             submitBtn.disabled = true;
             submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang đăng ký...';
@@ -242,14 +233,52 @@
                 await createUserWithEmailAndPassword(auth, email, password);
                 showMessage("Đăng ký thành công! Bạn hãy bấm Đăng nhập ngay.", "success");
             } catch (error) {
-                if (error.code === 'auth/email-already-in-use') {
-                    showMessage("Email này đã có người dùng rồi!", "error");
-                } else {
-                    showMessage("Lỗi đăng ký: " + error.message, "error");
-                }
+                showMessage("Lỗi đăng ký: " + error.message, "error");
             } finally {
                 submitBtn.disabled = false;
                 submitBtn.innerHTML = 'Đăng nhập ngay';
+            }
+        });
+
+        // --- XỬ LÝ ĐĂNG NHẬP GOOGLE (MỚI) ---
+        googleLoginBtn.addEventListener('click', async () => {
+            try {
+                // Hiển thị popup đăng nhập Google
+                const result = await signInWithPopup(auth, googleProvider);
+                
+                // Lấy thông tin user
+                const user = result.user;
+                
+                console.log("Đăng nhập Google thành công:", user);
+
+                // Lưu thông tin người dùng Google vào Firestore
+                await setDoc(doc(db, "users", user.uid), {
+                    email: user.email,
+                    displayName: user.displayName, // Tên hiển thị từ Google
+                    photoURL: user.photoURL,     // Ảnh đại diện từ Google
+                    lastLogin: new Date().toISOString(),
+                    authType: "google"
+                }, { merge: true });
+
+                showMessage(`Chào mừng ${user.displayName}! Đăng nhập Google thành công.`);
+                
+                setTimeout(() => {
+                    alert(`Xin chào ${user.displayName}! Bạn đã đăng nhập bằng Google thành công.`);
+                }, 500);
+
+            } catch (error) {
+                console.error("Lỗi Google Login:", error);
+                let msg = "Đăng nhập Google thất bại.";
+                
+                if (error.code === 'auth/popup-closed-by-user') {
+                    msg = "Bạn đã đóng cửa sổ đăng nhập.";
+                } else if (error.code === 'auth/popup-blocked') {
+                    msg = "Trình duyệt chặn popup. Hãy cho phép popup!";
+                } else if (error.code === 'auth/operation-not-allowed') {
+                    msg = "Lỗi: Bạn chưa bật Google Auth trong Firebase Console!";
+                }
+
+                showMessage(msg, "error");
             }
         });
 
