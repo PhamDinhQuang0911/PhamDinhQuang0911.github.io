@@ -253,20 +253,31 @@
                             Ai được phép làm
                         </h3>
                          <div class="flex flex-col gap-3">
-                             <label class="flex items-center gap-3 p-3 border rounded-xl cursor-pointer hover:bg-gray-50">
+                             <label class="flex items-center gap-3 p-3 border rounded-xl cursor-pointer hover:bg-gray-50 transition-all" onclick="togglePrivasySettings('public')">
                                  <input type="radio" name="settingAccess" value="public" class="w-5 h-5 text-blue-600" checked>
                                  <div>
-                                     <div class="font-bold text-sm text-gray-800">Tất cả mọi người</div>
+                                     <div class="font-bold text-sm text-gray-800">Công khai (Public)</div>
                                      <div class="text-xs text-gray-500">Ai có link cũng có thể vào làm bài</div>
                                  </div>
                              </label>
-                             <label class="flex items-center gap-3 p-3 border rounded-xl cursor-pointer hover:bg-gray-50 opacity-60" title="Tính năng đang phát triển">
-                                 <input type="radio" name="settingAccess" value="private" class="w-5 h-5 text-blue-600" disabled>
+                             
+                             <label class="flex items-center gap-3 p-3 border rounded-xl cursor-pointer hover:bg-gray-50 transition-all" onclick="togglePrivasySettings('class')">
+                                 <input type="radio" name="settingAccess" value="class" class="w-5 h-5 text-blue-600">
                                  <div>
-                                     <div class="font-bold text-sm text-gray-800">Chỉ lớp được giao (Sắp ra mắt)</div>
-                                     <div class="text-xs text-gray-500">Chỉ học sinh trong danh sách lớp mới được làm</div>
+                                     <div class="font-bold text-sm text-gray-800">Chỉ lớp được giao</div>
+                                     <div class="text-xs text-gray-500">Chỉ học sinh trong lớp được chọn mới được làm</div>
                                  </div>
                              </label>
+
+                             <div id="classSelectionArea" class="hidden pl-10 pr-2 transition-all bg-gray-50 p-3 rounded-lg border border-gray-200 mt-1">
+                                 <label class="form-group-title mb-1 block">Chọn lớp áp dụng:</label>
+                                 <select id="settingClassSelect" class="form-input bg-white border-blue-300 text-blue-800 font-bold">
+                                     <option value="">-- Đang tải danh sách lớp --</option>
+                                 </select>
+                                 <p class="text-xs text-orange-500 mt-2 italic flex items-center gap-1">
+                                     <i class="fa-solid fa-circle-exclamation"></i> Bài thi sẽ tự động hiện trong tài khoản của học sinh lớp này.
+                                 </p>
+                             </div>
                          </div>
                      </div>
                 </div>
@@ -430,8 +441,13 @@
         onAuthStateChanged(auth, async (user) => {
             if (user) {
                 currentUser = user;
+                // --- THÊM DÒNG NÀY: Tải danh sách lớp ngay khi vào ---
+                loadTeacherClasses(); 
+                // -----------------------------------------------------
+                
                 const urlParams = new URLSearchParams(window.location.search);
                 const examId = urlParams.get('id');
+                
                 if (examId) {
                     currentExamId = examId;
                     loadExamData(examId);
@@ -480,7 +496,18 @@
             const title = document.getElementById('settingTitle').value;
             if(!title) return alert("Vui lòng nhập tên đề thi!");
 
-            // Collect Settings
+            // Xử lý logic chọn lớp
+            const accessType = document.querySelector('input[name="settingAccess"]:checked').value;
+            const allowedClassId = document.getElementById('settingClassSelect').value;
+
+            // Nếu chọn "Theo lớp" mà chưa chọn lớp nào thì báo lỗi
+            if(accessType === 'class' && !allowedClassId) {
+                alert("Vui lòng chọn lớp học để giao đề!");
+                document.getElementById('settingClassSelect').focus();
+                return;
+            }
+
+            // Thu thập Settings
             const settings = {
                 title: title,
                 grade: document.getElementById('settingGrade').value,
@@ -495,13 +522,14 @@
                 shuffle: document.getElementById('settingShuffle').checked,
                 showScore: document.querySelector('input[name="settingShowScore"]:checked').value,
                 showResult: document.querySelector('input[name="settingShowResult"]:checked').value,
-                accessType: document.querySelector('input[name="settingAccess"]:checked').value
+                // --- THÊM 2 DÒNG NÀY ---
+                accessType: accessType,
+                allowedClassId: accessType === 'class' ? allowedClassId : null
             };
 
-            // Collect Questions
+            // Thu thập Câu hỏi (Giữ nguyên logic cũ)
             const questionCards = document.querySelectorAll('.question-card');
             const questions = [];
-            
             questionCards.forEach(card => {
                 const type = card.dataset.type;
                 const content = card.querySelector('textarea').value;
@@ -529,6 +557,7 @@
                 questions.push(qData);
             });
 
+            // Gửi lên Firebase
             const btn = status === 'published' ? document.getElementById('btnPublish') : document.getElementById('btnSaveDraft');
             const originalText = btn.innerHTML;
             btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang lưu...';
@@ -548,8 +577,9 @@
                 }, { merge: true });
 
                 currentExamId = examRef.id;
-                
                 document.getElementById('sidebarExamTitle').textContent = title;
+                
+                // Cập nhật trạng thái
                 const statusEl = document.getElementById('examStatus');
                 statusEl.textContent = status === 'published' ? '• Đã xuất bản' : '• Bản nháp';
                 statusEl.className = `text-xs font-bold ${status === 'published' ? 'text-green-600' : 'text-orange-500'}`;
@@ -557,7 +587,6 @@
                 if (status === 'published') {
                     const link = window.location.origin + window.location.pathname.replace('exam-editor.html', 'exam.html') + '?id=' + currentExamId;
                     document.getElementById('shareLinkInput').value = link;
-                    
                     const modal = document.getElementById('shareModal');
                     modal.classList.remove('opacity-0', 'pointer-events-none');
                     modal.querySelector('div').classList.remove('scale-95');
@@ -687,6 +716,42 @@
                 addQuestion(qType, qData); count++;
             }
             if (count > 0) alert(`Đã nhập ${count} câu hỏi!`);
+        }
+        // --- HÀM MỚI 1: TẢI DANH SÁCH LỚP ---
+        async function loadTeacherClasses() {
+            const select = document.getElementById('settingClassSelect');
+            try {
+                // Tìm các lớp do giáo viên này tạo
+                const q = query(collection(db, "classes"), where("teacherId", "==", currentUser.uid));
+                const snap = await getDocs(q);
+                
+                if (snap.empty) {
+                    select.innerHTML = '<option value="">Thầy chưa tạo lớp nào!</option>';
+                } else {
+                    select.innerHTML = '<option value="">-- Chọn lớp học --</option>';
+                    snap.forEach(doc => {
+                        const cl = doc.data();
+                        const opt = document.createElement('option');
+                        opt.value = doc.id;
+                        opt.textContent = `${cl.name} (Sĩ số: ${cl.studentCount || 0})`;
+                        select.appendChild(opt);
+                    });
+                }
+            } catch(e) { 
+                console.error(e); 
+                select.innerHTML = '<option>Lỗi tải danh sách lớp</option>'; 
+            }
+        }
+
+        // --- HÀM MỚI 2: BẬT TẮT GIAO DIỆN CHỌN LỚP ---
+        // Gán vào window để gọi được từ HTML onclick
+        window.togglePrivasySettings = function(type) {
+            const area = document.getElementById('classSelectionArea');
+            if (type === 'class') {
+                area.classList.remove('hidden');
+            } else {
+                area.classList.add('hidden');
+            }
         }
     </script>
 </body>
