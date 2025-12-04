@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Soạn đề thi - Toán thầy Choang Choang</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    
+    <!-- MathJax -->
+    <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+    <style>
+        body { font-family: 'Nunito', sans-serif; background-color: #F3F4F6; }
+        .latex-preview { font-family: 'Times New Roman', serif; }
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    </style>
+</head>
+<body class="flex flex-col h-screen overflow-hidden">
+
+    <!-- HEADER -->
+    <header class="bg-white border-b border-gray-200 h-16 flex items-center justify-between px-6 shrink-0 z-20">
+        <div class="flex items-center gap-4">
+            <button onclick="window.location.href='dashboard.html'" class="text-gray-500 hover:text-gray-700">
+                <i class="fa-solid fa-arrow-left text-xl"></i>
+            </button>
+            <h1 class="text-xl font-bold text-gray-800">Trình soạn thảo đề thi</h1>
+        </div>
+        <div class="flex items-center gap-3">
+            <button onclick="exportToLatex()" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg font-bold hover:bg-gray-200 text-sm">
+                <i class="fa-solid fa-file-export mr-2"></i> Xuất LaTeX
+            </button>
+            <button id="saveExamBtn" class="px-6 py-2 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 text-sm shadow-md">
+                <i class="fa-solid fa-save mr-2"></i> Lưu đề thi
+            </button>
+        </div>
+    </header>
+
+    <!-- MAIN CONTENT -->
+    <div class="flex flex-1 overflow-hidden">
+        
+        <!-- LEFT: Question List -->
+        <main class="flex-1 overflow-y-auto p-6 scroll-smooth" id="mainContainer">
+            
+            <!-- Exam Info -->
+            <div class="bg-white p-6 rounded-xl shadow-sm mb-6 border border-gray-100">
+                <label class="block text-sm font-bold text-gray-700 mb-2">Tên đề thi</label>
+                <input type="text" id="examTitle" class="w-full text-xl font-bold text-blue-800 border-b-2 border-gray-200 focus:border-blue-500 outline-none px-2 py-1 placeholder-gray-300" placeholder="Nhập tên đề thi (VD: Đề thi Giữa kỳ 1 - Lớp 5A)">
+            </div>
+
+            <!-- Questions Container -->
+            <div id="questionsList" class="space-y-6 pb-20">
+                <!-- Questions will be added here -->
+                <div id="emptyState" class="text-center py-12 text-gray-400 border-2 border-dashed border-gray-200 rounded-xl">
+                    <i class="fa-regular fa-folder-open text-4xl mb-3"></i>
+                    <p>Chưa có câu hỏi nào. Hãy thêm câu hỏi mới!</p>
+                </div>
+            </div>
+        </main>
+
+        <!-- RIGHT: Toolbar -->
+        <aside class="w-72 bg-white border-l border-gray-200 p-4 flex flex-col gap-4 shadow-xl z-10">
+            <h3 class="font-bold text-gray-700 text-sm uppercase">Thêm câu hỏi</h3>
+            
+            <button onclick="addQuestion('mc')" class="w-full p-3 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg font-bold text-left flex items-center transition-colors group">
+                <div class="w-8 h-8 bg-blue-200 rounded-md flex items-center justify-center mr-3 group-hover:bg-white text-blue-600">
+                    <i class="fa-solid fa-list-ul"></i>
+                </div>
+                <div>
+                    <div class="text-sm">Trắc nghiệm</div>
+                    <div class="text-xs font-normal opacity-70">\begin{ex}</div>
+                </div>
+            </button>
+
+            <button onclick="addQuestion('essay')" class="w-full p-3 bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-lg font-bold text-left flex items-center transition-colors group">
+                <div class="w-8 h-8 bg-purple-200 rounded-md flex items-center justify-center mr-3 group-hover:bg-white text-purple-600">
+                    <i class="fa-solid fa-pen-nib"></i>
+                </div>
+                <div>
+                    <div class="text-sm">Tự luận</div>
+                    <div class="text-xs font-normal opacity-70">\begin{bt}</div>
+                </div>
+            </button>
+
+            <button onclick="addQuestion('tf')" class="w-full p-3 bg-orange-50 hover:bg-orange-100 text-orange-700 rounded-lg font-bold text-left flex items-center transition-colors group">
+                <div class="w-8 h-8 bg-orange-200 rounded-md flex items-center justify-center mr-3 group-hover:bg-white text-orange-600">
+                    <i class="fa-solid fa-check-double"></i>
+                </div>
+                <div>
+                    <div class="text-sm">Đúng / Sai</div>
+                    <div class="text-xs font-normal opacity-70">\choiceTF</div>
+                </div>
+            </button>
+
+            <button onclick="addQuestion('short')" class="w-full p-3 bg-green-50 hover:bg-green-100 text-green-700 rounded-lg font-bold text-left flex items-center transition-colors group">
+                <div class="w-8 h-8 bg-green-200 rounded-md flex items-center justify-center mr-3 group-hover:bg-white text-green-600">
+                    <i class="fa-solid fa-keyboard"></i>
+                </div>
+                <div>
+                    <div class="text-sm">Trả lời ngắn</div>
+                    <div class="text-xs font-normal opacity-70">\shortans</div>
+                </div>
+            </button>
+
+            <div class="mt-auto pt-4 border-t border-gray-100 text-xs text-gray-400 text-center">
+                Hỗ trợ công thức Toán học LaTeX<br>VD: $\frac{a}{b}, \sqrt{x}$
+            </div>
+        </aside>
+    </div>
+
+    <!-- TEMPLATES CÂU HỎI (ẨN) -->
+    <template id="tpl-mc">
+        <div class="question-card bg-white p-6 rounded-xl shadow-sm border border-gray-200 relative group" data-type="mc">
+            <div class="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                <button onclick="moveUp(this)" class="p-1.5 text-gray-400 hover:text-blue-500"><i class="fa-solid fa-arrow-up"></i></button>
+                <button onclick="moveDown(this)" class="p-1.5 text-gray-400 hover:text-blue-500"><i class="fa-solid fa-arrow-down"></i></button>
+                <button onclick="deleteQuestion(this)" class="p-1.5 text-gray-400 hover:text-red-500"><i class="fa-solid fa-trash"></i></button>
+            </div>
+            <div class="mb-4">
+                <span class="inline-block px-2 py-1 bg-blue-100 text-blue-700 text-xs font-bold rounded mb-2">Trắc nghiệm</span>
+                <textarea class="w-full p-3 border border-gray-200 rounded-lg focus:border-blue-500 outline-none min-h-[80px]" placeholder="Nhập nội dung câu hỏi... (Hỗ trợ LaTeX)"></textarea>
+            </div>
+            <div class="grid grid-cols-2 gap-4 mb-4">
+                <div class="flex items-center gap-2">
+                    <input type="radio" name="correct-rad-${id}" class="w-4 h-4 text-blue-600">
+                    <input type="text" class="flex-1 p-2 border border-gray-200 rounded text-sm" placeholder="Phương án 1">
+                </div>
+                <div class="flex items-center gap-2">
+                    <input type="radio" name="correct-rad-${id}" class="w-4 h-4 text-blue-600">
+                    <input type="text" class="flex-1 p-2 border border-gray-200 rounded text-sm" placeholder="Phương án 2">
+                </div>
+                <div class="flex items-center gap-2">
+                    <input type="radio" name="correct-rad-${id}" class="w-4 h-4 text-blue-600">
+                    <input type="text" class="flex-1 p-2 border border-gray-200 rounded text-sm" placeholder="Phương án 3">
+                </div>
+                <div class="flex items-center gap-2">
+                    <input type="radio" name="correct-rad-${id}" class="w-4 h-4 text-blue-600">
+                    <input type="text" class="flex-1 p-2 border border-gray-200 rounded text-sm" placeholder="Phương án 4">
+                </div>
+            </div>
+            <div>
+                <input type="text" class="w-full p-2 bg-gray-50 border border-gray-200 rounded text-sm text-gray-600 italic" placeholder="Lời giải chi tiết...">
+            </div>
+        </div>
+    </template>
+
+    <template id="tpl-essay">
+        <div class="question-card bg-white p-6 rounded-xl shadow-sm border border-gray-200 relative group" data-type="essay">
+            <div class="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                <button onclick="moveUp(this)" class="p-1.5 text-gray-400 hover:text-blue-500"><i class="fa-solid fa-arrow-up"></i></button>
+                <button onclick="moveDown(this)" class="p-1.5 text-gray-400 hover:text-blue-500"><i class="fa-solid fa-arrow-down"></i></button>
+                <button onclick="deleteQuestion(this)" class="p-1.5 text-gray-400 hover:text-red-500"><i class="fa-solid fa-trash"></i></button>
+            </div>
+            <div class="mb-4">
+                <span class="inline-block px-2 py-1 bg-purple-100 text-purple-700 text-xs font-bold rounded mb-2">Tự luận</span>
+                <textarea class="w-full p-3 border border-gray-200 rounded-lg focus:border-purple-500 outline-none min-h-[100px]" placeholder="Nhập đề bài tự luận..."></textarea>
+            </div>
+            <div>
+                <textarea class="w-full p-3 bg-gray-50 border border-gray-200 rounded-lg text-sm min-h-[80px]" placeholder="Lời giải / Đáp án tham khảo..."></textarea>
+            </div>
+        </div>
+    </template>
+
+    <template id="tpl-tf">
+        <div class="question-card bg-white p-6 rounded-xl shadow-sm border border-gray-200 relative group" data-type="tf">
+            <div class="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                <button onclick="moveUp(this)" class="p-1.5 text-gray-400 hover:text-blue-500"><i class="fa-solid fa-arrow-up"></i></button>
+                <button onclick="moveDown(this)" class="p-1.5 text-gray-400 hover:text-blue-500"><i class="fa-solid fa-arrow-down"></i></button>
+                <button onclick="deleteQuestion(this)" class="p-1.5 text-gray-400 hover:text-red-500"><i class="fa-solid fa-trash"></i></button>
+            </div>
+            <div class="mb-4">
+                <span class="inline-block px-2 py-1 bg-orange-100 text-orange-700 text-xs font-bold rounded mb-2">Đúng / Sai</span>
+                <textarea class="w-full p-3 border border-gray-200 rounded-lg focus:border-orange-500 outline-none min-h-[60px]" placeholder="Nội dung câu hỏi gốc..."></textarea>
+            </div>
+            <div class="space-y-2 mb-4">
+                <div class="grid grid-cols-12 gap-2 text-xs font-bold text-gray-500 uppercase mb-1">
+                    <div class="col-span-8">Mệnh đề</div>
+                    <div class="col-span-2 text-center">Đúng</div>
+                    <div class="col-span-2 text-center">Sai</div>
+                </div>
+                <!-- 4 Mệnh đề -->
+                <div class="grid grid-cols-12 gap-2 items-center">
+                    <div class="col-span-8"><input type="text" class="w-full p-2 border border-gray-200 rounded text-sm" placeholder="Mệnh đề 1"></div>
+                    <div class="col-span-2 text-center"><input type="radio" name="tf-1-${id}" value="true" class="w-4 h-4 text-green-600"></div>
+                    <div class="col-span-2 text-center"><input type="radio" name="tf-1-${id}" value="false" class="w-4 h-4 text-red-600"></div>
+                </div>
+                <div class="grid grid-cols-12 gap-2 items-center">
+                    <div class="col-span-8"><input type="text" class="w-full p-2 border border-gray-200 rounded text-sm" placeholder="Mệnh đề 2"></div>
+                    <div class="col-span-2 text-center"><input type="radio" name="tf-2-${id}" value="true" class="w-4 h-4 text-green-600"></div>
+                    <div class="col-span-2 text-center"><input type="radio" name="tf-2-${id}" value="false" class="w-4 h-4 text-red-600"></div>
+                </div>
+                <div class="grid grid-cols-12 gap-2 items-center">
+                    <div class="col-span-8"><input type="text" class="w-full p-2 border border-gray-200 rounded text-sm" placeholder="Mệnh đề 3"></div>
+                    <div class="col-span-2 text-center"><input type="radio" name="tf-3-${id}" value="true" class="w-4 h-4 text-green-600"></div>
+                    <div class="col-span-2 text-center"><input type="radio" name="tf-3-${id}" value="false" class="w-4 h-4 text-red-600"></div>
+                </div>
+                <div class="grid grid-cols-12 gap-2 items-center">
+                    <div class="col-span-8"><input type="text" class="w-full p-2 border border-gray-200 rounded text-sm" placeholder="Mệnh đề 4"></div>
+                    <div class="col-span-2 text-center"><input type="radio" name="tf-4-${id}" value="true" class="w-4 h-4 text-green-600"></div>
+                    <div class="col-span-2 text-center"><input type="radio" name="tf-4-${id}" value="false" class="w-4 h-4 text-red-600"></div>
+                </div>
+            </div>
+            <div>
+                <textarea class="w-full p-2 bg-gray-50 border border-gray-200 rounded text-sm text-gray-600 italic h-20" placeholder="Lời giải chi tiết cho từng mệnh đề..."></textarea>
+            </div>
+        </div>
+    </template>
+
+    <template id="tpl-short">
+        <div class="question-card bg-white p-6 rounded-xl shadow-sm border border-gray-200 relative group" data-type="short">
+            <div class="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                <button onclick="moveUp(this)" class="p-1.5 text-gray-400 hover:text-blue-500"><i class="fa-solid fa-arrow-up"></i></button>
+                <button onclick="moveDown(this)" class="p-1.5 text-gray-400 hover:text-blue-500"><i class="fa-solid fa-arrow-down"></i></button>
+                <button onclick="deleteQuestion(this)" class="p-1.5 text-gray-400 hover:text-red-500"><i class="fa-solid fa-trash"></i></button>
+            </div>
+            <div class="mb-4">
+                <span class="inline-block px-2 py-1 bg-green-100 text-green-700 text-xs font-bold rounded mb-2">Trả lời ngắn</span>
+                <textarea class="w-full p-3 border border-gray-200 rounded-lg focus:border-green-500 outline-none min-h-[80px]" placeholder="Nhập câu hỏi..."></textarea>
+            </div>
+            <div class="mb-4">
+                <label class="block text-xs font-bold text-gray-500 mb-1">Đáp án ngắn:</label>
+                <input type="text" class="w-full p-2 border border-green-200 bg-green-50 rounded text-sm font-bold text-green-800" placeholder="VD: 15 cm">
+            </div>
+            <div>
+                <input type="text" class="w-full p-2 bg-gray-50 border border-gray-200 rounded text-sm text-gray-600 italic" placeholder="Lời giải chi tiết...">
+            </div>
+        </div>
+    </template>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+        import { getFirestore, collection, addDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+        // CẤU HÌNH (Dùng chung)
+        const firebaseConfig = {
+            apiKey: "AIzaSyCqAX3x1MbJ3do7m3EaH9JA4kFuVhlAc78",
+            authDomain: "lms-thitracnghiem.firebaseapp.com",
+            projectId: "lms-thitracnghiem",
+            storageBucket: "lms-thitracnghiem.firebasestorage.app",
+            messagingSenderId: "760187217240",
+            appId: "1:760187217240:web:d043cd5808c349f87a712d"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        let currentUser = null;
+
+        onAuthStateChanged(auth, (user) => {
+            if (user) {
+                currentUser = user;
+                console.log("Editor ready");
+            } else {
+                window.location.href = 'index.html';
+            }
+        });
+
+        // HÀM LƯU ĐỀ THI
+        document.getElementById('saveExamBtn').addEventListener('click', async () => {
+            if (!currentUser) return;
+            const title = document.getElementById('examTitle').value;
+            if (!title) { alert("Vui lòng nhập tên đề thi!"); return; }
+
+            const questionCards = document.querySelectorAll('.question-card');
+            if (questionCards.length === 0) { alert("Đề thi phải có ít nhất 1 câu hỏi!"); return; }
+
+            const questions = [];
+            questionCards.forEach(card => {
+                const type = card.dataset.type;
+                const content = card.querySelector('textarea').value;
+                const solution = card.querySelector('textarea:last-of-type').value || card.querySelector('input:last-of-type').value;
+
+                let qData = { type, content, solution };
+
+                if (type === 'mc') {
+                    const opts = Array.from(card.querySelectorAll('input[type="text"]')).slice(0, 4).map(i => i.value);
+                    const correctRad = card.querySelector('input[type="radio"]:checked');
+                    // Tìm index của radio được check
+                    let correctIdx = -1;
+                    card.querySelectorAll('input[type="radio"]').forEach((r, i) => { if(r.checked) correctIdx = i; });
+                    qData.options = opts;
+                    qData.correct = correctIdx;
+                } 
+                else if (type === 'tf') {
+                    const statements = [];
+                    // Lấy từng dòng mệnh đề
+                    const rows = card.querySelectorAll('.grid.items-center');
+                    rows.forEach(row => {
+                        const text = row.querySelector('input[type="text"]').value;
+                        const isTrue = row.querySelector('input[value="true"]').checked;
+                        statements.push({ text, isTrue });
+                    });
+                    qData.statements = statements;
+                }
+                else if (type === 'short') {
+                    qData.answer = card.querySelector('input[type="text"]').value; // Input đáp án ngắn
+                }
+
+                questions.push(qData);
+            });
+
+            try {
+                const saveBtn = document.getElementById('saveExamBtn');
+                saveBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang lưu...';
+                
+                await addDoc(collection(db, "exams"), {
+                    title: title,
+                    teacherId: currentUser.uid,
+                    createdAt: new Date().toISOString(),
+                    questions: questions,
+                    questionCount: questions.length
+                });
+
+                alert("Lưu đề thi thành công!");
+                window.location.href = 'dashboard.html';
+            } catch (e) {
+                console.error(e);
+                alert("Lỗi khi lưu: " + e.message);
+                document.getElementById('saveExamBtn').innerHTML = '<i class="fa-solid fa-save mr-2"></i> Lưu đề thi';
+            }
+        });
+    </script>
+
+    <script>
+        // JS XỬ LÝ UI (Không cần module)
+        let qCount = 0;
+
+        function addQuestion(type) {
+            document.getElementById('emptyState').classList.add('hidden');
+            const tpl = document.getElementById(`tpl-${type}`);
+            const clone = tpl.content.cloneNode(true);
+            
+            // Tạo ID duy nhất cho radio buttons để không bị trùng giữa các câu
+            qCount++;
+            const container = clone.querySelector('div');
+            container.innerHTML = container.innerHTML.replaceAll('${id}', qCount);
+            
+            document.getElementById('questionsList').appendChild(clone);
+            
+            // Scroll xuống dưới cùng
+            const main = document.getElementById('mainContainer');
+            main.scrollTo({ top: main.scrollHeight, behavior: 'smooth' });
+        }
+
+        function deleteQuestion(btn) {
+            if(confirm("Xóa câu hỏi này?")) {
+                btn.closest('.question-card').remove();
+                if(document.querySelectorAll('.question-card').length === 0) {
+                    document.getElementById('emptyState').classList.remove('hidden');
+                }
+            }
+        }
+
+        function moveUp(btn) {
+            const card = btn.closest('.question-card');
+            if (card.previousElementSibling && !card.previousElementSibling.id) { // Check id để tránh emptyState
+                card.parentNode.insertBefore(card, card.previousElementSibling);
+            }
+        }
+
+        function moveDown(btn) {
+            const card = btn.closest('.question-card');
+            if (card.nextElementSibling) {
+                card.parentNode.insertBefore(card.nextElementSibling, card);
+            }
+        }
+
+        // HÀM XUẤT LATEX (Dựa trên cấu trúc file txt bạn gửi)
+        function exportToLatex() {
+            let latex = "";
+            const cards = document.querySelectorAll('.question-card');
+            
+            cards.forEach(card => {
+                const type = card.dataset.type;
+                const content = card.querySelector('textarea').value;
+                const solution = card.querySelector('textarea:last-of-type').value || card.querySelector('input:last-of-type').value; // Lấy lời giải (textarea hoặc input cuối)
+
+                if (type === 'mc') {
+                    const opts = Array.from(card.querySelectorAll('input[type="text"]')).slice(0, 4).map(i => i.value);
+                    const radios = card.querySelectorAll('input[type="radio"]');
+                    let choiceStr = "";
+                    opts.forEach((opt, i) => {
+                        if (radios[i].checked) choiceStr += `{\\True ${opt}}\n`;
+                        else choiceStr += `{${opt}}\n`;
+                    });
+
+                    latex += `\\begin{ex}\n${content}\n\\choice\n${choiceStr}\\loigiai{\n${solution}\n}\n\\end{ex}\n\n`;
+                }
+                else if (type === 'essay') {
+                    latex += `\\begin{bt}\n${content}\n\\loigiai{\n${solution}\n}\n\\end{bt}\n\n`;
+                }
+                else if (type === 'tf') {
+                    const rows = card.querySelectorAll('.grid.items-center');
+                    let choiceTFStr = "";
+                    let solutionStr = "\\begin{itemchoice}\n";
+                    
+                    rows.forEach(row => {
+                        const text = row.querySelector('input[type="text"]').value;
+                        const isTrue = row.querySelector('input[value="true"]').checked;
+                        if (isTrue) choiceTFStr += `{\\True ${text}}\n`;
+                        else choiceTFStr += `{${text}}\n`;
+                        
+                        solutionStr += `\t\\itemch Lời giải cho ${text}\n`; // Placeholder lời giải từng ý
+                    });
+                    solutionStr += "\\end{itemchoice}";
+
+                    latex += `\\begin{ex}\n${content}\n\\choiceTF\n${choiceTFStr}\\loigiai{\n${solution}\n}\n\\end{ex}\n\n`;
+                }
+                else if (type === 'short') {
+                    const ans = card.querySelector('input[type="text"]').value;
+                    latex += `\\begin{ex}\n${content}\n\\shortans{${ans}}\n\\loigiai{\n${solution}\n}\n\\end{ex}\n\n`;
+                }
+            });
+
+            // Tải file xuống
+            const blob = new Blob([latex], { type: "text/plain;charset=utf-8" });
+            const link = document.createElement("a");
+            link.href = URL.createObjectURL(blob);
+            link.download = "de_thi_extest.tex";
+            link.click();
+        }
+    </script>
+</body>
+</html>
