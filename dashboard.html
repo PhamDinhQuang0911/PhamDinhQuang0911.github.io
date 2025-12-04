@@ -32,14 +32,14 @@
         @keyframes fadeOut { from { opacity: 1; } to { opacity: 0; } }
         .notification-toast { animation: slideIn 0.5s ease forwards; }
         .notification-toast.hide { animation: fadeOut 0.5s ease forwards; }
-        .modal { transition: opacity 0.25s ease; }
+        .modal { transition: opacity 0.2s ease; }
         body.modal-active { overflow: hidden; }
     </style>
 </head>
 <body class="h-screen flex overflow-hidden text-gray-800 bg-gray-50">
 
     <!-- CONTAINER THÔNG BÁO -->
-    <div id="notificationContainer" class="fixed top-5 right-5 z-[70] flex flex-col gap-3 pointer-events-none"></div>
+    <div id="notificationContainer" class="fixed top-5 right-5 z-[100] flex flex-col gap-3 pointer-events-none"></div>
 
     <!-- SIDEBAR (MENU TRÁI) -->
     <aside class="w-64 bg-white border-r border-gray-200 flex flex-col z-20 shadow-sm flex-shrink-0">
@@ -184,9 +184,36 @@
 
     </main>
 
-    <!-- === MODALS === -->
+    <!-- === MODALS & POPUPS (MỚI) === -->
 
-    <!-- Modal Profile (Giữ nguyên logic) -->
+    <!-- 1. Modal Nhập liệu chung (Thay thế Prompt) -->
+    <div id="genericInputModal" class="modal opacity-0 pointer-events-none fixed inset-0 z-[100] flex items-center justify-center bg-gray-900 bg-opacity-50 transition-opacity duration-300">
+        <div class="bg-white w-96 rounded-2xl shadow-2xl p-6 transform scale-95 transition-transform duration-300">
+            <h3 id="gInputTitle" class="text-lg font-bold text-gray-800 mb-4">Nhập thông tin</h3>
+            <input type="text" id="gInputVal" class="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all" placeholder="...">
+            <div class="flex justify-end gap-3 mt-6">
+                <button id="gInputCancel" class="px-5 py-2 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-xl font-bold transition-colors">Hủy</button>
+                <button id="gInputConfirm" class="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-lg shadow-blue-200 transition-all">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 2. Modal Xác nhận chung (Thay thế Confirm) -->
+    <div id="genericConfirmModal" class="modal opacity-0 pointer-events-none fixed inset-0 z-[100] flex items-center justify-center bg-gray-900 bg-opacity-50 transition-opacity duration-300">
+        <div class="bg-white w-96 rounded-2xl shadow-2xl p-6 transform scale-95 transition-transform duration-300 text-center">
+            <div class="w-16 h-16 bg-red-100 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4 text-3xl">
+                <i class="fa-solid fa-triangle-exclamation"></i>
+            </div>
+            <h3 class="text-lg font-bold text-gray-800 mb-2">Xác nhận</h3>
+            <p id="gConfirmMsg" class="text-gray-500 mb-6">Bạn có chắc chắn muốn thực hiện?</p>
+            <div class="flex justify-center gap-3">
+                <button id="gConfirmCancel" class="px-5 py-2 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-xl font-bold transition-colors">Hủy</button>
+                <button id="gConfirmOk" class="px-5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold shadow-lg shadow-red-200 transition-all">Đồng ý</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Profile -->
     <div id="profileModal" class="modal opacity-0 pointer-events-none fixed inset-0 z-[80] flex items-center justify-center bg-gray-900 bg-opacity-50">
         <div class="modal-container bg-white w-96 rounded-2xl shadow-2xl p-6 transform scale-95 transition-transform duration-300">
             <h3 class="text-xl font-bold text-gray-800 mb-4">Thông tin cá nhân</h3>
@@ -206,31 +233,124 @@
         </div>
     </div>
 
-    <!-- Modal Move/Rename (Context Menu Action) -->
+    <!-- Modal Context Menu (Rename/Move/Delete) -->
     <div id="actionModal" class="modal opacity-0 pointer-events-none fixed inset-0 z-[80] flex items-center justify-center bg-gray-900 bg-opacity-50">
         <div class="modal-container bg-white w-96 rounded-2xl shadow-2xl p-6">
             <h3 id="actionModalTitle" class="text-xl font-bold text-gray-800 mb-4">Hành động</h3>
-            <input type="text" id="actionInput" class="w-full px-4 py-2 border rounded-lg mb-4 hidden">
-            
-            <!-- List Folder to Move -->
-            <div id="moveFolderList" class="hidden h-48 overflow-y-auto border rounded-lg mb-4 p-2 space-y-1">
-                <!-- Render list folders -->
-            </div>
+            <div id="dynamicContent"></div> <!-- Nội dung sẽ được sinh ra ở đây -->
+            <button onclick="toggleModal('actionModal', false)" class="absolute top-4 right-4 text-gray-400 hover:text-gray-600"><i class="fa-solid fa-times"></i></button>
+        </div>
+    </div>
 
-            <div class="flex justify-end gap-3">
-                <button onclick="toggleModal('actionModal', false)" class="px-4 py-2 bg-gray-100 rounded-lg text-gray-600">Hủy</button>
-                <button id="confirmActionBtn" class="px-4 py-2 bg-blue-600 text-white rounded-lg">Xác nhận</button>
+    <!-- Modal Class Details (Cấu trúc như cũ) -->
+    <div id="classModal" class="modal opacity-0 pointer-events-none fixed w-full h-full top-0 left-0 flex items-center justify-center z-50">
+        <div class="modal-overlay absolute w-full h-full bg-gray-900 opacity-50"></div>
+        <div class="modal-container bg-white w-11/12 md:max-w-5xl mx-auto rounded-2xl shadow-2xl z-50 overflow-y-auto transform scale-95 transition-transform duration-300" style="max-height: 90vh;">
+            <div class="flex justify-between items-center py-4 px-6 border-b border-gray-100 bg-blue-50 rounded-t-2xl">
+                <div class="flex items-center gap-2">
+                    <p class="text-xl font-bold text-blue-800" id="classModalTitle">Chi tiết Lớp học</p>
+                    <button onclick="editClassName()" class="text-blue-400 hover:text-blue-600 p-1 rounded transition-colors" title="Đổi tên lớp"><i class="fa-solid fa-pen text-sm"></i></button>
+                </div>
+                <div onclick="toggleModal('classModal', false)" class="cursor-pointer z-50 p-2 hover:bg-blue-200 rounded-full text-blue-500 transition-colors"><i class="fa-solid fa-times"></i></div>
+            </div>
+            <!-- Tab Navigation -->
+            <div class="flex px-6 border-b border-gray-100">
+                <button onclick="switchTab('students')" id="tabBtnStudents" class="tab-btn active px-4 py-3 text-sm font-medium text-gray-600 hover:text-blue-600 transition-colors"><i class="fa-solid fa-users mr-1"></i> Danh sách học sinh</button>
+                <button onclick="switchTab('exams')" id="tabBtnExams" class="tab-btn px-4 py-3 text-sm font-medium text-gray-600 hover:text-blue-600 transition-colors"><i class="fa-solid fa-file-contract mr-1"></i> Bài tập, Đề thi</button>
+            </div>
+            <div class="p-6">
+                <!-- TAB 1: DANH SÁCH HỌC SINH -->
+                <div id="tabContentStudents" class="space-y-6">
+                    <div class="bg-gray-50 p-4 rounded-xl border border-gray-200">
+                        <div class="flex justify-between items-center mb-3">
+                            <h4 class="font-bold text-gray-700 text-sm uppercase"><i class="fa-solid fa-user-plus mr-1"></i> Thêm nhanh</h4>
+                            <div class="flex gap-2">
+                                <button onclick="downloadTemplate()" class="text-xs px-3 py-1 bg-white border border-green-500 text-green-600 rounded hover:bg-green-50 transition-colors"><i class="fa-solid fa-download"></i> File mẫu</button>
+                                <label for="excelInput" class="text-xs px-3 py-1 bg-green-500 text-white rounded cursor-pointer hover:bg-green-600 transition-colors flex items-center gap-1"><i class="fa-solid fa-file-excel"></i> Nhập từ Excel</label>
+                                <input type="file" id="excelInput" accept=".xlsx, .xls" class="hidden" onchange="handleFileUpload(this)">
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                            <input type="text" id="newStudentName" placeholder="Họ và tên" class="px-3 py-2 rounded-lg border border-gray-300 text-sm">
+                            <input type="text" id="newStudentUser" placeholder="Tên đăng nhập" class="px-3 py-2 rounded-lg border border-gray-300 text-sm">
+                            <input type="text" id="newStudentPass" placeholder="Mật khẩu" class="px-3 py-2 rounded-lg border border-gray-300 text-sm">
+                        </div>
+                        <button id="addStudentBtn" class="mt-3 w-full py-2 bg-blue-500 text-white rounded-lg font-bold text-sm hover:bg-blue-600 transition-colors"><i class="fa-solid fa-plus mr-1"></i> Thêm vào danh sách</button>
+                    </div>
+                    <div>
+                        <h4 class="font-bold text-gray-700 mb-3 text-sm uppercase">Danh sách học sinh <span id="studentCountBadge" class="ml-2 bg-blue-100 text-blue-800 text-xs font-bold px-2 py-0.5 rounded-full">0</span></h4>
+                        <div class="overflow-x-auto border rounded-lg max-h-80 overflow-y-auto">
+                            <table class="w-full text-sm text-left text-gray-500">
+                                <thead class="text-xs text-gray-700 uppercase bg-gray-100 sticky top-0 z-10">
+                                    <tr><th class="px-4 py-3">STT</th><th class="px-4 py-3">Họ tên</th><th class="px-4 py-3">SBD</th><th class="px-4 py-3">Tài khoản</th><th class="px-4 py-3">Mật khẩu</th><th class="px-4 py-3 text-center">Hành động</th></tr>
+                                </thead>
+                                <tbody id="studentListTable" class="divide-y divide-gray-100"></tbody>
+                            </table>
+                            <p id="emptyStudentMsg" class="text-center py-8 text-gray-400 italic hidden">Chưa có học sinh nào.</p>
+                        </div>
+                    </div>
+                </div>
+                <!-- TAB 2 -->
+                <div id="tabContentExams" class="hidden space-y-6">
+                    <div class="border rounded-xl p-8 text-center bg-gray-50 border-dashed border-gray-300">
+                        <div class="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4 text-blue-500 text-2xl"><i class="fa-solid fa-file-invoice"></i></div>
+                        <h3 class="text-lg font-bold text-gray-700 mb-2">Chưa có bài tập nào</h3>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
 
-    <!-- Modal Class Details (Tạm ẩn - Logic giữ nguyên từ file cũ nếu cần) -->
-    <!-- Bạn có thể copy lại modal Class từ code trước vào đây nếu muốn giữ tính năng thêm học sinh -->
+    <!-- Modal Sửa Học Sinh (Mới) -->
+    <div id="editStudentModal" class="modal opacity-0 pointer-events-none fixed w-full h-full top-0 left-0 flex items-center justify-center z-[60]">
+        <div class="modal-overlay absolute w-full h-full bg-gray-900 opacity-50"></div>
+        <div class="modal-container bg-white w-11/12 md:max-w-xl mx-auto rounded-2xl shadow-2xl z-[60] overflow-y-auto transform scale-95 transition-transform duration-300">
+            <div class="flex justify-between items-center py-4 px-6 border-b border-gray-100 bg-orange-50 rounded-t-2xl">
+                <p class="text-xl font-bold text-orange-800">Sửa thông tin học sinh</p>
+                <div onclick="toggleModal('editStudentModal', false)" class="cursor-pointer p-2 hover:bg-orange-200 rounded-full text-orange-500 transition-colors"><i class="fa-solid fa-times"></i></div>
+            </div>
+            <div class="p-6 space-y-4">
+                <!-- Nội dung Form Sửa (Như cũ) -->
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="col-span-2"><label class="block text-xs font-bold text-gray-700 mb-1">Họ và tên</label><input type="text" id="editStuName" class="w-full px-3 py-2 rounded-lg border border-gray-300"></div>
+                    <div><label class="block text-xs font-bold text-gray-700 mb-1">Số báo danh</label><input type="text" id="editStuSBD" class="w-full px-3 py-2 rounded-lg border border-gray-300"></div>
+                    <div><label class="block text-xs font-bold text-gray-700 mb-1">Giới tính</label><select id="editStuGender" class="w-full px-3 py-2 rounded-lg border border-gray-300 bg-white"><option value="Nam">Nam</option><option value="Nữ">Nữ</option></select></div>
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div><label class="block text-xs font-bold text-gray-700 mb-1">SĐT Học sinh</label><input type="text" id="editStuPhone" class="w-full px-3 py-2 rounded-lg border border-gray-300"></div>
+                    <div><label class="block text-xs font-bold text-gray-700 mb-1">SĐT Phụ huynh</label><input type="text" id="editStuParentPhone" class="w-full px-3 py-2 rounded-lg border border-gray-300"></div>
+                    <div class="col-span-2"><label class="block text-xs font-bold text-gray-700 mb-1">Email</label><input type="email" id="editStuEmail" class="w-full px-3 py-2 rounded-lg border border-gray-300"></div>
+                </div>
+                <hr class="border-gray-100">
+                <div class="bg-blue-50 p-4 rounded-xl border border-blue-100">
+                    <h5 class="text-xs font-bold text-blue-800 uppercase mb-3">Thông tin đăng nhập</h5>
+                    <div class="space-y-3">
+                        <div><label class="block text-xs font-bold text-gray-700 mb-1">Tên đăng nhập</label><input type="text" id="editStuUsername" class="w-full px-3 py-2 rounded-lg border border-gray-300 bg-gray-100 text-gray-500 cursor-not-allowed"></div>
+                        <div>
+                            <label class="block text-xs font-bold text-gray-700 mb-1">Mật khẩu</label>
+                            <div class="flex gap-2">
+                                <div class="relative flex-1">
+                                    <input type="password" id="editStuPassword" class="w-full px-3 py-2 rounded-lg border border-gray-300 pr-10">
+                                    <div onclick="const i=document.getElementById('editStuPassword');i.type=i.type==='password'?'text':'password'" class="absolute inset-y-0 right-0 pr-3 flex items-center cursor-pointer text-gray-400"><i class="fa-regular fa-eye"></i></div>
+                                </div>
+                                <button onclick="refreshPassword()" class="px-3 py-2 bg-white border border-blue-300 text-blue-600 rounded-lg text-xs font-bold hover:bg-blue-50"><i class="fa-solid fa-rotate"></i> Làm mới</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="flex justify-end pt-2 pb-6 px-6 gap-3 bg-gray-50 rounded-b-2xl">
+                <button onclick="toggleModal('editStudentModal', false)" class="px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-100">Hủy</button>
+                <button id="saveStudentBtn" class="px-6 py-2 bg-orange-custom text-white rounded-lg hover:bg-orange-600 font-bold shadow-md">Lưu thông tin</button>
+            </div>
+        </div>
+    </div>
 
+    <!-- SCRIPT LOGIC -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getAuth, onAuthStateChanged, signOut, updateProfile } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
-        import { getFirestore, doc, getDoc, setDoc, collection, addDoc, query, where, onSnapshot, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { getFirestore, doc, getDoc, setDoc, collection, addDoc, query, where, onSnapshot, updateDoc, deleteDoc, arrayUnion } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyCqAX3x1MbJ3do7m3EaH9JA4kFuVhlAc78",
@@ -245,15 +365,81 @@
         const auth = getAuth(app);
         const db = getFirestore(app);
 
-        // STATE
-        let currentUser = null;
-        let currentFolderId = null; // null = root
-        let breadcrumbs = []; // [{id: null, name: 'Gốc'}]
+        // --- GLOBAL HELPER FUNCTIONS (PROMISIFIED MODALS) ---
+        
+        // 1. Custom Prompt
+        window.customPrompt = (title, placeholder = '', defaultValue = '') => {
+            return new Promise((resolve) => {
+                const modal = document.getElementById('genericInputModal');
+                const titleEl = document.getElementById('gInputTitle');
+                const inputEl = document.getElementById('gInputVal');
+                const confirmBtn = document.getElementById('gInputConfirm');
+                const cancelBtn = document.getElementById('gInputCancel');
+
+                titleEl.textContent = title;
+                inputEl.placeholder = placeholder;
+                inputEl.value = defaultValue;
+
+                // Show Modal
+                modal.classList.remove('opacity-0', 'pointer-events-none');
+                modal.querySelector('div').classList.remove('scale-95');
+                modal.querySelector('div').classList.add('scale-100');
+                inputEl.focus();
+
+                const close = () => {
+                    modal.classList.add('opacity-0', 'pointer-events-none');
+                    modal.querySelector('div').classList.add('scale-95');
+                    modal.querySelector('div').classList.remove('scale-100');
+                    // Cleanup to avoid multiple listeners
+                    confirmBtn.onclick = null;
+                    cancelBtn.onclick = null;
+                    inputEl.onkeydown = null;
+                };
+
+                confirmBtn.onclick = () => { close(); resolve(inputEl.value); };
+                cancelBtn.onclick = () => { close(); resolve(null); };
+                inputEl.onkeydown = (e) => { if(e.key === 'Enter') confirmBtn.click(); if(e.key === 'Escape') cancelBtn.click(); };
+            });
+        };
+
+        // 2. Custom Confirm
+        window.customConfirm = (message) => {
+            return new Promise((resolve) => {
+                const modal = document.getElementById('genericConfirmModal');
+                const msgEl = document.getElementById('gConfirmMsg');
+                const okBtn = document.getElementById('gConfirmOk');
+                const cancelBtn = document.getElementById('gConfirmCancel');
+
+                msgEl.textContent = message;
+
+                modal.classList.remove('opacity-0', 'pointer-events-none');
+                modal.querySelector('div').classList.remove('scale-95');
+                modal.querySelector('div').classList.add('scale-100');
+
+                const close = () => {
+                    modal.classList.add('opacity-0', 'pointer-events-none');
+                    modal.querySelector('div').classList.add('scale-95');
+                    modal.querySelector('div').classList.remove('scale-100');
+                    okBtn.onclick = null;
+                    cancelBtn.onclick = null;
+                };
+
+                okBtn.onclick = () => { close(); resolve(true); };
+                cancelBtn.onclick = () => { close(); resolve(false); };
+            });
+        };
+
+        // UI Variables & Helpers
+        let currentUserUid = null;
+        let currentRole = 'student';
+        let currentFolderId = null;
         let folderData = [];
         let examData = [];
-        let currentActionItem = null; // Item đang được chọn để sửa/xóa/di chuyển {id, type, name}
+        let currentActionItem = null;
+        let currentViewingClassId = null;
+        let currentClassStudents = [];
+        let editingStudentIndex = -1;
 
-        // --- DOM HELPER ---
         window.toggleModal = (id, show) => {
             const el = document.getElementById(id);
             if(show) {
@@ -270,8 +456,6 @@
         window.switchView = (viewName) => {
             document.querySelectorAll('.view-section').forEach(el => el.classList.add('hidden'));
             document.getElementById(`view-${viewName}`).classList.remove('hidden');
-            
-            // Update Active Menu
             document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
             const activeNav = document.getElementById(`nav-${viewName}`);
             if(activeNav) activeNav.classList.add('active');
@@ -287,38 +471,38 @@
             setTimeout(() => { div.classList.add('hide'); setTimeout(() => div.remove(), 500); }, 3000);
         }
 
-        // AUTH & INIT
+        // AUTH
         onAuthStateChanged(auth, async (user) => {
             if (user) {
-                currentUser = user;
-                // Load User Info
-                const userDoc = await getDoc(doc(db, "users", user.uid));
-                if (userDoc.exists()) {
-                    const data = userDoc.data();
-                    document.getElementById('sidebarName').textContent = data.displayName || user.email;
-                    document.getElementById('sidebarRole').textContent = data.role === 'teacher' ? 'Giáo viên' : (data.role === 'admin' ? 'Admin' : 'Học sinh');
-                    document.getElementById('sidebarAvatar').src = user.photoURL || `https://ui-avatars.com/api/?name=${user.email}&background=random`;
-                    
-                    // Setup UI Role
-                    if(data.role === 'teacher' || data.role === 'admin') {
-                        document.getElementById('teacherMenu').classList.remove('hidden');
-                        loadClasses();
-                        loadFileManager(); // Start listener
+                currentUserUid = user.uid;
+                try {
+                    const userDoc = await getDoc(doc(db, "users", user.uid));
+                    if (userDoc.exists()) {
+                        const data = userDoc.data();
+                        currentRole = data.role || 'student';
+                        document.getElementById('sidebarName').textContent = data.displayName || user.email;
+                        document.getElementById('sidebarRole').textContent = currentRole === 'teacher' ? 'Giáo viên' : (currentRole === 'admin' ? 'Admin' : 'Học sinh');
+                        document.getElementById('sidebarAvatar').src = user.photoURL || `https://ui-avatars.com/api/?name=${user.email}&background=random`;
+                        
+                        document.getElementById('editDisplayName').value = data.displayName || "";
+                        document.getElementById('editBirthDate').value = data.birthDate || "";
+                        document.getElementById('editRole').value = currentRole;
+
+                        if (currentRole === 'teacher' || currentRole === 'admin') {
+                            document.getElementById('teacherMenu').classList.remove('hidden');
+                            loadClasses();
+                            loadFileManager();
+                        }
                     }
-                    
-                    // Fill profile modal
-                    document.getElementById('editDisplayName').value = data.displayName || "";
-                    document.getElementById('editBirthDate').value = data.birthDate || "";
-                    document.getElementById('editRole').value = data.role || "student";
-                }
+                } catch (e) { console.error(e); }
             } else {
                 window.location.href = "index.html";
             }
         });
 
-        // --- 1. LOGIC QUẢN LÝ LỚP HỌC (VIEW CLASSES) ---
+        // 1. CLASS MANAGER
         function loadClasses() {
-            const q = query(collection(db, "classes"), where("teacherId", "==", currentUser.uid));
+            const q = query(collection(db, "classes"), where("teacherId", "==", currentUserUid));
             onSnapshot(q, (snap) => {
                 const list = document.getElementById('classList');
                 list.innerHTML = '';
@@ -327,48 +511,36 @@
                     const card = document.createElement('div');
                     card.className = "bg-white p-5 rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-shadow cursor-pointer relative group";
                     card.innerHTML = `
-                        <div class="flex justify-between items-start mb-2">
-                            <div class="w-10 h-10 rounded-lg bg-blue-100 text-blue-600 flex items-center justify-center font-bold text-lg">${cl.name.substring(0,2).toUpperCase()}</div>
-                            <div class="opacity-0 group-hover:opacity-100 transition-opacity">
-                                <button class="text-gray-400 hover:text-blue-500 p-1"><i class="fa-solid fa-pen"></i></button>
-                            </div>
-                        </div>
-                        <h3 class="font-bold text-gray-800 text-lg mb-1">${cl.name}</h3>
-                        <p class="text-sm text-gray-500">${cl.studentCount || 0} học sinh</p>
+                        <div class="flex justify-between items-start mb-2"><div class="w-10 h-10 rounded-lg bg-blue-100 text-blue-600 flex items-center justify-center font-bold text-lg">${cl.name.substring(0,2).toUpperCase()}</div><div class="opacity-0 group-hover:opacity-100 transition-opacity"><button class="text-gray-400 hover:text-blue-500 p-1"><i class="fa-solid fa-pen"></i></button></div></div>
+                        <h3 class="font-bold text-gray-800 text-lg mb-1">${cl.name}</h3><p class="text-sm text-gray-500">${cl.studentCount || 0} học sinh</p>
                     `;
-                    // Add click event to open details (Giữ logic modal cũ nếu cần)
+                    card.onclick = () => openClassModal(d.id, cl.name, cl.students || []);
                     list.appendChild(card);
                 });
-                // Add "Create New" Card
                 const addCard = document.createElement('button');
                 addCard.className = "border-2 border-dashed border-gray-300 rounded-xl p-5 flex flex-col items-center justify-center text-gray-400 hover:border-blue-400 hover:text-blue-500 transition-colors h-full min-h-[140px]";
                 addCard.innerHTML = `<i class="fa-solid fa-plus text-3xl mb-2"></i><span class="font-bold">Tạo lớp mới</span>`;
-                addCard.onclick = () => document.getElementById('createClassBtn').click();
+                // REPLACE PROMPT
+                addCard.onclick = async () => {
+                    const name = await customPrompt("Nhập tên lớp học mới:", "VD: Lớp 5A");
+                    if(name) {
+                        await addDoc(collection(db, "classes"), { name, teacherId: currentUserUid, studentCount: 0, createdAt: new Date().toISOString() });
+                        showNotification("Tạo lớp thành công");
+                    }
+                };
                 list.appendChild(addCard);
             });
         }
 
-        document.getElementById('createClassBtn').addEventListener('click', async () => {
-            const name = prompt("Nhập tên lớp học:");
-            if(name) {
-                await addDoc(collection(db, "classes"), { name, teacherId: currentUser.uid, studentCount: 0, createdAt: new Date().toISOString() });
-                showNotification("Tạo lớp thành công");
-            }
-        });
-
-        // --- 2. LOGIC NGÂN HÀNG ĐỀ THI (FILE EXPLORER) ---
-        
+        // 2. FILE EXPLORER
         function loadFileManager() {
-            // Listen Folders
-            const qFolders = query(collection(db, "folders"), where("teacherId", "==", currentUser.uid));
+            const qFolders = query(collection(db, "folders"), where("teacherId", "==", currentUserUid));
             onSnapshot(qFolders, (snap) => {
                 folderData = [];
                 snap.forEach(d => folderData.push({id: d.id, ...d.data()}));
                 renderExplorer();
             });
-
-            // Listen Exams
-            const qExams = query(collection(db, "exams"), where("teacherId", "==", currentUser.uid));
+            const qExams = query(collection(db, "exams"), where("teacherId", "==", currentUserUid));
             onSnapshot(qExams, (snap) => {
                 examData = [];
                 snap.forEach(d => examData.push({id: d.id, ...d.data()}));
@@ -379,191 +551,95 @@
         function renderExplorer() {
             const grid = document.getElementById('explorerGrid');
             grid.innerHTML = '';
-            
-            // Filter by currentFolderId
-            // Note: Firestore query can do this but client-side filter is easier for small data & tree view
             const currentFolders = folderData.filter(f => f.parentId === currentFolderId);
-            // Exams: check field folderId. If undefined/null, treat as root (null)
             const currentExams = examData.filter(e => (e.folderId || null) === currentFolderId);
 
-            if (currentFolders.length === 0 && currentExams.length === 0) {
-                document.getElementById('emptyExplorerMsg').classList.remove('hidden');
-            } else {
-                document.getElementById('emptyExplorerMsg').classList.add('hidden');
-            }
+            if (currentFolders.length === 0 && currentExams.length === 0) document.getElementById('emptyExplorerMsg').classList.remove('hidden');
+            else document.getElementById('emptyExplorerMsg').classList.add('hidden');
 
-            // Render Folders
             currentFolders.forEach(f => {
                 const div = document.createElement('div');
                 div.className = "explorer-item bg-white p-4 rounded-xl border border-gray-200 cursor-pointer relative group";
-                div.innerHTML = `
-                    <div class="text-4xl text-yellow-400 mb-3 text-center"><i class="fa-solid fa-folder"></i></div>
-                    <p class="text-sm font-bold text-gray-700 text-center truncate px-2">${f.name}</p>
-                    <div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button onclick="event.stopPropagation(); openContextMenu('${f.id}', 'folder', '${f.name}')" class="p-1 hover:bg-gray-100 rounded text-gray-500"><i class="fa-solid fa-ellipsis-vertical"></i></button>
-                    </div>
-                `;
+                div.innerHTML = `<div class="text-4xl text-yellow-400 mb-3 text-center"><i class="fa-solid fa-folder"></i></div><p class="text-sm font-bold text-gray-700 text-center truncate px-2">${f.name}</p><div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"><button onclick="event.stopPropagation(); openContextMenu('${f.id}', 'folder', '${f.name}')" class="p-1 hover:bg-gray-100 rounded text-gray-500"><i class="fa-solid fa-ellipsis-vertical"></i></button></div>`;
                 div.onclick = () => navigateFolder(f.id, f.name);
                 grid.appendChild(div);
             });
 
-            // Render Exams
             currentExams.forEach(e => {
                 const div = document.createElement('div');
                 div.className = "explorer-item bg-white p-4 rounded-xl border border-gray-200 cursor-pointer relative group";
-                div.innerHTML = `
-                    <div class="text-4xl text-blue-500 mb-3 text-center"><i class="fa-regular fa-file-lines"></i></div>
-                    <p class="text-sm font-bold text-gray-700 text-center truncate px-2" title="${e.title}">${e.title}</p>
-                    <div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button onclick="event.stopPropagation(); openContextMenu('${e.id}', 'exam', '${e.title}')" class="p-1 hover:bg-gray-100 rounded text-gray-500"><i class="fa-solid fa-ellipsis-vertical"></i></button>
-                    </div>
-                `;
+                div.innerHTML = `<div class="text-4xl text-blue-500 mb-3 text-center"><i class="fa-regular fa-file-lines"></i></div><p class="text-sm font-bold text-gray-700 text-center truncate px-2" title="${e.title}">${e.title}</p><div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"><button onclick="event.stopPropagation(); openContextMenu('${e.id}', 'exam', '${e.title}')" class="p-1 hover:bg-gray-100 rounded text-gray-500"><i class="fa-solid fa-ellipsis-vertical"></i></button></div>`;
                 div.onclick = () => window.location.href = `exam-editor.html?id=${e.id}`;
                 grid.appendChild(div);
             });
-
             renderBreadcrumb();
         }
 
-        // Navigation Logic
         window.navigateFolder = (id, name) => {
-            if(id === 'root') {
-                currentFolderId = null;
-                breadcrumbs = [];
-            } else {
-                currentFolderId = id;
-                // Add to breadcrumb if moving deeper (simple logic)
-                // For correct tree navigation, we should reconstruct path from parentId chain, but simple push is okay for now
-                breadcrumbs.push({id, name}); 
-            }
+            if(id === 'root') { currentFolderId = null; breadcrumbs = []; }
+            else { currentFolderId = id; breadcrumbs.push({id, name}); }
             renderExplorer();
         }
 
         function renderBreadcrumb() {
             const container = document.getElementById('breadcrumbContainer');
-            if (!currentFolderId) {
-                container.innerHTML = '<span class="mx-2 text-gray-400">/</span><span>Tất cả</span>';
-                return;
-            }
-            
-            // Reconstruct path logic: find current folder, find its parent, repeat
-            let path = [];
-            let curr = folderData.find(f => f.id === currentFolderId);
-            while(curr) {
-                path.unshift(curr);
-                curr = folderData.find(f => f.id === curr.parentId);
-            }
-
+            if (!currentFolderId) { container.innerHTML = '<span class="mx-2 text-gray-400">/</span><span>Tất cả</span>'; return; }
+            let path = []; let curr = folderData.find(f => f.id === currentFolderId);
+            while(curr) { path.unshift(curr); curr = folderData.find(f => f.id === curr.parentId); }
             let html = '<span class="mx-2 text-gray-400">/</span><button onclick="navigateFolder(\'root\')" class="hover:text-blue-600">...</button>';
-            path.forEach((p, idx) => {
-                html += `<span class="mx-2 text-gray-400">/</span>`;
-                if (idx === path.length - 1) html += `<span class="font-bold text-gray-800">${p.name}</span>`;
-                else html += `<button onclick="navigateFolder('${p.id}')" class="hover:text-blue-600">${p.name}</button>`;
-            });
+            path.forEach((p, idx) => { html += `<span class="mx-2 text-gray-400">/</span>`; if (idx === path.length - 1) html += `<span class="font-bold text-gray-800">${p.name}</span>`; else html += `<button onclick="navigateFolder('${p.id}')" class="hover:text-blue-600">${p.name}</button>`; });
             container.innerHTML = html;
         }
 
-        // Actions
+        // ACTIONS WITH CUSTOM MODAL
         window.createNewFolder = async () => {
-            const name = prompt("Nhập tên thư mục:");
+            // REPLACE PROMPT
+            const name = await customPrompt("Nhập tên thư mục mới:", "VD: Toán Đại Số");
             if(name) {
                 try {
-                    await addDoc(collection(db, "folders"), {
-                        name: name,
-                        parentId: currentFolderId,
-                        teacherId: currentUser.uid,
-                        createdAt: new Date().toISOString()
-                    });
+                    await addDoc(collection(db, "folders"), { name, parentId: currentFolderId, teacherId: currentUserUid, createdAt: new Date().toISOString() });
                     showNotification("Đã tạo thư mục");
                 } catch(e) { showNotification("Lỗi: " + e.message, "error"); }
             }
         }
 
-        // Context Menu Logic (Modal based for simplicity)
         window.openContextMenu = (id, type, name) => {
             currentActionItem = {id, type, name};
             document.getElementById('actionModalTitle').textContent = `Thao tác: ${name}`;
             
-            // Clear contents
-            const input = document.getElementById('actionInput');
-            const list = document.getElementById('moveFolderList');
-            const confirmBtn = document.getElementById('confirmActionBtn');
-            
-            // Reset UI
-            input.classList.add('hidden');
-            list.classList.add('hidden');
-            
-            // Create Menu Buttons dynamically
-            const modalBody = document.querySelector('#actionModal .modal-container');
-            // Remove old buttons if any (simple hack: remove everything after h3 and recreate)
-            // Better: use a dedicated div for dynamic content
-            
-            // Let's use a simpler prompt/confirm approach for actions triggered here
-            // But user asked for "Window-like", so let's reuse the modal for "Rename" and "Move"
-            
-            const actionHTML = `
-                <div class="grid grid-cols-3 gap-3 mb-4" id="actionButtons">
+            // Generate Buttons
+            const content = document.getElementById('dynamicContent');
+            content.innerHTML = `
+                <div class="grid grid-cols-3 gap-3 mb-4">
                     <button onclick="triggerAction('rename')" class="p-3 bg-blue-50 text-blue-600 rounded-lg font-bold hover:bg-blue-100 flex flex-col items-center"><i class="fa-solid fa-pen mb-1"></i> Đổi tên</button>
                     <button onclick="triggerAction('move')" class="p-3 bg-purple-50 text-purple-600 rounded-lg font-bold hover:bg-purple-100 flex flex-col items-center"><i class="fa-solid fa-arrow-right-to-bracket mb-1"></i> Di chuyển</button>
                     <button onclick="triggerAction('delete')" class="p-3 bg-red-50 text-red-600 rounded-lg font-bold hover:bg-red-100 flex flex-col items-center"><i class="fa-solid fa-trash mb-1"></i> Xóa</button>
                 </div>
-                <div id="dynamicContent"></div>
+                <div id="subActionContent"></div>
             `;
-            
-            // Inject into modal (hacky but fast)
-            const contentDiv = document.createElement('div');
-            contentDiv.innerHTML = actionHTML;
-            
-            // Replace old content
-            const container = document.querySelector('#actionModal .modal-container');
-            // Keep title
-            const title = container.querySelector('h3');
-            container.innerHTML = '';
-            container.appendChild(title);
-            container.appendChild(contentDiv);
-            
-            // Add close button logic back
-            const closeBtn = document.createElement('button');
-            closeBtn.className = "absolute top-4 right-4 text-gray-400 hover:text-gray-600";
-            closeBtn.innerHTML = '<i class="fa-solid fa-times"></i>';
-            closeBtn.onclick = () => toggleModal('actionModal', false);
-            container.appendChild(closeBtn);
-
             toggleModal('actionModal', true);
         }
 
         window.triggerAction = async (action) => {
-            const container = document.getElementById('dynamicContent');
-            container.innerHTML = ''; // Clear
+            const container = document.getElementById('subActionContent');
+            container.innerHTML = ''; 
 
             if (action === 'rename') {
-                container.innerHTML = `
-                    <label class="block text-sm font-bold text-gray-700 mb-2">Tên mới</label>
-                    <div class="flex gap-2">
-                        <input type="text" id="renameInput" value="${currentActionItem.name}" class="flex-1 border rounded px-3 py-2">
-                        <button onclick="commitRename()" class="bg-blue-600 text-white px-4 rounded font-bold">Lưu</button>
-                    </div>
-                `;
+                container.innerHTML = `<label class="block text-sm font-bold text-gray-700 mb-2">Tên mới</label><div class="flex gap-2"><input type="text" id="renameInput" value="${currentActionItem.name}" class="flex-1 border rounded px-3 py-2"><button onclick="commitRename()" class="bg-blue-600 text-white px-4 rounded font-bold">Lưu</button></div>`;
             } else if (action === 'delete') {
-                if(confirm(`Bạn chắc chắn muốn xóa "${currentActionItem.name}"?`)) {
+                // REPLACE CONFIRM
+                toggleModal('actionModal', false); // Close context menu first
+                if(await customConfirm(`Bạn chắc chắn muốn xóa "${currentActionItem.name}"?`)) {
                     try {
                         const collName = currentActionItem.type === 'folder' ? 'folders' : 'exams';
                         await deleteDoc(doc(db, collName, currentActionItem.id));
                         showNotification("Đã xóa!");
-                        toggleModal('actionModal', false);
                     } catch(e) { showNotification(e.message, 'error'); }
                 }
             } else if (action === 'move') {
-                // Show list of folders to move to
                 let html = '<p class="text-sm font-bold text-gray-700 mb-2">Chọn thư mục đến:</p><div class="h-40 overflow-y-auto border rounded p-1 space-y-1">';
                 html += `<button onclick="commitMove(null)" class="w-full text-left px-3 py-2 hover:bg-gray-100 rounded flex items-center gap-2"><i class="fa-solid fa-house text-gray-400"></i> Thư mục gốc</button>`;
-                
-                // Recursive function to show tree is better, but flat list for now
-                folderData.forEach(f => {
-                    if (f.id !== currentActionItem.id) { // Cannot move folder into itself
-                        html += `<button onclick="commitMove('${f.id}')" class="w-full text-left px-3 py-2 hover:bg-gray-100 rounded flex items-center gap-2"><i class="fa-solid fa-folder text-yellow-400"></i> ${f.name}</button>`;
-                    }
-                });
+                folderData.forEach(f => { if (f.id !== currentActionItem.id) html += `<button onclick="commitMove('${f.id}')" class="w-full text-left px-3 py-2 hover:bg-gray-100 rounded flex items-center gap-2"><i class="fa-solid fa-folder text-yellow-400"></i> ${f.name}</button>`; });
                 html += '</div>';
                 container.innerHTML = html;
             }
@@ -573,26 +649,184 @@
             const newName = document.getElementById('renameInput').value;
             if(!newName) return;
             const collName = currentActionItem.type === 'folder' ? 'folders' : 'exams';
-            await updateDoc(doc(db, collName, currentActionItem.id), { name: newName, title: newName }); // title for exams, name for folders
+            await updateDoc(doc(db, collName, currentActionItem.id), { name: newName, title: newName });
             showNotification("Đã đổi tên");
             toggleModal('actionModal', false);
         }
 
         window.commitMove = async (targetFolderId) => {
             const collName = currentActionItem.type === 'folder' ? 'folders' : 'exams';
-            // For folder: update parentId. For exam: update folderId
             const field = currentActionItem.type === 'folder' ? 'parentId' : 'folderId';
-            
             await updateDoc(doc(db, collName, currentActionItem.id), { [field]: targetFolderId });
             showNotification("Đã di chuyển");
             toggleModal('actionModal', false);
         }
 
-        // Profile & Logout (Giữ nguyên)
-        document.getElementById('logoutBtn').onclick = () => { if(confirm("Đăng xuất?")) signOut(auth).then(()=>window.location.href='index.html'); }
+        // CLASS MODAL LOGIC
+        function openClassModal(classId, className, students) {
+            currentViewingClassId = classId;
+            currentClassStudents = students || [];
+            document.getElementById('classModalTitle').textContent = `Quản lý: ${className}`;
+            renderStudentList(currentClassStudents);
+            window.switchTab('students');
+            toggleModal('classModal', true);
+        }
+
+        window.editClassName = async () => {
+            if (!currentViewingClassId) return;
+            const currentName = document.getElementById('classModalTitle').textContent.replace('Quản lý: ', '');
+            // REPLACE PROMPT
+            const newName = await customPrompt("Nhập tên mới cho lớp:", "", currentName);
+            if (newName && newName !== currentName) {
+                try {
+                    const classRef = doc(db, "classes", currentViewingClassId);
+                    await updateDoc(classRef, { name: newName });
+                    document.getElementById('classModalTitle').textContent = `Quản lý: ${newName}`;
+                    showNotification("Đổi tên lớp thành công!", "success");
+                } catch(e) { showNotification("Lỗi: " + e.message, "error"); }
+            }
+        }
+
+        function renderStudentList(students) {
+            const table = document.getElementById('studentListTable');
+            table.innerHTML = '';
+            document.getElementById('studentCountBadge').textContent = students ? students.length : 0;
+            if (!students || students.length === 0) document.getElementById('emptyStudentMsg').classList.remove('hidden');
+            else {
+                document.getElementById('emptyStudentMsg').classList.add('hidden');
+                students.forEach((st, index) => {
+                    const row = document.createElement('tr');
+                    row.className = "bg-white hover:bg-gray-50 border-b";
+                    row.innerHTML = `<td class="px-4 py-3 font-medium text-gray-500">${index + 1}</td><td class="px-4 py-3 font-medium text-gray-900">${st.name}</td><td class="px-4 py-3 text-gray-500">${st.sbd || '---'}</td><td class="px-4 py-3 text-blue-600 font-medium">${st.username}</td><td class="px-4 py-3 font-mono text-gray-400">******</td><td class="px-4 py-3 text-center"><button onclick="openEditStudent(${index})" class="text-blue-500 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 p-2 rounded-lg transition-colors mr-1"><i class="fa-solid fa-pen-to-square"></i></button><button onclick="deleteStudent(${index})" class="text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 p-2 rounded-lg transition-colors"><i class="fa-solid fa-trash"></i></button></td>`;
+                    table.appendChild(row);
+                });
+            }
+        }
+
+        window.openEditStudent = function(index) {
+            editingStudentIndex = index;
+            const st = currentClassStudents[index];
+            document.getElementById('editStuName').value = st.name || '';
+            document.getElementById('editStuSBD').value = st.sbd || '';
+            document.getElementById('editStuGender').value = st.gender || 'Nam';
+            document.getElementById('editStuPhone').value = st.phoneStudent || '';
+            document.getElementById('editStuParentPhone').value = st.phoneParent || '';
+            document.getElementById('editStuEmail').value = st.email || '';
+            document.getElementById('editStuUsername').value = st.username || '';
+            document.getElementById('editStuPassword').value = st.password || '';
+            document.getElementById('editStuPassword').type = "password"; 
+            toggleModal('editStudentModal', true);
+        }
+
+        window.deleteStudent = async function(index) {
+            // REPLACE CONFIRM
+            if(!await customConfirm("Bạn có chắc muốn xóa học sinh này khỏi lớp?")) return;
+            try {
+                currentClassStudents.splice(index, 1);
+                const classRef = doc(db, "classes", currentViewingClassId);
+                await updateDoc(classRef, { students: currentClassStudents, studentCount: currentClassStudents.length });
+                renderStudentList(currentClassStudents);
+                showNotification("Đã xóa học sinh.", "success");
+            } catch(e) { showNotification("Lỗi xóa: " + e.message, "error"); }
+        }
+
+        document.getElementById('saveStudentBtn').addEventListener('click', async () => {
+            if (editingStudentIndex === -1 || !currentViewingClassId) return;
+            const updatedStudent = {
+                ...currentClassStudents[editingStudentIndex],
+                name: document.getElementById('editStuName').value,
+                sbd: document.getElementById('editStuSBD').value,
+                gender: document.getElementById('editStuGender').value,
+                phoneStudent: document.getElementById('editStuPhone').value,
+                phoneParent: document.getElementById('editStuParentPhone').value,
+                email: document.getElementById('editStuEmail').value,
+                username: document.getElementById('editStuUsername').value,
+                password: document.getElementById('editStuPassword').value
+            };
+            if(!updatedStudent.name || !updatedStudent.username || !updatedStudent.password) { showNotification("Thiếu thông tin!", "error"); return; }
+            try {
+                currentClassStudents[editingStudentIndex] = updatedStudent;
+                const classRef = doc(db, "classes", currentViewingClassId);
+                await updateDoc(classRef, { students: currentClassStudents });
+                showNotification("Cập nhật thành công!", "success");
+                renderStudentList(currentClassStudents);
+                toggleModal('editStudentModal', false);
+            } catch (e) { showNotification("Lỗi: " + e.message, "error"); }
+        });
+
+        // RE-IMPLEMENT HELPER FUNCTIONS (Because they are in type=module but called from HTML)
+        window.downloadTemplate = () => {
+            const data = [["Họ và tên", "Tên đăng nhập", "Mật khẩu", "SBD", "Giới tính", "SĐT HS", "SĐT PHHS"], ["Nguyễn Văn A", "nguyenvana", "123456", "001", "Nam", "098...", "091..."]];
+            const ws = XLSX.utils.aoa_to_sheet(data); const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "DanhSach"); XLSX.writeFile(wb, "Mau_DS_Hoc_Sinh.xlsx");
+        }
+        
+        window.handleFileUpload = (input) => { /* Excel logic remains same */
+             const file = input.files[0]; if (!file) return;
+            const reader = new FileReader();
+            reader.onload = async function(e) {
+                const data = new Uint8Array(e.target.result);
+                const workbook = XLSX.read(data, {type: 'array'});
+                const jsonData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], {header: 1});
+                const studentsToAdd = [];
+                for(let i = 1; i < jsonData.length; i++) {
+                    const row = jsonData[i];
+                    if(row[0] && row[1]) {
+                        studentsToAdd.push({ name: row[0], username: row[1], password: String(row[2] || '123456'), sbd: row[3]||'', gender: row[4]||'Nam', phoneStudent: row[5]||'', phoneParent: row[6]||'', createdAt: new Date().toISOString() });
+                    }
+                }
+                if (studentsToAdd.length > 0 && currentViewingClassId) {
+                    try {
+                        const classRef = doc(db, "classes", currentViewingClassId);
+                        const newFullList = [...currentClassStudents, ...studentsToAdd];
+                        await updateDoc(classRef, { students: newFullList, studentCount: newFullList.length });
+                        currentClassStudents = newFullList;
+                        renderStudentList(newFullList);
+                        showNotification(`Đã thêm ${studentsToAdd.length} học sinh!`, "success");
+                    } catch(err) { showNotification("Lỗi: " + err.message, "error"); }
+                }
+                input.value = "";
+            };
+            reader.readAsArrayBuffer(file);
+        }
+        
+        window.switchTab = (tabName) => {
+            const btnStudents = document.getElementById('tabBtnStudents'); const btnExams = document.getElementById('tabBtnExams');
+            const contentStudents = document.getElementById('tabContentStudents'); const contentExams = document.getElementById('tabContentExams');
+            if (tabName === 'students') { btnStudents.classList.add('active'); btnExams.classList.remove('active'); contentStudents.classList.remove('hidden'); contentExams.classList.add('hidden'); }
+            else { btnStudents.classList.remove('active'); btnExams.classList.add('active'); contentStudents.classList.add('hidden'); contentExams.classList.remove('hidden'); }
+        }
+        
+        window.refreshPassword = () => {
+            const chars = "0123456789abcdefghijklmnopqrstuvwxyz"; let password = "";
+            for (let i = 0; i < 6; i++) password += chars.charAt(Math.floor(Math.random() * chars.length));
+            document.getElementById('editStuPassword').value = password; document.getElementById('editStuPassword').type = "text"; 
+        }
+
+        // Logic cũ Add Student (manual)
+        document.getElementById('addStudentBtn').addEventListener('click', async () => {
+            if (!currentViewingClassId) return;
+            const name = document.getElementById('newStudentName').value;
+            const user = document.getElementById('newStudentUser').value;
+            const pass = document.getElementById('newStudentPass').value;
+            if (!name || !user || !pass) { showNotification("Nhập đủ thông tin!", "error"); return; }
+            const newStudent = { name, username: user, password: pass, createdAt: new Date().toISOString() };
+            try {
+                const classRef = doc(db, "classes", currentViewingClassId);
+                await updateDoc(classRef, { students: arrayUnion(newStudent) });
+                // Manual Sync
+                currentClassStudents.push(newStudent);
+                renderStudentList(currentClassStudents);
+                await updateDoc(classRef, { studentCount: currentClassStudents.length });
+                document.getElementById('newStudentName').value = ''; document.getElementById('newStudentUser').value = ''; document.getElementById('newStudentPass').value = '';
+                showNotification("Thêm thành công!", "success");
+            } catch (e) { showNotification("Lỗi: " + e.message, "error"); }
+        });
+
+        document.getElementById('logoutBtn').onclick = async () => { if(await customConfirm("Bạn có chắc muốn đăng xuất?")) signOut(auth).then(()=>window.location.href='index.html'); }
         document.getElementById('saveProfileBtn').onclick = async () => {
             const name = document.getElementById('editDisplayName').value;
-            await updateDoc(doc(db, "users", currentUser.uid), { displayName: name });
+            await updateDoc(doc(db, "users", currentUserUid), { displayName: name });
             showNotification("Đã cập nhật profile");
             setTimeout(()=>location.reload(), 500);
         }
