@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Làm bài thi - Toán thầy Choang Choang</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Pacifico&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    
+    <!-- Thư viện MathJax để hiển thị công thức Toán (LaTeX) -->
+    <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+    <style>
+        body { font-family: 'Nunito', sans-serif; background-color: #FFF8F0; }
+        .text-orange-custom { color: #FF6A00; }
+        .bg-orange-custom { background-color: #FF6A00; }
+        .font-handwriting { font-family: 'Pacifico', cursive; }
+        
+        /* Style cho câu hỏi được chọn */
+        .question-grid-item.active { background-color: #FF6A00; color: white; border-color: #FF6A00; }
+        .question-grid-item.answered { background-color: #E0F2FE; color: #0369A1; border-color: #0EA5E9; }
+        
+        /* Ẩn thanh cuộn nhưng vẫn cuộn được */
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    </style>
+</head>
+<body class="bg-gray-50 h-screen flex flex-col overflow-hidden">
+
+    <!-- HEADER: Thông tin bài thi & Đồng hồ -->
+    <header class="bg-white shadow-sm z-20 shrink-0">
+        <div class="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
+            <!-- Logo nhỏ -->
+            <div class="flex items-center gap-2 cursor-pointer" onclick="if(confirm('Bạn muốn thoát bài thi? Kết quả sẽ không được lưu.')) window.location.href='dashboard.html'">
+                <div class="w-8 h-8 bg-orange-custom rounded-lg flex items-center justify-center text-white font-bold shadow-md">
+                    <i class="fa-solid fa-chevron-left"></i>
+                </div>
+                <span class="font-bold text-gray-700 hidden sm:block">Thoát</span>
+            </div>
+
+            <!-- Tên bài thi -->
+            <h1 class="text-lg md:text-xl font-bold text-orange-600 font-handwriting">Đề thi thử Toán Lớp 5 - Giữa kỳ 1</h1>
+
+            <!-- Đồng hồ đếm ngược -->
+            <div class="flex items-center gap-2 bg-orange-50 px-4 py-2 rounded-full border border-orange-100">
+                <i class="fa-regular fa-clock text-orange-500"></i>
+                <span id="timer" class="font-mono font-bold text-xl text-orange-600">45:00</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- MAIN: Nội dung thi -->
+    <main class="flex-1 flex overflow-hidden max-w-7xl mx-auto w-full">
+        
+        <!-- CỘT TRÁI: Nội dung câu hỏi (Cuộn được) -->
+        <div class="flex-1 overflow-y-auto p-4 md:p-8 no-scrollbar" id="questionContainer">
+            <div class="max-w-3xl mx-auto bg-white rounded-2xl shadow-sm p-6 md:p-10 min-h-full">
+                
+                <!-- Số thứ tự câu hỏi -->
+                <div class="flex justify-between items-center mb-6">
+                    <span class="text-sm font-bold text-gray-400 uppercase tracking-wider">Câu hỏi <span id="currentQuestionNum">1</span> / <span id="totalQuestions">10</span></span>
+                    <span class="px-3 py-1 bg-blue-100 text-blue-600 rounded-full text-xs font-bold">Trắc nghiệm</span>
+                </div>
+
+                <!-- Nội dung câu hỏi -->
+                <div class="text-xl md:text-2xl font-bold text-gray-800 mb-8 leading-relaxed" id="questionText">
+                    Đang tải câu hỏi...
+                </div>
+
+                <!-- Các phương án trả lời -->
+                <div class="space-y-4" id="answersArea">
+                    <!-- Các đáp án sẽ được sinh ra bằng JS tại đây -->
+                </div>
+
+                <!-- Nút điều hướng -->
+                <div class="flex justify-between mt-10 pt-6 border-t border-gray-100">
+                    <button id="prevBtn" class="px-6 py-2 rounded-xl bg-gray-100 text-gray-600 font-bold hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed">
+                        <i class="fa-solid fa-arrow-left mr-2"></i> Câu trước
+                    </button>
+                    <button id="nextBtn" class="px-6 py-2 rounded-xl bg-orange-custom text-white font-bold hover:bg-orange-600 shadow-lg shadow-orange-200">
+                        Câu sau <i class="fa-solid fa-arrow-right ml-2"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- CỘT PHẢI: Bảng câu hỏi (Sidebar) -->
+        <div class="w-72 bg-white border-l border-gray-200 hidden md:flex flex-col">
+            <div class="p-6 flex-1 overflow-y-auto">
+                <h3 class="font-bold text-gray-700 mb-4">Danh sách câu hỏi</h3>
+                <div class="grid grid-cols-4 gap-3" id="questionPalette">
+                    <!-- Grid câu hỏi sinh bằng JS -->
+                </div>
+            </div>
+            
+            <div class="p-6 border-t border-gray-100 bg-gray-50">
+                <button id="submitBtn" class="w-full py-4 rounded-xl bg-green-500 text-white font-bold text-lg hover:bg-green-600 shadow-lg shadow-green-200 transition-all transform hover:-translate-y-1">
+                    Nộp bài thi
+                </button>
+            </div>
+        </div>
+    </main>
+
+    <!-- Modal Kết quả (Ẩn mặc định) -->
+    <div id="resultModal" class="fixed inset-0 z-50 flex items-center justify-center bg-gray-900 bg-opacity-50 hidden">
+        <div class="bg-white rounded-3xl p-8 max-w-sm w-full text-center shadow-2xl transform scale-100 transition-transform">
+            <div class="w-20 h-20 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-4 text-4xl">
+                🏆
+            </div>
+            <h2 class="text-2xl font-bold text-gray-800 mb-2">Kết quả bài thi</h2>
+            <p class="text-gray-500 mb-6">Bạn đã hoàn thành bài thi!</p>
+            
+            <div class="text-5xl font-extrabold text-orange-custom mb-2" id="scoreDisplay">0/10</div>
+            <p class="text-sm font-bold text-gray-400 uppercase tracking-wide mb-8">Điểm số</p>
+            
+            <button onclick="window.location.href='dashboard.html'" class="w-full py-3 rounded-xl bg-gray-100 text-gray-700 font-bold hover:bg-gray-200">
+                Quay về Sảnh chính
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // --- DỮ LIỆU CÂU HỎI MẪU (CÓ LATEX) ---
+        // Sau này chúng ta sẽ lấy từ Firebase
+        const questions = [
+            {
+                id: 1,
+                content: "Tính giá trị của biểu thức: \\( P = \\frac{2}{3} + \\frac{4}{5} \\times \\frac{1}{2} \\)",
+                answers: ["\\( \\frac{16}{15} \\)", "\\( \\frac{14}{15} \\)", "\\( \\frac{8}{15} \\)", "1"],
+                correct: 0 // Index của đáp án đúng (0 là A)
+            },
+            {
+                id: 2,
+                content: "Diện tích hình tròn có bán kính \\( r = 5cm \\) là bao nhiêu? (Lấy \\( \\pi = 3.14 \\))",
+                answers: ["15.7 cm²", "31.4 cm²", "78.5 cm²", "25 cm²"],
+                correct: 2
+            },
+            {
+                id: 3,
+                content: "Tìm \\( x \\) biết: \\( 2x - 5 = 15 \\)",
+                answers: ["x = 5", "x = 10", "x = 20", "x = 7.5"],
+                correct: 1
+            },
+            {
+                id: 4,
+                content: "Một lớp học có 40 học sinh, trong đó có 25 nữ. Tỉ số phần trăm học sinh nam so với cả lớp là?",
+                answers: ["37.5%", "62.5%", "40%", "60%"],
+                correct: 0
+            },
+            {
+                id: 5,
+                content: "Kết quả của phép tính \\( 125 \\times 8 \\) là:",
+                answers: ["100", "1000", "10000", "800"],
+                correct: 1
+            }
+        ];
+
+        // --- LOGIC XỬ LÝ ---
+        let currentQIndex = 0;
+        let userAnswers = new Array(questions.length).fill(null); // Lưu đáp án người dùng chọn
+        let timeLeft = 45 * 60; // 45 phút
+
+        const questionText = document.getElementById('questionText');
+        const answersArea = document.getElementById('answersArea');
+        const questionPalette = document.getElementById('questionPalette');
+        const currentQuestionNum = document.getElementById('currentQuestionNum');
+        const totalQuestions = document.getElementById('totalQuestions');
+        const prevBtn = document.getElementById('prevBtn');
+        const nextBtn = document.getElementById('nextBtn');
+        const timerDisplay = document.getElementById('timer');
+        const submitBtn = document.getElementById('submitBtn');
+        const resultModal = document.getElementById('resultModal');
+        const scoreDisplay = document.getElementById('scoreDisplay');
+
+        // 1. Khởi tạo
+        totalQuestions.textContent = questions.length;
+        renderPalette();
+        loadQuestion(currentQIndex);
+        startTimer();
+
+        // 2. Hiển thị câu hỏi
+        function loadQuestion(index) {
+            const q = questions[index];
+            currentQuestionNum.textContent = index + 1;
+            
+            // Render nội dung
+            questionText.innerHTML = q.content;
+            
+            // Render đáp án
+            answersArea.innerHTML = '';
+            q.answers.forEach((ans, i) => {
+                const isSelected = userAnswers[index] === i;
+                const btn = document.createElement('div');
+                btn.className = `p-4 rounded-xl border-2 cursor-pointer transition-all flex items-center gap-3 ${isSelected ? 'border-orange-500 bg-orange-50 text-orange-700 font-bold' : 'border-gray-100 hover:border-orange-200 bg-white'}`;
+                btn.onclick = () => selectAnswer(index, i);
+                
+                btn.innerHTML = `
+                    <div class="w-8 h-8 rounded-full border-2 flex items-center justify-center text-sm font-bold ${isSelected ? 'border-orange-500 bg-orange-500 text-white' : 'border-gray-300 text-gray-400'}">
+                        ${String.fromCharCode(65 + i)}
+                    </div>
+                    <div class="flex-1">${ans}</div>
+                `;
+                answersArea.appendChild(btn);
+            });
+
+            // Cập nhật trạng thái nút
+            prevBtn.disabled = index === 0;
+            nextBtn.innerHTML = index === questions.length - 1 ? 'Về đích' : 'Câu sau <i class="fa-solid fa-arrow-right ml-2"></i>';
+            
+            // Cập nhật Palette
+            updatePaletteActive();
+
+            // Yêu cầu MathJax render lại công thức toán
+            if (window.MathJax) {
+                MathJax.typesetPromise();
+            }
+        }
+
+        // 3. Chọn đáp án
+        function selectAnswer(qIndex, aIndex) {
+            userAnswers[qIndex] = aIndex;
+            loadQuestion(qIndex); // Render lại để hiện màu
+            renderPalette(); // Cập nhật màu trên palette
+        }
+
+        // 4. Render Palette (Bảng câu hỏi bên phải)
+        function renderPalette() {
+            questionPalette.innerHTML = '';
+            questions.forEach((_, i) => {
+                const btn = document.createElement('button');
+                const isAnswered = userAnswers[i] !== null;
+                const isActive = i === currentQIndex;
+                
+                let classes = "w-10 h-10 rounded-lg text-sm font-bold border transition-all ";
+                if (isActive) classes += "bg-orange-500 text-white border-orange-500 shadow-md transform scale-110";
+                else if (isAnswered) classes += "bg-blue-100 text-blue-600 border-blue-200";
+                else classes += "bg-gray-50 text-gray-400 border-gray-200 hover:bg-gray-100";
+
+                btn.className = classes;
+                btn.textContent = i + 1;
+                btn.onclick = () => {
+                    currentQIndex = i;
+                    loadQuestion(i);
+                };
+                questionPalette.appendChild(btn);
+            });
+        }
+
+        function updatePaletteActive() {
+            renderPalette(); // Gọi lại hàm render cho đơn giản
+        }
+
+        // 5. Điều hướng
+        prevBtn.onclick = () => {
+            if (currentQIndex > 0) {
+                currentQIndex--;
+                loadQuestion(currentQIndex);
+            }
+        };
+
+        nextBtn.onclick = () => {
+            if (currentQIndex < questions.length - 1) {
+                currentQIndex++;
+                loadQuestion(currentQIndex);
+            }
+        };
+
+        // 6. Đồng hồ đếm ngược
+        function startTimer() {
+            const interval = setInterval(() => {
+                timeLeft--;
+                const minutes = Math.floor(timeLeft / 60);
+                const seconds = timeLeft % 60;
+                timerDisplay.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+                
+                if (timeLeft <= 0) {
+                    clearInterval(interval);
+                    submitExam();
+                }
+            }, 1000);
+        }
+
+        // 7. Nộp bài
+        submitBtn.onclick = () => {
+            if (confirm("Bạn có chắc chắn muốn nộp bài?")) {
+                submitExam();
+            }
+        };
+
+        function submitExam() {
+            // Tính điểm
+            let score = 0;
+            questions.forEach((q, i) => {
+                if (userAnswers[i] === q.correct) {
+                    score++;
+                }
+            });
+
+            // Hiện modal kết quả
+            scoreDisplay.textContent = `${score}/${questions.length}`;
+            resultModal.classList.remove('hidden');
+        }
+
+    </script>
+</body>
+</html>
