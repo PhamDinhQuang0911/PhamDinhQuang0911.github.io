@@ -291,12 +291,11 @@
         </div>
     </div>
 
-   <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-        import { getAuth, onAuthStateChanged, signOut, createUserWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
-        import { getFirestore, doc, getDoc, setDoc, collection, addDoc, query, where, onSnapshot, updateDoc, deleteDoc, arrayUnion, getDocs } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+    <script type="module">
+        import { initializeApp, deleteApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getAuth, onAuthStateChanged, signOut, updateProfile, createUserWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+        import { getFirestore, doc, getDoc, setDoc, collection, addDoc, query, where, onSnapshot, updateDoc, deleteDoc, arrayUnion, getDocs, orderBy } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-        // CẤU HÌNH FIREBASE
         const firebaseConfig = {
             apiKey: "AIzaSyCqAX3x1MbJ3do7m3EaH9JA4kFuVhlAc78",
             authDomain: "lms-thitracnghiem.firebaseapp.com",
@@ -310,97 +309,19 @@
         const auth = getAuth(app);
         const db = getFirestore(app);
 
-        // --- 1. HỆ THỐNG MODAL & THÔNG BÁO (MỚI & ĐÃ SỬA LỖI) ---
-        let modalResolve = null;
-        const modalEl = document.getElementById('customModal');
-        const modalBox = document.getElementById('customModalBox');
-        const modalTitle = document.getElementById('modalTitle');
-        const modalMsg = document.getElementById('modalMessage');
-        const modalIcon = document.getElementById('modalIcon');
-        const modalInput = document.getElementById('modalInput');
-        const btnConfirm = document.getElementById('btnConfirm');
-        const btnCancel = document.getElementById('btnCancel');
-
-        // Hàm đóng Modal
-        window.closeCustomModal = () => {
-            modalEl.classList.add('opacity-0', 'pointer-events-none');
-            modalBox.classList.remove('scale-100'); modalBox.classList.add('scale-95');
-            // Nếu đóng ngang (bấm X hoặc click ra ngoài)
-            if (modalResolve) { modalResolve(null); modalResolve = null; }
-        };
-
-        // Hàm Thông báo góc màn hình (Toast)
-        window.showToast = (message, type = 'success') => {
-            const container = document.getElementById('toastContainer');
-            const toast = document.createElement('div');
-            const icons = { success: '<i class="fa-solid fa-circle-check text-green-500"></i>', error: '<i class="fa-solid fa-circle-exclamation text-red-500"></i>', info: '<i class="fa-solid fa-circle-info text-blue-500"></i>' };
-            const borderColors = { success: 'border-green-500', error: 'border-red-500', info: 'border-blue-500' };
-            toast.className = `pointer-events-auto bg-white border-l-4 ${borderColors[type]} shadow-xl rounded-lg p-4 flex items-center gap-3 min-w-[300px] transform translate-x-full transition-transform duration-300`;
-            toast.innerHTML = `<div class="text-xl">${icons[type]}</div><div><h4 class="font-bold text-gray-800 text-sm uppercase">${type==='success'?'Thành công':(type==='error'?'Lỗi':'Thông báo')}</h4><p class="text-sm text-gray-600">${message}</p></div>`;
-            container.appendChild(toast);
-            requestAnimationFrame(() => toast.classList.remove('translate-x-full'));
-            setTimeout(() => { toast.classList.add('translate-x-full', 'opacity-0'); setTimeout(() => toast.remove(), 500); }, 3000);
-        }
-
-        // Hàm Xác nhận (Confirm)
-        window.customConfirm = (message, title = "Xác nhận") => {
-            return new Promise((resolve) => {
-                modalTitle.innerText = title; 
-                modalMsg.innerText = message;
-                modalIcon.innerHTML = '<i class="fa-solid fa-circle-question text-orange-500"></i>';
-                modalInput.classList.add('hidden'); 
-                btnCancel.classList.remove('hidden'); 
-                btnConfirm.innerText = "Đồng ý";
-                
-                modalEl.classList.remove('opacity-0', 'pointer-events-none'); 
-                modalBox.classList.remove('scale-95'); 
-                modalBox.classList.add('scale-100');
-                
-                btnConfirm.onclick = () => { resolve(true); modalResolve = null; closeCustomModal(); };
-                btnCancel.onclick = () => { resolve(false); modalResolve = null; closeCustomModal(); };
-                modalResolve = resolve;
-            });
-        };
-
-        // Hàm Nhập liệu (Prompt) - ĐÃ FIX LỖI TRẢ VỀ DỮ LIỆU
-        window.customPrompt = (message, placeholder = "", defaultValue = "") => {
-            return new Promise((resolve) => {
-                modalTitle.innerText = "Nhập thông tin"; 
-                modalMsg.innerText = message;
-                modalIcon.innerHTML = '<i class="fa-solid fa-pen-to-square text-blue-500"></i>';
-                modalInput.classList.remove('hidden'); 
-                modalInput.value = defaultValue; 
-                modalInput.placeholder = placeholder;
-                
-                btnCancel.classList.remove('hidden'); 
-                btnConfirm.innerText = "Lưu lại";
-                
-                modalEl.classList.remove('opacity-0', 'pointer-events-none'); 
-                modalBox.classList.remove('scale-95'); 
-                modalBox.classList.add('scale-100');
-                modalInput.focus();
-                
-                const submit = () => { 
-                    const val = modalInput.value; 
-                    resolve(val); // Trả về giá trị nhập
-                    modalResolve = null; 
-                    closeCustomModal(); 
-                };
-
-                btnConfirm.onclick = submit;
-                btnCancel.onclick = () => { resolve(null); modalResolve = null; closeCustomModal(); };
-                modalInput.onkeyup = (e) => { if(e.key === 'Enter') submit(); }
-                
-                modalResolve = resolve;
-            });
-        };
-
-        // --- GLOBAL HELPERS ---
+        // --- GLOBAL HELPERS (FULL CODE) ---
         window.toggleModal = (id, show) => {
             const el = document.getElementById(id);
             const container = el.querySelector('.modal-container');
-            if(show) { el.classList.remove('opacity-0', 'pointer-events-none'); document.body.classList.add('modal-active'); if(container) container.classList.remove('scale-95'); }
-            else { el.classList.add('opacity-0', 'pointer-events-none'); document.body.classList.remove('modal-active'); if(container) container.classList.add('scale-95'); }
+            if(show) { 
+                el.classList.remove('opacity-0', 'pointer-events-none'); 
+                document.body.classList.add('modal-active'); 
+                if(container) container.classList.remove('scale-95'); 
+            } else { 
+                el.classList.add('opacity-0', 'pointer-events-none'); 
+                document.body.classList.remove('modal-active'); 
+                if(container) container.classList.add('scale-95'); 
+            }
         }
 
         window.switchView = (viewName) => {
@@ -411,14 +332,82 @@
             if(activeNav) activeNav.classList.add('active');
         }
 
-        window.togglePasswordVisibility = (inputId) => { const x = document.getElementById(inputId); x.type = x.type === "password" ? "text" : "password"; }
-        window.refreshPassword = () => { const chars = "0123456789abcdefghijklmnopqrstuvwxyz"; let password = ""; for (let i = 0; i < 6; i++) password += chars.charAt(Math.floor(Math.random() * chars.length)); document.getElementById('editStuPassword').value = password; document.getElementById('editStuPassword').type = "text"; }
+        window.showNotification = (msg, type = 'success') => {
+            const container = document.getElementById('notificationContainer');
+            const div = document.createElement('div');
+            const color = type === 'success' ? 'green' : 'red';
+            div.className = `notification-toast pointer-events-auto bg-white border-l-4 border-${color}-500 shadow-lg rounded-lg p-4 w-80 flex items-start`;
+            div.innerHTML = `<i class="fa-solid fa-${type==='success'?'check':'circle-exclamation'} text-${color}-500 mt-1 mr-3"></i><div><h4 class="font-bold text-gray-800 text-sm">${type==='success'?'Thành công':'Lỗi'}</h4><p class="text-sm text-gray-600">${msg}</p></div>`;
+            container.appendChild(div);
+            setTimeout(() => { div.classList.add('hide'); setTimeout(() => div.remove(), 500); }, 3000);
+        }
+
+        window.customPrompt = (title, placeholder = '', defaultValue = '') => {
+            return new Promise((resolve) => {
+                const modal = document.getElementById('genericInputModal');
+                const titleEl = document.getElementById('gInputTitle');
+                const inputEl = document.getElementById('gInputVal');
+                const confirmBtn = document.getElementById('gInputConfirm');
+                const cancelBtn = document.getElementById('gInputCancel');
+                const closeBtn = document.getElementById('gInputClose');
+
+                titleEl.textContent = title;
+                inputEl.placeholder = placeholder;
+                inputEl.value = defaultValue;
+                
+                window.toggleModal('genericInputModal', true);
+                inputEl.focus();
+
+                const close = () => {
+                     window.toggleModal('genericInputModal', false);
+                     confirmBtn.onclick = null; cancelBtn.onclick = null; closeBtn.onclick = null; inputEl.onkeydown = null;
+                };
+
+                confirmBtn.onclick = () => { close(); resolve(inputEl.value); };
+                cancelBtn.onclick = () => { close(); resolve(null); };
+                closeBtn.onclick = () => { close(); resolve(null); };
+                inputEl.onkeydown = (e) => { if(e.key === 'Enter') confirmBtn.click(); if(e.key === 'Escape') cancelBtn.click(); };
+            });
+        }
+
+        window.customConfirm = (message) => {
+            return new Promise((resolve) => {
+                const modal = document.getElementById('genericConfirmModal');
+                document.getElementById('gConfirmMsg').textContent = message;
+                const okBtn = document.getElementById('gConfirmOk');
+                const cancelBtn = document.getElementById('gConfirmCancel');
+                const closeBtn = document.getElementById('gConfirmClose');
+
+                window.toggleModal('genericConfirmModal', true);
+
+                const close = () => {
+                    window.toggleModal('genericConfirmModal', false);
+                    okBtn.onclick = null; cancelBtn.onclick = null; closeBtn.onclick = null;
+                };
+
+                okBtn.onclick = () => { close(); resolve(true); };
+                cancelBtn.onclick = () => { close(); resolve(false); };
+                closeBtn.onclick = () => { close(); resolve(false); };
+            });
+        }
+        
+        window.togglePasswordVisibility = (inputId) => {
+            const input = document.getElementById(inputId);
+            input.type = input.type === "password" ? "text" : "password";
+        }
+
+        window.refreshPassword = () => {
+            const chars = "0123456789abcdefghijklmnopqrstuvwxyz"; let password = "";
+            for (let i = 0; i < 6; i++) password += chars.charAt(Math.floor(Math.random() * chars.length));
+            document.getElementById('editStuPassword').value = password; 
+            document.getElementById('editStuPassword').type = "text"; 
+        }
 
         // --- APP VARIABLES ---
-        let currentUserUid = null;
-        let currentRole = 'student';
-        let currentUser = null;
+        let currentUser, currentUserUid, currentRole;
         let studentResultsMap = {};
+        
+        // Teacher Vars
         let currentFolderId = null;
         let folderData = [];
         let examData = [];
@@ -426,9 +415,11 @@
         let currentViewingClassId = null;
         let currentClassStudents = [];
         let editingStudentIndex = -1;
+        
+        // Student Vars
         let currentClassExamsData = [];
 
-        // --- AUTH & INIT ---
+        // --- AUTH STATE ---
         onAuthStateChanged(auth, async (user) => {
             if (user) {
                 currentUser = user;
@@ -446,15 +437,10 @@
                         document.getElementById('editBirthDate').value = data.birthDate || "";
                         document.getElementById('editRole').value = currentRole;
 
-                        // Check URL param
-                        const urlParams = new URLSearchParams(window.location.search);
-                        const viewParam = urlParams.get('view');
-
                         if (currentRole === 'teacher' || currentRole === 'admin') {
                             document.getElementById('teacherMenu').classList.remove('hidden');
                             loadClasses();
                             loadFileManager();
-                            if (viewParam === 'exambank') switchView('exambank'); else switchView('home');
                         } else if (currentRole === 'student') {
                             document.getElementById('studentMyClasses').classList.remove('hidden');
                             document.getElementById('studentAssignedExams').classList.remove('hidden');
@@ -469,218 +455,6 @@
             }
         });
 
-        // --- TEACHER LOGIC ---
-        function loadClasses() {
-            const q = query(collection(db, "classes"), where("teacherId", "==", currentUserUid));
-            onSnapshot(q, (snap) => {
-                const list = document.getElementById('classList'); list.innerHTML = '';
-                snap.forEach(d => {
-                    const cl = d.data();
-                    const card = document.createElement('div'); card.className = "bg-white p-5 rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-shadow cursor-pointer relative group";
-                    const words = cl.name.trim().split(/\s+/); let acronym = words.length >= 2 ? (words[0][0] + words[1][0]).toUpperCase() : words[0].substring(0, 2).toUpperCase();
-                    card.innerHTML = `<div class="flex justify-between items-start mb-2"><div class="w-10 h-10 rounded-lg bg-blue-100 text-blue-600 flex items-center justify-center font-bold text-lg">${acronym}</div><div class="opacity-0 group-hover:opacity-100 transition-opacity"><button class="text-gray-400 hover:text-blue-500 p-1"><i class="fa-solid fa-pen"></i></button></div></div><h3 class="font-bold text-gray-800 text-lg mb-1">${cl.name}</h3><p class="text-sm text-gray-500">${cl.studentCount || 0} học sinh</p>`;
-                    card.onclick = () => window.openTeacherClassDetail(d.id, cl.name, cl.students || []); list.appendChild(card);
-                });
-                const addCard = document.createElement('button'); addCard.className = "border-2 border-dashed border-gray-300 rounded-xl p-5 flex flex-col items-center justify-center text-gray-400 hover:border-blue-400 hover:text-blue-500 transition-colors h-full min-h-[140px]";
-                addCard.innerHTML = `<i class="fa-solid fa-plus text-3xl mb-2"></i><span class="font-bold">Tạo lớp mới</span>`;
-                addCard.onclick = async () => { const name = await customPrompt("Nhập tên lớp học mới:", "VD: Lớp 5A"); if(name) { await addDoc(collection(db, "classes"), { name, teacherId: currentUserUid, studentCount: 0, createdAt: new Date().toISOString() }); showToast("Tạo lớp thành công"); } };
-                list.appendChild(addCard);
-            });
-        }
-
-        // --- CONTEXT MENU (CLICK CHUỘT PHẢI) ---
-        window.openContextMenu = (id, type, name) => {
-            currentActionItem = {id, type, name}; document.getElementById('actionModalTitle').textContent = `Thao tác: ${name}`;
-            const content = document.getElementById('dynamicContent');
-            content.innerHTML = `<div class="grid grid-cols-3 gap-3 mb-4"><button onclick="window.triggerAction('rename')" class="p-3 bg-blue-50 text-blue-600 rounded-lg font-bold hover:bg-blue-100 flex flex-col items-center"><i class="fa-solid fa-pen mb-1"></i> Đổi tên</button><button onclick="window.triggerAction('move')" class="p-3 bg-purple-50 text-purple-600 rounded-lg font-bold hover:bg-purple-100 flex flex-col items-center"><i class="fa-solid fa-arrow-right-to-bracket mb-1"></i> Di chuyển</button><button onclick="window.triggerAction('delete')" class="p-3 bg-red-50 text-red-600 rounded-lg font-bold hover:bg-red-100 flex flex-col items-center"><i class="fa-solid fa-trash mb-1"></i> Xóa</button></div><div id="subActionContent"></div>`; toggleModal('actionModal', true);
-        }
-
-        window.triggerAction = async (action) => {
-            const container = document.getElementById('subActionContent'); container.innerHTML = ''; 
-            if (action === 'rename') {
-                toggleModal('actionModal', false);
-                const newName = await customPrompt("Nhập tên mới:", "", currentActionItem.name);
-                if(newName) {
-                     const collName = currentActionItem.type === 'folder' ? 'folders' : 'exams';
-                     await updateDoc(doc(db, collName, currentActionItem.id), { name: newName, title: newName });
-                     showToast("Đã đổi tên thành công!");
-                }
-            }
-            else if (action === 'delete') { 
-                toggleModal('actionModal', false); 
-                if(await customConfirm(`Bạn chắc chắn muốn xóa "${currentActionItem.name}"?`)) { 
-                    try { const collName = currentActionItem.type === 'folder' ? 'folders' : 'exams'; await deleteDoc(doc(db, collName, currentActionItem.id)); showToast("Đã xóa!"); } catch(e) { showToast(e.message, 'error'); } 
-                } 
-            }
-            else if (action === 'move') { 
-                let html = '<p class="text-sm font-bold text-gray-700 mb-2">Chọn thư mục đến:</p><div class="h-40 overflow-y-auto border rounded p-1 space-y-1">'; 
-                html += `<button onclick="window.commitMove(null)" class="w-full text-left px-3 py-2 hover:bg-gray-100 rounded flex items-center gap-2"><i class="fa-solid fa-house text-gray-400"></i> Thư mục gốc</button>`; 
-                folderData.forEach(f => { if (f.id !== currentActionItem.id) html += `<button onclick="window.commitMove('${f.id}')" class="w-full text-left px-3 py-2 hover:bg-gray-100 rounded flex items-center gap-2"><i class="fa-solid fa-folder text-yellow-400"></i> ${f.name}</button>`; }); 
-                html += '</div>'; container.innerHTML = html; 
-            }
-        }
-        window.commitMove = async (targetFolderId) => { const collName = currentActionItem.type === 'folder' ? 'folders' : 'exams'; const field = currentActionItem.type === 'folder' ? 'parentId' : 'folderId'; await updateDoc(doc(db, collName, currentActionItem.id), { [field]: targetFolderId }); toggleModal('actionModal', false); showToast("Đã di chuyển"); }
-
-        function loadFileManager() {
-            const qFolders = query(collection(db, "folders"), where("teacherId", "==", currentUserUid));
-            onSnapshot(qFolders, (snap) => { folderData = []; snap.forEach(d => folderData.push({id: d.id, ...d.data()})); renderExplorer(); });
-            const qExams = query(collection(db, "exams"), where("teacherId", "==", currentUserUid));
-            onSnapshot(qExams, (snap) => { examData = []; snap.forEach(d => examData.push({id: d.id, ...d.data()})); renderExplorer(); });
-        }
-
-        function renderExplorer() {
-            const grid = document.getElementById('explorerGrid'); grid.innerHTML = '';
-            const currentFolders = folderData.filter(f => f.parentId === currentFolderId);
-            const currentExams = examData.filter(e => (e.folderId || null) === currentFolderId);
-            if (currentFolders.length === 0 && currentExams.length === 0) document.getElementById('emptyExplorerMsg').classList.remove('hidden'); else document.getElementById('emptyExplorerMsg').classList.add('hidden');
-            currentFolders.forEach(f => {
-                const div = document.createElement('div'); div.className = "explorer-item bg-white p-4 rounded-xl border border-gray-200 relative group"; div.draggable = true;
-                div.ondragstart = (evt) => { evt.dataTransfer.setData("text/plain", JSON.stringify({id: f.id, type: 'folder'})); evt.target.classList.add('dragging'); evt.stopPropagation(); };
-                div.ondragover = (evt) => { evt.preventDefault(); evt.currentTarget.classList.add('drag-over'); };
-                div.ondragleave = (evt) => { evt.currentTarget.classList.remove('drag-over'); };
-                div.ondrop = async (evt) => { evt.preventDefault(); evt.stopPropagation(); evt.currentTarget.classList.remove('drag-over'); const data = JSON.parse(evt.dataTransfer.getData("text/plain")); if (data.id === f.id) return; const collName = data.type === 'folder' ? 'folders' : 'exams'; const field = data.type === 'folder' ? 'parentId' : 'folderId'; await updateDoc(doc(db, collName, data.id), { [field]: f.id }); showToast("Đã di chuyển thành công!"); };
-                div.innerHTML = `<div class="text-4xl text-yellow-400 mb-3 text-center pointer-events-none"><i class="fa-solid fa-folder"></i></div><p class="text-sm font-bold text-gray-700 text-center truncate px-2 pointer-events-none">${f.name}</p><div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"><button onclick="event.stopPropagation(); openContextMenu('${f.id}', 'folder', '${f.name}')" class="p-1 hover:bg-gray-100 rounded text-gray-500"><i class="fa-solid fa-ellipsis-vertical"></i></button></div>`;
-                div.onclick = (e) => { if(!e.target.closest('button')) window.navigateFolder(f.id, f.name); }; grid.appendChild(div);
-            });
-            currentExams.forEach(exam => {
-                const div = document.createElement('div'); div.className = "explorer-item bg-white p-4 rounded-xl border border-gray-200 relative group"; div.draggable = true;
-                div.ondragstart = (evt) => { evt.dataTransfer.setData("text/plain", JSON.stringify({id: exam.id, type: 'exam'})); };
-                div.innerHTML = `<div class="text-4xl text-blue-500 mb-3 text-center pointer-events-none"><i class="fa-regular fa-file-lines"></i></div><p class="text-sm font-bold text-gray-700 text-center truncate px-2 pointer-events-none" title="${exam.title}">${exam.title}</p><div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"><button onclick="event.stopPropagation(); openContextMenu('${exam.id}', 'exam', '${exam.title}')" class="p-1 hover:bg-gray-100 rounded text-gray-500"><i class="fa-solid fa-ellipsis-vertical"></i></button></div>`;
-                div.onclick = (e) => { if(!e.target.closest('button')) { if(exam.status === 'published') openExamStats(exam.id); else window.location.href = `exam-editor.html?id=${exam.id}`; } };
-                grid.appendChild(div);
-            });
-            renderBreadcrumb();
-        }
-
-        window.navigateFolder = (id, name) => { if(id === 'root') { currentFolderId = null; breadcrumbs = []; } else { currentFolderId = id; breadcrumbs.push({id, name}); } renderExplorer(); }
-        window.createNewFolder = async () => { const name = await customPrompt("Nhập tên thư mục mới:", "VD: Toán Đại Số"); if(name) { try { await addDoc(collection(db, "folders"), { name, parentId: currentFolderId, teacherId: currentUserUid, createdAt: new Date().toISOString() }); showToast("Đã tạo thư mục"); } catch(e) { showToast("Lỗi: " + e.message, "error"); } } }
-
-        let breadcrumbs = [];
-        function renderBreadcrumb() {
-            const container = document.getElementById('breadcrumbContainer'); if (!currentFolderId) { container.innerHTML = '<span class="mx-2 text-gray-400">/</span><span>Tất cả</span>'; return; }
-            let path = []; let curr = folderData.find(f => f.id === currentFolderId); while(curr) { path.unshift(curr); curr = folderData.find(f => f.id === curr.parentId); }
-            let html = '<span class="mx-2 text-gray-400">/</span><button onclick="window.navigateFolder(\'root\')" class="hover:text-blue-600">...</button>';
-            path.forEach((p, idx) => { html += `<span class="mx-2 text-gray-400">/</span>`; if (idx === path.length - 1) html += `<span class="font-bold text-gray-800">${p.name}</span>`; else html += `<button onclick="window.navigateFolder('${p.id}')" class="hover:text-blue-600">${p.name}</button>`; }); container.innerHTML = html;
-        }
-
-        // --- TEACHER CLASS VIEW LOGIC ---
-        window.openTeacherClassDetail = (classId, className, students) => {
-            document.querySelectorAll('.view-section').forEach(el => el.classList.add('hidden')); document.getElementById('view-teacher-class-detail').classList.remove('hidden');
-            document.getElementById('mainSidebar').classList.add('hidden'); // HIDE SIDEBAR
-            currentViewingClassId = classId; currentClassStudents = students || [];
-            document.getElementById('classModalTitle').textContent = className;
-            renderStudentList(currentClassStudents); window.switchTab('students');
-        }
-
-        window.closeClassDetail = () => { document.getElementById('mainSidebar').classList.remove('hidden'); switchView('classes'); }
-
-        // --- SỬA LỖI ĐỔI TÊN LỚP (CẬP NHẬT ID CHÍNH XÁC) ---
-        window.editClassName = async () => {
-            if (!currentViewingClassId) return;
-            // SỬA: Lấy đúng ID classModalTitle (trong code cũ là teacherClassTitle gây lỗi)
-            const currentName = document.getElementById('classModalTitle').textContent;
-            
-            const newName = await customPrompt("Nhập tên mới cho lớp:", "", currentName);
-            
-            if (newName && newName.trim() !== "" && newName !== currentName) {
-                try {
-                    await updateDoc(doc(db, "classes", currentViewingClassId), { name: newName });
-                    document.getElementById('classModalTitle').textContent = newName;
-                    showToast("Đổi tên lớp thành công!");
-                } catch(e) { 
-                    showToast("Lỗi: " + e.message, "error"); 
-                }
-            }
-        }
-
-        window.switchTab = async function(tabName) {
-            const btnStudents = document.getElementById('tabBtnStudents'); const btnExams = document.getElementById('tabBtnExams');
-            const contentStudents = document.getElementById('tabContentStudents'); const contentExams = document.getElementById('tabContentExams');
-            contentStudents.classList.add('hidden'); contentExams.classList.add('hidden');
-            btnStudents.className = `px-4 py-1.5 text-sm font-bold rounded-md transition-all text-gray-500 hover:text-gray-700 bg-transparent shadow-none`;
-            btnExams.className = `px-4 py-1.5 text-sm font-bold rounded-md transition-all text-gray-500 hover:text-gray-700 bg-transparent shadow-none`;
-            if (tabName === 'students') { contentStudents.classList.remove('hidden'); btnStudents.className = `px-4 py-1.5 text-sm font-bold rounded-md transition-all text-blue-700 bg-white shadow-sm`; }
-            else { contentExams.classList.remove('hidden'); btnExams.className = `px-4 py-1.5 text-sm font-bold rounded-md transition-all text-blue-700 bg-white shadow-sm`; await loadClassExams(currentViewingClassId); }
-        }
-
-        async function loadClassExams(classId) {
-            const container = document.getElementById('tabContentExams'); container.innerHTML = '<p class="text-gray-400 italic text-center py-4">Đang tải danh sách đề...</p>';
-            try {
-                const q = query(collection(db, "exams"), where("accessType", "==", "class"), where("allowedClassId", "==", classId));
-                const snap = await getDocs(q);
-                if (snap.empty) { container.innerHTML = `<div class="border rounded-xl p-8 text-center bg-gray-50 border-dashed border-gray-300"><div class="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4 text-blue-500 text-2xl"><i class="fa-solid fa-file-invoice"></i></div><h3 class="text-lg font-bold text-gray-700 mb-2">Chưa có bài tập nào</h3><p class="text-sm text-gray-500">Thầy chưa giao bài tập riêng cho lớp này.</p></div>`; return; }
-                let html = '<div class="space-y-3">';
-                snap.forEach(doc => { const exam = doc.data(); const statusColor = exam.status === 'published' ? 'text-green-600 bg-green-50' : 'text-orange-500 bg-orange-50'; const statusText = exam.status === 'published' ? 'Đang mở' : 'Bản nháp'; html += `<div class="bg-white p-4 rounded-xl border border-gray-200 flex justify-between items-center hover:shadow-md transition-shadow"><div class="flex items-center gap-3"><div class="w-10 h-10 rounded-lg bg-purple-100 text-purple-600 flex items-center justify-center font-bold"><i class="fa-solid fa-file-lines"></i></div><div><h4 class="font-bold text-gray-800">${exam.title}</h4><p class="text-xs text-gray-500">${exam.questionCount || 0} câu • ${exam.duration} phút</p></div></div><div class="flex items-center gap-3"><span class="px-3 py-1 rounded-full text-xs font-bold ${statusColor}">${statusText}</span><button onclick="window.location.href='exam-editor.html?id=${doc.id}'" class="text-gray-400 hover:text-blue-600 p-2"><i class="fa-solid fa-pen-to-square"></i></button></div></div>`; });
-                html += '</div>'; container.innerHTML = html;
-            } catch (e) { container.innerHTML = '<p class="text-red-500 italic text-center">Lỗi tải dữ liệu.</p>'; }
-        }
-
-        const renderStudentList = (students) => {
-            const table = document.getElementById('studentListTable'); table.innerHTML = ''; document.getElementById('studentCountBadge').textContent = students ? students.length : 0;
-            if (!students || students.length === 0) document.getElementById('emptyStudentMsg').classList.remove('hidden');
-            else { document.getElementById('emptyStudentMsg').classList.add('hidden'); students.forEach((st, index) => { const row = document.createElement('tr'); row.className = "bg-white hover:bg-gray-50 border-b"; row.innerHTML = `<td class="px-4 py-3 font-medium text-gray-500">${index + 1}</td><td class="px-4 py-3 font-medium text-gray-900">${st.name}</td><td class="px-4 py-3 text-gray-500">${st.sbd || '---'}</td><td class="px-4 py-3 text-blue-600 font-medium">${st.username}</td><td class="px-4 py-3 font-mono text-gray-400">******</td><td class="px-4 py-3 text-center"><button onclick="window.openEditStudent(${index})" class="text-blue-500 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 p-2 rounded-lg transition-colors mr-1"><i class="fa-solid fa-pen-to-square"></i></button><button onclick="window.deleteStudent(${index})" class="text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 p-2 rounded-lg transition-colors"><i class="fa-solid fa-trash"></i></button></td>`; table.appendChild(row); }); }
-        }
-
-        window.openEditStudent = function(index) {
-            editingStudentIndex = index; const st = currentClassStudents[index];
-            document.getElementById('editStuName').value = st.name || ''; document.getElementById('editStuSBD').value = st.sbd || ''; document.getElementById('editStuGender').value = st.gender || 'Nam'; document.getElementById('editStuPhone').value = st.phoneStudent || ''; document.getElementById('editStuParentPhone').value = st.phoneParent || ''; document.getElementById('editStuEmail').value = st.email || ''; document.getElementById('editStuUsername').value = st.username || ''; document.getElementById('editStuPassword').value = st.password || ''; document.getElementById('editStuPassword').type = "password"; 
-            toggleModal('editStudentModal', true);
-        }
-
-        window.deleteStudent = async function(index) {
-            if(!await customConfirm("Bạn có chắc muốn xóa học sinh này khỏi lớp?")) return;
-            try { currentClassStudents.splice(index, 1); await updateDoc(doc(db, "classes", currentViewingClassId), { students: currentClassStudents, studentCount: currentClassStudents.length }); renderStudentList(currentClassStudents); showToast("Đã xóa học sinh.", "success"); } catch(e) { showToast("Lỗi xóa: " + e.message, "error"); }
-        }
-
-        document.getElementById('saveStudentBtn').addEventListener('click', async () => {
-            if (editingStudentIndex === -1 || !currentViewingClassId) return;
-            const updatedStudent = { ...currentClassStudents[editingStudentIndex], name: document.getElementById('editStuName').value, sbd: document.getElementById('editStuSBD').value, gender: document.getElementById('editStuGender').value, phoneStudent: document.getElementById('editStuPhone').value, phoneParent: document.getElementById('editStuParentPhone').value, email: document.getElementById('editStuEmail').value, username: document.getElementById('editStuUsername').value, password: document.getElementById('editStuPassword').value };
-            if(!updatedStudent.name || !updatedStudent.username || !updatedStudent.password) { showToast("Thiếu thông tin!", "error"); return; }
-            try { currentClassStudents[editingStudentIndex] = updatedStudent; await updateDoc(doc(db, "classes", currentViewingClassId), { students: currentClassStudents }); showToast("Cập nhật thành công!", "success"); renderStudentList(currentClassStudents); toggleModal('editStudentModal', false); } catch (e) { showToast("Lỗi: " + e.message, "error"); }
-        });
-
-        document.getElementById('addStudentBtn').addEventListener('click', async () => {
-            if (!currentViewingClassId) return;
-            const name = document.getElementById('newStudentName').value; const user = document.getElementById('newStudentUser').value; const pass = document.getElementById('newStudentPass').value;
-            if (!name || !user || !pass) { showToast("Nhập đủ thông tin!", "error"); return; }
-            const fakeEmail = `${user}@hocsinh.com`;
-            try { await createStudentAuth(fakeEmail, pass, name); const newStudent = { name, username: user, password: pass, email: fakeEmail, createdAt: new Date().toISOString() }; await updateDoc(doc(db, "classes", currentViewingClassId), { students: arrayUnion(newStudent) }); currentClassStudents.push(newStudent); renderStudentList(currentClassStudents); await updateDoc(doc(db, "classes", currentViewingClassId), { studentCount: currentClassStudents.length }); document.getElementById('newStudentName').value = ''; document.getElementById('newStudentUser').value = ''; document.getElementById('newStudentPass').value = ''; showToast("Thêm thành công và đã tạo tài khoản!", "success"); } catch (e) { console.error(e); if(e.code === 'auth/email-already-in-use') showToast("Tên đăng nhập đã tồn tại!", "error"); else showToast("Lỗi: " + e.message, "error"); }
-        });
-
-        async function createStudentAuth(email, password, displayName) { const secondaryApp = initializeApp(firebaseConfig, "Secondary"); const secondaryAuth = getAuth(secondaryApp); try { const userCredential = await createUserWithEmailAndPassword(secondaryAuth, email, password); await setDoc(doc(db, "users", userCredential.user.uid), { email: email, displayName: displayName, role: 'student', birthDate: '', authType: 'email', createdAt: new Date().toISOString() }); await signOut(secondaryAuth); return userCredential.user; } catch (error) { throw error; } finally { deleteApp(secondaryApp); } }
-        window.downloadTemplate = () => { const data = [["Họ và tên", "Tên đăng nhập", "Mật khẩu", "SBD", "Giới tính", "SĐT HS", "SĐT PHHS"], ["Nguyễn Văn A", "nguyenvana", "123456", "001", "Nam", "098...", "091..."]]; const ws = XLSX.utils.aoa_to_sheet(data); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "DanhSach"); XLSX.writeFile(wb, "Mau_DS_Hoc_Sinh.xlsx"); }
-        window.handleFileUpload = (input) => { const file = input.files[0]; if (!file) return; const reader = new FileReader(); reader.onload = async function(e) { const data = new Uint8Array(e.target.result); const workbook = XLSX.read(data, {type: 'array'}); const jsonData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], {header: 1}); let addedCount = 0; for(let i = 1; i < jsonData.length; i++) { const row = jsonData[i]; if(row[0] && row[1]) { try { const name = row[0]; const user = row[1]; const pass = String(row[2] || '123456'); const fakeEmail = `${user}@hocsinh.com`; try { await createStudentAuth(fakeEmail, pass, name); } catch(e) { console.log("User exists or error", e); } const newStudent = { name, username: user, password: pass, email: fakeEmail, sbd: row[3]||'', gender: row[4]||'Nam', phoneStudent: row[5]||'', phoneParent: row[6]||'', createdAt: new Date().toISOString() }; await updateDoc(doc(db, "classes", currentViewingClassId), { students: arrayUnion(newStudent) }); currentClassStudents.push(newStudent); addedCount++; } catch(e) { console.error(e); } } } if(addedCount > 0) { renderStudentList(currentClassStudents); await updateDoc(doc(db, "classes", currentViewingClassId), { studentCount: currentClassStudents.length }); showToast(`Đã thêm ${addedCount} học sinh!`, "success"); } input.value = ""; }; reader.readAsArrayBuffer(file); }
-        
-        document.getElementById('logoutBtn').onclick = async () => { if(await customConfirm("Bạn có chắc muốn đăng xuất?")) signOut(auth).then(()=>window.location.href="index.html"); }
-        document.getElementById('saveProfileBtn').onclick = async () => { const name = document.getElementById('editDisplayName').value; await updateDoc(doc(db, "users", currentUserUid), { displayName: name }); showToast("Đã cập nhật profile"); setTimeout(()=>location.reload(), 500); }
-
-        // --- STATS LOGIC ---
-        let currentStatExamId = null;
-        window.openExamStats = async (examId) => {
-            currentStatExamId = examId;
-            switchView('exam-stats');
-            const examDoc = await getDoc(doc(db, "exams", examId));
-            if(examDoc.exists()) document.getElementById('statExamTitle').textContent = examDoc.data().title;
-            loadExamResultsList(examId);
-        }
-        window.editExamFromStats = () => { if(currentStatExamId) window.location.href = `exam-editor.html?id=${currentStatExamId}`; }
-        async function loadExamResultsList(examId) {
-            const container = document.getElementById('statStudentGrid'); container.innerHTML = '<p class="col-span-full text-center text-gray-400 italic py-10"><i class="fa-solid fa-spinner fa-spin mr-2"></i>Đang tải dữ liệu...</p>';
-            try {
-                const q = query(collection(db, "results"), where("examId", "==", examId)); const snap = await getDocs(q);
-                document.getElementById('statSubmissionCount').textContent = snap.size;
-                if (snap.empty) { container.innerHTML = '<div class="col-span-full flex flex-col items-center justify-center py-20 text-gray-400"><i class="fa-solid fa-clipboard-list text-5xl mb-4 text-gray-300"></i><p>Chưa có học sinh nào làm bài.</p></div>'; return; }
-                container.innerHTML = '';
-                snap.forEach(d => {
-                    const res = d.data(); const score = res.score; const submittedAt = res.submittedAt ? new Date(res.submittedAt).toLocaleString('vi-VN') : "--";
-                    let scoreColor = score >= 8 ? 'text-green-600' : (score >= 5 ? 'text-blue-600' : 'text-red-500'); const avatarLetter = res.studentName ? res.studentName.charAt(0).toUpperCase() : "?";
-                    const card = document.createElement('div'); card.className = "bg-white p-4 rounded-xl border border-gray-200 hover:shadow-md transition-shadow relative";
-                    card.innerHTML = `<div class="flex items-start gap-3 mb-3"><div class="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center font-bold text-gray-600 text-lg">${avatarLetter}</div><div class="flex-1 min-w-0"><h4 class="font-bold text-gray-800 truncate" title="${res.studentName}">${res.studentName}</h4><p class="text-xs text-gray-500">Nộp: ${submittedAt}</p></div><div class="text-right"><div class="text-xl font-bold ${scoreColor}">${score}</div><div class="text-[10px] text-gray-400 font-bold uppercase">Điểm</div></div></div><div class="grid grid-cols-2 gap-2 text-xs text-gray-500 bg-gray-50 p-2 rounded-lg mb-2"><div><span class="block text-gray-400">Thời gian làm:</span><span class="font-bold text-gray-700">-- phút</span></div><div><span class="block text-gray-400">Vi phạm:</span><span class="font-bold text-red-500">${res.cheatCount || 0} lần</span></div></div><div class="flex gap-2"><button class="flex-1 py-1.5 bg-white border border-gray-200 hover:bg-blue-50 text-blue-600 text-xs font-bold rounded flex items-center justify-center gap-1"><i class="fa-regular fa-eye"></i> Xem bài</button><button class="px-2 py-1.5 bg-white border border-gray-200 hover:text-blue-600 text-gray-400 rounded"><i class="fa-solid fa-pen"></i></button></div>`;
-                    container.appendChild(card);
-                });
-            } catch (err) { console.error(err); container.innerHTML = '<p class="col-span-full text-center text-red-500">Lỗi tải dữ liệu.</p>'; }
-        }
-
         // --- STUDENT LOGIC ---
         async function loadStudentResults() {
             try {
@@ -689,26 +463,39 @@
                 studentResultsMap = {};
                 snap.forEach(doc => {
                     const res = doc.data();
-                    if (!studentResultsMap[res.examId]) { studentResultsMap[res.examId] = []; }
+                    if (!studentResultsMap[res.examId]) studentResultsMap[res.examId] = [];
                     studentResultsMap[res.examId].push(res);
                 });
-            } catch (err) { console.error(err); }
+            } catch (err) { console.error("Lỗi tải kết quả:", err); }
         }
 
-        async function loadAssignedExams() { 
-             const container = document.getElementById('assignedExamsList'); container.innerHTML = '<p class="text-gray-400 italic col-span-3">Đang kiểm tra bài tập...</p>';
+        async function loadAssignedExams() {
+            const container = document.getElementById('assignedExamsList');
+            container.innerHTML = '<p class="text-gray-400 italic col-span-3">Đang kiểm tra bài tập...</p>';
             try {
-                const qClasses = query(collection(db, "classes")); const snapClasses = await getDocs(qClasses);
-                const myClassIds = []; const myClassNames = {};
+                const qClasses = query(collection(db, "classes"));
+                const snapClasses = await getDocs(qClasses);
+                const myClassIds = [];
+                const myClassNames = {};
                 snapClasses.forEach(doc => {
-                    const cl = doc.data(); const students = cl.students || [];
-                    const isMember = students.some(s => (s.email && s.email.toLowerCase() === currentUser.email.toLowerCase()) || (s.username && `${s.username}@hocsinh.com`.toLowerCase() === currentUser.email.toLowerCase()));
+                    const cl = doc.data();
+                    const students = cl.students || [];
+                    const isMember = students.some(s => 
+                        (s.email && s.email.toLowerCase() === currentUser.email.toLowerCase()) ||
+                        (s.username && `${s.username}@hocsinh.com`.toLowerCase() === currentUser.email.toLowerCase())
+                    );
                     if (isMember) { myClassIds.push(doc.id); myClassNames[doc.id] = cl.name; }
                 });
+
                 if (myClassIds.length === 0) { container.innerHTML = '<p class="text-gray-400 italic col-span-3">Bạn chưa tham gia lớp học nào.</p>'; return; }
+
                 const qExams = query(collection(db, "exams"), where("accessType", "==", "class"), where("status", "==", "published"));
                 const snapExams = await getDocs(qExams);
-                container.innerHTML = ''; let count = 0; const now = new Date();
+                
+                container.innerHTML = '';
+                let count = 0;
+                const now = new Date();
+
                 snapExams.forEach(doc => {
                     const exam = doc.data();
                     if (myClassIds.includes(exam.allowedClassId)) {
@@ -720,60 +507,613 @@
                             const attempts = results.length;
                             const maxScore = attempts > 0 ? Math.max(...results.map(r => r.score)) : "--";
                             const isDone = attempts > 0;
-                            const deadlineStr = endTime ? `Hạn chót: ${endTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} ${endTime.toLocaleDateString('vi-VN')}` : "Không giới hạn thời gian";
+                            const statusHTML = isDone 
+                                ? `<span class="text-xs font-bold text-green-600 bg-green-50 px-2 py-1 rounded">Đã làm (${attempts} lần) - Điểm: ${maxScore}</span>`
+                                : `<span class="text-xs font-bold text-orange-600 bg-orange-50 px-2 py-1 rounded">Chưa làm</span>`;
+
                             const div = document.createElement('div');
                             div.className = "bg-white rounded-2xl shadow-md p-6 border-l-4 border-purple-500 hover:shadow-xl transition-all relative overflow-hidden group";
-                            div.innerHTML = `<div class="absolute top-0 right-0 bg-purple-100 text-purple-600 text-xs font-bold px-3 py-1 rounded-bl-xl">${className}</div><h3 class="font-bold text-gray-800 text-lg mb-1 mt-2">${exam.title}</h3><div class="mb-3">${isDone ? `<span class="text-xs font-bold text-green-600 bg-green-50 px-2 py-1 rounded">Đã làm (${attempts} lần) - Điểm: ${maxScore}</span>` : `<span class="text-xs font-bold text-orange-600 bg-orange-50 px-2 py-1 rounded">Chưa làm</span>`}</div><div class="text-xs text-gray-500 mb-2"><i class="fa-regular fa-clock mr-1"></i> ${exam.duration} phút • ${exam.questionCount || 0} câu</div><div class="text-xs font-bold text-red-500 mb-4"><i class="fa-solid fa-hourglass-half mr-1"></i> ${deadlineStr}</div><button onclick="window.location.href='exam.html?id=${doc.id}'" class="w-full py-2 bg-purple-50 text-purple-600 font-bold rounded-lg group-hover:bg-purple-600 group-hover:text-white transition-colors">${isDone ? 'Làm lại' : 'Làm bài ngay'}</button>`;
+                            div.innerHTML = `<div class="absolute top-0 right-0 bg-purple-100 text-purple-600 text-xs font-bold px-3 py-1 rounded-bl-xl">${className}</div><h3 class="font-bold text-gray-800 text-lg mb-1 mt-2">${exam.title}</h3><div class="mb-3">${statusHTML}</div><p class="text-xs text-gray-500 mb-4"><i class="fa-regular fa-clock mr-1"></i> ${exam.duration} phút • ${exam.questionCount || 0} câu</p><button onclick="window.location.href='exam.html?id=${doc.id}'" class="w-full py-2 bg-purple-50 text-purple-600 font-bold rounded-lg group-hover:bg-purple-600 group-hover:text-white transition-colors">${isDone ? 'Làm lại' : 'Làm bài ngay'}</button>`;
                             container.appendChild(div);
                         }
                     }
                 });
-                if (count === 0) container.innerHTML = '<div class="col-span-3 text-center py-8 bg-white rounded-xl border border-dashed border-gray-300"><p class="text-gray-500 font-bold">Không có bài tập mới!</p></div>';
-            } catch (err) { console.error(err); container.innerHTML = '<p class="text-red-400 italic col-span-3">Lỗi tải dữ liệu.</p>'; }
+                if (count === 0) container.innerHTML = '<div class="col-span-3 text-center py-8 bg-white rounded-xl border border-dashed border-gray-300"><p class="text-gray-500 font-bold">Không có bài tập mới!</p><p class="text-sm text-gray-400">Bạn đã hoàn thành tất cả hoặc chưa có bài mới.</p></div>';
+            } catch (err) { console.error("Lỗi tải bài tập:", err); container.innerHTML = '<p class="text-red-400 italic col-span-3">Lỗi tải dữ liệu.</p>'; }
         }
 
-        async function loadStudentClasses() { 
-             try { const q = query(collection(db, "classes")); const snapshot = await getDocs(q); const container = document.getElementById('studentClassList'); container.innerHTML = ''; let hasClass = false;
+        async function loadStudentClasses() {
+            try {
+                const q = query(collection(db, "classes"));
+                const snapshot = await getDocs(q);
+                const container = document.getElementById('studentClassList');
+                container.innerHTML = '';
+                let hasClass = false;
                 snapshot.forEach(docSnap => {
-                    const classData = docSnap.data(); const students = classData.students || [];
-                    const isMember = students.some(s => (s.email && s.email.toLowerCase() === currentUser.email.toLowerCase()) || (s.username && currentUser.email.toLowerCase() === `${s.username}@hocsinh.com`.toLowerCase()));
+                    const classData = docSnap.data();
+                    const students = classData.students || [];
+                    const isMember = students.some(s => 
+                        (s.email && s.email.toLowerCase() === currentUser.email.toLowerCase()) ||
+                        (s.username && currentUser.email.toLowerCase() === `${s.username}@hocsinh.com`.toLowerCase())
+                    );
                     if (isMember) {
                         hasClass = true;
-                        const card = document.createElement('div'); card.className = "bg-white p-6 rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-shadow cursor-pointer";
-                        const words = classData.name.trim().split(/\s+/); let acronym = words.length >= 2 ? (words[0][0] + words[1][0]).toUpperCase() : words[0].substring(0, 2).toUpperCase();
-                        card.innerHTML = `<div class="flex items-center gap-4 mb-4"><div class="w-12 h-12 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center font-bold text-xl">${acronym}</div><div><h3 class="font-bold text-gray-800 text-lg leading-tight">${classData.name}</h3><p class="text-xs text-gray-500">${classData.students.length} thành viên</p></div></div><button onclick="window.openClassDetail('${docSnap.id}', '${classData.name}')" class="w-full py-2 bg-blue-50 text-blue-600 rounded-lg text-sm font-bold hover:bg-blue-100 transition-colors">Vào lớp</button>`;
+                        const card = document.createElement('div');
+                        card.className = "bg-white p-6 rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-shadow cursor-pointer";
+                        const words = classData.name.trim().split(/\s+/);
+                        let acronym = words.length >= 2 ? (words[0][0] + words[1][0]).toUpperCase() : words[0].substring(0, 2).toUpperCase();
+                        card.innerHTML = `<div class="flex items-center gap-4 mb-4"><div class="w-12 h-12 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center font-bold text-xl">${acronym}</div><div><h3 class="font-bold text-gray-800 text-lg leading-tight">${classData.name}</h3><p class="text-xs text-gray-500">${classData.students.length} thành viên</p></div></div><button onclick="window.openStudentClassDetail('${docSnap.id}', '${classData.name}')" class="w-full py-2 bg-blue-50 text-blue-600 rounded-lg text-sm font-bold hover:bg-blue-100 transition-colors">Vào lớp</button>`;
                         container.appendChild(card);
                     }
                 });
                 if (!hasClass) container.innerHTML = '<p class="text-gray-400 italic col-span-3">Bạn chưa tham gia lớp học nào.</p>';
-            } catch (err) { console.error(err); }
+            } catch (err) { console.error("Lỗi tải lớp học sinh:", err); }
         }
 
-        window.openClassDetail = async (classId, className) => { 
-             document.querySelectorAll('.view-section').forEach(el => el.classList.add('hidden')); document.getElementById('view-class-detail').classList.remove('hidden');
+        window.openStudentClassDetail = async (classId, className) => {
+            window.switchView('student-class-detail');
             document.getElementById('detailClassName').textContent = className;
-            const content = document.getElementById('classDetailContent'); content.innerHTML = '<p class="text-center text-gray-400 py-10">Đang tải danh sách bài tập...</p>';
+            const content = document.getElementById('classDetailContent');
+            content.innerHTML = '<p class="text-center text-gray-400 py-10">Đang tải danh sách bài tập...</p>';
             try {
-                const q = query(collection(db, "exams"), where("allowedClassId", "==", classId)); const snap = await getDocs(q);
-                if (snap.empty) { content.innerHTML = '<div class="text-center py-10"><i class="fa-regular fa-folder-open text-4xl text-gray-300 mb-2"></i><p class="text-gray-500">Chưa có bài tập nào.</p></div>'; currentClassExamsData = []; return; }
-                currentClassExamsData = []; snap.forEach(doc => currentClassExamsData.push({ id: doc.id, ...doc.data() })); renderClassExams('newest');
+                const q = query(collection(db, "exams"), where("allowedClassId", "==", classId));
+                const snap = await getDocs(q);
+                if (snap.empty) { content.innerHTML = '<div class="text-center py-10"><i class="fa-regular fa-folder-open text-4xl text-gray-300 mb-2"></i><p class="text-gray-500">Chưa có bài tập nào trong lớp này.</p></div>'; currentClassExamsData = []; return; }
+                currentClassExamsData = [];
+                snap.forEach(doc => currentClassExamsData.push({ id: doc.id, ...doc.data() }));
+                window.sortClassExams('newest');
             } catch (err) { console.error(err); content.innerHTML = '<p class="text-red-500 text-center">Lỗi tải dữ liệu.</p>'; }
         }
 
-        window.sortClassExams = (order) => { renderClassExams(order); }
-        function renderClassExams(order) { 
-             const content = document.getElementById('classDetailContent');
-             currentClassExamsData.sort((a, b) => { const dateA = a.createdAt ? new Date(a.createdAt) : new Date(0); const dateB = b.createdAt ? new Date(b.createdAt) : new Date(0); return order === 'newest' ? dateB - dateA : dateA - dateB; });
+        window.sortClassExams = (order) => {
+            const content = document.getElementById('classDetailContent');
+            currentClassExamsData.sort((a, b) => {
+                const dateA = a.createdAt ? new Date(a.createdAt) : new Date(0);
+                const dateB = b.createdAt ? new Date(b.createdAt) : new Date(0);
+                return order === 'newest' ? dateB - dateA : dateA - dateB; 
+            });
             let html = '<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">';
             currentClassExamsData.forEach(exam => {
-                const results = studentResultsMap[exam.id] || []; const attempts = results.length; const maxScore = attempts > 0 ? Math.max(...results.map(r => r.score)) : "--"; const isDone = attempts > 0;
-                const now = new Date(); const endTime = exam.endTime ? new Date(exam.endTime) : null; const isExpired = endTime && endTime < now;
-                const statusColor = isExpired ? 'text-red-500 bg-red-50' : 'text-green-600 bg-green-50'; const statusText = isExpired ? 'Đã hết hạn' : 'Đang mở';
+                const results = studentResultsMap[exam.id] || [];
+                const attempts = results.length;
+                const maxScore = attempts > 0 ? Math.max(...results.map(r => r.score)) : "--";
+                const isDone = attempts > 0;
+                const now = new Date();
+                const endTime = exam.endTime ? new Date(exam.endTime) : null;
+                const isExpired = endTime && endTime < now;
+                const statusColor = isExpired ? 'text-red-500 bg-red-50' : 'text-green-600 bg-green-50';
+                const statusText = isExpired ? 'Đã hết hạn' : 'Đang mở';
                 const deadlineStr = endTime ? `${endTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} ${endTime.toLocaleDateString('vi-VN')}` : "Không giới hạn";
                 html += `<div class="bg-white p-5 rounded-2xl border ${isExpired ? 'border-gray-200 bg-gray-50' : 'border-blue-100 hover:border-blue-300'} shadow-sm flex flex-col justify-between transition-all hover:shadow-md"><div><div class="flex justify-between items-start mb-2"><h4 class="font-bold text-gray-800 text-lg line-clamp-2" title="${exam.title}">${exam.title}</h4><span class="text-[10px] font-bold px-2 py-1 rounded shrink-0 ml-2 ${statusColor}">${statusText}</span></div><div class="flex items-center gap-4 text-xs text-gray-500 mb-3"><span><i class="fa-solid fa-clock mr-1"></i> ${exam.duration} phút</span><span><i class="fa-solid fa-list mr-1"></i> ${exam.questionCount} câu</span></div><div class="bg-gray-50 p-3 rounded-xl mb-4 text-xs border border-gray-100 space-y-1"><div class="flex justify-between"><span>Trạng thái:</span> <span class="font-bold ${isDone?'text-green-600':'text-orange-500'}">${isDone?'Đã làm':'Chưa làm'}</span></div><div class="flex justify-between"><span>Số lần làm:</span> <span class="font-bold">${attempts} / ${exam.attempts || '∞'}</span></div><div class="flex justify-between"><span>Điểm cao nhất:</span> <span class="font-bold text-blue-600 text-sm">${maxScore}</span></div><div class="flex justify-between pt-1 mt-1 border-t border-gray-200 text-red-500 font-bold"><span>Hạn nộp:</span> <span>${deadlineStr}</span></div></div></div><button onclick="window.location.href='exam.html?id=${exam.id}'" class="w-full py-2.5 ${isExpired ? 'bg-gray-200 text-gray-500 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700 shadow-lg shadow-blue-200'} font-bold rounded-xl text-sm transition-all" ${isExpired ? 'disabled' : ''}>${isExpired ? 'Đã đóng' : (isDone ? 'Làm lại bài' : 'Bắt đầu làm bài')}</button></div>`;
             });
-            html += '</div>'; content.innerHTML = html;
+            html += '</div>';
+            content.innerHTML = html;
         }
+
+        // --- TEACHER LOGIC ---
+        function loadClasses() {
+            const q = query(collection(db, "classes"), where("teacherId", "==", currentUserUid));
+            onSnapshot(q, (snap) => {
+                const list = document.getElementById('classList');
+                list.innerHTML = '';
+                snap.forEach(d => {
+                    const cl = d.data();
+                    const card = document.createElement('div');
+                    card.className = "bg-white p-5 rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-shadow cursor-pointer relative group";
+                    const words = cl.name.trim().split(/\s+/);
+                    let acronym = words.length >= 2 ? (words[0][0] + words[1][0]).toUpperCase() : words[0].substring(0, 2).toUpperCase();
+                    card.innerHTML = `<div class="flex justify-between items-start mb-2"><div class="w-10 h-10 rounded-lg bg-blue-100 text-blue-600 flex items-center justify-center font-bold text-lg">${acronym}</div><div class="opacity-0 group-hover:opacity-100 transition-opacity"><button class="text-gray-400 hover:text-blue-500 p-1"><i class="fa-solid fa-pen"></i></button></div></div><h3 class="font-bold text-gray-800 text-lg mb-1">${cl.name}</h3><p class="text-sm text-gray-500">${cl.studentCount || 0} học sinh</p>`;
+                    card.onclick = () => window.openTeacherClassDetail(d.id, cl.name, cl.students || []);
+                    list.appendChild(card);
+                });
+                const addCard = document.createElement('button');
+                addCard.className = "border-2 border-dashed border-gray-300 rounded-xl p-5 flex flex-col items-center justify-center text-gray-400 hover:border-blue-400 hover:text-blue-500 transition-colors h-full min-h-[140px]";
+                addCard.innerHTML = `<i class="fa-solid fa-plus text-3xl mb-2"></i><span class="font-bold">Tạo lớp mới</span>`;
+                addCard.onclick = async () => {
+                    const name = await customPrompt("Nhập tên lớp học mới:", "VD: Lớp 5A");
+                    if(name) {
+                        await addDoc(collection(db, "classes"), { name, teacherId: currentUserUid, studentCount: 0, createdAt: new Date().toISOString() });
+                        showNotification("Tạo lớp thành công");
+                    }
+                };
+                list.appendChild(addCard);
+            });
+        }
+
+        window.openTeacherClassDetail = async (id, name) => {
+            window.switchView('teacher-class-detail');
+            currentViewingClassId = id;
+            document.getElementById('teacherClassTitle').textContent = name;
+            // Load latest data for students
+            const snap = await getDoc(doc(db, "classes", id));
+            if(snap.exists()) {
+                currentClassStudents = snap.data().students || [];
+                renderStudentList(currentClassStudents);
+            }
+            window.switchTab('students');
+        }
+
+        window.switchTab = async (tabName) => {
+            const btnStudents = document.getElementById('tabBtnStudents');
+            const btnExams = document.getElementById('tabBtnExams');
+            const contentStudents = document.getElementById('tabContentStudents'); 
+            const contentExams = document.getElementById('tabContentExams');
+
+            contentStudents.classList.add('hidden');
+            contentExams.classList.add('hidden');
+
+            const inactiveClass = "text-gray-500 hover:text-gray-700 bg-transparent shadow-none";
+            const activeClass = "text-blue-700 bg-white shadow-sm";
+
+            btnStudents.className = `px-4 py-1.5 text-sm font-bold rounded-md transition-all ${inactiveClass}`;
+            btnExams.className = `px-4 py-1.5 text-sm font-bold rounded-md transition-all ${inactiveClass}`;
+
+            if (tabName === 'students') {
+                contentStudents.classList.remove('hidden');
+                btnStudents.className = `px-4 py-1.5 text-sm font-bold rounded-md transition-all ${activeClass}`;
+            } else {
+                contentExams.classList.remove('hidden');
+                btnExams.className = `px-4 py-1.5 text-sm font-bold rounded-md transition-all ${activeClass}`;
+                await loadClassExams(currentViewingClassId);
+            }
+        }
+
+        function renderStudentList(list) {
+            const table = document.getElementById('studentListTable');
+            table.innerHTML = '';
+            document.getElementById('studentCountBadge').textContent = `${list.length} học sinh`;
+            if (list.length === 0) document.getElementById('emptyStudentMsg').classList.remove('hidden');
+            else {
+                document.getElementById('emptyStudentMsg').classList.add('hidden');
+                list.forEach((st, index) => {
+                    table.innerHTML += `<tr class="bg-white hover:bg-gray-50 border-b"><td class="px-6 py-3 font-medium text-gray-500">${index + 1}</td><td class="px-6 py-3 font-medium text-gray-900">${st.name}</td><td class="px-6 py-3 text-blue-600 font-medium">${st.username}</td><td class="px-6 py-3 font-mono text-gray-400">******</td><td class="px-6 py-3 text-center"><button onclick="window.openEditStudent(${index})" class="text-blue-500 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 p-2 rounded-lg transition-colors mr-1"><i class="fa-solid fa-pen-to-square"></i></button><button onclick="window.deleteStudent(${index})" class="text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 p-2 rounded-lg transition-colors"><i class="fa-solid fa-trash"></i></button></td></tr>`;
+                });
+            }
+        }
+
+        async function loadClassExams(classId) {
+            const container = document.getElementById('teacherExamList');
+            container.innerHTML = '<p class="text-gray-400 italic text-center py-4">Đang tải danh sách đề...</p>';
+            try {
+                const q = query(collection(db, "exams"), where("accessType", "==", "class"), where("allowedClassId", "==", classId));
+                const snap = await getDocs(q);
+                if (snap.empty) {
+                    container.innerHTML = `<div class="border rounded-2xl p-10 text-center bg-white border-dashed border-gray-300"><div class="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-4 text-blue-500 text-2xl"><i class="fa-solid fa-file-invoice"></i></div><h3 class="text-lg font-bold text-gray-700 mb-2">Chưa có bài tập nào</h3><p class="text-sm text-gray-500">Thầy chưa giao bài tập riêng cho lớp này.</p></div>`;
+                    return;
+                }
+                let html = '<div class="space-y-3">';
+                snap.forEach(doc => {
+                    const exam = doc.data();
+                    const statusColor = exam.status === 'published' ? 'text-green-600 bg-green-50' : 'text-orange-500 bg-orange-50';
+                    const statusText = exam.status === 'published' ? 'Đang mở' : 'Bản nháp';
+                    html += `<div class="bg-white p-4 rounded-xl border border-gray-200 flex justify-between items-center hover:shadow-md transition-shadow"><div class="flex items-center gap-3"><div class="w-10 h-10 rounded-lg bg-purple-100 text-purple-600 flex items-center justify-center font-bold"><i class="fa-solid fa-file-lines"></i></div><div><h4 class="font-bold text-gray-800">${exam.title}</h4><p class="text-xs text-gray-500">${exam.questionCount || 0} câu • ${exam.duration} phút</p></div></div><div class="flex items-center gap-3"><span class="px-3 py-1 rounded-full text-xs font-bold ${statusColor}">${statusText}</span><button onclick="window.location.href='exam-editor.html?id=${doc.id}'" class="text-gray-400 hover:text-blue-600 p-2"><i class="fa-solid fa-pen-to-square"></i></button></div></div>`;
+                });
+                html += '</div>';
+                container.innerHTML = html;
+            } catch (e) { container.innerHTML = '<p class="text-red-500 italic text-center">Lỗi tải dữ liệu.</p>'; }
+        }
+
+        // --- FILE MANAGER LOGIC ---
+        function loadFileManager() {
+            const qFolders = query(collection(db, "folders"), where("teacherId", "==", currentUserUid));
+            onSnapshot(qFolders, (snap) => {
+                folderData = [];
+                snap.forEach(d => folderData.push({id: d.id, ...d.data()}));
+                renderExplorer();
+            });
+            const qExams = query(collection(db, "exams"), where("teacherId", "==", currentUserUid));
+            onSnapshot(qExams, (snap) => {
+                examData = [];
+                snap.forEach(d => examData.push({id: d.id, ...d.data()}));
+                renderExplorer();
+            });
+        }
+
+        function renderExplorer() {
+            const grid = document.getElementById('explorerGrid');
+            grid.innerHTML = '';
+            const currentFolders = folderData.filter(f => f.parentId === currentFolderId);
+            const currentExams = examData.filter(e => (e.folderId || null) === currentFolderId);
+
+            if (currentFolders.length === 0 && currentExams.length === 0) document.getElementById('emptyExplorerMsg').classList.remove('hidden');
+            else document.getElementById('emptyExplorerMsg').classList.add('hidden');
+
+            currentFolders.forEach(f => {
+                const div = document.createElement('div');
+                div.className = "explorer-item bg-white p-4 rounded-xl border border-gray-200 relative group";
+                div.draggable = true;
+                div.ondragstart = (evt) => window.handleDragStart(evt, f.id, 'folder');
+                div.ondragover = (evt) => window.handleDragOver(evt);
+                div.ondragleave = (evt) => window.handleDragLeave(evt);
+                div.ondrop = (evt) => window.handleDrop(evt, f.id);
+                div.onclick = (e) => { if(!e.target.closest('button')) window.navigateFolder(f.id, f.name); };
+                div.innerHTML = `<div class="text-4xl text-yellow-400 mb-3 text-center pointer-events-none"><i class="fa-solid fa-folder"></i></div><p class="text-sm font-bold text-gray-700 text-center truncate px-2 pointer-events-none">${f.name}</p><div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"><button onclick="event.stopPropagation(); window.openContextMenu('${f.id}', 'folder', '${f.name}')" class="p-1 hover:bg-gray-100 rounded text-gray-500"><i class="fa-solid fa-ellipsis-vertical"></i></button></div>`;
+                grid.appendChild(div);
+            });
+
+            currentExams.forEach(exam => {
+                const div = document.createElement('div');
+                div.className = "explorer-item bg-white p-4 rounded-xl border border-gray-200 relative group";
+                div.draggable = true;
+                div.ondragstart = (evt) => window.handleDragStart(evt, exam.id, 'exam');
+                div.onclick = (e) => { if(!e.target.closest('button')) window.location.href = `exam-editor.html?id=${exam.id}`; };
+                div.innerHTML = `<div class="text-4xl text-blue-500 mb-3 text-center pointer-events-none"><i class="fa-regular fa-file-lines"></i></div><p class="text-sm font-bold text-gray-700 text-center truncate px-2 pointer-events-none" title="${exam.title}">${exam.title}</p><div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"><button onclick="event.stopPropagation(); window.openContextMenu('${exam.id}', 'exam', '${exam.title}')" class="p-1 hover:bg-gray-100 rounded text-gray-500"><i class="fa-solid fa-ellipsis-vertical"></i></button></div>`;
+                grid.appendChild(div);
+            });
+            renderBreadcrumb();
+        }
+
+        window.handleDragStart = (e, id, type) => {
+            e.dataTransfer.setData("text/plain", JSON.stringify({id, type}));
+            e.target.classList.add('dragging');
+            e.stopPropagation();
+        }
+        window.handleDragOver = (e) => { e.preventDefault(); e.currentTarget.classList.add('drag-over'); }
+        window.handleDragLeave = (e) => { e.currentTarget.classList.remove('drag-over'); }
+        window.handleDrop = async (e, targetId) => {
+            e.preventDefault(); e.stopPropagation(); e.currentTarget.classList.remove('drag-over');
+            try {
+                const data = JSON.parse(e.dataTransfer.getData("text/plain"));
+                if (data.id === targetId) return;
+                const collName = data.type === 'folder' ? 'folders' : 'exams';
+                const field = data.type === 'folder' ? 'parentId' : 'folderId';
+                await updateDoc(doc(db, collName, data.id), { [field]: targetId });
+                showNotification("Đã di chuyển thành công!");
+            } catch (err) { console.error("Drop error", err); }
+            document.querySelectorAll('.dragging').forEach(el => el.classList.remove('dragging'));
+        }
+
+        window.navigateFolder = (id, name) => {
+            if(id === 'root') { currentFolderId = null; }
+            else { currentFolderId = id; }
+            renderExplorer();
+        }
+        
+        window.createNewFolder = async () => {
+            const name = await customPrompt("Nhập tên thư mục mới:", "VD: Toán Đại Số");
+            if(name) {
+                try { await addDoc(collection(db, "folders"), { name, parentId: currentFolderId, teacherId: currentUserUid, createdAt: new Date().toISOString() }); showNotification("Đã tạo thư mục"); } catch(e) { showNotification("Lỗi: " + e.message, "error"); }
+            }
+        }
+
+        function renderBreadcrumb() {
+            const container = document.getElementById('breadcrumbContainer');
+            if (!currentFolderId) { container.innerHTML = '<span class="mx-2 text-gray-400">/</span><span>Tất cả</span>'; return; }
+            let path = []; let curr = folderData.find(f => f.id === currentFolderId);
+            while(curr) { path.unshift(curr); curr = folderData.find(f => f.id === curr.parentId); }
+            let html = '<span class="mx-2 text-gray-400">/</span><button onclick="window.navigateFolder(\'root\')" class="hover:text-blue-600">...</button>';
+            path.forEach((p, idx) => { html += `<span class="mx-2 text-gray-400">/</span>`; if (idx === path.length - 1) html += `<span class="font-bold text-gray-800">${p.name}</span>`; else html += `<button onclick="window.navigateFolder('${p.id}')" class="hover:text-blue-600">${p.name}</button>`; });
+            container.innerHTML = html;
+        }
+
+        window.openContextMenu = (id, type, name) => {
+            currentActionItem = {id, type, name};
+            document.getElementById('actionModalTitle').textContent = `Thao tác: ${name}`;
+            const content = document.getElementById('dynamicContent');
+            content.innerHTML = `<div class="grid grid-cols-3 gap-3 mb-4"><button onclick="window.triggerAction('rename')" class="p-3 bg-blue-50 text-blue-600 rounded-lg font-bold hover:bg-blue-100 flex flex-col items-center"><i class="fa-solid fa-pen mb-1"></i> Đổi tên</button><button onclick="window.triggerAction('move')" class="p-3 bg-purple-50 text-purple-600 rounded-lg font-bold hover:bg-purple-100 flex flex-col items-center"><i class="fa-solid fa-arrow-right-to-bracket mb-1"></i> Di chuyển</button><button onclick="window.triggerAction('delete')" class="p-3 bg-red-50 text-red-600 rounded-lg font-bold hover:bg-red-100 flex flex-col items-center"><i class="fa-solid fa-trash mb-1"></i> Xóa</button></div><div id="subActionContent"></div>`;
+            window.toggleModal('actionModal', true);
+        }
+
+        window.triggerAction = async (action) => {
+            const container = document.getElementById('subActionContent'); container.innerHTML = ''; 
+            if (action === 'rename') container.innerHTML = `<label class="block text-sm font-bold text-gray-700 mb-2">Tên mới</label><div class="flex gap-2"><input type="text" id="renameInput" value="${currentActionItem.name}" class="flex-1 border rounded px-3 py-2"><button onclick="window.commitRename()" class="bg-blue-600 text-white px-4 rounded font-bold">Lưu</button></div>`;
+            else if (action === 'delete') {
+                window.toggleModal('actionModal', false);
+                if(await customConfirm(`Bạn chắc chắn muốn xóa "${currentActionItem.name}"?`)) {
+                    try {
+                        const collName = currentActionItem.type === 'folder' ? 'folders' : 'exams';
+                        await deleteDoc(doc(db, collName, currentActionItem.id));
+                        showNotification("Đã xóa!");
+                    } catch(e) { showNotification(e.message, 'error'); }
+                }
+            } else if (action === 'move') {
+                let html = '<p class="text-sm font-bold text-gray-700 mb-2">Chọn thư mục đến:</p><div class="h-40 overflow-y-auto border rounded p-1 space-y-1">';
+                html += `<button onclick="window.commitMove(null)" class="w-full text-left px-3 py-2 hover:bg-gray-100 rounded flex items-center gap-2"><i class="fa-solid fa-house text-gray-400"></i> Thư mục gốc</button>`;
+                folderData.forEach(f => { if (f.id !== currentActionItem.id) html += `<button onclick="window.commitMove('${f.id}')" class="w-full text-left px-3 py-2 hover:bg-gray-100 rounded flex items-center gap-2"><i class="fa-solid fa-folder text-yellow-400"></i> ${f.name}</button>`; });
+                html += '</div>'; container.innerHTML = html;
+            }
+        }
+
+        window.commitRename = async () => {
+            const newName = document.getElementById('renameInput').value; if(!newName) return;
+            const collName = currentActionItem.type === 'folder' ? 'folders' : 'exams';
+            await updateDoc(doc(db, collName, currentActionItem.id), { name: newName, title: newName });
+            showNotification("Đã đổi tên"); window.toggleModal('actionModal', false);
+        }
+
+        window.commitMove = async (targetFolderId) => {
+            const collName = currentActionItem.type === 'folder' ? 'folders' : 'exams';
+            const field = currentActionItem.type === 'folder' ? 'parentId' : 'folderId';
+            await updateDoc(doc(db, collName, currentActionItem.id), { [field]: targetFolderId });
+            window.toggleModal('actionModal', false);
+            showNotification("Đã di chuyển");
+        }
+
+        // --- STUDENT MANAGEMENT ---
+        window.openEditStudent = function(index) {
+            editingStudentIndex = index;
+            const st = currentClassStudents[index];
+            document.getElementById('editStuName').value = st.name || '';
+            document.getElementById('editStuSBD').value = st.sbd || '';
+            document.getElementById('editStuGender').value = st.gender || 'Nam';
+            document.getElementById('editStuPhone').value = st.phoneStudent || '';
+            document.getElementById('editStuParentPhone').value = st.phoneParent || '';
+            document.getElementById('editStuEmail').value = st.email || '';
+            document.getElementById('editStuUsername').value = st.username || '';
+            document.getElementById('editStuPassword').value = st.password || '';
+            document.getElementById('editStuPassword').type = "password"; 
+            window.toggleModal('editStudentModal', true);
+        }
+
+        window.deleteStudent = async function(index) {
+            if(!await customConfirm("Bạn có chắc muốn xóa học sinh này khỏi lớp?")) return;
+            try {
+                currentClassStudents.splice(index, 1);
+                await updateDoc(doc(db, "classes", currentViewingClassId), { students: currentClassStudents, studentCount: currentClassStudents.length });
+                renderStudentList(currentClassStudents);
+                showNotification("Đã xóa học sinh.", "success");
+            } catch(e) { showNotification("Lỗi xóa: " + e.message, "error"); }
+        }
+
+        document.getElementById('saveStudentBtn').addEventListener('click', async () => {
+            if (editingStudentIndex === -1 || !currentViewingClassId) return;
+            const updatedStudent = {
+                ...currentClassStudents[editingStudentIndex],
+                name: document.getElementById('editStuName').value,
+                sbd: document.getElementById('editStuSBD').value,
+                gender: document.getElementById('editStuGender').value,
+                phoneStudent: document.getElementById('editStuPhone').value,
+                phoneParent: document.getElementById('editStuParentPhone').value,
+                email: document.getElementById('editStuEmail').value,
+                username: document.getElementById('editStuUsername').value,
+                password: document.getElementById('editStuPassword').value
+            };
+            if(!updatedStudent.name || !updatedStudent.username || !updatedStudent.password) { showNotification("Thiếu thông tin!", "error"); return; }
+            try {
+                currentClassStudents[editingStudentIndex] = updatedStudent;
+                await updateDoc(doc(db, "classes", currentViewingClassId), { students: currentClassStudents });
+                showNotification("Cập nhật thành công!", "success");
+                renderStudentList(currentClassStudents);
+                window.toggleModal('editStudentModal', false);
+            } catch (e) { showNotification("Lỗi: " + e.message, "error"); }
+        });
+
+        document.getElementById('addStudentBtn').addEventListener('click', async () => {
+            if (!currentViewingClassId) return;
+            const name = document.getElementById('newStudentName').value;
+            const user = document.getElementById('newStudentUser').value;
+            const pass = document.getElementById('newStudentPass').value;
+            if (!name || !user || !pass) { showNotification("Nhập đủ thông tin!", "error"); return; }
+            const fakeEmail = `${user}@hocsinh.com`;
+            try {
+                await createStudentAuth(fakeEmail, pass, name);
+                const newStudent = { name, username: user, password: pass, email: fakeEmail, createdAt: new Date().toISOString() };
+                await updateDoc(doc(db, "classes", currentViewingClassId), { students: arrayUnion(newStudent) });
+                currentClassStudents.push(newStudent);
+                renderStudentList(currentClassStudents);
+                await updateDoc(doc(db, "classes", currentViewingClassId), { studentCount: currentClassStudents.length });
+                document.getElementById('newStudentName').value = ''; document.getElementById('newStudentUser').value = ''; document.getElementById('newStudentPass').value = '';
+                showNotification("Thêm thành công và đã tạo tài khoản!", "success");
+            } catch (e) { 
+                console.error(e);
+                if(e.code === 'auth/email-already-in-use') showNotification("Tên đăng nhập đã tồn tại!", "error");
+                else showNotification("Lỗi: " + e.message, "error"); 
+            }
+        });
+
+        // Helper: Create User via Secondary App
+        async function createStudentAuth(email, password, displayName) {
+            const secondaryApp = initializeApp(firebaseConfig, "Secondary");
+            const secondaryAuth = getAuth(secondaryApp);
+            try {
+                const userCredential = await createUserWithEmailAndPassword(secondaryAuth, email, password);
+                await setDoc(doc(db, "users", userCredential.user.uid), {
+                    email: email,
+                    displayName: displayName,
+                    role: 'student',
+                    birthDate: '',
+                    authType: 'email',
+                    createdAt: new Date().toISOString()
+                });
+                await signOut(secondaryAuth);
+                return userCredential.user;
+            } catch (error) { throw error; } finally { deleteApp(secondaryApp); }
+        }
+
+        window.downloadTemplate = () => {
+            const data = [["Họ và tên", "Tên đăng nhập", "Mật khẩu", "SBD", "Giới tính", "SĐT HS", "SĐT PHHS"], ["Nguyễn Văn A", "nguyenvana", "123456", "001", "Nam", "098...", "091..."]];
+            const ws = XLSX.utils.aoa_to_sheet(data); const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "DanhSach"); XLSX.writeFile(wb, "Mau_DS_Hoc_Sinh.xlsx");
+        }
+        
+        window.handleFileUpload = (input) => { 
+             const file = input.files[0]; if (!file) return;
+            const reader = new FileReader();
+            reader.onload = async function(e) {
+                const data = new Uint8Array(e.target.result);
+                const workbook = XLSX.read(data, {type: 'array'});
+                const jsonData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], {header: 1});
+                let addedCount = 0;
+                for(let i = 1; i < jsonData.length; i++) {
+                    const row = jsonData[i];
+                    if(row[0] && row[1]) {
+                        try {
+                            const name = row[0]; const user = row[1]; const pass = String(row[2] || '123456');
+                            const fakeEmail = `${user}@hocsinh.com`;
+                            try { await createStudentAuth(fakeEmail, pass, name); } catch(e) { console.log("User exists or error", e); }
+                            const newStudent = { name, username: user, password: pass, email: fakeEmail, sbd: row[3]||'', gender: row[4]||'Nam', phoneStudent: row[5]||'', phoneParent: row[6]||'', createdAt: new Date().toISOString() };
+                            await updateDoc(doc(db, "classes", currentViewingClassId), { students: arrayUnion(newStudent) });
+                            currentClassStudents.push(newStudent);
+                            addedCount++;
+                        } catch(e) { console.error(e); }
+                    }
+                }
+                if(addedCount > 0) {
+                    renderStudentList(currentClassStudents);
+                    await updateDoc(doc(db, "classes", currentViewingClassId), { studentCount: currentClassStudents.length });
+                    showNotification(`Đã thêm ${addedCount} học sinh!`, "success");
+                }
+                input.value = "";
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        window.editClassName = async () => {
+            if (!currentViewingClassId) return;
+            const currentName = document.getElementById('teacherClassTitle').textContent;
+            const newName = await customPrompt("Nhập tên mới cho lớp:", "", currentName);
+            if (newName && newName !== currentName) {
+                try {
+                    await updateDoc(doc(db, "classes", currentViewingClassId), { name: newName });
+                    document.getElementById('teacherClassTitle').textContent = newName;
+                    showNotification("Đổi tên lớp thành công!");
+                } catch(e) { showNotification("Lỗi: " + e.message, "error"); }
+            }
+        }
+
+        document.getElementById('logoutBtn').onclick = async () => { if(await customConfirm("Bạn có chắc muốn đăng xuất?")) signOut(auth).then(()=>window.location.href='index.html'); }
+        document.getElementById('saveProfileBtn').onclick = async () => {
+            const name = document.getElementById('editDisplayName').value;
+            await updateDoc(doc(db, "users", currentUserUid), { displayName: name });
+            showNotification("Đã cập nhật profile");
+            setTimeout(()=>location.reload(), 500);
+        }
+        // --- HÀM HỖ TRỢ MODAL ---
+
+// 1. Toast Notification (Góc phải màn hình)
+window.showToast = (message, type = 'success') => {
+    const container = document.getElementById('toastContainer');
+    const toast = document.createElement('div');
+    
+    // Icon và màu sắc dựa trên type
+    const icons = {
+        success: '<i class="fa-solid fa-circle-check text-green-500"></i>',
+        error: '<i class="fa-solid fa-circle-exclamation text-red-500"></i>',
+        info: '<i class="fa-solid fa-circle-info text-blue-500"></i>'
+    };
+    const borderColors = { success: 'border-green-500', error: 'border-red-500', info: 'border-blue-500' };
+
+    toast.className = `bg-white border-l-4 ${borderColors[type]} shadow-xl rounded-lg p-4 flex items-center gap-3 min-w-[300px] transform translate-x-full transition-transform duration-300`;
+    toast.innerHTML = `
+        <div class="text-xl">${icons[type]}</div>
+        <div>
+            <h4 class="font-bold text-gray-800 text-sm uppercase">${type === 'success' ? 'Thành công' : (type === 'error' ? 'Lỗi' : 'Thông báo')}</h4>
+            <p class="text-sm text-gray-600">${message}</p>
+        </div>
+    `;
+
+    container.appendChild(toast);
+    
+    // Animation trượt vào
+    requestAnimationFrame(() => toast.classList.remove('translate-x-full'));
+
+    // Tự động tắt sau 3s
+    setTimeout(() => {
+        toast.classList.add('translate-x-full', 'opacity-0');
+        setTimeout(() => toast.remove(), 500);
+    }, 3000);
+}
+
+// Biến lưu resolve của Promise
+let modalResolve = null;
+
+const modalEl = document.getElementById('customModal');
+const modalBox = document.getElementById('customModalBox');
+const modalTitle = document.getElementById('modalTitle');
+const modalMsg = document.getElementById('modalMessage');
+const modalIcon = document.getElementById('modalIcon');
+const modalInput = document.getElementById('modalInput');
+const btnConfirm = document.getElementById('btnConfirm');
+const btnCancel = document.getElementById('btnCancel');
+
+// Hàm đóng Modal
+window.closeCustomModal = () => {
+    modalEl.classList.add('opacity-0', 'pointer-events-none');
+    modalBox.classList.remove('scale-100');
+    modalBox.classList.add('scale-95');
+    if (modalResolve) modalResolve(null); // Resolve null nếu đóng ngang
+};
+
+// 2. Custom Confirm (Trả về true/false)
+window.customConfirm = (message, title = "Xác nhận") => {
+    return new Promise((resolve) => {
+        modalResolve = resolve;
+        
+        // Setup UI
+        modalTitle.innerText = title;
+        modalMsg.innerText = message;
+        modalIcon.innerHTML = '<i class="fa-solid fa-circle-question text-orange-500"></i>';
+        modalInput.classList.add('hidden');
+        btnCancel.classList.remove('hidden');
+        btnConfirm.innerText = "Đồng ý";
+        
+        // Show Modal
+        modalEl.classList.remove('opacity-0', 'pointer-events-none');
+        modalBox.classList.remove('scale-95');
+        modalBox.classList.add('scale-100');
+
+        // Sự kiện
+        btnConfirm.onclick = () => { closeCustomModal(); resolve(true); };
+        btnCancel.onclick = () => { closeCustomModal(); resolve(false); };
+    });
+};
+
+// 3. Custom Prompt (Trả về text hoặc null)
+window.customPrompt = (message, placeholder = "", defaultValue = "") => {
+    return new Promise((resolve) => {
+        modalResolve = resolve;
+        
+        // Setup UI
+        modalTitle.innerText = "Nhập thông tin";
+        modalMsg.innerText = message;
+        modalIcon.innerHTML = '<i class="fa-solid fa-pen-to-square text-blue-500"></i>';
+        modalInput.classList.remove('hidden');
+        modalInput.value = defaultValue;
+        modalInput.placeholder = placeholder;
+        modalInput.focus();
+        btnCancel.classList.remove('hidden');
+        btnConfirm.innerText = "Lưu lại";
+
+        // Show Modal
+        modalEl.classList.remove('opacity-0', 'pointer-events-none');
+        modalBox.classList.remove('scale-95');
+        modalBox.classList.add('scale-100');
+
+        // Sự kiện
+        btnConfirm.onclick = () => { 
+            const val = modalInput.value; 
+            closeCustomModal(); 
+            resolve(val); 
+        };
+        btnCancel.onclick = () => { closeCustomModal(); resolve(null); };
+        
+        // Enter để submit
+        modalInput.onkeyup = (e) => { if(e.key === 'Enter') btnConfirm.click(); }
+    });
+};
+
+// 4. Custom Alert (Chỉ hiện thông báo rồi tắt)
+window.customAlert = (message, type = 'info') => {
+    return new Promise((resolve) => {
+        modalResolve = resolve;
+        modalTitle.innerText = type === 'error' ? 'Lỗi' : 'Thông báo';
+        modalMsg.innerText = message;
+        
+        if(type === 'error') modalIcon.innerHTML = '<i class="fa-solid fa-triangle-exclamation text-red-500"></i>';
+        else if(type === 'success') modalIcon.innerHTML = '<i class="fa-solid fa-circle-check text-green-500"></i>';
+        else modalIcon.innerHTML = '<i class="fa-solid fa-bell text-blue-500"></i>';
+
+        modalInput.classList.add('hidden');
+        btnCancel.classList.add('hidden'); // Ẩn nút hủy
+        btnConfirm.innerText = "Đã hiểu";
+
+        modalEl.classList.remove('opacity-0', 'pointer-events-none');
+        modalBox.classList.remove('scale-95');
+        modalBox.classList.add('scale-100');
+
+        btnConfirm.onclick = () => { closeCustomModal(); resolve(true); };
+    });
+};
     </script>
     <div id="customModal" class="fixed inset-0 z-[100] flex items-center justify-center opacity-0 pointer-events-none transition-opacity duration-300">
     <div class="absolute inset-0 bg-gray-900 bg-opacity-50 backdrop-blur-sm"></div>
@@ -803,12 +1143,5 @@
 </div>
 
 <div id="toastContainer" class="fixed top-5 right-5 z-[110] flex flex-col gap-3"></div>
-    <div id="actionModal" class="modal opacity-0 pointer-events-none fixed inset-0 z-[80] flex items-center justify-center bg-gray-900 bg-opacity-50">
-    <div class="modal-container bg-white w-96 rounded-2xl shadow-2xl p-6 relative transform scale-95 transition-transform duration-300">
-        <h3 id="actionModalTitle" class="text-xl font-bold text-gray-800 mb-4">Hành động</h3>
-        <div id="dynamicContent"></div> 
-        <button onclick="window.toggleModal('actionModal', false)" class="absolute top-4 right-4 text-gray-400 hover:text-gray-600"><i class="fa-solid fa-times"></i></button>
-    </div>
-</div>
 </body>
 </html>
