@@ -926,7 +926,89 @@
             showNotification("Đã cập nhật profile");
             setTimeout(()=>location.reload(), 500);
         }
+        // --- SỬA LỖI: HÀM CHUYỂN TAB TRONG MODAL LỚP HỌC ---
+        window.switchTab = async function(tabName) {
+            // 1. Cập nhật giao diện nút bấm
+            const btnStudents = document.getElementById('tabBtnStudents');
+            const btnExams = document.getElementById('tabBtnExams');
+            
+            // Reset style (giả sử active là màu xanh/đậm)
+            btnStudents.className = "tab-btn px-4 py-3 text-sm font-medium text-gray-600 hover:text-blue-600 border-b-2 border-transparent";
+            btnExams.className = "tab-btn px-4 py-3 text-sm font-medium text-gray-600 hover:text-blue-600 border-b-2 border-transparent";
 
+            // Ẩn hết nội dung
+            document.getElementById('tabContentStudents').classList.add('hidden');
+            document.getElementById('tabContentExams').classList.add('hidden');
+
+            // 2. Hiển thị tab được chọn
+            if (tabName === 'students') {
+                document.getElementById('tabContentStudents').classList.remove('hidden');
+                btnStudents.classList.add('text-blue-600', 'border-blue-600');
+                btnStudents.classList.remove('text-gray-600', 'border-transparent');
+            } else {
+                document.getElementById('tabContentExams').classList.remove('hidden');
+                btnExams.classList.add('text-blue-600', 'border-blue-600');
+                btnExams.classList.remove('text-gray-600', 'border-transparent');
+                
+                // Gọi hàm tải đề thi của lớp này
+                await loadClassExams(currentViewingClassId);
+            }
+        }
+
+        // --- HÀM MỚI: TẢI ĐỀ THI ĐÃ GIAO CHO LỚP ---
+        async function loadClassExams(classId) {
+            const container = document.getElementById('tabContentExams');
+            container.innerHTML = '<p class="text-gray-400 italic text-center py-4">Đang tải danh sách đề...</p>';
+
+            try {
+                // Tìm các đề thi có accessType='class' VÀ allowedClassId trùng với lớp đang xem
+                const q = query(collection(db, "exams"), 
+                    where("accessType", "==", "class"), 
+                    where("allowedClassId", "==", classId)
+                );
+                
+                const snap = await getDocs(q);
+                
+                if (snap.empty) {
+                    container.innerHTML = `
+                        <div class="border rounded-xl p-8 text-center bg-gray-50 border-dashed border-gray-300">
+                            <div class="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4 text-blue-500 text-2xl"><i class="fa-solid fa-file-invoice"></i></div>
+                            <h3 class="text-lg font-bold text-gray-700 mb-2">Chưa có bài tập nào</h3>
+                            <p class="text-sm text-gray-500">Thầy chưa giao bài tập riêng cho lớp này.</p>
+                        </div>`;
+                    return;
+                }
+
+                let html = '<div class="space-y-3">';
+                snap.forEach(doc => {
+                    const exam = doc.data();
+                    const statusColor = exam.status === 'published' ? 'text-green-600 bg-green-50' : 'text-orange-500 bg-orange-50';
+                    const statusText = exam.status === 'published' ? 'Đang mở' : 'Bản nháp';
+                    
+                    html += `
+                        <div class="bg-white p-4 rounded-xl border border-gray-200 flex justify-between items-center hover:shadow-md transition-shadow">
+                            <div class="flex items-center gap-3">
+                                <div class="w-10 h-10 rounded-lg bg-purple-100 text-purple-600 flex items-center justify-center font-bold"><i class="fa-solid fa-file-lines"></i></div>
+                                <div>
+                                    <h4 class="font-bold text-gray-800">${exam.title}</h4>
+                                    <p class="text-xs text-gray-500">${exam.questionCount || 0} câu • ${exam.duration} phút</p>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-3">
+                                <span class="px-3 py-1 rounded-full text-xs font-bold ${statusColor}">${statusText}</span>
+                                <button onclick="window.location.href='exam-editor.html?id=${doc.id}'" class="text-gray-400 hover:text-blue-600 p-2"><i class="fa-solid fa-pen-to-square"></i></button>
+                            </div>
+                        </div>
+                    `;
+                });
+                html += '</div>';
+                container.innerHTML = html;
+
+            } catch (e) {
+                console.error(e);
+                container.innerHTML = '<p class="text-red-500 italic text-center">Lỗi tải dữ liệu. Hãy kiểm tra lại Index trên Firebase.</p>';
+            }
+        }
     </script>
 </body>
 </html>
