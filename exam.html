@@ -6,303 +6,485 @@
     <title>Làm bài thi - Toán thầy Choang Choang</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Pacifico&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     
-    <!-- Thư viện MathJax để hiển thị công thức Toán (LaTeX) -->
-    <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+    <!-- Cấu hình MathJax để render công thức Toán -->
+    <script>
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$', '$'], ['\\(', '\\)']],
+        displayMath: [['$$', '$$'], ['\\[', '\\]']],
+        processEscapes: true
+      },
+      svg: {
+        fontCache: 'global'
+      }
+    };
+    </script>
     <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
 
     <style>
         body { font-family: 'Nunito', sans-serif; background-color: #FFF8F0; }
         .text-orange-custom { color: #FF6A00; }
         .bg-orange-custom { background-color: #FF6A00; }
-        .font-handwriting { font-family: 'Pacifico', cursive; }
         
-        /* Style cho câu hỏi được chọn */
-        .question-grid-item.active { background-color: #FF6A00; color: white; border-color: #FF6A00; }
-        .question-grid-item.answered { background-color: #E0F2FE; color: #0369A1; border-color: #0EA5E9; }
+        /* Trạng thái câu hỏi trên Palette */
+        .q-btn.active { background-color: #FF6A00; color: white; border-color: #FF6A00; }
+        .q-btn.answered { background-color: #E0F2FE; color: #0284C7; border-color: #38BDF8; }
+        .q-btn.flagged { border-color: #EF4444; color: #EF4444; }
         
-        /* Ẩn thanh cuộn nhưng vẫn cuộn được */
+        /* Ẩn thanh cuộn */
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        
+        /* Radio custom */
+        .custom-radio:checked + div { border-color: #FF6A00; background-color: #FFF7ED; color: #C2410C; font-weight: bold; }
+        .custom-radio:checked + div .check-circle { background-color: #FF6A00; border-color: #FF6A00; color: white; }
     </style>
 </head>
 <body class="bg-gray-50 h-screen flex flex-col overflow-hidden">
 
-    <!-- HEADER: Thông tin bài thi & Đồng hồ -->
-    <header class="bg-white shadow-sm z-20 shrink-0">
-        <div class="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
-            <!-- Logo nhỏ -->
-            <div class="flex items-center gap-2 cursor-pointer" onclick="if(confirm('Bạn muốn thoát bài thi? Kết quả sẽ không được lưu.')) window.location.href='dashboard.html'">
-                <div class="w-8 h-8 bg-orange-custom rounded-lg flex items-center justify-center text-white font-bold shadow-md">
-                    <i class="fa-solid fa-chevron-left"></i>
-                </div>
-                <span class="font-bold text-gray-700 hidden sm:block">Thoát</span>
+    <!-- HEADER -->
+    <header class="bg-white shadow-sm z-20 shrink-0 h-16 flex items-center justify-between px-4 lg:px-8">
+        <div class="flex items-center gap-4">
+            <button onclick="window.history.back()" class="text-gray-400 hover:text-gray-600 transition-colors">
+                <i class="fa-solid fa-arrow-left text-xl"></i>
+            </button>
+            <div>
+                <h1 id="examTitle" class="text-lg font-bold text-gray-800 leading-tight">Đang tải đề thi...</h1>
+                <p class="text-xs text-gray-500 hidden sm:block">Mã đề: <span id="examId">---</span></p>
             </div>
+        </div>
 
-            <!-- Tên bài thi -->
-            <h1 class="text-lg md:text-xl font-bold text-orange-600 font-handwriting">Đề thi thử Toán Lớp 5 - Giữa kỳ 1</h1>
-
-            <!-- Đồng hồ đếm ngược -->
-            <div class="flex items-center gap-2 bg-orange-50 px-4 py-2 rounded-full border border-orange-100">
-                <i class="fa-regular fa-clock text-orange-500"></i>
-                <span id="timer" class="font-mono font-bold text-xl text-orange-600">45:00</span>
+        <div class="flex items-center gap-4">
+            <!-- Đồng hồ -->
+            <div class="flex items-center gap-2 bg-orange-50 px-4 py-2 rounded-full border border-orange-100 shadow-sm">
+                <i class="fa-regular fa-clock text-orange-500 animate-pulse"></i>
+                <span id="timer" class="font-mono font-bold text-xl text-orange-600">00:00</span>
             </div>
+            <button id="submitBtnTop" class="hidden md:block px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg transition-all shadow-md shadow-blue-200">
+                Nộp bài
+            </button>
         </div>
     </header>
 
-    <!-- MAIN: Nội dung thi -->
-    <main class="flex-1 flex overflow-hidden max-w-7xl mx-auto w-full">
+    <!-- MAIN CONTENT -->
+    <main class="flex-1 flex overflow-hidden w-full max-w-7xl mx-auto">
         
-        <!-- CỘT TRÁI: Nội dung câu hỏi (Cuộn được) -->
-        <div class="flex-1 overflow-y-auto p-4 md:p-8 no-scrollbar" id="questionContainer">
-            <div class="max-w-3xl mx-auto bg-white rounded-2xl shadow-sm p-6 md:p-10 min-h-full">
+        <!-- LOADING SPINNER -->
+        <div id="loadingOverlay" class="absolute inset-0 bg-white z-50 flex flex-col items-center justify-center">
+            <div class="w-16 h-16 border-4 border-orange-200 border-t-orange-500 rounded-full animate-spin mb-4"></div>
+            <p class="text-gray-500 font-medium animate-pulse">Đang tải dữ liệu đề thi...</p>
+        </div>
+
+        <!-- CỘT TRÁI: Nội dung câu hỏi -->
+        <div class="flex-1 overflow-y-auto p-4 md:p-6 no-scrollbar relative" id="questionArea">
+            <div class="max-w-4xl mx-auto bg-white rounded-2xl shadow-sm border border-gray-100 min-h-full p-6 md:p-10 relative">
                 
-                <!-- Số thứ tự câu hỏi -->
-                <div class="flex justify-between items-center mb-6">
-                    <span class="text-sm font-bold text-gray-400 uppercase tracking-wider">Câu hỏi <span id="currentQuestionNum">1</span> / <span id="totalQuestions">10</span></span>
-                    <span class="px-3 py-1 bg-blue-100 text-blue-600 rounded-full text-xs font-bold">Trắc nghiệm</span>
+                <!-- Header câu hỏi -->
+                <div class="flex justify-between items-start mb-6 pb-4 border-b border-gray-100">
+                    <div>
+                        <span class="inline-block px-3 py-1 bg-blue-50 text-blue-600 rounded-lg text-xs font-bold uppercase tracking-wider mb-1" id="questionTypeBadge">TRẮC NGHIỆM</span>
+                        <h2 class="text-lg font-bold text-gray-400">Câu hỏi <span id="currentQNum">1</span></h2>
+                    </div>
+                    <button class="text-gray-300 hover:text-red-400 transition-colors" title="Đánh dấu xem lại">
+                        <i class="fa-regular fa-flag text-xl"></i>
+                    </button>
                 </div>
 
                 <!-- Nội dung câu hỏi -->
-                <div class="text-xl md:text-2xl font-bold text-gray-800 mb-8 leading-relaxed" id="questionText">
-                    Đang tải câu hỏi...
+                <div id="questionContent" class="text-xl text-gray-800 font-medium leading-relaxed mb-8">
+                    <!-- Nội dung sẽ được render tại đây -->
                 </div>
 
-                <!-- Các phương án trả lời -->
-                <div class="space-y-4" id="answersArea">
-                    <!-- Các đáp án sẽ được sinh ra bằng JS tại đây -->
+                <!-- Khu vực trả lời -->
+                <div id="answerOptions" class="space-y-3">
+                    <!-- Đáp án render tại đây -->
                 </div>
 
-                <!-- Nút điều hướng -->
-                <div class="flex justify-between mt-10 pt-6 border-t border-gray-100">
-                    <button id="prevBtn" class="px-6 py-2 rounded-xl bg-gray-100 text-gray-600 font-bold hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed">
-                        <i class="fa-solid fa-arrow-left mr-2"></i> Câu trước
-                    </button>
-                    <button id="nextBtn" class="px-6 py-2 rounded-xl bg-orange-custom text-white font-bold hover:bg-orange-600 shadow-lg shadow-orange-200">
-                        Câu sau <i class="fa-solid fa-arrow-right ml-2"></i>
-                    </button>
+                <!-- Điều hướng Mobile (Sticky Bottom) -->
+                <div class="md:hidden fixed bottom-0 left-0 w-full bg-white border-t border-gray-200 p-4 flex justify-between z-30 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
+                    <button id="prevBtnMob" class="px-4 py-2 bg-gray-100 rounded-lg font-bold text-gray-600">Trước</button>
+                    <button id="nextBtnMob" class="px-4 py-2 bg-orange-custom text-white rounded-lg font-bold shadow-md shadow-orange-200">Câu sau</button>
                 </div>
             </div>
         </div>
 
-        <!-- CỘT PHẢI: Bảng câu hỏi (Sidebar) -->
-        <div class="w-72 bg-white border-l border-gray-200 hidden md:flex flex-col">
-            <div class="p-6 flex-1 overflow-y-auto">
-                <h3 class="font-bold text-gray-700 mb-4">Danh sách câu hỏi</h3>
-                <div class="grid grid-cols-4 gap-3" id="questionPalette">
-                    <!-- Grid câu hỏi sinh bằng JS -->
+        <!-- CỘT PHẢI: Palette (Ẩn trên mobile nhỏ) -->
+        <aside class="w-80 bg-white border-l border-gray-200 hidden md:flex flex-col z-10">
+            <div class="p-5 border-b border-gray-100 bg-gray-50">
+                <h3 class="font-bold text-gray-700">Danh sách câu hỏi</h3>
+                <div class="flex gap-4 mt-2 text-xs text-gray-500">
+                    <div class="flex items-center gap-1"><span class="w-3 h-3 bg-orange-custom rounded-sm"></span> Đang làm</div>
+                    <div class="flex items-center gap-1"><span class="w-3 h-3 bg-blue-100 border border-blue-300 rounded-sm"></span> Đã làm</div>
                 </div>
             </div>
             
-            <div class="p-6 border-t border-gray-100 bg-gray-50">
-                <button id="submitBtn" class="w-full py-4 rounded-xl bg-green-500 text-white font-bold text-lg hover:bg-green-600 shadow-lg shadow-green-200 transition-all transform hover:-translate-y-1">
+            <div class="flex-1 overflow-y-auto p-5">
+                <div class="grid grid-cols-5 gap-3" id="questionPalette">
+                    <!-- Các nút số câu hỏi -->
+                </div>
+            </div>
+
+            <div class="p-5 border-t border-gray-200">
+                <button id="submitBtnSide" class="w-full py-3 bg-green-600 hover:bg-green-700 text-white font-bold rounded-xl shadow-lg shadow-green-200 transition-all transform hover:-translate-y-1">
                     Nộp bài thi
                 </button>
             </div>
+        </aside>
+
+        <!-- Điều hướng Desktop (Nổi) -->
+        <div class="hidden md:flex fixed bottom-8 left-1/2 transform -translate-x-1/2 bg-white px-6 py-3 rounded-full shadow-2xl border border-gray-100 gap-4 items-center z-40">
+            <button id="prevBtn" class="w-10 h-10 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-600 transition-colors">
+                <i class="fa-solid fa-chevron-left"></i>
+            </button>
+            <span class="text-sm font-bold text-gray-500"><span id="navCurrent">1</span> / <span id="navTotal">--</span></span>
+            <button id="nextBtn" class="w-10 h-10 rounded-full bg-orange-custom hover:bg-orange-600 text-white flex items-center justify-center shadow-md shadow-orange-200 transition-colors">
+                <i class="fa-solid fa-chevron-right"></i>
+            </button>
         </div>
+
     </main>
 
-    <!-- Modal Kết quả (Ẩn mặc định) -->
-    <div id="resultModal" class="fixed inset-0 z-50 flex items-center justify-center bg-gray-900 bg-opacity-50 hidden">
-        <div class="bg-white rounded-3xl p-8 max-w-sm w-full text-center shadow-2xl transform scale-100 transition-transform">
-            <div class="w-20 h-20 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-4 text-4xl">
+    <!-- Modal Kết quả -->
+    <div id="resultModal" class="fixed inset-0 z-50 flex items-center justify-center bg-gray-900 bg-opacity-70 hidden opacity-0 transition-opacity duration-300">
+        <div class="bg-white rounded-[2rem] p-8 max-w-sm w-full text-center shadow-2xl transform scale-90 transition-transform duration-300" id="resultModalContent">
+            <div class="w-24 h-24 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-6 text-5xl shadow-inner animate-bounce">
                 🏆
             </div>
-            <h2 class="text-2xl font-bold text-gray-800 mb-2">Kết quả bài thi</h2>
-            <p class="text-gray-500 mb-6">Bạn đã hoàn thành bài thi!</p>
+            <h2 class="text-3xl font-extrabold text-gray-800 mb-2">Hoàn thành!</h2>
+            <p class="text-gray-500 mb-8">Chúc mừng bạn đã nộp bài thành công.</p>
             
-            <div class="text-5xl font-extrabold text-orange-custom mb-2" id="scoreDisplay">0/10</div>
-            <p class="text-sm font-bold text-gray-400 uppercase tracking-wide mb-8">Điểm số</p>
+            <div class="bg-gray-50 rounded-2xl p-6 mb-8 border border-gray-100">
+                <p class="text-sm text-gray-400 uppercase font-bold tracking-wide mb-1">Điểm số của bạn</p>
+                <div class="text-6xl font-black text-orange-custom" id="scoreDisplay">--</div>
+                <div class="text-sm text-gray-500 mt-2 font-medium">Số câu đúng: <span id="correctCount">--</span>/<span id="totalCount">--</span></div>
+            </div>
             
-            <button onclick="window.location.href='dashboard.html'" class="w-full py-3 rounded-xl bg-gray-100 text-gray-700 font-bold hover:bg-gray-200">
-                Quay về Sảnh chính
-            </button>
+            <div class="flex gap-3">
+                <button onclick="window.location.reload()" class="flex-1 py-3 rounded-xl bg-gray-100 text-gray-700 font-bold hover:bg-gray-200 transition-colors">Làm lại</button>
+                <button onclick="window.location.href='dashboard.html'" class="flex-1 py-3 rounded-xl bg-blue-600 text-white font-bold hover:bg-blue-700 shadow-lg shadow-blue-200 transition-colors">Về nhà</button>
+            </div>
         </div>
     </div>
 
-    <script>
-        // --- DỮ LIỆU CÂU HỎI MẪU (CÓ LATEX) ---
-        // Sau này chúng ta sẽ lấy từ Firebase
-        const questions = [
-            {
-                id: 1,
-                content: "Tính giá trị của biểu thức: \\( P = \\frac{2}{3} + \\frac{4}{5} \\times \\frac{1}{2} \\)",
-                answers: ["\\( \\frac{16}{15} \\)", "\\( \\frac{14}{15} \\)", "\\( \\frac{8}{15} \\)", "1"],
-                correct: 0 // Index của đáp án đúng (0 là A)
-            },
-            {
-                id: 2,
-                content: "Diện tích hình tròn có bán kính \\( r = 5cm \\) là bao nhiêu? (Lấy \\( \\pi = 3.14 \\))",
-                answers: ["15.7 cm²", "31.4 cm²", "78.5 cm²", "25 cm²"],
-                correct: 2
-            },
-            {
-                id: 3,
-                content: "Tìm \\( x \\) biết: \\( 2x - 5 = 15 \\)",
-                answers: ["x = 5", "x = 10", "x = 20", "x = 7.5"],
-                correct: 1
-            },
-            {
-                id: 4,
-                content: "Một lớp học có 40 học sinh, trong đó có 25 nữ. Tỉ số phần trăm học sinh nam so với cả lớp là?",
-                answers: ["37.5%", "62.5%", "40%", "60%"],
-                correct: 0
-            },
-            {
-                id: 5,
-                content: "Kết quả của phép tính \\( 125 \\times 8 \\) là:",
-                answers: ["100", "1000", "10000", "800"],
-                correct: 1
+    <!-- SCRIPT LOGIC -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+        import { getFirestore, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+        // CẤU HÌNH FIREBASE
+        const firebaseConfig = {
+            apiKey: "AIzaSyCqAX3x1MbJ3do7m3EaH9JA4kFuVhlAc78",
+            authDomain: "lms-thitracnghiem.firebaseapp.com",
+            projectId: "lms-thitracnghiem",
+            storageBucket: "lms-thitracnghiem.firebasestorage.app",
+            messagingSenderId: "760187217240",
+            appId: "1:760187217240:web:d043cd5808c349f87a712d"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        // STATE
+        let examData = null;
+        let currentQuestions = [];
+        let userAnswers = {}; // Lưu dạng { index: value }
+        let currentIndex = 0;
+        let timerInterval;
+        let timeLeft = 0;
+
+        // UI ELEMENTS
+        const dom = {
+            loading: document.getElementById('loadingOverlay'),
+            title: document.getElementById('examTitle'),
+            id: document.getElementById('examId'),
+            timer: document.getElementById('timer'),
+            content: document.getElementById('questionContent'),
+            options: document.getElementById('answerOptions'),
+            palette: document.getElementById('questionPalette'),
+            badge: document.getElementById('questionTypeBadge'),
+            currentNum: document.getElementById('currentQNum'),
+            navCurrent: document.getElementById('navCurrent'),
+            navTotal: document.getElementById('navTotal'),
+            resultModal: document.getElementById('resultModal'),
+            score: document.getElementById('scoreDisplay'),
+            correct: document.getElementById('correctCount'),
+            total: document.getElementById('totalCount')
+        };
+
+        // 1. INIT & LOAD
+        window.addEventListener('DOMContentLoaded', () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            const examId = urlParams.get('id');
+
+            if (!examId) {
+                alert("Không tìm thấy mã đề thi!");
+                window.location.href = 'dashboard.html';
+                return;
             }
-        ];
 
-        // --- LOGIC XỬ LÝ ---
-        let currentQIndex = 0;
-        let userAnswers = new Array(questions.length).fill(null); // Lưu đáp án người dùng chọn
-        let timeLeft = 45 * 60; // 45 phút
+            dom.id.textContent = examId;
+            loadExam(examId);
+        });
 
-        const questionText = document.getElementById('questionText');
-        const answersArea = document.getElementById('answersArea');
-        const questionPalette = document.getElementById('questionPalette');
-        const currentQuestionNum = document.getElementById('currentQuestionNum');
-        const totalQuestions = document.getElementById('totalQuestions');
-        const prevBtn = document.getElementById('prevBtn');
-        const nextBtn = document.getElementById('nextBtn');
-        const timerDisplay = document.getElementById('timer');
-        const submitBtn = document.getElementById('submitBtn');
-        const resultModal = document.getElementById('resultModal');
-        const scoreDisplay = document.getElementById('scoreDisplay');
+        async function loadExam(id) {
+            try {
+                const docSnap = await getDoc(doc(db, "exams", id));
+                if (docSnap.exists()) {
+                    examData = docSnap.data();
+                    currentQuestions = examData.questions || [];
+                    
+                    // Setup UI
+                    dom.title.textContent = examData.title;
+                    timeLeft = (examData.duration || 45) * 60; // Mặc định 45p nếu thiếu
+                    
+                    if (currentQuestions.length === 0) {
+                        alert("Đề thi này chưa có câu hỏi nào!");
+                        window.location.href = 'dashboard.html';
+                        return;
+                    }
 
-        // 1. Khởi tạo
-        totalQuestions.textContent = questions.length;
-        renderPalette();
-        loadQuestion(currentQIndex);
-        startTimer();
+                    // Render
+                    renderPalette();
+                    renderQuestion(0);
+                    startTimer();
+                    dom.loading.classList.add('hidden');
+                    dom.navTotal.textContent = currentQuestions.length;
 
-        // 2. Hiển thị câu hỏi
-        function loadQuestion(index) {
-            const q = questions[index];
-            currentQuestionNum.textContent = index + 1;
+                } else {
+                    alert("Đề thi không tồn tại hoặc đã bị xóa.");
+                    window.location.href = 'dashboard.html';
+                }
+            } catch (error) {
+                console.error("Lỗi tải đề:", error);
+                alert("Có lỗi xảy ra khi tải đề thi.");
+            }
+        }
+
+        // 2. RENDER QUESTION
+        function renderQuestion(index) {
+            currentIndex = index;
+            const q = currentQuestions[index];
             
-            // Render nội dung
-            questionText.innerHTML = q.content;
+            // Cập nhật số thứ tự
+            dom.currentNum.textContent = index + 1;
+            dom.navCurrent.textContent = index + 1;
             
-            // Render đáp án
-            answersArea.innerHTML = '';
-            q.answers.forEach((ans, i) => {
-                const isSelected = userAnswers[index] === i;
-                const btn = document.createElement('div');
-                btn.className = `p-4 rounded-xl border-2 cursor-pointer transition-all flex items-center gap-3 ${isSelected ? 'border-orange-500 bg-orange-50 text-orange-700 font-bold' : 'border-gray-100 hover:border-orange-200 bg-white'}`;
-                btn.onclick = () => selectAnswer(index, i);
+            // Cập nhật Badge loại câu hỏi
+            const types = { 'mc': 'TRẮC NGHIỆM', 'tf': 'ĐÚNG / SAI', 'essay': 'TỰ LUẬN', 'short': 'TRẢ LỜI NGẮN' };
+            dom.badge.textContent = types[q.type] || 'CÂU HỎI';
+            dom.badge.className = `inline-block px-3 py-1 rounded-lg text-xs font-bold uppercase tracking-wider mb-1 ${q.type === 'essay' ? 'bg-purple-50 text-purple-600' : 'bg-blue-50 text-blue-600'}`;
+
+            // Render Nội dung (Hỗ trợ MathJax)
+            // Thay thế xuống dòng bằng <br> để hiển thị đẹp hơn
+            let contentHtml = q.content.replace(/\n/g, '<br>');
+            dom.content.innerHTML = contentHtml;
+
+            // Render Options dựa theo loại
+            dom.options.innerHTML = '';
+            
+            if (q.type === 'mc') {
+                q.options.forEach((opt, i) => {
+                    const isChecked = userAnswers[index] === i;
+                    const div = document.createElement('label');
+                    div.className = "block cursor-pointer group";
+                    div.innerHTML = `
+                        <input type="radio" name="q-${index}" class="hidden custom-radio" value="${i}" ${isChecked ? 'checked' : ''}>
+                        <div class="flex items-center p-4 border-2 border-gray-100 rounded-xl transition-all hover:border-blue-200 group-hover:bg-blue-50">
+                            <div class="check-circle w-8 h-8 rounded-full border-2 border-gray-200 flex items-center justify-center mr-4 font-bold text-gray-400 transition-colors">
+                                ${String.fromCharCode(65 + i)}
+                            </div>
+                            <div class="flex-1 font-medium text-gray-700">${opt}</div>
+                        </div>
+                    `;
+                    // Sự kiện chọn
+                    div.querySelector('input').addEventListener('change', () => {
+                        saveAnswer(index, i);
+                    });
+                    dom.options.appendChild(div);
+                });
+            } 
+            else if (q.type === 'tf') {
+                // Tạo bảng Đúng/Sai
+                const table = document.createElement('div');
+                table.className = "w-full border border-gray-200 rounded-xl overflow-hidden";
                 
-                btn.innerHTML = `
-                    <div class="w-8 h-8 rounded-full border-2 flex items-center justify-center text-sm font-bold ${isSelected ? 'border-orange-500 bg-orange-500 text-white' : 'border-gray-300 text-gray-400'}">
-                        ${String.fromCharCode(65 + i)}
+                let rowsHtml = `
+                    <div class="grid grid-cols-12 bg-gray-50 p-3 border-b border-gray-200 text-xs font-bold text-gray-500 uppercase">
+                        <div class="col-span-8">Mệnh đề</div>
+                        <div class="col-span-2 text-center text-green-600">Đúng</div>
+                        <div class="col-span-2 text-center text-red-500">Sai</div>
                     </div>
-                    <div class="flex-1">${ans}</div>
                 `;
-                answersArea.appendChild(btn);
-            });
+                
+                q.statements.forEach((stmt, i) => {
+                    // userAnswers[index] sẽ là mảng [true, false, null, true]
+                    const currentAns = userAnswers[index] || [];
+                    const isTrue = currentAns[i] === true;
+                    const isFalse = currentAns[i] === false;
 
-            // Cập nhật trạng thái nút
-            prevBtn.disabled = index === 0;
-            nextBtn.innerHTML = index === questions.length - 1 ? 'Về đích' : 'Câu sau <i class="fa-solid fa-arrow-right ml-2"></i>';
-            
-            // Cập nhật Palette
-            updatePaletteActive();
+                    rowsHtml += `
+                        <div class="grid grid-cols-12 p-4 border-b border-gray-100 items-center hover:bg-gray-50">
+                            <div class="col-span-8 font-medium text-gray-700">${stmt.text}</div>
+                            <div class="col-span-2 text-center">
+                                <input type="radio" name="q-${index}-s-${i}" class="w-5 h-5 text-green-600 cursor-pointer accent-green-600" 
+                                    onchange="window.saveTFAnswer(${index}, ${i}, true)" ${isTrue ? 'checked' : ''}>
+                            </div>
+                            <div class="col-span-2 text-center">
+                                <input type="radio" name="q-${index}-s-${i}" class="w-5 h-5 text-red-500 cursor-pointer accent-red-500" 
+                                    onchange="window.saveTFAnswer(${index}, ${i}, false)" ${isFalse ? 'checked' : ''}>
+                            </div>
+                        </div>
+                    `;
+                });
+                table.innerHTML = rowsHtml;
+                dom.options.appendChild(table);
+            }
+            else if (q.type === 'short') {
+                const input = document.createElement('input');
+                input.type = "text";
+                input.className = "w-full p-4 border-2 border-gray-200 rounded-xl focus:border-green-500 focus:ring-0 outline-none text-lg font-bold text-gray-700 placeholder-gray-300";
+                input.placeholder = "Nhập câu trả lời của bạn...";
+                input.value = userAnswers[index] || '';
+                input.addEventListener('input', (e) => saveAnswer(index, e.target.value.trim()));
+                dom.options.appendChild(input);
+            }
+            else if (q.type === 'essay') {
+                const area = document.createElement('textarea');
+                area.className = "w-full p-4 border-2 border-gray-200 rounded-xl focus:border-purple-500 focus:ring-0 outline-none min-h-[200px] text-gray-700 resize-none";
+                area.placeholder = "Nhập bài làm tự luận của bạn tại đây...";
+                area.value = userAnswers[index] || '';
+                area.addEventListener('input', (e) => saveAnswer(index, e.target.value));
+                dom.options.appendChild(area);
+            }
 
-            // Yêu cầu MathJax render lại công thức toán
+            // Trigger MathJax render lại công thức
             if (window.MathJax) {
-                MathJax.typesetPromise();
+                MathJax.typesetPromise([dom.content, dom.options]).catch((err) => console.log('MathJax error:', err));
             }
+
+            updatePalette();
         }
 
-        // 3. Chọn đáp án
-        function selectAnswer(qIndex, aIndex) {
-            userAnswers[qIndex] = aIndex;
-            loadQuestion(qIndex); // Render lại để hiện màu
-            renderPalette(); // Cập nhật màu trên palette
+        // 3. LOGIC TRẢ LỜI
+        function saveAnswer(qIndex, value) {
+            userAnswers[qIndex] = value;
+            updatePalette();
         }
 
-        // 4. Render Palette (Bảng câu hỏi bên phải)
-        function renderPalette() {
-            questionPalette.innerHTML = '';
-            questions.forEach((_, i) => {
-                const btn = document.createElement('button');
-                const isAnswered = userAnswers[i] !== null;
-                const isActive = i === currentQIndex;
-                
-                let classes = "w-10 h-10 rounded-lg text-sm font-bold border transition-all ";
-                if (isActive) classes += "bg-orange-500 text-white border-orange-500 shadow-md transform scale-110";
-                else if (isAnswered) classes += "bg-blue-100 text-blue-600 border-blue-200";
-                else classes += "bg-gray-50 text-gray-400 border-gray-200 hover:bg-gray-100";
+        // Hàm riêng cho Đúng/Sai (gắn vào window để gọi từ HTML string)
+        window.saveTFAnswer = function(qIndex, stmtIndex, value) {
+            if (!userAnswers[qIndex]) userAnswers[qIndex] = [];
+            userAnswers[qIndex][stmtIndex] = value;
+            updatePalette();
+        }
 
-                btn.className = classes;
-                btn.textContent = i + 1;
-                btn.onclick = () => {
-                    currentQIndex = i;
-                    loadQuestion(i);
-                };
-                questionPalette.appendChild(btn);
+        function updatePalette() {
+            const btns = dom.palette.querySelectorAll('button');
+            btns.forEach((btn, i) => {
+                btn.className = "w-10 h-10 rounded-lg text-sm font-bold border transition-all duration-200 q-btn";
+                // Active
+                if (i === currentIndex) {
+                    btn.classList.add('active');
+                    btn.classList.add('scale-110', 'shadow-md');
+                } else {
+                    btn.classList.remove('active', 'scale-110', 'shadow-md');
+                    // Answered
+                    if (userAnswers[i] !== undefined && userAnswers[i] !== '' && userAnswers[i] !== null) {
+                        // Check kỹ hơn cho TF (phải làm ít nhất 1 ý)
+                        if (Array.isArray(userAnswers[i]) && userAnswers[i].every(v => v === null)) {
+                             btn.classList.add('bg-gray-50', 'text-gray-400', 'border-gray-200', 'hover:bg-gray-100');
+                        } else {
+                             btn.classList.add('answered');
+                        }
+                    } else {
+                        btn.classList.add('bg-gray-50', 'text-gray-400', 'border-gray-200', 'hover:bg-gray-100');
+                    }
+                }
             });
         }
 
-        function updatePaletteActive() {
-            renderPalette(); // Gọi lại hàm render cho đơn giản
+        function renderPalette() {
+            dom.palette.innerHTML = '';
+            currentQuestions.forEach((_, i) => {
+                const btn = document.createElement('button');
+                btn.textContent = i + 1;
+                btn.onclick = () => renderQuestion(i);
+                dom.palette.appendChild(btn);
+            });
+            updatePalette();
         }
 
-        // 5. Điều hướng
-        prevBtn.onclick = () => {
-            if (currentQIndex > 0) {
-                currentQIndex--;
-                loadQuestion(currentQIndex);
-            }
-        };
-
-        nextBtn.onclick = () => {
-            if (currentQIndex < questions.length - 1) {
-                currentQIndex++;
-                loadQuestion(currentQIndex);
-            }
-        };
-
-        // 6. Đồng hồ đếm ngược
+        // 4. TIMER & SUBMIT
         function startTimer() {
-            const interval = setInterval(() => {
+            updateTimerDisplay();
+            timerInterval = setInterval(() => {
                 timeLeft--;
-                const minutes = Math.floor(timeLeft / 60);
-                const seconds = timeLeft % 60;
-                timerDisplay.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-                
+                updateTimerDisplay();
                 if (timeLeft <= 0) {
-                    clearInterval(interval);
-                    submitExam();
+                    clearInterval(timerInterval);
+                    finishExam(true);
                 }
             }, 1000);
         }
 
-        // 7. Nộp bài
-        submitBtn.onclick = () => {
-            if (confirm("Bạn có chắc chắn muốn nộp bài?")) {
-                submitExam();
-            }
-        };
+        function updateTimerDisplay() {
+            const m = Math.floor(timeLeft / 60);
+            const s = timeLeft % 60;
+            dom.timer.textContent = `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+            if(timeLeft < 300) dom.timer.classList.add('text-red-600', 'animate-pulse'); // Cảnh báo 5 phút cuối
+        }
 
-        function submitExam() {
-            // Tính điểm
+        function finishExam(auto = false) {
+            if (!auto && !confirm("Bạn chắc chắn muốn nộp bài?")) return;
+            
+            clearInterval(timerInterval);
+            
+            // Tính điểm (Sơ bộ)
             let score = 0;
-            questions.forEach((q, i) => {
-                if (userAnswers[i] === q.correct) {
-                    score++;
+            let correctCount = 0;
+            
+            currentQuestions.forEach((q, i) => {
+                const uAns = userAnswers[i];
+                if (q.type === 'mc') {
+                    if (uAns === q.correct) correctCount++;
+                } else if (q.type === 'short') {
+                    // So sánh chuỗi (đơn giản)
+                    if (uAns && q.answer && uAns.trim().toLowerCase() === q.answer.trim().toLowerCase()) correctCount++;
+                } else if (q.type === 'tf') {
+                    // Logic tính điểm TF phức tạp hơn, tạm thời tính nếu đúng hết các ý
+                    if (Array.isArray(uAns)) {
+                        const allCorrect = q.statements.every((s, idx) => s.isTrue === uAns[idx]);
+                        if (allCorrect) correctCount++;
+                    }
                 }
+                // Tự luận không chấm tự động
             });
 
-            // Hiện modal kết quả
-            scoreDisplay.textContent = `${score}/${questions.length}`;
-            resultModal.classList.remove('hidden');
+            // Hiển thị kết quả
+            dom.score.textContent = (correctCount * (10 / currentQuestions.length)).toFixed(1); // Quy về thang 10
+            dom.correct.textContent = correctCount;
+            dom.total.textContent = currentQuestions.length;
+            
+            dom.resultModal.classList.remove('hidden');
+            setTimeout(() => {
+                dom.resultModal.classList.remove('opacity-0');
+                document.getElementById('resultModalContent').classList.remove('scale-90');
+                document.getElementById('resultModalContent').classList.add('scale-100');
+            }, 10);
         }
+
+        // NAVIGATION EVENTS
+        document.getElementById('prevBtn').onclick = () => { if(currentIndex > 0) renderQuestion(currentIndex - 1); };
+        document.getElementById('nextBtn').onclick = () => { if(currentIndex < currentQuestions.length - 1) renderQuestion(currentIndex + 1); };
+        document.getElementById('prevBtnMob').onclick = () => { if(currentIndex > 0) renderQuestion(currentIndex - 1); };
+        document.getElementById('nextBtnMob').onclick = () => { if(currentIndex < currentQuestions.length - 1) renderQuestion(currentIndex + 1); };
+        
+        document.getElementById('submitBtnTop').onclick = () => finishExam();
+        document.getElementById('submitBtnSide').onclick = () => finishExam();
 
     </script>
 </body>
