@@ -25,17 +25,19 @@
         /* File Explorer Items */
         .explorer-item { transition: all 0.2s; user-select: none; }
         .explorer-item:hover { background-color: #EFF6FF; transform: translateY(-2px); box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
-        .explorer-item.selected { background-color: #DBEAFE; border-color: #3B82F6; }
         
-        /* Drag & Drop Visuals */
+        /* Drag & Drop Visuals - Hiệu ứng rõ hơn */
         .explorer-item.drag-over {
-            background-color: #BFDBFE !important; /* Xanh đậm hơn khi kéo vào */
+            background-color: #DBEAFE !important; /* Xanh đậm */
             border: 2px dashed #2563EB !important;
             transform: scale(1.05);
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+            z-index: 10;
         }
         .explorer-item.dragging {
-            opacity: 0.5;
+            opacity: 0.4;
             border: 2px dashed #9CA3AF;
+            background-color: #F3F4F6;
         }
 
         /* Notification & Modal Animations */
@@ -163,7 +165,9 @@
             <div class="h-16 border-b border-gray-200 flex items-center justify-between px-6 bg-white shrink-0">
                 <div class="flex items-center gap-4">
                     <div class="flex items-center text-gray-500 text-sm bg-gray-100 px-3 py-1.5 rounded-lg">
-                        <button onclick="navigateFolder('root')" class="hover:text-blue-600 font-bold"><i class="fa-solid fa-house"></i></button>
+                        <button onclick="navigateFolder('root')" class="hover:text-blue-600 font-bold flex items-center gap-1" title="Về thư mục gốc">
+                            <i class="fa-solid fa-house"></i>
+                        </button>
                         <span id="breadcrumbContainer" class="flex items-center">
                             <!-- Breadcrumb items will be here -->
                         </span>
@@ -587,7 +591,10 @@
 
                 div.innerHTML = `<div class="text-4xl text-yellow-400 mb-3 text-center"><i class="fa-solid fa-folder"></i></div><p class="text-sm font-bold text-gray-700 text-center truncate px-2">${f.name}</p><div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"><button onclick="event.stopPropagation(); openContextMenu('${f.id}', 'folder', '${f.name}')" class="p-1 hover:bg-gray-100 rounded text-gray-500"><i class="fa-solid fa-ellipsis-vertical"></i></button></div>`;
                 // FIX ONCLICK: Attach directly
-                div.addEventListener('click', () => navigateFolder(f.id, f.name));
+                div.onclick = (e) => {
+                    // Only navigate if not clicking the menu button
+                    if(!e.target.closest('button')) navigateFolder(f.id, f.name);
+                };
                 grid.appendChild(div);
             });
 
@@ -599,20 +606,22 @@
                 div.ondragstart = (e) => handleDragStart(e, e.id, 'exam');
                 
                 div.innerHTML = `<div class="text-4xl text-blue-500 mb-3 text-center"><i class="fa-regular fa-file-lines"></i></div><p class="text-sm font-bold text-gray-700 text-center truncate px-2" title="${e.title}">${e.title}</p><div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"><button onclick="event.stopPropagation(); openContextMenu('${e.id}', 'exam', '${e.title}')" class="p-1 hover:bg-gray-100 rounded text-gray-500"><i class="fa-solid fa-ellipsis-vertical"></i></button></div>`;
-                div.addEventListener('click', () => window.location.href = `exam-editor.html?id=${e.id}`);
+                div.onclick = (e) => {
+                    if(!e.target.closest('button')) window.location.href = `exam-editor.html?id=${e.id}`;
+                };
                 grid.appendChild(div);
             });
             renderBreadcrumb();
         }
 
-        // DRAG & DROP LOGIC
+        // DRAG & DROP LOGIC (UPDATED)
         window.handleDragStart = (e, id, type) => {
             e.dataTransfer.setData("text/plain", JSON.stringify({id, type}));
             e.target.classList.add('dragging');
         }
 
         window.handleDragOver = (e) => {
-            e.preventDefault(); // Necessary for drop to work
+            e.preventDefault(); // Required to allow dropping
             e.currentTarget.classList.add('drag-over');
         }
 
@@ -622,6 +631,7 @@
 
         window.handleDrop = async (e, targetId) => {
             e.preventDefault();
+            e.stopPropagation(); // Stop bubbling
             e.currentTarget.classList.remove('drag-over');
             
             try {
@@ -634,7 +644,6 @@
                 console.error("Drop error", err);
             }
             
-            // Remove dragging style from source (if needed via DOM, but snapshot handles it)
             document.querySelectorAll('.dragging').forEach(el => el.classList.remove('dragging'));
         }
 
