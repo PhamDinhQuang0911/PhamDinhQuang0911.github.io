@@ -124,7 +124,12 @@
                         <p class="text-gray-400 italic col-span-3">Đang tải danh sách lớp...</p>
                     </div>
                 </div>
-
+                <div id="studentAssignedExams" class="hidden mt-10">
+                    <h2 class="text-2xl font-bold text-gray-800 mb-6 border-l-4 border-purple-500 pl-4">Bài tập được giao</h2>
+                    <div id="assignedExamsList" class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <p class="text-gray-400 italic col-span-3">Đang kiểm tra bài tập...</p>
+                    </div>
+                </div>
                 <!-- Danh sách môn thi -->
                 <div class="mt-10">
                     <h2 class="text-2xl font-bold text-gray-800 mb-6 border-l-4 border-orange-500 pl-4">Chọn môn thi tự do</h2>
@@ -440,7 +445,11 @@
                             loadFileManager();
                         } else if (currentRole === 'student') {
                             document.getElementById('studentMyClasses').classList.remove('hidden');
+                            // Hiện khung bài tập được giao
+                            document.getElementById('studentAssignedExams').classList.remove('hidden');
                             loadStudentClasses();
+                            // Gọi hàm tải bài tập
+                            loadAssignedExams();
                         }
                     }
                 } catch (e) { console.error(e); }
@@ -448,7 +457,75 @@
                 window.location.href = "index.html";
             }
         });
+        // --- HÀM MỚI: TẢI BÀI TẬP ĐƯỢC GIAO ---
+        async function loadAssignedExams() {
+            const container = document.getElementById('assignedExamsList');
+            container.innerHTML = '<p class="text-gray-400 italic col-span-3">Đang tải...</p>';
 
+            try {
+                // 1. Lấy tất cả lớp học để tìm lớp của mình
+                // (Lưu ý: Với hệ thống lớn nên lưu classId vào profile user để tránh query all)
+                const qClasses = query(collection(db, "classes"));
+                const snapClasses = await getDocs(qClasses);
+                const myClassIds = [];
+                const myClassNames = {};
+
+                snapClasses.forEach(doc => {
+                    const cl = doc.data();
+                    const students = cl.students || [];
+                    const isMember = students.some(s => 
+                        (s.email && s.email.toLowerCase() === currentUser.email.toLowerCase()) ||
+                        (s.username && `${s.username}@hocsinh.com`.toLowerCase() === currentUser.email.toLowerCase())
+                    );
+                    if (isMember) {
+                        myClassIds.push(doc.id);
+                        myClassNames[doc.id] = cl.name;
+                    }
+                });
+
+                if (myClassIds.length === 0) {
+                    container.innerHTML = '<p class="text-gray-400 italic col-span-3">Bạn chưa tham gia lớp học nào.</p>';
+                    return;
+                }
+
+                // 2. Lấy các đề thi có accessType = 'class'
+                const qExams = query(collection(db, "exams"), where("accessType", "==", "class"), where("status", "==", "published"));
+                const snapExams = await getDocs(qExams);
+                
+                container.innerHTML = '';
+                let count = 0;
+
+                snapExams.forEach(doc => {
+                    const exam = doc.data();
+                    // Kiểm tra xem đề này có giao cho lớp của mình không
+                    if (myClassIds.includes(exam.allowedClassId)) {
+                        count++;
+                        const className = myClassNames[exam.allowedClassId] || "Lớp học";
+                        
+                        // Render Card đề thi
+                        const div = document.createElement('div');
+                        div.className = "bg-white rounded-2xl shadow-md p-6 border-l-4 border-purple-500 hover:shadow-xl transition-all relative overflow-hidden group";
+                        div.innerHTML = `
+                            <div class="absolute top-0 right-0 bg-purple-100 text-purple-600 text-xs font-bold px-3 py-1 rounded-bl-xl">${className}</div>
+                            <h3 class="font-bold text-gray-800 text-lg mb-1 mt-2">${exam.title}</h3>
+                            <p class="text-xs text-gray-500 mb-4"><i class="fa-regular fa-clock mr-1"></i> ${exam.duration} phút • ${exam.questionCount || 0} câu</p>
+                            <button onclick="window.location.href='exam.html?id=${doc.id}'" class="w-full py-2 bg-purple-50 text-purple-600 font-bold rounded-lg group-hover:bg-purple-600 group-hover:text-white transition-colors">
+                                Làm bài ngay
+                            </button>
+                        `;
+                        container.appendChild(div);
+                    }
+                });
+
+                if (count === 0) {
+                    container.innerHTML = '<div class="col-span-3 text-center py-8 bg-white rounded-xl border border-dashed border-gray-300"><p class="text-gray-500 font-bold">Chưa có bài tập nào!</p><p class="text-sm text-gray-400">Thầy cô chưa giao bài mới cho lớp của bạn.</p></div>';
+                }
+
+            } catch (err) {
+                console.error("Lỗi tải bài tập:", err);
+                container.innerHTML = '<p class="text-red-400 italic col-span-3">Lỗi tải dữ liệu.</p>';
+            }
+        }
         // --- STUDENT LOGIC: MY CLASSES ---
         async function loadStudentClasses() {
             try {
