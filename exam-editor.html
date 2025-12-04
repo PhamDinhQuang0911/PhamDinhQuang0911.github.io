@@ -8,7 +8,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     
-    <!-- MathJax để hiển thị công thức Toán -->
+    <!-- MathJax -->
     <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
     <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
 
@@ -16,16 +16,17 @@
         body { font-family: 'Nunito', sans-serif; background-color: #F8F9FA; }
         .sidebar-item.active { background-color: #EFF6FF; color: #1D4ED8; font-weight: 700; border-right: 3px solid #1D4ED8; }
         .question-card:hover { border-color: #3B82F6; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
-        
-        /* Hiệu ứng load MathJax */
         mjx-container { font-size: 110% !important; }
+        
+        /* Modal Animation */
+        .modal { transition: opacity 0.25s ease; }
+        body.modal-active { overflow-x: hidden; overflow-y: hidden !important; }
     </style>
 </head>
 <body class="h-screen flex overflow-hidden text-gray-800">
 
     <!-- SIDEBAR (TRÁI) -->
     <aside class="w-64 bg-white border-r border-gray-200 flex flex-col z-20 shadow-sm flex-shrink-0">
-        <!-- Header thông tin đề -->
         <div class="p-5 border-b border-gray-100">
             <div class="flex items-center gap-3 mb-3">
                 <div class="w-10 h-10 bg-blue-100 text-blue-600 rounded-xl flex items-center justify-center text-xl shadow-sm">
@@ -33,20 +34,11 @@
                 </div>
                 <div class="flex-1 overflow-hidden">
                     <h3 id="sidebarExamTitle" class="font-bold text-gray-800 truncate text-sm" title="Tên đề thi">Đề thi mới</h3>
-                    <p class="text-xs text-gray-400" id="sidebarDate">Đang soạn thảo</p>
+                    <p class="text-xs text-orange-500 font-bold" id="examStatus">• Bản nháp</p>
                 </div>
-            </div>
-            <div class="flex gap-2">
-                <button class="flex-1 py-1.5 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded text-xs font-bold text-gray-600 flex items-center justify-center gap-1 transition-colors">
-                    <i class="fa-regular fa-copy"></i> Link
-                </button>
-                <button class="py-1.5 px-3 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded text-xs font-bold text-gray-600 transition-colors">
-                    <i class="fa-solid fa-qrcode"></i>
-                </button>
             </div>
         </div>
 
-        <!-- Menu -->
         <nav class="flex-1 overflow-y-auto py-4">
             <div class="px-6 mb-2 text-xs font-bold text-gray-400 uppercase tracking-wider">Cấu hình</div>
             <ul class="space-y-1 mb-6">
@@ -61,23 +53,8 @@
                     </button>
                 </li>
             </ul>
-
-            <div class="px-6 mb-2 text-xs font-bold text-gray-400 uppercase tracking-wider">Báo cáo</div>
-            <ul class="space-y-1">
-                <li>
-                    <button onclick="switchView('stats')" id="menu-stats" class="sidebar-item w-full text-left px-6 py-3 text-gray-600 hover:bg-gray-50 transition-colors flex items-center gap-3 text-sm">
-                        <i class="fa-solid fa-chart-pie w-5"></i> Thống kê điểm
-                    </button>
-                </li>
-                <li>
-                    <button class="sidebar-item w-full text-left px-6 py-3 text-gray-600 hover:bg-gray-50 transition-colors flex items-center gap-3 text-sm">
-                        <i class="fa-solid fa-users-viewfinder w-5"></i> Giám sát thi
-                    </button>
-                </li>
-            </ul>
         </nav>
 
-        <!-- Footer -->
         <div class="p-4 border-t border-gray-200">
             <button onclick="window.location.href='dashboard.html'" class="w-full py-2 text-gray-500 hover:text-red-600 font-bold text-sm flex items-center justify-center gap-2 transition-colors">
                 <i class="fa-solid fa-arrow-right-from-bracket"></i> Quay lại Sảnh chính
@@ -96,9 +73,15 @@
                         <h1 class="text-2xl font-bold text-gray-800">Cài đặt đề thi</h1>
                         <p class="text-sm text-gray-500">Thiết lập thông tin cơ bản và cấu hình phòng thi.</p>
                     </div>
-                    <button id="saveSettingsBtn" class="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-lg shadow-blue-200 transition-all flex items-center gap-2 text-sm">
-                        <i class="fa-solid fa-save"></i> Lưu cài đặt
-                    </button>
+                    <!-- Nút hành động chính -->
+                    <div class="flex gap-3">
+                        <button onclick="saveExam('draft')" id="btnSaveDraft" class="px-5 py-2.5 bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold rounded-xl transition-all flex items-center gap-2 text-sm">
+                            <i class="fa-regular fa-floppy-disk"></i> Lưu nháp
+                        </button>
+                        <button onclick="saveExam('published')" id="btnPublish" class="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-lg shadow-blue-200 transition-all flex items-center gap-2 text-sm">
+                            <i class="fa-solid fa-rocket"></i> Xuất bản
+                        </button>
+                    </div>
                 </div>
 
                 <div class="space-y-6">
@@ -119,48 +102,11 @@
                                     <option>Vật lý</option>
                                     <option>Hóa học</option>
                                     <option>Tiếng Anh</option>
-                                    <option>Ngữ Văn</option>
                                 </select>
                             </div>
                             <div>
                                 <label class="block text-xs font-bold text-gray-500 uppercase mb-2">Thời gian (phút)</label>
-                                <input type="number" value="45" class="w-full px-4 py-2.5 rounded-xl border border-gray-300 focus:outline-none focus:border-blue-500">
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Cấu hình nâng cao -->
-                    <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
-                        <h3 class="font-bold text-gray-700 mb-4 pb-2 border-b border-gray-100 flex items-center gap-2">
-                            <i class="fa-solid fa-gears text-gray-500"></i> Cấu hình thi
-                        </h3>
-                        <div class="space-y-5">
-                            <div class="flex items-center justify-between">
-                                <div>
-                                    <p class="font-bold text-gray-700 text-sm">Mật khẩu bài thi</p>
-                                    <p class="text-xs text-gray-400">Yêu cầu nhập mật khẩu mới được vào làm bài</p>
-                                </div>
-                                <input type="text" placeholder="Không đặt mật khẩu" class="px-3 py-2 rounded-lg border border-gray-300 text-sm w-48 focus:outline-none focus:border-blue-500">
-                            </div>
-                            <div class="flex items-center justify-between">
-                                <div>
-                                    <p class="font-bold text-gray-700 text-sm">Đảo câu hỏi & Đáp án</p>
-                                    <p class="text-xs text-gray-400">Tự động xáo trộn vị trí để chống gian lận</p>
-                                </div>
-                                <label class="relative inline-flex items-center cursor-pointer">
-                                    <input type="checkbox" class="sr-only peer" checked>
-                                    <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-                                </label>
-                            </div>
-                            <div class="flex items-center justify-between">
-                                <div>
-                                    <p class="font-bold text-gray-700 text-sm">Cho xem kết quả</p>
-                                    <p class="text-xs text-gray-400">Hiển thị điểm và đáp án đúng sau khi nộp bài</p>
-                                </div>
-                                <label class="relative inline-flex items-center cursor-pointer">
-                                    <input type="checkbox" class="sr-only peer" checked>
-                                    <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-                                </label>
+                                <input type="number" id="settingDuration" value="45" class="w-full px-4 py-2.5 rounded-xl border border-gray-300 focus:outline-none focus:border-blue-500">
                             </div>
                         </div>
                     </div>
@@ -173,7 +119,6 @@
             <!-- Khu vực danh sách câu hỏi (Giữa) -->
             <div class="flex-1 overflow-y-auto p-6 bg-gray-100 scroll-smooth" id="questionsContainer">
                 <div class="max-w-3xl mx-auto pb-24 space-y-4" id="questionsList">
-                    <!-- Danh sách câu hỏi sẽ render vào đây -->
                     <div id="emptyState" class="text-center py-20 text-gray-400 border-2 border-dashed border-gray-300 rounded-2xl bg-gray-50">
                         <div class="w-20 h-20 bg-white rounded-full flex items-center justify-center mx-auto mb-4 text-3xl shadow-sm">
                             <i class="fa-regular fa-folder-open text-blue-300"></i>
@@ -192,31 +137,19 @@
                 
                 <button onclick="addQuestion('mc')" class="w-full p-3 bg-white border border-gray-200 hover:border-blue-500 hover:bg-blue-50 rounded-xl text-left flex items-center gap-3 transition-all shadow-sm group">
                     <div class="w-8 h-8 rounded-lg bg-blue-100 text-blue-600 flex items-center justify-center group-hover:bg-blue-600 group-hover:text-white transition-colors"><i class="fa-solid fa-list-ul"></i></div>
-                    <div>
-                        <span class="text-sm font-bold text-gray-700 block">Trắc nghiệm</span>
-                        <span class="text-xs text-gray-400 font-mono">\begin{ex}</span>
-                    </div>
+                    <div><span class="text-sm font-bold text-gray-700 block">Trắc nghiệm</span></div>
                 </button>
                 <button onclick="addQuestion('essay')" class="w-full p-3 bg-white border border-gray-200 hover:border-purple-500 hover:bg-purple-50 rounded-xl text-left flex items-center gap-3 transition-all shadow-sm group">
                     <div class="w-8 h-8 rounded-lg bg-purple-100 text-purple-600 flex items-center justify-center group-hover:bg-purple-600 group-hover:text-white transition-colors"><i class="fa-solid fa-pen-nib"></i></div>
-                    <div>
-                        <span class="text-sm font-bold text-gray-700 block">Tự luận</span>
-                        <span class="text-xs text-gray-400 font-mono">\begin{bt}</span>
-                    </div>
+                    <div><span class="text-sm font-bold text-gray-700 block">Tự luận</span></div>
                 </button>
                 <button onclick="addQuestion('tf')" class="w-full p-3 bg-white border border-gray-200 hover:border-orange-500 hover:bg-orange-50 rounded-xl text-left flex items-center gap-3 transition-all shadow-sm group">
                     <div class="w-8 h-8 rounded-lg bg-orange-100 text-orange-600 flex items-center justify-center group-hover:bg-orange-600 group-hover:text-white transition-colors"><i class="fa-solid fa-check-double"></i></div>
-                    <div>
-                        <span class="text-sm font-bold text-gray-700 block">Đúng / Sai</span>
-                        <span class="text-xs text-gray-400 font-mono">\choiceTF</span>
-                    </div>
+                    <div><span class="text-sm font-bold text-gray-700 block">Đúng / Sai</span></div>
                 </button>
                 <button onclick="addQuestion('short')" class="w-full p-3 bg-white border border-gray-200 hover:border-green-500 hover:bg-green-50 rounded-xl text-left flex items-center gap-3 transition-all shadow-sm group">
                     <div class="w-8 h-8 rounded-lg bg-green-100 text-green-600 flex items-center justify-center group-hover:bg-green-600 group-hover:text-white transition-colors"><i class="fa-solid fa-keyboard"></i></div>
-                    <div>
-                        <span class="text-sm font-bold text-gray-700 block">Trả lời ngắn</span>
-                        <span class="text-xs text-gray-400 font-mono">\shortans</span>
-                    </div>
+                    <div><span class="text-sm font-bold text-gray-700 block">Trả lời ngắn</span></div>
                 </button>
 
                 <div class="border-t border-gray-100 my-2 pt-3">
@@ -224,63 +157,71 @@
                         <i class="fa-solid fa-file-import text-green-600"></i> Nhập liệu
                     </h3>
                     <button onclick="document.getElementById('texInput').click()" class="w-full py-2 bg-green-50 text-green-700 border border-green-200 rounded-lg text-sm font-bold hover:bg-green-100 transition-colors flex items-center justify-center gap-2 mb-2">
-                        <i class="fa-solid fa-file-arrow-up"></i> Tải file LaTeX (.tex)
+                        <i class="fa-solid fa-file-arrow-up"></i> Tải file LaTeX
                     </button>
                     <input type="file" id="texInput" accept=".tex,.txt" class="hidden" onchange="handleTexUpload(this)">
-                    
-                    <button onclick="downloadSampleTex()" class="w-full py-2 bg-white text-gray-500 border border-gray-200 rounded-lg text-xs hover:bg-gray-50 transition-colors">
-                        Tải file mẫu cấu trúc
-                    </button>
-                </div>
-
-                <div class="mt-auto">
-                    <button onclick="saveQuestions()" id="saveQuestionsBtn" class="w-full py-3 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all flex items-center justify-center gap-2">
-                        <i class="fa-solid fa-floppy-disk"></i> Lưu nội dung đề
-                    </button>
                 </div>
             </div>
         </div>
-
-        <!-- === VIEW 3: THỐNG KÊ === -->
-        <div id="view-stats" class="flex-1 hidden p-8 flex items-center justify-center bg-gray-50">
-            <div class="text-center max-w-md">
-                <div class="w-24 h-24 bg-white rounded-full flex items-center justify-center mx-auto mb-6 shadow-sm">
-                    <i class="fa-solid fa-chart-column text-5xl text-gray-300"></i>
-                </div>
-                <h3 class="text-xl font-bold text-gray-700 mb-2">Chưa có dữ liệu thống kê</h3>
-                <p class="text-gray-500">Đề thi này chưa được tổ chức thi hoặc chưa có học sinh nào nộp bài.</p>
-            </div>
-        </div>
-
     </main>
+
+    <!-- MODAL CHIA SẺ LINK (MỚI) -->
+    <div id="shareModal" class="modal opacity-0 pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-gray-900 bg-opacity-70">
+        <div class="bg-white rounded-2xl p-6 max-w-lg w-full shadow-2xl transform scale-95 transition-transform duration-300">
+            <div class="text-center mb-6">
+                <div class="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4 text-3xl text-green-600 animate-bounce">
+                    <i class="fa-solid fa-check"></i>
+                </div>
+                <h3 class="text-2xl font-bold text-gray-800">Xuất bản thành công!</h3>
+                <p class="text-gray-500">Đề thi đã sẵn sàng. Hãy gửi link dưới đây cho học sinh.</p>
+            </div>
+
+            <div class="bg-gray-50 p-4 rounded-xl border border-gray-200 mb-6">
+                <label class="block text-xs font-bold text-gray-500 uppercase mb-2">Link bài thi</label>
+                <div class="flex gap-2">
+                    <input type="text" id="shareLinkInput" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-gray-600 bg-white focus:outline-none" readonly>
+                    <button onclick="copyLink()" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg transition-colors">
+                        Copy
+                    </button>
+                </div>
+            </div>
+
+            <div class="flex justify-center gap-3">
+                <button onclick="window.open(document.getElementById('shareLinkInput').value, '_blank')" class="px-5 py-2.5 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 font-bold rounded-xl transition-colors">
+                    <i class="fa-solid fa-arrow-up-right-from-square mr-2"></i> Mở thử
+                </button>
+                <button onclick="closeShareModal()" class="px-5 py-2.5 bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold rounded-xl transition-colors">
+                    Đóng
+                </button>
+            </div>
+        </div>
+    </div>
 
     <!-- TEMPLATES -->
     <template id="tpl-mc">
-        <div class="question-card bg-white p-5 rounded-xl shadow-sm border border-gray-200 relative group transition-all hover:border-blue-400" data-type="mc">
+        <div class="question-card bg-white p-5 rounded-xl shadow-sm border border-gray-200 relative group transition-all hover:border-blue-400 mb-6" data-type="mc">
             <div class="absolute top-3 right-3 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity bg-white p-1 rounded-lg shadow-sm border border-gray-100 z-10">
-                <button onclick="moveUp(this)" class="p-1.5 text-gray-400 hover:text-blue-600 rounded hover:bg-blue-50"><i class="fa-solid fa-arrow-up"></i></button>
-                <button onclick="moveDown(this)" class="p-1.5 text-gray-400 hover:text-blue-600 rounded hover:bg-blue-50"><i class="fa-solid fa-arrow-down"></i></button>
                 <button onclick="deleteQuestion(this)" class="p-1.5 text-gray-400 hover:text-red-600 rounded hover:bg-red-50"><i class="fa-solid fa-trash"></i></button>
             </div>
             <div class="mb-3">
-                <span class="inline-block px-2 py-0.5 bg-blue-100 text-blue-700 text-[10px] font-bold rounded uppercase tracking-wide mb-2">Câu hỏi ${id}</span>
+                <span class="inline-block px-2 py-0.5 bg-blue-100 text-blue-700 text-[10px] font-bold rounded uppercase tracking-wide mb-2">Trắc nghiệm</span>
                 <textarea class="w-full p-3 bg-gray-50 border-0 rounded-lg focus:ring-2 focus:ring-blue-200 outline-none min-h-[80px] text-gray-700 text-sm" placeholder="Nhập nội dung câu hỏi..."></textarea>
             </div>
             <div class="grid grid-cols-2 gap-3 mb-3">
-                <div class="flex items-center gap-2 bg-white border border-gray-200 px-3 py-2 rounded-lg focus-within:border-blue-400 focus-within:ring-1 focus-within:ring-blue-400 transition-all">
-                    <input type="radio" name="correct-rad-${id}" class="w-4 h-4 text-blue-600 cursor-pointer focus:ring-0">
+                <div class="flex items-center gap-2 bg-white border border-gray-200 px-3 py-2 rounded-lg focus-within:border-blue-400 transition-all">
+                    <input type="radio" name="correct-rad-${id}" class="w-4 h-4 text-blue-600 cursor-pointer">
                     <input type="text" class="flex-1 bg-transparent border-0 outline-none text-sm ml-1" placeholder="Phương án A">
                 </div>
-                <div class="flex items-center gap-2 bg-white border border-gray-200 px-3 py-2 rounded-lg focus-within:border-blue-400 focus-within:ring-1 focus-within:ring-blue-400 transition-all">
-                    <input type="radio" name="correct-rad-${id}" class="w-4 h-4 text-blue-600 cursor-pointer focus:ring-0">
+                <div class="flex items-center gap-2 bg-white border border-gray-200 px-3 py-2 rounded-lg focus-within:border-blue-400 transition-all">
+                    <input type="radio" name="correct-rad-${id}" class="w-4 h-4 text-blue-600 cursor-pointer">
                     <input type="text" class="flex-1 bg-transparent border-0 outline-none text-sm ml-1" placeholder="Phương án B">
                 </div>
-                <div class="flex items-center gap-2 bg-white border border-gray-200 px-3 py-2 rounded-lg focus-within:border-blue-400 focus-within:ring-1 focus-within:ring-blue-400 transition-all">
-                    <input type="radio" name="correct-rad-${id}" class="w-4 h-4 text-blue-600 cursor-pointer focus:ring-0">
+                <div class="flex items-center gap-2 bg-white border border-gray-200 px-3 py-2 rounded-lg focus-within:border-blue-400 transition-all">
+                    <input type="radio" name="correct-rad-${id}" class="w-4 h-4 text-blue-600 cursor-pointer">
                     <input type="text" class="flex-1 bg-transparent border-0 outline-none text-sm ml-1" placeholder="Phương án C">
                 </div>
-                <div class="flex items-center gap-2 bg-white border border-gray-200 px-3 py-2 rounded-lg focus-within:border-blue-400 focus-within:ring-1 focus-within:ring-blue-400 transition-all">
-                    <input type="radio" name="correct-rad-${id}" class="w-4 h-4 text-blue-600 cursor-pointer focus:ring-0">
+                <div class="flex items-center gap-2 bg-white border border-gray-200 px-3 py-2 rounded-lg focus-within:border-blue-400 transition-all">
+                    <input type="radio" name="correct-rad-${id}" class="w-4 h-4 text-blue-600 cursor-pointer">
                     <input type="text" class="flex-1 bg-transparent border-0 outline-none text-sm ml-1" placeholder="Phương án D">
                 </div>
             </div>
@@ -289,14 +230,12 @@
     </template>
 
     <template id="tpl-essay">
-        <div class="question-card bg-white p-5 rounded-xl shadow-sm border border-gray-200 relative group transition-all hover:border-purple-400" data-type="essay">
+        <div class="question-card bg-white p-5 rounded-xl shadow-sm border border-gray-200 relative group mb-6 transition-all hover:border-purple-400" data-type="essay">
             <div class="absolute top-3 right-3 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity bg-white p-1 rounded-lg shadow-sm border border-gray-100 z-10">
-                <button onclick="moveUp(this)" class="p-1.5 text-gray-400 hover:text-blue-600 rounded hover:bg-blue-50"><i class="fa-solid fa-arrow-up"></i></button>
-                <button onclick="moveDown(this)" class="p-1.5 text-gray-400 hover:text-blue-600 rounded hover:bg-blue-50"><i class="fa-solid fa-arrow-down"></i></button>
                 <button onclick="deleteQuestion(this)" class="p-1.5 text-gray-400 hover:text-red-600 rounded hover:bg-red-50"><i class="fa-solid fa-trash"></i></button>
             </div>
             <div class="mb-3">
-                <span class="inline-block px-2 py-0.5 bg-purple-100 text-purple-700 text-[10px] font-bold rounded uppercase tracking-wide mb-2">Tự luận ${id}</span>
+                <span class="inline-block px-2 py-0.5 bg-purple-100 text-purple-700 text-[10px] font-bold rounded uppercase tracking-wide mb-2">Tự luận</span>
                 <textarea class="w-full p-3 bg-gray-50 border-0 rounded-lg focus:ring-2 focus:ring-purple-200 outline-none min-h-[100px] text-gray-700 text-sm" placeholder="Nhập đề bài tự luận..."></textarea>
             </div>
             <textarea class="w-full p-3 bg-white border border-gray-200 rounded-lg text-sm min-h-[60px] outline-none focus:border-purple-400 focus:ring-1 focus:ring-purple-400" placeholder="Đáp án / Lời giải tham khảo..."></textarea>
@@ -304,14 +243,12 @@
     </template>
 
     <template id="tpl-tf">
-        <div class="question-card bg-white p-5 rounded-xl shadow-sm border border-gray-200 relative group transition-all hover:border-orange-400" data-type="tf">
+        <div class="question-card bg-white p-5 rounded-xl shadow-sm border border-gray-200 relative group mb-6 transition-all hover:border-orange-400" data-type="tf">
             <div class="absolute top-3 right-3 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity bg-white p-1 rounded-lg shadow-sm border border-gray-100 z-10">
-                <button onclick="moveUp(this)" class="p-1.5 text-gray-400 hover:text-blue-600 rounded hover:bg-blue-50"><i class="fa-solid fa-arrow-up"></i></button>
-                <button onclick="moveDown(this)" class="p-1.5 text-gray-400 hover:text-blue-600 rounded hover:bg-blue-50"><i class="fa-solid fa-arrow-down"></i></button>
                 <button onclick="deleteQuestion(this)" class="p-1.5 text-gray-400 hover:text-red-600 rounded hover:bg-red-50"><i class="fa-solid fa-trash"></i></button>
             </div>
             <div class="mb-3">
-                <span class="inline-block px-2 py-0.5 bg-orange-100 text-orange-700 text-[10px] font-bold rounded uppercase tracking-wide mb-2">Đúng / Sai ${id}</span>
+                <span class="inline-block px-2 py-0.5 bg-orange-100 text-orange-700 text-[10px] font-bold rounded uppercase tracking-wide mb-2">Đúng / Sai</span>
                 <textarea class="w-full p-3 bg-gray-50 border-0 rounded-lg focus:ring-2 focus:ring-orange-200 outline-none min-h-[60px] text-gray-700 text-sm" placeholder="Nhập câu dẫn..."></textarea>
             </div>
             <div class="space-y-2 mb-3">
@@ -323,23 +260,23 @@
                 <!-- 4 Mệnh đề -->
                 <div class="grid grid-cols-12 gap-2 items-center">
                     <div class="col-span-8"><input type="text" class="w-full px-3 py-1.5 border border-gray-200 rounded text-sm focus:border-orange-400 outline-none" placeholder="Mệnh đề 1"></div>
-                    <div class="col-span-2 text-center"><input type="radio" name="tf-1-${id}" value="true" class="w-4 h-4 text-green-600 cursor-pointer"></div>
-                    <div class="col-span-2 text-center"><input type="radio" name="tf-1-${id}" value="false" class="w-4 h-4 text-red-500 cursor-pointer"></div>
+                    <div class="col-span-2 text-center"><input type="radio" name="tf-1-${id}" value="true" class="w-4 h-4 cursor-pointer"></div>
+                    <div class="col-span-2 text-center"><input type="radio" name="tf-1-${id}" value="false" class="w-4 h-4 cursor-pointer"></div>
                 </div>
                 <div class="grid grid-cols-12 gap-2 items-center">
                     <div class="col-span-8"><input type="text" class="w-full px-3 py-1.5 border border-gray-200 rounded text-sm focus:border-orange-400 outline-none" placeholder="Mệnh đề 2"></div>
-                    <div class="col-span-2 text-center"><input type="radio" name="tf-2-${id}" value="true" class="w-4 h-4 text-green-600 cursor-pointer"></div>
-                    <div class="col-span-2 text-center"><input type="radio" name="tf-2-${id}" value="false" class="w-4 h-4 text-red-500 cursor-pointer"></div>
+                    <div class="col-span-2 text-center"><input type="radio" name="tf-2-${id}" value="true" class="w-4 h-4 cursor-pointer"></div>
+                    <div class="col-span-2 text-center"><input type="radio" name="tf-2-${id}" value="false" class="w-4 h-4 cursor-pointer"></div>
                 </div>
                 <div class="grid grid-cols-12 gap-2 items-center">
                     <div class="col-span-8"><input type="text" class="w-full px-3 py-1.5 border border-gray-200 rounded text-sm focus:border-orange-400 outline-none" placeholder="Mệnh đề 3"></div>
-                    <div class="col-span-2 text-center"><input type="radio" name="tf-3-${id}" value="true" class="w-4 h-4 text-green-600 cursor-pointer"></div>
-                    <div class="col-span-2 text-center"><input type="radio" name="tf-3-${id}" value="false" class="w-4 h-4 text-red-500 cursor-pointer"></div>
+                    <div class="col-span-2 text-center"><input type="radio" name="tf-3-${id}" value="true" class="w-4 h-4 cursor-pointer"></div>
+                    <div class="col-span-2 text-center"><input type="radio" name="tf-3-${id}" value="false" class="w-4 h-4 cursor-pointer"></div>
                 </div>
                 <div class="grid grid-cols-12 gap-2 items-center">
                     <div class="col-span-8"><input type="text" class="w-full px-3 py-1.5 border border-gray-200 rounded text-sm focus:border-orange-400 outline-none" placeholder="Mệnh đề 4"></div>
-                    <div class="col-span-2 text-center"><input type="radio" name="tf-4-${id}" value="true" class="w-4 h-4 text-green-600 cursor-pointer"></div>
-                    <div class="col-span-2 text-center"><input type="radio" name="tf-4-${id}" value="false" class="w-4 h-4 text-red-500 cursor-pointer"></div>
+                    <div class="col-span-2 text-center"><input type="radio" name="tf-4-${id}" value="true" class="w-4 h-4 cursor-pointer"></div>
+                    <div class="col-span-2 text-center"><input type="radio" name="tf-4-${id}" value="false" class="w-4 h-4 cursor-pointer"></div>
                 </div>
             </div>
             <textarea class="w-full px-3 py-2 text-xs bg-gray-50 border border-gray-200 rounded outline-none h-16 resize-none" placeholder="Giải thích chi tiết..."></textarea>
@@ -347,14 +284,12 @@
     </template>
 
     <template id="tpl-short">
-        <div class="question-card bg-white p-5 rounded-xl shadow-sm border border-gray-200 relative group transition-all hover:border-green-400" data-type="short">
+        <div class="question-card bg-white p-5 rounded-xl shadow-sm border border-gray-200 relative group mb-6 transition-all hover:border-green-400" data-type="short">
             <div class="absolute top-3 right-3 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity bg-white p-1 rounded-lg shadow-sm border border-gray-100 z-10">
-                <button onclick="moveUp(this)" class="p-1.5 text-gray-400 hover:text-blue-600 rounded hover:bg-blue-50"><i class="fa-solid fa-arrow-up"></i></button>
-                <button onclick="moveDown(this)" class="p-1.5 text-gray-400 hover:text-blue-600 rounded hover:bg-blue-50"><i class="fa-solid fa-arrow-down"></i></button>
                 <button onclick="deleteQuestion(this)" class="p-1.5 text-gray-400 hover:text-red-600 rounded hover:bg-red-50"><i class="fa-solid fa-trash"></i></button>
             </div>
             <div class="mb-3">
-                <span class="inline-block px-2 py-0.5 bg-green-100 text-green-700 text-[10px] font-bold rounded uppercase tracking-wide mb-2">Trả lời ngắn ${id}</span>
+                <span class="inline-block px-2 py-0.5 bg-green-100 text-green-700 text-[10px] font-bold rounded uppercase tracking-wide mb-2">Trả lời ngắn</span>
                 <textarea class="w-full p-3 bg-gray-50 border-0 rounded-lg focus:ring-2 focus:ring-green-200 outline-none min-h-[80px] text-gray-700 text-sm" placeholder="Nhập câu hỏi..."></textarea>
             </div>
             <div class="mb-3">
@@ -387,11 +322,9 @@
         let currentUser = null;
         let currentExamId = null;
 
-        // INIT
         onAuthStateChanged(auth, async (user) => {
             if (user) {
                 currentUser = user;
-                // Check URL param ID
                 const urlParams = new URLSearchParams(window.location.search);
                 const examId = urlParams.get('id');
                 
@@ -399,7 +332,6 @@
                     currentExamId = examId;
                     loadExamData(examId);
                 } else {
-                    // Mặc định cho tạo mới
                     document.getElementById('sidebarExamTitle').textContent = "Đề thi mới (Chưa lưu)";
                 }
             } else {
@@ -407,80 +339,33 @@
             }
         });
 
-        // LOAD DATA
         async function loadExamData(id) {
             try {
                 const docSnap = await getDoc(doc(db, "exams", id));
                 if (docSnap.exists()) {
                     const data = docSnap.data();
-                    // Fill Settings
                     document.getElementById('settingTitle').value = data.title;
+                    document.getElementById('settingDuration').value = data.duration || 45;
                     document.getElementById('sidebarExamTitle').textContent = data.title;
-                    document.getElementById('sidebarDate').textContent = "Cập nhật: " + new Date(data.createdAt).toLocaleDateString('vi-VN');
                     
-                    // Fill Questions
+                    const statusText = data.status === 'published' ? '• Đã xuất bản' : '• Bản nháp';
+                    const statusEl = document.getElementById('examStatus');
+                    statusEl.textContent = statusText;
+                    statusEl.className = `text-xs font-bold ${data.status === 'published' ? 'text-green-600' : 'text-orange-500'}`;
+
                     if (data.questions && data.questions.length > 0) {
                         document.getElementById('emptyState').classList.add('hidden');
                         data.questions.forEach(q => addQuestion(q.type === 'mc' ? 'mc' : (q.type === 'tf' ? 'tf' : (q.type === 'short' ? 'short' : 'essay')), q));
                     }
-                } else {
-                    alert("Không tìm thấy đề thi!");
                 }
-            } catch (e) {
-                console.error("Lỗi tải đề:", e);
-            }
+            } catch (e) { console.error(e); }
         }
 
-        // SAVE SETTINGS (Cập nhật thông tin chung)
-        window.saveSettings = async function() {
+        // LƯU & XUẤT BẢN
+        window.saveExam = async function(status) {
             const title = document.getElementById('settingTitle').value;
+            const duration = document.getElementById('settingDuration').value;
             if(!title) return alert("Vui lòng nhập tên đề thi!");
-
-            const btn = document.getElementById('saveSettingsBtn');
-            const originalText = btn.innerHTML;
-            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang lưu...';
-            btn.disabled = true;
-
-            try {
-                // Nếu chưa có ID (tạo mới từ đầu) -> Tạo doc mới
-                const examRef = currentExamId ? doc(db, "exams", currentExamId) : doc(collection(db, "exams"));
-                
-                await setDoc(examRef, {
-                    title: title,
-                    teacherId: currentUser.uid,
-                    updatedAt: new Date().toISOString(),
-                    ...(currentExamId ? {} : { createdAt: new Date().toISOString() })
-                }, { merge: true });
-
-                currentExamId = examRef.id;
-                document.getElementById('sidebarExamTitle').textContent = title;
-                alert("Đã lưu cài đặt thành công!");
-                
-                // Update URL nếu chưa có ID
-                if (!window.location.search.includes('id=')) {
-                    const newUrl = window.location.protocol + "//" + window.location.host + window.location.pathname + '?id=' + currentExamId;
-                    window.history.pushState({path:newUrl},'',newUrl);
-                }
-
-            } catch(e) {
-                console.error(e);
-                alert("Lỗi lưu: " + e.message);
-            } finally {
-                btn.innerHTML = originalText;
-                btn.disabled = false;
-            }
-        }
-        
-        document.getElementById('saveSettingsBtn').addEventListener('click', window.saveSettings);
-
-        // SAVE QUESTIONS (Cập nhật mảng câu hỏi)
-        window.saveQuestions = async function() {
-            if (!currentExamId) return alert("Vui lòng lưu cài đặt chung (Tên đề thi) trước ở tab Cài đặt!");
-            
-            const btn = document.getElementById('saveQuestionsBtn');
-            const originalText = btn.innerHTML;
-            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang lưu...';
-            btn.disabled = true;
 
             const questionCards = document.querySelectorAll('.question-card');
             const questions = [];
@@ -488,14 +373,11 @@
             questionCards.forEach(card => {
                 const type = card.dataset.type;
                 const content = card.querySelector('textarea').value;
-                // Lấy lời giải (thường là input cuối hoặc textarea cuối)
-                const solutionInput = card.querySelector('input:last-of-type') || card.querySelector('textarea:last-of-type');
-                const solution = solutionInput ? solutionInput.value : '';
+                const solution = card.querySelector('input:last-of-type') ? card.querySelector('input:last-of-type').value : card.querySelector('textarea:last-of-type').value;
                 
                 let qData = { type, content, solution };
-
                 if(type === 'mc') {
-                    const opts = Array.from(card.querySelectorAll('input[type="text"]')).map(i => i.value); 
+                    const opts = Array.from(card.querySelectorAll('input[type="text"]')).map(i => i.value);
                     let correctIdx = -1;
                     card.querySelectorAll('input[type="radio"]').forEach((r, i) => { if(r.checked) correctIdx = i; });
                     qData.options = opts;
@@ -512,166 +394,160 @@
                 } else if (type === 'short') {
                     qData.answer = card.querySelector('input[placeholder*="VD"]').value;
                 }
-
                 questions.push(qData);
             });
 
+            // Logic lưu
+            const btn = status === 'published' ? document.getElementById('btnPublish') : document.getElementById('btnSaveDraft');
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang xử lý...';
+            btn.disabled = true;
+
             try {
-                await updateDoc(doc(db, "exams", currentExamId), {
+                const examRef = currentExamId ? doc(db, "exams", currentExamId) : doc(collection(db, "exams"));
+                
+                await setDoc(examRef, {
+                    title: title,
+                    duration: duration,
+                    teacherId: currentUser.uid,
                     questions: questions,
                     questionCount: questions.length,
-                    updatedAt: new Date().toISOString()
-                });
-                alert("Đã lưu nội dung đề thi thành công!");
+                    status: status, // 'draft' hoặc 'published'
+                    updatedAt: new Date().toISOString(),
+                    ...(currentExamId ? {} : { createdAt: new Date().toISOString() })
+                }, { merge: true });
+
+                currentExamId = examRef.id;
+                
+                // Cập nhật UI
+                document.getElementById('sidebarExamTitle').textContent = title;
+                const statusEl = document.getElementById('examStatus');
+                statusEl.textContent = status === 'published' ? '• Đã xuất bản' : '• Bản nháp';
+                statusEl.className = `text-xs font-bold ${status === 'published' ? 'text-green-600' : 'text-orange-500'}`;
+
+                // Nếu xuất bản -> Hiện modal link
+                if (status === 'published') {
+                    const link = window.location.origin + window.location.pathname.replace('exam-editor.html', 'exam.html') + '?id=' + currentExamId;
+                    document.getElementById('shareLinkInput').value = link;
+                    
+                    const modal = document.getElementById('shareModal');
+                    modal.classList.remove('opacity-0', 'pointer-events-none');
+                    modal.querySelector('div').classList.remove('scale-95');
+                    modal.querySelector('div').classList.add('scale-100');
+                } else {
+                    alert("Đã lưu bản nháp thành công!");
+                }
+
+                // Update URL
+                if (!window.location.search.includes('id=')) {
+                    const newUrl = window.location.href.split('?')[0] + '?id=' + currentExamId;
+                    window.history.pushState({path:newUrl},'',newUrl);
+                }
+
             } catch(e) {
                 console.error(e);
-                alert("Lỗi lưu câu hỏi: " + e.message);
+                alert("Lỗi lưu: " + e.message);
             } finally {
                 btn.innerHTML = originalText;
                 btn.disabled = false;
             }
         }
+
+        // COPY LINK
+        window.copyLink = function() {
+            const copyText = document.getElementById("shareLinkInput");
+            copyText.select();
+            document.execCommand("copy");
+            alert("Đã sao chép link bài thi!");
+        }
+
+        window.closeShareModal = function() {
+            const modal = document.getElementById('shareModal');
+            modal.classList.add('opacity-0', 'pointer-events-none');
+            modal.querySelector('div').classList.add('scale-95');
+            modal.querySelector('div').classList.remove('scale-100');
+        }
     </script>
 
     <script>
-        // UI SWITCHER
+        // UI Helpers & Question Logic (Non-module)
         function switchView(viewId) {
-            // Hide all
             document.getElementById('view-settings').classList.add('hidden');
             document.getElementById('view-editor').classList.add('hidden');
-            document.getElementById('view-editor').classList.remove('flex'); 
-            document.getElementById('view-stats').classList.add('hidden');
-            
-            // Remove active sidebar
+            document.getElementById('view-editor').classList.remove('flex');
             document.querySelectorAll('.sidebar-item').forEach(i => i.classList.remove('active'));
 
-            // Show selected
             if (viewId === 'settings') {
                 document.getElementById('view-settings').classList.remove('hidden');
                 document.getElementById('menu-settings').classList.add('active');
             } else if (viewId === 'editor') {
                 document.getElementById('view-editor').classList.remove('hidden');
-                document.getElementById('view-editor').classList.add('flex'); 
+                document.getElementById('view-editor').classList.add('flex');
                 document.getElementById('menu-editor').classList.add('active');
-            } else if (viewId === 'stats') {
-                document.getElementById('view-stats').classList.remove('hidden');
-                document.getElementById('menu-stats').classList.add('active');
             }
         }
 
-        // JS LOGIC ADD QUESTION
         let qCount = 0;
         function addQuestion(type, data = null) {
             document.getElementById('emptyState').classList.add('hidden');
             const tpl = document.getElementById(`tpl-${type}`);
-            if(!tpl) return;
-            
             const clone = tpl.content.cloneNode(true);
             qCount++;
-            
-            // Replace ID
             const container = clone.querySelector('div');
-            // Cập nhật số thứ tự câu hỏi hiển thị
-            const badge = container.querySelector('span'); 
-            if(badge) badge.textContent = badge.textContent.replace('${id}', document.querySelectorAll('.question-card').length + 1);
-            
-            // Replace ID cho radio inputs
             container.innerHTML = container.innerHTML.replaceAll('${id}', qCount);
             
-            // Fill data if exists
             if(data) {
-                // Content
                 container.querySelector('textarea').value = data.content || '';
-                
-                // Solution
                 const lastInput = container.querySelector('input:last-of-type') || container.querySelector('textarea:last-of-type');
                 if(lastInput && data.solution) lastInput.value = data.solution;
 
-                // Specifics
                 if (type === 'mc' && data.options) {
                     const texts = container.querySelectorAll('input[type="text"]');
                     const radios = container.querySelectorAll('input[type="radio"]');
                     data.options.forEach((opt, i) => {
-                        if(texts[i]) texts[i].value = opt; // Lưu ý: Cấu trúc data.options ở đây là mảng string
+                        if(texts[i]) texts[i].value = opt;
                         if(radios[i] && i === data.correct) radios[i].checked = true;
                     });
-                }
-                else if (type === 'tf' && data.statements) {
+                } else if (type === 'tf' && data.statements) {
                     const rows = container.querySelectorAll('.grid.items-center');
                     data.statements.forEach((stmt, idx) => {
                         if(rows[idx]) {
-                            const txt = rows[idx].querySelector('input[type="text"]');
-                            if(txt) txt.value = stmt.text;
-                            const tRad = rows[idx].querySelector('input[value="true"]');
-                            const fRad = rows[idx].querySelector('input[value="false"]');
-                            if(stmt.isTrue) tRad.checked = true; else fRad.checked = true;
+                            rows[idx].querySelector('input[type="text"]').value = stmt.text;
+                            if(stmt.isTrue) rows[idx].querySelector('input[value="true"]').checked = true;
+                            else rows[idx].querySelector('input[value="false"]').checked = true;
                         }
                     });
-                }
-                else if (type === 'short' && data.answer) {
-                    const ansInput = container.querySelector('input[placeholder*="VD"]');
-                    if(ansInput) ansInput.value = data.answer;
+                } else if (type === 'short' && data.answer) {
+                    container.querySelector('input[placeholder*="VD"]').value = data.answer;
                 }
             }
 
             document.getElementById('questionsList').appendChild(clone);
-            
-            // Auto scroll
-            const scrollContainer = document.getElementById('questionsContainer');
-            scrollContainer.scrollTo({ top: scrollContainer.scrollHeight, behavior: 'smooth' });
-            
-            // Render MathJax
+            const containerDiv = document.getElementById('questionsContainer');
+            containerDiv.scrollTo({ top: containerDiv.scrollHeight, behavior: 'smooth' });
             if (window.MathJax) MathJax.typesetPromise();
         }
 
         function deleteQuestion(btn) {
-            if(confirm("Xóa câu hỏi này?")) {
-                btn.closest('.question-card').remove();
-                // Update numbers (Optional, logic phức tạp hơn chút nên tạm bỏ qua)
-                if(document.querySelectorAll('.question-card').length === 0) {
-                    document.getElementById('emptyState').classList.remove('hidden');
-                }
-            }
-        }
-
-        function moveUp(btn) {
-            const card = btn.closest('.question-card');
-            if (card.previousElementSibling && !card.previousElementSibling.id) {
-                card.parentNode.insertBefore(card, card.previousElementSibling);
-            }
-        }
-
-        function moveDown(btn) {
-            const card = btn.closest('.question-card');
-            if (card.nextElementSibling) {
-                card.parentNode.insertBefore(card.nextElementSibling, card);
-            }
+            if(confirm("Xóa câu này?")) btn.closest('.question-card').remove();
         }
         
-        // LaTeX Upload Handlers (Giữ nguyên logic parser cũ)
         function handleTexUpload(input) {
             const file = input.files[0];
             if (!file) return;
             const reader = new FileReader();
-            reader.onload = function(e) {
-                parseTexAndAdd(e.target.result);
-                input.value = "";
-            };
+            reader.onload = function(e) { parseTexAndAdd(e.target.result); input.value = ""; };
             reader.readAsText(file);
         }
 
         function parseTexAndAdd(texContent) {
-            // Regex tìm các khối \begin{ex}...\end{ex}
             const blockRegex = /\\begin\{(ex|bt|vd)\}([\s\S]*?)\\end\{\1\}/g;
-            let match;
-            let count = 0;
-
+            let match, count = 0;
             while ((match = blockRegex.exec(texContent)) !== null) {
                 let body = match[2];
                 let qType = 'essay';
                 let qData = { content: '', solution: '', options: [], statements: [], answer: '' };
 
-                // Tách Lời giải
                 const loigiaiMatch = body.match(/\\loigiai\s*\{([\s\S]*)\}\s*$/);
                 if (loigiaiMatch) {
                     qData.solution = loigiaiMatch[1].trim();
@@ -695,7 +571,7 @@
                     let itemMatch;
                     let idx = 0;
                     while ((itemMatch = itemRegex.exec(parts[1])) !== null && idx < 4) {
-                        qData.options.push(itemMatch[2].trim()); // Chỉ push text string
+                        qData.options.push(itemMatch[2].trim());
                         if(itemMatch[1]) qData.correct = idx;
                         idx++;
                     }
@@ -709,21 +585,10 @@
                 } else {
                     qData.content = body.trim();
                 }
-
                 addQuestion(qType, qData);
                 count++;
             }
             if (count > 0) alert(`Đã nhập ${count} câu hỏi!`);
-            else alert("Không tìm thấy câu hỏi hợp lệ trong file.");
-        }
-
-        function downloadSampleTex() {
-            const content = `\\begin{ex}\nCâu 1: 1+1=?\n\\choice\n{1}\n{\\True 2}\n{3}\n{4}\n\\loigiai{Dễ quá}\n\\end{ex}`;
-            const blob = new Blob([content], {type: 'text/plain'});
-            const a = document.createElement('a');
-            a.href = URL.createObjectURL(blob);
-            a.download = 'mau_de_thi.tex';
-            a.click();
         }
     </script>
 </body>
