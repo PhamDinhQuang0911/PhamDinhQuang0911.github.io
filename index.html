@@ -6,7 +6,6 @@
     <title>Đăng nhập - Toán thầy Choang Choang</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
-    <!-- Thêm font chữ cách điệu Pacifico -->
     <link href="https://fonts.googleapis.com/css2?family=Pacifico&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     
@@ -15,19 +14,15 @@
         .text-orange-custom { color: #FF6A00; }
         .bg-orange-custom { background-color: #FF6A00; }
         .text-purple-custom { color: #A020F0; }
-        /* Class riêng cho font chữ cách điệu */
         .font-handwriting { font-family: 'Pacifico', cursive; }
-        
         input:focus { outline: none; border-color: #FF6A00; box-shadow: 0 0 0 3px rgba(255, 106, 0, 0.1); }
     </style>
 </head>
 <body class="min-h-screen flex items-center justify-center p-4">
 
-    <!-- Container chính -->
     <div class="w-full max-w-6xl grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
         <!-- CỘT TRÁI -->
         <div class="space-y-6 animate-fade-in-up hidden lg:block">
-            <!-- LOGO MỚI: TOÁN THẦY CHOANG CHOANG -->
             <div class="flex items-center gap-3 mb-4">
                 <div class="w-12 h-12 bg-orange-custom rounded-xl flex items-center justify-center text-white font-bold text-2xl shadow-md">
                     <i class="fa-solid fa-graduation-cap"></i>
@@ -53,7 +48,7 @@
             <h2 class="text-3xl font-extrabold text-gray-800 mb-2">Đăng nhập</h2>
             <p class="text-gray-500 mb-6 text-sm">Chọn vai trò của bạn để tiếp tục</p>
 
-            <!-- PHẦN CHỌN VAI TRÒ (Đã cập nhật ID để xử lý logic) -->
+            <!-- PHẦN CHỌN VAI TRÒ -->
             <div class="bg-gray-100 p-1 rounded-xl flex mb-6">
                 <button type="button" id="roleStudent" class="flex-1 py-2 rounded-lg bg-orange-custom text-white font-bold shadow-md text-sm transition-all">Học sinh</button>
                 <button type="button" id="roleTeacher" class="flex-1 py-2 rounded-lg text-gray-500 font-semibold text-sm hover:bg-gray-200 transition-all">Giáo viên</button>
@@ -97,7 +92,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, GoogleAuthProvider, signInWithPopup } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
-        import { getFirestore, doc, setDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { getFirestore, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
         // --- CẤU HÌNH CỦA BẠN (GIỮ NGUYÊN) ---
         const firebaseConfig = {
@@ -122,27 +117,23 @@
         const googleLoginBtn = document.getElementById('googleLoginBtn');
         const messageArea = document.getElementById('messageArea');
 
-        // Các nút vai trò
         const roleBtns = {
             student: document.getElementById('roleStudent'),
             teacher: document.getElementById('roleTeacher'),
             admin: document.getElementById('roleAdmin')
         };
-        let currentRole = 'student'; // Mặc định là học sinh
+        let uiSelectedRole = 'student'; // Vai trò đang chọn trên giao diện
 
-        // === HÀM XỬ LÝ CHỌN VAI TRÒ ===
         function setupRoleSelection() {
             const activeClass = "bg-orange-custom text-white shadow-md".split(" ");
             const inactiveClass = "text-gray-500 hover:bg-gray-200".split(" ");
 
             function updateUI(selectedRole) {
-                currentRole = selectedRole;
-                // Reset tất cả về inactive
+                uiSelectedRole = selectedRole;
                 Object.values(roleBtns).forEach(btn => {
                     btn.classList.remove(...activeClass);
                     btn.classList.add(...inactiveClass);
                 });
-                // Set active cho nút được chọn
                 const activeBtn = roleBtns[selectedRole];
                 activeBtn.classList.remove(...inactiveClass);
                 activeBtn.classList.add(...activeClass);
@@ -160,58 +151,75 @@
             messageArea.classList.add(type === 'success' ? 'text-green-600' : 'text-red-600');
         }
 
-        // === HÀM CHUYỂN TRANG ===
         function goToDashboard() {
-            console.log("--> Đang thực hiện chuyển hướng đến dashboard.html...");
             submitBtn.innerHTML = '<i class="fa-solid fa-check"></i> Đang vào lớp...';
             window.location.href = "dashboard.html";
         }
 
-        // === LƯU THÔNG TIN USER (KÈM VAI TRÒ) ===
-        async function saveUserData(user, method) {
+        // --- HÀM KIỂM TRA VAI TRÒ KHI ĐĂNG NHẬP ---
+        async function checkRoleAndLogin(user) {
             try {
-                // Lưu thêm trường 'role' vào Firestore
-                await setDoc(doc(db, "users", user.uid), {
-                    email: user.email,
-                    lastLogin: new Date().toISOString(),
-                    authType: method,
-                    role: currentRole, // Lưu vai trò hiện tại (student/teacher/admin)
-                    displayName: user.displayName || "",
-                    photoURL: user.photoURL || ""
-                }, { merge: true });
-                console.log(`Đã lưu user với vai trò: ${currentRole}`);
+                // Đọc dữ liệu user từ Firestore
+                const userDoc = await getDoc(doc(db, "users", user.uid));
+                
+                if (userDoc.exists()) {
+                    const userData = userDoc.data();
+                    const storedRole = userData.role || 'student'; // Mặc định là student nếu thiếu
+
+                    // So sánh vai trò chọn trên UI với vai trò thực trong DB
+                    if (storedRole !== uiSelectedRole) {
+                        alert(`Chú ý: Tài khoản của bạn là "${storedRole.toUpperCase()}" chứ không phải "${uiSelectedRole.toUpperCase()}".\nHệ thống sẽ tự động chuyển bạn về đúng giao diện của mình.`);
+                    }
+
+                    // Chỉ cập nhật thời gian đăng nhập, KHÔNG ghi đè role
+                    await setDoc(doc(db, "users", user.uid), {
+                        lastLogin: new Date().toISOString()
+                    }, { merge: true });
+
+                    return true;
+                } else {
+                    // Trường hợp user có trong Auth nhưng chưa có trong DB (lỗi data cũ), ta tạo mới với role đang chọn
+                    await setDoc(doc(db, "users", user.uid), {
+                        email: user.email,
+                        role: uiSelectedRole,
+                        authType: 'recovered',
+                        createdAt: new Date().toISOString()
+                    });
+                    return true;
+                }
             } catch (error) {
-                console.warn("Lỗi lưu DB:", error);
+                console.error("Lỗi check role:", error);
+                return true; // Vẫn cho vào nếu lỗi mạng, xử lý sau
             }
         }
 
-        // --- XỬ LÝ ĐĂNG NHẬP THỦ CÔNG ---
+        // --- XỬ LÝ ĐĂNG NHẬP ---
         loginForm.addEventListener('submit', async (e) => {
             e.preventDefault(); 
             const email = emailInput.value;
             const password = passwordInput.value;
 
             submitBtn.disabled = true;
-            submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang xử lý...';
+            submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang kiểm tra...';
 
             try {
                 const userCredential = await signInWithEmailAndPassword(auth, email, password);
-                showMessage(`Đăng nhập thành công với vai trò: ${currentRole === 'student' ? 'Học sinh' : (currentRole === 'teacher' ? 'Giáo viên' : 'Admin')}!`, "success");
                 
-                saveUserData(userCredential.user, "email");
+                // Kiểm tra vai trò
+                await checkRoleAndLogin(userCredential.user);
+                
+                showMessage("Đăng nhập thành công!", "success");
                 setTimeout(goToDashboard, 500);
 
             } catch (error) {
                 console.error(error);
-                let msg = "Đăng nhập thất bại.";
-                if (error.code === 'auth/invalid-credential') msg = "Sai email hoặc mật khẩu!";
-                showMessage(msg, "error");
+                showMessage("Sai email hoặc mật khẩu!", "error");
                 submitBtn.disabled = false;
                 submitBtn.innerHTML = 'Đăng nhập ngay';
             }
         });
 
-        // --- XỬ LÝ ĐĂNG KÝ NHANH ---
+        // --- XỬ LÝ ĐĂNG KÝ (Tạo mới thì GHI role được chọn) ---
         quickRegisterBtn.addEventListener('click', async () => {
             const email = emailInput.value;
             const password = passwordInput.value;
@@ -223,10 +231,17 @@
 
             try {
                 const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-                // Khi đăng ký mới, lưu vai trò đã chọn
-                saveUserData(userCredential.user, "email");
+                const user = userCredential.user;
+
+                // Đăng ký mới: Ghi cứng vai trò đang chọn vào DB
+                await setDoc(doc(db, "users", user.uid), {
+                    email: user.email,
+                    role: uiSelectedRole, // QUAN TRỌNG: Lưu role lúc đăng ký
+                    authType: 'email',
+                    createdAt: new Date().toISOString()
+                });
                 
-                showMessage("Đăng ký thành công! Hãy bấm đăng nhập.", "success");
+                showMessage(`Đăng ký thành công tài khoản ${uiSelectedRole}!`, "success");
             } catch (error) {
                 showMessage("Lỗi: " + error.message, "error");
             } finally {
@@ -235,19 +250,19 @@
             }
         });
 
-        // --- XỬ LÝ ĐĂNG NHẬP GOOGLE ---
+        // --- XỬ LÝ GOOGLE (Tương tự logic trên) ---
         googleLoginBtn.addEventListener('click', async () => {
             try {
                 const result = await signInWithPopup(auth, googleProvider);
-                showMessage(`Chào ${result.user.displayName}!`, "success");
+                // Kiểm tra user đã tồn tại chưa để quyết định login hay register logic
+                // Ở đây mình dùng hàm checkRoleAndLogin thông minh để tự xử lý
+                await checkRoleAndLogin(result.user);
                 
-                saveUserData(result.user, "google");
+                showMessage(`Chào ${result.user.displayName}!`, "success");
                 setTimeout(goToDashboard, 500);
-
             } catch (error) {
-                console.error("Lỗi Google:", error);
                 if (error.code !== 'auth/popup-closed-by-user') {
-                    showMessage("Lỗi đăng nhập Google. Hãy thử lại.", "error");
+                    showMessage("Lỗi đăng nhập Google.", "error");
                 }
             }
         });
