@@ -114,20 +114,21 @@
                         </button>
                     </div>
                     <div id="classList" class="space-y-3 max-h-64 overflow-y-auto pr-2">
-                        <p class="text-gray-400 text-sm italic text-center py-4">Chưa có lớp học nào.</p>
+                        <p class="text-gray-400 text-sm italic text-center py-4">Đang tải danh sách lớp...</p>
                     </div>
                 </div>
-                <!-- 2. Quản lý Đề thi -->
+
+                <!-- Quản lý Đề thi -->
                 <div class="bg-white rounded-2xl shadow-sm p-6 border border-gray-100">
                     <div class="flex justify-between items-center mb-4">
                         <h3 class="text-xl font-bold text-gray-700"><i class="fa-solid fa-file-pen mr-2 text-green-500"></i>Ngân hàng Đề thi</h3>
-                        <!-- SỬA LINK Ở ĐÂY -->
+                        <!-- Nút Soạn đề chuyển hướng sang trang Editor -->
                         <button onclick="window.location.href='exam-editor.html'" class="px-3 py-1.5 bg-green-50 text-green-600 rounded-lg text-sm font-bold hover:bg-green-100 transition-colors">
                             + Soạn đề
                         </button>
                     </div>
                     <div id="examList" class="space-y-3 max-h-64 overflow-y-auto pr-2">
-                        <p class="text-gray-400 text-sm italic text-center py-4">Chưa có đề thi nào.</p>
+                        <p class="text-gray-400 text-sm italic text-center py-4">Đang tải danh sách đề...</p>
                     </div>
                 </div>
             </div>
@@ -401,6 +402,7 @@
         // DOM Elements
         const teacherSection = document.getElementById('teacherSection');
         const classList = document.getElementById('classList');
+        const examList = document.getElementById('examList');
         const classModal = document.getElementById('classModal');
         const editStudentModal = document.getElementById('editStudentModal');
         const studentListTable = document.getElementById('studentListTable');
@@ -454,6 +456,7 @@
 
         // TEACHER LOGIC
         function loadTeacherData() {
+            // LOAD LỚP
             const qClasses = query(collection(db, "classes"), where("teacherId", "==", currentUserUid));
             onSnapshot(qClasses, (snapshot) => {
                 classList.innerHTML = '';
@@ -466,6 +469,30 @@
                         div.innerHTML = `<div><p class="font-bold text-gray-800">${cl.name}</p><p class="text-xs text-gray-500">${cl.studentCount || 0} học sinh</p></div><i class="fa-solid fa-chevron-right text-gray-400"></i>`;
                         div.onclick = () => openClassModal(doc.id, cl.name, cl.students || []);
                         classList.appendChild(div);
+                    });
+                }
+            });
+
+            // LOAD ĐỀ THI (THÊM MỚI)
+            const qExams = query(collection(db, "exams"), where("teacherId", "==", currentUserUid));
+            onSnapshot(qExams, (snapshot) => {
+                examList.innerHTML = '';
+                if (snapshot.empty) examList.innerHTML = '<p class="text-gray-400 text-sm italic text-center py-4">Chưa có đề thi nào.</p>';
+                else {
+                    snapshot.forEach(doc => {
+                        const ex = doc.data();
+                        const div = document.createElement('div');
+                        div.className = "p-3 bg-gray-50 hover:bg-green-50 border border-gray-200 rounded-lg flex justify-between items-center cursor-pointer transition-colors";
+                        div.innerHTML = `
+                            <div>
+                                <p class="font-bold text-gray-800 truncate w-48">${ex.title}</p>
+                                <p class="text-xs text-gray-500">${ex.questionCount || 0} câu hỏi</p>
+                            </div>
+                            <i class="fa-solid fa-pen-to-square text-gray-400 hover:text-green-600"></i>
+                        `;
+                        // Click vào đề thi -> Chuyển sang trang sửa đề
+                        div.onclick = () => window.location.href = `exam-editor.html?id=${doc.id}`;
+                        examList.appendChild(div);
                     });
                 }
             });
