@@ -8,6 +8,9 @@
     <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Pacifico&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <!-- Thư viện xử lý Excel -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    
     <style>
         body { font-family: 'Nunito', sans-serif; background-color: #FFF8F0; }
         .text-orange-custom { color: #FF6A00; }
@@ -17,9 +20,30 @@
         /* Modal Animation */
         .modal { transition: opacity 0.25s ease; }
         body.modal-active { overflow-x: hidden; overflow-y: hidden !important; }
+
+        /* Notification Animation */
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        @keyframes fadeOut {
+            from { opacity: 1; }
+            to { opacity: 0; }
+        }
+        .notification-toast {
+            animation: slideIn 0.5s ease forwards;
+        }
+        .notification-toast.hide {
+            animation: fadeOut 0.5s ease forwards;
+        }
     </style>
 </head>
-<body class="bg-gray-50">
+<body class="bg-gray-50 relative">
+
+    <!-- CONTAINER THÔNG BÁO (POPUP) -->
+    <div id="notificationContainer" class="fixed top-24 right-5 z-[60] flex flex-col gap-3 pointer-events-none">
+        <!-- Thông báo sẽ được JS thêm vào đây -->
+    </div>
 
     <!-- Navbar -->
     <nav class="bg-white shadow-sm sticky top-0 z-50">
@@ -171,7 +195,7 @@
         </div>
     </div>
 
-    <!-- MODAL QUẢN LÝ LỚP HỌC (NEW) -->
+    <!-- MODAL QUẢN LÝ LỚP HỌC (ĐÃ NÂNG CẤP) -->
     <div id="classModal" class="modal opacity-0 pointer-events-none fixed w-full h-full top-0 left-0 flex items-center justify-center z-50">
         <div class="modal-overlay absolute w-full h-full bg-gray-900 opacity-50"></div>
         <div class="modal-container bg-white w-11/12 md:max-w-2xl mx-auto rounded-2xl shadow-2xl z-50 overflow-y-auto transform scale-95 transition-transform duration-300" style="max-height: 90vh;">
@@ -180,36 +204,53 @@
                 <div onclick="toggleClassModal(false)" class="cursor-pointer z-50 p-2 hover:bg-blue-200 rounded-full text-blue-500 transition-colors"><i class="fa-solid fa-times"></i></div>
             </div>
             
-            <div class="p-6">
-                <!-- Thêm học sinh -->
-                <div class="bg-gray-50 p-4 rounded-xl border border-gray-200 mb-6">
-                    <h4 class="font-bold text-gray-700 mb-3 text-sm uppercase">Thêm học sinh mới</h4>
+            <div class="p-6 space-y-6">
+                
+                <!-- Tab thêm học sinh -->
+                <div class="bg-gray-50 p-4 rounded-xl border border-gray-200">
+                    <div class="flex justify-between items-center mb-3">
+                        <h4 class="font-bold text-gray-700 text-sm uppercase"><i class="fa-solid fa-user-plus mr-1"></i> Thêm học sinh</h4>
+                        <!-- Nút tải file mẫu & Nhập Excel -->
+                        <div class="flex gap-2">
+                            <button onclick="downloadTemplate()" class="text-xs px-3 py-1 bg-white border border-green-500 text-green-600 rounded hover:bg-green-50 transition-colors" title="Tải file Excel mẫu">
+                                <i class="fa-solid fa-download"></i> File mẫu
+                            </button>
+                            <label for="excelInput" class="text-xs px-3 py-1 bg-green-500 text-white rounded cursor-pointer hover:bg-green-600 transition-colors flex items-center gap-1">
+                                <i class="fa-solid fa-file-excel"></i> Nhập từ Excel
+                            </label>
+                            <input type="file" id="excelInput" accept=".xlsx, .xls" class="hidden" onchange="handleFileUpload(this)">
+                        </div>
+                    </div>
+
+                    <!-- Form nhập tay -->
                     <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
                         <input type="text" id="newStudentName" placeholder="Họ và tên" class="px-3 py-2 rounded-lg border border-gray-300 text-sm">
                         <input type="text" id="newStudentUser" placeholder="Tên đăng nhập" class="px-3 py-2 rounded-lg border border-gray-300 text-sm">
                         <input type="text" id="newStudentPass" placeholder="Mật khẩu" class="px-3 py-2 rounded-lg border border-gray-300 text-sm">
                     </div>
                     <button id="addStudentBtn" class="mt-3 w-full py-2 bg-blue-500 text-white rounded-lg font-bold text-sm hover:bg-blue-600 transition-colors">
-                        <i class="fa-solid fa-plus mr-1"></i> Thêm vào danh sách
+                        <i class="fa-solid fa-plus mr-1"></i> Thêm thủ công
                     </button>
                 </div>
 
                 <!-- Danh sách học sinh -->
-                <h4 class="font-bold text-gray-700 mb-3 text-sm uppercase">Danh sách học sinh</h4>
-                <div class="overflow-x-auto">
-                    <table class="w-full text-sm text-left text-gray-500">
-                        <thead class="text-xs text-gray-700 uppercase bg-gray-100">
-                            <tr>
-                                <th class="px-4 py-3 rounded-tl-lg">Họ tên</th>
-                                <th class="px-4 py-3">Tài khoản</th>
-                                <th class="px-4 py-3 rounded-tr-lg">Mật khẩu</th>
-                            </tr>
-                        </thead>
-                        <tbody id="studentListTable">
-                            <!-- JS sẽ render vào đây -->
-                        </tbody>
-                    </table>
-                    <p id="emptyStudentMsg" class="text-center py-4 text-gray-400 italic hidden">Chưa có học sinh nào.</p>
+                <div>
+                    <h4 class="font-bold text-gray-700 mb-3 text-sm uppercase">Danh sách học sinh <span id="studentCountBadge" class="ml-2 bg-blue-100 text-blue-800 text-xs font-bold px-2 py-0.5 rounded-full">0</span></h4>
+                    <div class="overflow-x-auto border rounded-lg max-h-60 overflow-y-auto">
+                        <table class="w-full text-sm text-left text-gray-500">
+                            <thead class="text-xs text-gray-700 uppercase bg-gray-100 sticky top-0">
+                                <tr>
+                                    <th class="px-4 py-3">Họ tên</th>
+                                    <th class="px-4 py-3">Tài khoản</th>
+                                    <th class="px-4 py-3 text-right">Mật khẩu</th>
+                                </tr>
+                            </thead>
+                            <tbody id="studentListTable" class="divide-y divide-gray-100">
+                                <!-- JS sẽ render vào đây -->
+                            </tbody>
+                        </table>
+                        <p id="emptyStudentMsg" class="text-center py-8 text-gray-400 italic hidden">Chưa có học sinh nào.</p>
+                    </div>
                 </div>
             </div>
         </div>
@@ -248,6 +289,7 @@
         const studentListTable = document.getElementById('studentListTable');
         const addStudentBtn = document.getElementById('addStudentBtn');
         const emptyStudentMsg = document.getElementById('emptyStudentMsg');
+        const studentCountBadge = document.getElementById('studentCountBadge');
 
         // Profile Elements
         const userNameDisplay = document.getElementById('userNameDisplay');
@@ -269,6 +311,45 @@
         let currentUserUid = null;
         let currentRole = 'student';
         let currentViewingClassId = null;
+
+        // === HÀM THÔNG BÁO POPUP (Thay thế alert) ===
+        window.showNotification = function(message, type = 'success') {
+            const container = document.getElementById('notificationContainer');
+            const toast = document.createElement('div');
+            
+            // Màu sắc dựa trên loại thông báo
+            const bgColor = type === 'success' ? 'bg-white border-l-4 border-green-500' : 'bg-white border-l-4 border-red-500';
+            const iconColor = type === 'success' ? 'text-green-500' : 'text-red-500';
+            const icon = type === 'success' ? 'fa-check-circle' : 'fa-exclamation-circle';
+            const title = type === 'success' ? 'Thành công' : 'Thất bại';
+
+            toast.className = `notification-toast pointer-events-auto w-80 max-w-full shadow-lg rounded-lg overflow-hidden flex ring-1 ring-black ring-opacity-5 ${bgColor}`;
+            toast.innerHTML = `
+                <div class="p-4 flex items-start w-full">
+                    <div class="flex-shrink-0">
+                        <i class="fa-solid ${icon} ${iconColor} text-xl"></i>
+                    </div>
+                    <div class="ml-3 w-0 flex-1 pt-0.5">
+                        <p class="text-sm font-medium text-gray-900">${title}</p>
+                        <p class="mt-1 text-sm text-gray-500">${message}</p>
+                    </div>
+                    <div class="ml-4 flex-shrink-0 flex">
+                        <button onclick="this.parentElement.parentElement.parentElement.remove()" class="bg-white rounded-md inline-flex text-gray-400 hover:text-gray-500 focus:outline-none">
+                            <span class="sr-only">Đóng</span>
+                            <i class="fa-solid fa-times"></i>
+                        </button>
+                    </div>
+                </div>
+            `;
+
+            container.appendChild(toast);
+
+            // Tự động tắt sau 3 giây
+            setTimeout(() => {
+                toast.classList.add('hide');
+                setTimeout(() => toast.remove(), 500); // Đợi hiệu ứng fadeOut
+            }, 3000);
+        }
 
         // 1. AUTH & DATA LOADING
         onAuthStateChanged(auth, async (user) => {
@@ -339,9 +420,6 @@
                     });
                 }
             });
-
-            // Tải danh sách đề thi (Giả lập)
-            // Phần này sẽ phát triển thêm sau
         }
 
         // TẠO LỚP MỚI
@@ -353,12 +431,12 @@
                         name: className,
                         teacherId: currentUserUid,
                         createdAt: new Date().toISOString(),
-                        students: [], // Mảng chứa thông tin học sinh
+                        students: [], 
                         studentCount: 0
                     });
-                    alert("Tạo lớp thành công!");
+                    showNotification("Tạo lớp thành công!", "success");
                 } catch (e) {
-                    alert("Lỗi: " + e.message);
+                    showNotification("Lỗi: " + e.message, "error");
                 }
             }
         });
@@ -367,9 +445,7 @@
         createExamBtn.addEventListener('click', () => {
             const examName = prompt("Nhập tên đề thi mới:");
             if(examName) {
-                // Tạm thời chỉ thông báo, sau này sẽ chuyển trang soạn thảo
-                alert(`Đã tạo bản nháp đề thi: "${examName}". \nTính năng soạn thảo chi tiết đang được xây dựng.`);
-                // Logic lưu vào DB sẽ thêm ở đây
+                showNotification(`Đã tạo bản nháp: "${examName}"`, "success");
             }
         });
 
@@ -400,24 +476,120 @@
 
         function renderStudentList(students) {
             studentListTable.innerHTML = '';
+            // Reset đếm số lượng
+            const count = students ? students.length : 0;
+            studentCountBadge.textContent = count;
+
             if (!students || students.length === 0) {
                 emptyStudentMsg.classList.remove('hidden');
             } else {
                 emptyStudentMsg.classList.add('hidden');
                 students.forEach(st => {
                     const row = document.createElement('tr');
-                    row.className = "bg-white border-b hover:bg-gray-50";
+                    row.className = "bg-white hover:bg-gray-50";
                     row.innerHTML = `
                         <td class="px-4 py-3 font-medium text-gray-900">${st.name}</td>
                         <td class="px-4 py-3">${st.username}</td>
-                        <td class="px-4 py-3 font-mono text-gray-600">${st.password}</td>
+                        <td class="px-4 py-3 text-right font-mono text-gray-600">${st.password}</td>
                     `;
                     studentListTable.appendChild(row);
                 });
             }
         }
 
-        // THÊM HỌC SINH
+        // --- CHỨC NĂNG EXCEL ---
+        
+        // 1. Tải file mẫu
+        window.downloadTemplate = function() {
+            // Tạo dữ liệu mẫu
+            const data = [
+                ["Họ và tên", "Tên đăng nhập", "Mật khẩu"],
+                ["Nguyễn Văn A", "nguyenvana", "123456"],
+                ["Trần Thị B", "tranthib", "123456"]
+            ];
+            
+            const ws = XLSX.utils.aoa_to_sheet(data);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "DanhSachHocSinh");
+            
+            // Xuất file
+            XLSX.writeFile(wb, "Mau_Danh_Sach_Hoc_Sinh.xlsx");
+        }
+
+        // 2. Xử lý file tải lên
+        window.handleFileUpload = function(input) {
+            const file = input.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            
+            reader.onload = async function(e) {
+                const data = new Uint8Array(e.target.result);
+                const workbook = XLSX.read(data, {type: 'array'});
+                
+                // Lấy sheet đầu tiên
+                const firstSheetName = workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[firstSheetName];
+                
+                // Chuyển thành JSON (bỏ dòng tiêu đề header)
+                const jsonData = XLSX.utils.sheet_to_json(worksheet, {header: 1});
+                
+                // Bỏ dòng đầu (Tiêu đề) và lọc dòng trống
+                const studentsToAdd = [];
+                for(let i = 1; i < jsonData.length; i++) {
+                    const row = jsonData[i];
+                    if(row[0] && row[1] && row[2]) { // Đảm bảo có đủ 3 cột
+                        studentsToAdd.push({
+                            name: row[0],
+                            username: row[1],
+                            password: String(row[2]), // Mật khẩu chuyển thành chuỗi
+                            createdAt: new Date().toISOString()
+                        });
+                    }
+                }
+
+                if (studentsToAdd.length === 0) {
+                    showNotification("File không có dữ liệu hợp lệ!", "error");
+                    return;
+                }
+
+                // Lưu vào Firestore
+                if (currentViewingClassId) {
+                    try {
+                        const classRef = doc(db, "classes", currentViewingClassId);
+                        
+                        // Update từng em một (hoặc gom lại)
+                        // Lưu ý: arrayUnion chỉ thêm nếu chưa tồn tại (so sánh cả object)
+                        // Để an toàn ta cứ đẩy hết vào
+                        for (const student of studentsToAdd) {
+                            await updateDoc(classRef, {
+                                students: arrayUnion(student)
+                            });
+                        }
+
+                        // Cập nhật lại số lượng
+                        const updatedDoc = await getDoc(classRef);
+                        if(updatedDoc.exists()) {
+                            const totalStudents = updatedDoc.data().students.length;
+                            await updateDoc(classRef, { studentCount: totalStudents });
+                            
+                            renderStudentList(updatedDoc.data().students);
+                            showNotification(`Đã thêm thành công ${studentsToAdd.length} học sinh!`, "success");
+                        }
+                    } catch (err) {
+                        console.error(err);
+                        showNotification("Lỗi khi lưu dữ liệu: " + err.message, "error");
+                    }
+                }
+                
+                // Reset input
+                input.value = "";
+            };
+            
+            reader.readAsArrayBuffer(file);
+        }
+
+        // THÊM HỌC SINH THỦ CÔNG
         addStudentBtn.addEventListener('click', async () => {
             if (!currentViewingClassId) return;
             
@@ -426,7 +598,7 @@
             const pass = document.getElementById('newStudentPass').value;
 
             if (!name || !user || !pass) {
-                alert("Vui lòng nhập đầy đủ thông tin!");
+                showNotification("Vui lòng nhập đầy đủ thông tin!", "error");
                 return;
             }
 
@@ -436,27 +608,23 @@
                 const classRef = doc(db, "classes", currentViewingClassId);
                 await updateDoc(classRef, {
                     students: arrayUnion(newStudent),
-                    // Tăng biến đếm học sinh (cần cloud function để chính xác tuyệt đối, nhưng ở đây dùng client update cho nhanh)
-                    // Ở đây ta không cộng trực tiếp được vì Firestore cần get trước, để đơn giản ta chỉ push vào mảng
                 });
                 
-                // Cập nhật lại UI ngay lập tức (giả lập vì snapshot sẽ tự lo)
                 // Reset form
                 document.getElementById('newStudentName').value = '';
                 document.getElementById('newStudentUser').value = '';
                 document.getElementById('newStudentPass').value = '';
                 
-                // Load lại data mới nhất để update count (Snapshot listener bên ngoài sẽ tự update list lớp)
                 const updatedDoc = await getDoc(classRef);
                 if(updatedDoc.exists()) {
                     renderStudentList(updatedDoc.data().students);
-                    // Cập nhật lại count
                     await updateDoc(classRef, { studentCount: updatedDoc.data().students.length });
+                    showNotification("Thêm học sinh thành công!", "success");
                 }
 
             } catch (e) {
                 console.error(e);
-                alert("Lỗi thêm học sinh: " + e.message);
+                showNotification("Lỗi thêm học sinh: " + e.message, "error");
             }
         });
 
@@ -497,7 +665,7 @@
             const newRole = editRole.value;
             const newBirth = editBirthDate.value;
 
-            if (!newName.trim()) { alert("Nhập tên!"); return; }
+            if (!newName.trim()) { showNotification("Nhập tên!", "error"); return; }
 
             saveProfileBtn.disabled = true;
             saveProfileBtn.textContent = 'Đang lưu...';
@@ -512,12 +680,10 @@
 
                 if (auth.currentUser) await updateProfile(auth.currentUser, { displayName: newName }).catch(e=>console.log(e));
 
-                saveStatus.textContent = "Thành công! Đang tải lại...";
-                saveStatus.className = "text-center text-sm font-bold text-green-600 block p-2 rounded bg-green-50";
+                showNotification("Cập nhật thông tin thành công!", "success");
                 setTimeout(() => location.reload(), 1000);
             } catch (error) {
-                saveStatus.textContent = "Lỗi: " + error.message;
-                saveStatus.className = "text-center text-sm font-bold text-red-600 block p-2 rounded bg-red-50";
+                showNotification("Lỗi: " + error.message, "error");
                 saveProfileBtn.disabled = false;
             }
         });
