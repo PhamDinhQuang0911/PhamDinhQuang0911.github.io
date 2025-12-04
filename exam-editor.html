@@ -342,7 +342,12 @@
             setTimeout(() => { toast.classList.add('translate-x-full', 'opacity-0'); setTimeout(() => toast.remove(), 500); }, 3000);
         }
 
+        // --- CUSTOM MODAL LOGIC START (ĐÃ SỬA LỖI) ---
+        
+        // Biến lưu trạng thái Promise
         let modalResolve = null;
+
+        // Lấy các phần tử DOM
         const modalEl = document.getElementById('customModal');
         const modalBox = document.getElementById('customModalBox');
         const modalTitle = document.getElementById('modalTitle');
@@ -352,32 +357,88 @@
         const btnConfirm = document.getElementById('btnConfirm');
         const btnCancel = document.getElementById('btnCancel');
 
+        // Hàm đóng Modal
         window.closeCustomModal = () => {
             modalEl.classList.add('opacity-0', 'pointer-events-none');
-            modalBox.classList.remove('scale-100'); modalBox.classList.add('scale-95');
-            if (modalResolve) modalResolve(null);
+            modalBox.classList.remove('scale-100'); 
+            modalBox.classList.add('scale-95');
+            
+            // Nếu đóng mà chưa bấm nút nào (vd: bấm X), coi như là Hủy (null)
+            if (modalResolve) {
+                modalResolve(null);
+                modalResolve = null;
+            }
         };
 
+        // Hàm hiện thông báo (Toast)
+        window.showToast = (message, type = 'success') => {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            const icons = { success: '<i class="fa-solid fa-circle-check text-green-500"></i>', error: '<i class="fa-solid fa-circle-exclamation text-red-500"></i>', info: '<i class="fa-solid fa-circle-info text-blue-500"></i>' };
+            const borderColors = { success: 'border-green-500', error: 'border-red-500', info: 'border-blue-500' };
+            toast.className = `bg-white border-l-4 ${borderColors[type]} shadow-xl rounded-lg p-4 flex items-center gap-3 min-w-[300px] transform translate-x-full transition-transform duration-300`;
+            toast.innerHTML = `<div class="text-xl">${icons[type]}</div><div><h4 class="font-bold text-gray-800 text-sm uppercase">${type==='success'?'Thành công':(type==='error'?'Lỗi':'Thông báo')}</h4><p class="text-sm text-gray-600">${message}</p></div>`;
+            container.appendChild(toast);
+            requestAnimationFrame(() => toast.classList.remove('translate-x-full'));
+            setTimeout(() => { toast.classList.add('translate-x-full', 'opacity-0'); setTimeout(() => toast.remove(), 500); }, 3000);
+        }
+
+        // Hàm Confirm (Xác nhận) - SỬA LỖI QUAN TRỌNG TẠI ĐÂY
         window.customConfirm = (message, title = "Xác nhận") => {
             return new Promise((resolve) => {
-                modalResolve = resolve;
-                modalTitle.innerText = title; modalMsg.innerText = message;
+                // Setup UI
+                modalTitle.innerText = title; 
+                modalMsg.innerText = message;
                 modalIcon.innerHTML = '<i class="fa-solid fa-circle-question text-orange-500"></i>';
-                modalInput.classList.add('hidden'); btnCancel.classList.remove('hidden'); btnConfirm.innerText = "Đồng ý";
-                modalEl.classList.remove('opacity-0', 'pointer-events-none'); modalBox.classList.remove('scale-95'); modalBox.classList.add('scale-100');
-                btnConfirm.onclick = () => { closeCustomModal(); resolve(true); };
-                btnCancel.onclick = () => { closeCustomModal(); resolve(false); };
+                modalInput.classList.add('hidden'); 
+                btnCancel.classList.remove('hidden'); 
+                btnConfirm.innerText = "Đồng ý";
+                
+                // Hiện Modal
+                modalEl.classList.remove('opacity-0', 'pointer-events-none'); 
+                modalBox.classList.remove('scale-95'); 
+                modalBox.classList.add('scale-100');
+
+                // --- KHẮC PHỤC LỖI: Resolve trước, Close sau ---
+                btnConfirm.onclick = () => { 
+                    resolve(true); // Báo là Đồng ý
+                    modalResolve = null; // Xóa biến nhớ để hàm close không ghi đè
+                    closeCustomModal(); 
+                };
+                
+                btnCancel.onclick = () => { 
+                    resolve(false); // Báo là Hủy
+                    modalResolve = null; 
+                    closeCustomModal(); 
+                };
+                
+                // Lưu resolve để dùng cho nút X
+                modalResolve = resolve;
             });
         };
 
+        // Hàm Alert (Thông báo đơn)
         window.customAlert = (message, type = 'info') => {
             return new Promise((resolve) => {
-                modalResolve = resolve;
-                modalTitle.innerText = type === 'error' ? 'Lỗi' : 'Thông báo'; modalMsg.innerText = message;
+                modalTitle.innerText = type === 'error' ? 'Lỗi' : 'Thông báo'; 
+                modalMsg.innerText = message;
                 modalIcon.innerHTML = type === 'error' ? '<i class="fa-solid fa-triangle-exclamation text-red-500"></i>' : (type === 'success' ? '<i class="fa-solid fa-circle-check text-green-500"></i>' : '<i class="fa-solid fa-bell text-blue-500"></i>');
-                modalInput.classList.add('hidden'); btnCancel.classList.add('hidden'); btnConfirm.innerText = "Đã hiểu";
-                modalEl.classList.remove('opacity-0', 'pointer-events-none'); modalBox.classList.remove('scale-95'); modalBox.classList.add('scale-100');
-                btnConfirm.onclick = () => { closeCustomModal(); resolve(true); };
+                modalInput.classList.add('hidden'); 
+                btnCancel.classList.add('hidden'); 
+                btnConfirm.innerText = "Đã hiểu";
+                
+                modalEl.classList.remove('opacity-0', 'pointer-events-none'); 
+                modalBox.classList.remove('scale-95'); 
+                modalBox.classList.add('scale-100');
+                
+                // --- KHẮC PHỤC LỖI ---
+                btnConfirm.onclick = () => { 
+                    resolve(true); 
+                    modalResolve = null;
+                    closeCustomModal(); 
+                };
+                
+                modalResolve = resolve;
             });
         };
         // --- CUSTOM MODAL LOGIC END ---
