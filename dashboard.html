@@ -23,9 +23,20 @@
         .nav-item i { width: 24px; text-align: center; }
 
         /* File Explorer Items */
-        .explorer-item { transition: all 0.2s; }
+        .explorer-item { transition: all 0.2s; user-select: none; }
         .explorer-item:hover { background-color: #EFF6FF; transform: translateY(-2px); box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
         .explorer-item.selected { background-color: #DBEAFE; border-color: #3B82F6; }
+        
+        /* Drag & Drop Visuals */
+        .explorer-item.drag-over {
+            background-color: #BFDBFE !important; /* Xanh đậm hơn khi kéo vào */
+            border: 2px dashed #2563EB !important;
+            transform: scale(1.05);
+        }
+        .explorer-item.dragging {
+            opacity: 0.5;
+            border: 2px dashed #9CA3AF;
+        }
 
         /* Notification & Modal Animations */
         @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
@@ -178,17 +189,19 @@
                 <div id="emptyExplorerMsg" class="hidden flex flex-col items-center justify-center h-64 text-gray-400">
                     <i class="fa-regular fa-folder-open text-6xl mb-4 text-gray-300"></i>
                     <p>Thư mục trống</p>
+                    <p class="text-xs mt-2">Kéo thả để di chuyển tệp tin</p>
                 </div>
             </div>
         </div>
 
     </main>
 
-    <!-- === MODALS & POPUPS (MỚI) === -->
+    <!-- === MODALS & POPUPS (ĐÃ NÂNG CẤP) === -->
 
-    <!-- 1. Modal Nhập liệu chung (Thay thế Prompt) -->
+    <!-- 1. Modal Nhập liệu chung (Có nút X) -->
     <div id="genericInputModal" class="modal opacity-0 pointer-events-none fixed inset-0 z-[100] flex items-center justify-center bg-gray-900 bg-opacity-50 transition-opacity duration-300">
-        <div class="bg-white w-96 rounded-2xl shadow-2xl p-6 transform scale-95 transition-transform duration-300">
+        <div class="modal-container bg-white w-96 rounded-2xl shadow-2xl p-6 transform scale-95 transition-transform duration-300 relative">
+            <button id="gInputClose" class="absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition-colors"><i class="fa-solid fa-times"></i></button>
             <h3 id="gInputTitle" class="text-lg font-bold text-gray-800 mb-4">Nhập thông tin</h3>
             <input type="text" id="gInputVal" class="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all" placeholder="...">
             <div class="flex justify-end gap-3 mt-6">
@@ -198,9 +211,10 @@
         </div>
     </div>
 
-    <!-- 2. Modal Xác nhận chung (Thay thế Confirm) -->
+    <!-- 2. Modal Xác nhận chung (Có nút X) -->
     <div id="genericConfirmModal" class="modal opacity-0 pointer-events-none fixed inset-0 z-[100] flex items-center justify-center bg-gray-900 bg-opacity-50 transition-opacity duration-300">
-        <div class="bg-white w-96 rounded-2xl shadow-2xl p-6 transform scale-95 transition-transform duration-300 text-center">
+        <div class="modal-container bg-white w-96 rounded-2xl shadow-2xl p-6 transform scale-95 transition-transform duration-300 text-center relative">
+            <button id="gConfirmClose" class="absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition-colors"><i class="fa-solid fa-times"></i></button>
             <div class="w-16 h-16 bg-red-100 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4 text-3xl">
                 <i class="fa-solid fa-triangle-exclamation"></i>
             </div>
@@ -235,9 +249,9 @@
 
     <!-- Modal Context Menu (Rename/Move/Delete) -->
     <div id="actionModal" class="modal opacity-0 pointer-events-none fixed inset-0 z-[80] flex items-center justify-center bg-gray-900 bg-opacity-50">
-        <div class="modal-container bg-white w-96 rounded-2xl shadow-2xl p-6">
+        <div class="modal-container bg-white w-96 rounded-2xl shadow-2xl p-6 relative">
             <h3 id="actionModalTitle" class="text-xl font-bold text-gray-800 mb-4">Hành động</h3>
-            <div id="dynamicContent"></div> <!-- Nội dung sẽ được sinh ra ở đây -->
+            <div id="dynamicContent"></div> 
             <button onclick="toggleModal('actionModal', false)" class="absolute top-4 right-4 text-gray-400 hover:text-gray-600"><i class="fa-solid fa-times"></i></button>
         </div>
     </div>
@@ -367,7 +381,7 @@
 
         // --- GLOBAL HELPER FUNCTIONS (PROMISIFIED MODALS) ---
         
-        // 1. Custom Prompt
+        // 1. Custom Prompt (Có nút X)
         window.customPrompt = (title, placeholder = '', defaultValue = '') => {
             return new Promise((resolve) => {
                 const modal = document.getElementById('genericInputModal');
@@ -375,6 +389,7 @@
                 const inputEl = document.getElementById('gInputVal');
                 const confirmBtn = document.getElementById('gInputConfirm');
                 const cancelBtn = document.getElementById('gInputCancel');
+                const closeBtn = document.getElementById('gInputClose');
 
                 titleEl.textContent = title;
                 inputEl.placeholder = placeholder;
@@ -382,50 +397,54 @@
 
                 // Show Modal
                 modal.classList.remove('opacity-0', 'pointer-events-none');
-                modal.querySelector('div').classList.remove('scale-95');
-                modal.querySelector('div').classList.add('scale-100');
+                modal.querySelector('.modal-container').classList.remove('scale-95');
+                modal.querySelector('.modal-container').classList.add('scale-100');
                 inputEl.focus();
 
                 const close = () => {
                     modal.classList.add('opacity-0', 'pointer-events-none');
-                    modal.querySelector('div').classList.add('scale-95');
-                    modal.querySelector('div').classList.remove('scale-100');
-                    // Cleanup to avoid multiple listeners
+                    modal.querySelector('.modal-container').classList.add('scale-95');
+                    modal.querySelector('.modal-container').classList.remove('scale-100');
                     confirmBtn.onclick = null;
                     cancelBtn.onclick = null;
+                    closeBtn.onclick = null;
                     inputEl.onkeydown = null;
                 };
 
                 confirmBtn.onclick = () => { close(); resolve(inputEl.value); };
                 cancelBtn.onclick = () => { close(); resolve(null); };
+                closeBtn.onclick = () => { close(); resolve(null); };
                 inputEl.onkeydown = (e) => { if(e.key === 'Enter') confirmBtn.click(); if(e.key === 'Escape') cancelBtn.click(); };
             });
         };
 
-        // 2. Custom Confirm
+        // 2. Custom Confirm (Có nút X)
         window.customConfirm = (message) => {
             return new Promise((resolve) => {
                 const modal = document.getElementById('genericConfirmModal');
                 const msgEl = document.getElementById('gConfirmMsg');
                 const okBtn = document.getElementById('gConfirmOk');
                 const cancelBtn = document.getElementById('gConfirmCancel');
+                const closeBtn = document.getElementById('gConfirmClose');
 
                 msgEl.textContent = message;
 
                 modal.classList.remove('opacity-0', 'pointer-events-none');
-                modal.querySelector('div').classList.remove('scale-95');
-                modal.querySelector('div').classList.add('scale-100');
+                modal.querySelector('.modal-container').classList.remove('scale-95');
+                modal.querySelector('.modal-container').classList.add('scale-100');
 
                 const close = () => {
                     modal.classList.add('opacity-0', 'pointer-events-none');
-                    modal.querySelector('div').classList.add('scale-95');
-                    modal.querySelector('div').classList.remove('scale-100');
+                    modal.querySelector('.modal-container').classList.add('scale-95');
+                    modal.querySelector('.modal-container').classList.remove('scale-100');
                     okBtn.onclick = null;
                     cancelBtn.onclick = null;
+                    closeBtn.onclick = null;
                 };
 
                 okBtn.onclick = () => { close(); resolve(true); };
                 cancelBtn.onclick = () => { close(); resolve(false); };
+                closeBtn.onclick = () => { close(); resolve(false); };
             });
         };
 
@@ -520,7 +539,6 @@
                 const addCard = document.createElement('button');
                 addCard.className = "border-2 border-dashed border-gray-300 rounded-xl p-5 flex flex-col items-center justify-center text-gray-400 hover:border-blue-400 hover:text-blue-500 transition-colors h-full min-h-[140px]";
                 addCard.innerHTML = `<i class="fa-solid fa-plus text-3xl mb-2"></i><span class="font-bold">Tạo lớp mới</span>`;
-                // REPLACE PROMPT
                 addCard.onclick = async () => {
                     const name = await customPrompt("Nhập tên lớp học mới:", "VD: Lớp 5A");
                     if(name) {
@@ -532,7 +550,7 @@
             });
         }
 
-        // 2. FILE EXPLORER
+        // 2. FILE EXPLORER (UPDATED DRAG & DROP & CLICK FIX)
         function loadFileManager() {
             const qFolders = query(collection(db, "folders"), where("teacherId", "==", currentUserUid));
             onSnapshot(qFolders, (snap) => {
@@ -560,21 +578,75 @@
             currentFolders.forEach(f => {
                 const div = document.createElement('div');
                 div.className = "explorer-item bg-white p-4 rounded-xl border border-gray-200 cursor-pointer relative group";
+                // Add Drag Events
+                div.draggable = true;
+                div.ondragstart = (e) => handleDragStart(e, f.id, 'folder');
+                div.ondragover = (e) => handleDragOver(e);
+                div.ondragleave = (e) => handleDragLeave(e);
+                div.ondrop = (e) => handleDrop(e, f.id);
+
                 div.innerHTML = `<div class="text-4xl text-yellow-400 mb-3 text-center"><i class="fa-solid fa-folder"></i></div><p class="text-sm font-bold text-gray-700 text-center truncate px-2">${f.name}</p><div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"><button onclick="event.stopPropagation(); openContextMenu('${f.id}', 'folder', '${f.name}')" class="p-1 hover:bg-gray-100 rounded text-gray-500"><i class="fa-solid fa-ellipsis-vertical"></i></button></div>`;
-                div.onclick = () => navigateFolder(f.id, f.name);
+                // FIX ONCLICK: Attach directly
+                div.addEventListener('click', () => navigateFolder(f.id, f.name));
                 grid.appendChild(div);
             });
 
             currentExams.forEach(e => {
                 const div = document.createElement('div');
                 div.className = "explorer-item bg-white p-4 rounded-xl border border-gray-200 cursor-pointer relative group";
+                // Add Drag Events
+                div.draggable = true;
+                div.ondragstart = (e) => handleDragStart(e, e.id, 'exam');
+                
                 div.innerHTML = `<div class="text-4xl text-blue-500 mb-3 text-center"><i class="fa-regular fa-file-lines"></i></div><p class="text-sm font-bold text-gray-700 text-center truncate px-2" title="${e.title}">${e.title}</p><div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"><button onclick="event.stopPropagation(); openContextMenu('${e.id}', 'exam', '${e.title}')" class="p-1 hover:bg-gray-100 rounded text-gray-500"><i class="fa-solid fa-ellipsis-vertical"></i></button></div>`;
-                div.onclick = () => window.location.href = `exam-editor.html?id=${e.id}`;
+                div.addEventListener('click', () => window.location.href = `exam-editor.html?id=${e.id}`);
                 grid.appendChild(div);
             });
             renderBreadcrumb();
         }
 
+        // DRAG & DROP LOGIC
+        window.handleDragStart = (e, id, type) => {
+            e.dataTransfer.setData("text/plain", JSON.stringify({id, type}));
+            e.target.classList.add('dragging');
+        }
+
+        window.handleDragOver = (e) => {
+            e.preventDefault(); // Necessary for drop to work
+            e.currentTarget.classList.add('drag-over');
+        }
+
+        window.handleDragLeave = (e) => {
+            e.currentTarget.classList.remove('drag-over');
+        }
+
+        window.handleDrop = async (e, targetId) => {
+            e.preventDefault();
+            e.currentTarget.classList.remove('drag-over');
+            
+            try {
+                const data = JSON.parse(e.dataTransfer.getData("text/plain"));
+                if (data.id === targetId) return; // Can't drop into self
+
+                // Perform Move
+                await commitMoveInternal(data.id, data.type, targetId);
+            } catch (err) {
+                console.error("Drop error", err);
+            }
+            
+            // Remove dragging style from source (if needed via DOM, but snapshot handles it)
+            document.querySelectorAll('.dragging').forEach(el => el.classList.remove('dragging'));
+        }
+
+        // Refactored Commit Move logic to reuse
+        async function commitMoveInternal(itemId, itemType, targetFolderId) {
+            const collName = itemType === 'folder' ? 'folders' : 'exams';
+            const field = itemType === 'folder' ? 'parentId' : 'folderId';
+            await updateDoc(doc(db, collName, itemId), { [field]: targetFolderId });
+            showNotification("Đã di chuyển thành công!");
+        }
+
+        // NAVIGATION
         window.navigateFolder = (id, name) => {
             if(id === 'root') { currentFolderId = null; breadcrumbs = []; }
             else { currentFolderId = id; breadcrumbs.push({id, name}); }
@@ -593,7 +665,6 @@
 
         // ACTIONS WITH CUSTOM MODAL
         window.createNewFolder = async () => {
-            // REPLACE PROMPT
             const name = await customPrompt("Nhập tên thư mục mới:", "VD: Toán Đại Số");
             if(name) {
                 try {
@@ -606,8 +677,6 @@
         window.openContextMenu = (id, type, name) => {
             currentActionItem = {id, type, name};
             document.getElementById('actionModalTitle').textContent = `Thao tác: ${name}`;
-            
-            // Generate Buttons
             const content = document.getElementById('dynamicContent');
             content.innerHTML = `
                 <div class="grid grid-cols-3 gap-3 mb-4">
@@ -627,8 +696,7 @@
             if (action === 'rename') {
                 container.innerHTML = `<label class="block text-sm font-bold text-gray-700 mb-2">Tên mới</label><div class="flex gap-2"><input type="text" id="renameInput" value="${currentActionItem.name}" class="flex-1 border rounded px-3 py-2"><button onclick="commitRename()" class="bg-blue-600 text-white px-4 rounded font-bold">Lưu</button></div>`;
             } else if (action === 'delete') {
-                // REPLACE CONFIRM
-                toggleModal('actionModal', false); // Close context menu first
+                toggleModal('actionModal', false);
                 if(await customConfirm(`Bạn chắc chắn muốn xóa "${currentActionItem.name}"?`)) {
                     try {
                         const collName = currentActionItem.type === 'folder' ? 'folders' : 'exams';
@@ -655,10 +723,7 @@
         }
 
         window.commitMove = async (targetFolderId) => {
-            const collName = currentActionItem.type === 'folder' ? 'folders' : 'exams';
-            const field = currentActionItem.type === 'folder' ? 'parentId' : 'folderId';
-            await updateDoc(doc(db, collName, currentActionItem.id), { [field]: targetFolderId });
-            showNotification("Đã di chuyển");
+            await commitMoveInternal(currentActionItem.id, currentActionItem.type, targetFolderId);
             toggleModal('actionModal', false);
         }
 
@@ -675,7 +740,6 @@
         window.editClassName = async () => {
             if (!currentViewingClassId) return;
             const currentName = document.getElementById('classModalTitle').textContent.replace('Quản lý: ', '');
-            // REPLACE PROMPT
             const newName = await customPrompt("Nhập tên mới cho lớp:", "", currentName);
             if (newName && newName !== currentName) {
                 try {
@@ -719,7 +783,6 @@
         }
 
         window.deleteStudent = async function(index) {
-            // REPLACE CONFIRM
             if(!await customConfirm("Bạn có chắc muốn xóa học sinh này khỏi lớp?")) return;
             try {
                 currentClassStudents.splice(index, 1);
@@ -754,14 +817,14 @@
             } catch (e) { showNotification("Lỗi: " + e.message, "error"); }
         });
 
-        // RE-IMPLEMENT HELPER FUNCTIONS (Because they are in type=module but called from HTML)
+        // RE-IMPLEMENT HELPER FUNCTIONS
         window.downloadTemplate = () => {
             const data = [["Họ và tên", "Tên đăng nhập", "Mật khẩu", "SBD", "Giới tính", "SĐT HS", "SĐT PHHS"], ["Nguyễn Văn A", "nguyenvana", "123456", "001", "Nam", "098...", "091..."]];
             const ws = XLSX.utils.aoa_to_sheet(data); const wb = XLSX.utils.book_new();
             XLSX.utils.book_append_sheet(wb, ws, "DanhSach"); XLSX.writeFile(wb, "Mau_DS_Hoc_Sinh.xlsx");
         }
         
-        window.handleFileUpload = (input) => { /* Excel logic remains same */
+        window.handleFileUpload = (input) => { 
              const file = input.files[0]; if (!file) return;
             const reader = new FileReader();
             reader.onload = async function(e) {
