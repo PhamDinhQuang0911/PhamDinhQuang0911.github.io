@@ -1015,49 +1015,104 @@ window.showToast = (message, type = 'success') => {
 }
 
 // Biến lưu resolve của Promise
-let modalResolve = null;
+// --- 1. LOGIC HỘP THOẠI (MODAL) CHUẨN ---
+        let modalResolve = null;
+        // Lấy Element
+        const modalEl = document.getElementById('customModal');
+        const modalBox = document.getElementById('customModalBox');
+        const modalTitle = document.getElementById('modalTitle');
+        const modalMsg = document.getElementById('modalMessage');
+        const modalIcon = document.getElementById('modalIcon');
+        const modalInput = document.getElementById('modalInput'); // Input nhập liệu
+        const btnConfirm = document.getElementById('btnConfirm');
+        const btnCancel = document.getElementById('btnCancel');
 
-const modalEl = document.getElementById('customModal');
-const modalBox = document.getElementById('customModalBox');
-const modalTitle = document.getElementById('modalTitle');
-const modalMsg = document.getElementById('modalMessage');
-const modalIcon = document.getElementById('modalIcon');
-const modalInput = document.getElementById('modalInput');
-const btnConfirm = document.getElementById('btnConfirm');
-const btnCancel = document.getElementById('btnCancel');
+        // Hàm đóng Modal
+        window.closeCustomModal = () => {
+            modalEl.classList.add('opacity-0', 'pointer-events-none');
+            modalBox.classList.remove('scale-100'); modalBox.classList.add('scale-95');
+            // Nếu đóng mà chưa xong việc (resolve còn tồn tại) thì trả về null
+            if (modalResolve) { modalResolve(null); modalResolve = null; }
+        };
 
-// Hàm đóng Modal
-window.closeCustomModal = () => {
-    modalEl.classList.add('opacity-0', 'pointer-events-none');
-    modalBox.classList.remove('scale-100');
-    modalBox.classList.add('scale-95');
-    if (modalResolve) modalResolve(null); // Resolve null nếu đóng ngang
-};
+        // Hàm Nhập liệu (Prompt) - ĐÃ SỬA LỖI TRẢ VỀ GIÁ TRỊ
+        window.customPrompt = (message, placeholder = "", defaultValue = "") => {
+            return new Promise((resolve) => {
+                modalTitle.innerText = "Nhập thông tin"; 
+                modalMsg.innerText = message;
+                modalIcon.innerHTML = '<i class="fa-solid fa-pen-to-square text-blue-500"></i>';
+                
+                // Hiện Input & Setup giá trị
+                modalInput.classList.remove('hidden'); 
+                modalInput.value = defaultValue; 
+                modalInput.placeholder = placeholder;
+                
+                // Hiện nút
+                btnCancel.classList.remove('hidden'); 
+                btnConfirm.innerText = "Lưu lại";
+                
+                // Hiện Modal
+                modalEl.classList.remove('opacity-0', 'pointer-events-none'); 
+                modalBox.classList.remove('scale-95'); 
+                modalBox.classList.add('scale-100');
+                
+                modalInput.focus();
 
-// 2. Custom Confirm (Trả về true/false)
-window.customConfirm = (message, title = "Xác nhận") => {
-    return new Promise((resolve) => {
-        modalResolve = resolve;
-        
-        // Setup UI
-        modalTitle.innerText = title;
-        modalMsg.innerText = message;
-        modalIcon.innerHTML = '<i class="fa-solid fa-circle-question text-orange-500"></i>';
-        modalInput.classList.add('hidden');
-        btnCancel.classList.remove('hidden');
-        btnConfirm.innerText = "Đồng ý";
-        
-        // Show Modal
-        modalEl.classList.remove('opacity-0', 'pointer-events-none');
-        modalBox.classList.remove('scale-95');
-        modalBox.classList.add('scale-100');
+                // Xử lý nút bấm
+                const submit = () => { 
+                    const val = modalInput.value; // Lấy giá trị trước khi đóng
+                    resolve(val); 
+                    modalResolve = null; 
+                    closeCustomModal(); 
+                };
 
-        // Sự kiện
-        btnConfirm.onclick = () => { closeCustomModal(); resolve(true); };
-        btnCancel.onclick = () => { closeCustomModal(); resolve(false); };
-    });
-};
+                btnConfirm.onclick = submit;
+                btnCancel.onclick = () => { resolve(null); modalResolve = null; closeCustomModal(); };
+                
+                // Hỗ trợ bấm Enter
+                modalInput.onkeyup = (e) => { if(e.key === 'Enter') submit(); }
+                
+                modalResolve = resolve;
+            });
+        };
 
+        // Hàm Xác nhận (Confirm)
+        window.customConfirm = (message, title = "Xác nhận") => {
+            return new Promise((resolve) => {
+                modalTitle.innerText = title; modalMsg.innerText = message;
+                modalIcon.innerHTML = '<i class="fa-solid fa-circle-question text-orange-500"></i>';
+                modalInput.classList.add('hidden'); btnCancel.classList.remove('hidden'); btnConfirm.innerText = "Đồng ý";
+                
+                modalEl.classList.remove('opacity-0', 'pointer-events-none'); modalBox.classList.remove('scale-95'); modalBox.classList.add('scale-100');
+                
+                btnConfirm.onclick = () => { resolve(true); modalResolve = null; closeCustomModal(); };
+                btnCancel.onclick = () => { resolve(false); modalResolve = null; closeCustomModal(); };
+                modalResolve = resolve;
+            });
+        };
+
+        // --- 2. SỬA LỖI: HÀM ĐỔI TÊN LỚP ---
+        window.editClassName = async () => {
+            if (!currentViewingClassId) return;
+            const currentName = document.getElementById('classModalTitle').textContent.replace("Chi tiết: ", ""); // Lọc text thừa nếu có
+            
+            // Gọi Prompt mới
+            const newName = await customPrompt("Nhập tên mới cho lớp:", "", currentName);
+            
+            // Kiểm tra kỹ điều kiện lưu
+            if (newName && newName.trim().length > 0 && newName !== currentName) {
+                try {
+                    // Lưu vào Firestore
+                    await updateDoc(doc(db, "classes", currentViewingClassId), { name: newName });
+                    
+                    // Cập nhật giao diện ngay lập tức
+                    document.getElementById('classModalTitle').textContent = newName;
+                    showToast("Đổi tên lớp thành công!", "success");
+                } catch(e) { 
+                    showToast("Lỗi: " + e.message, "error"); 
+                }
+            }
+        }
 // 3. Custom Prompt (Trả về text hoặc null)
 window.customPrompt = (message, placeholder = "", defaultValue = "") => {
     return new Promise((resolve) => {
