@@ -246,42 +246,45 @@
 
         async function loadLobby(id) {
             try {
-                // 1. Tải thông tin đề thi
+                // 1. Lấy dữ liệu đề thi
                 const s = await getDoc(doc(db, "exams", id));
                 if(!s.exists()) { document.getElementById('lobbyTitle').textContent = "Đề thi không tồn tại!"; return; }
                 examData = s.data();
                 
-                // 2. Tải kết quả làm bài của học sinh
+                // 2. Lấy toàn bộ kết quả thi của học sinh
                 const q = query(collection(db, "results"), where("examId","==",id), where("studentId","==",currentUser.uid));
                 const snapshot = await getDocs(q);
-                const att = snapshot.size; // Số lần đã làm
+                const att = snapshot.size;
 
-                // --- LOGIC MỚI: KIỂM TRA CHẾ ĐỘ XEM LẠI (REVIEW MODE) ---
+                // --- [START] LOGIC MỚI: KIỂM TRA CHẾ ĐỘ XEM LẠI ---
                 const urlParams = new URLSearchParams(window.location.search);
                 if (urlParams.get('mode') === 'review') {
                     if (att > 0) {
-                        // Lấy bài làm gần nhất
+                        // Lấy bài làm mới nhất để hiển thị
                         const resultsList = [];
                         snapshot.forEach(doc => resultsList.push(doc.data()));
                         // Sắp xếp theo thời gian nộp mới nhất
                         resultsList.sort((a, b) => new Date(b.submittedAt) - new Date(a.submittedAt));
                         
-                        // Nạp dữ liệu toàn cục để hàm viewDetailSolutions sử dụng
+                        // Nạp dữ liệu vào biến toàn cục cho hàm viewDetailSolutions dùng
                         currentQuestions = examData.questions || [];
                         userAnswers = resultsList[0].answers || {};
                         
-                        // Ẩn Lobby và hiển thị giao diện lời giải ngay lập tức
+                        // Ẩn màn hình Lobby (quan trọng)
                         document.getElementById('lobbyScreen').classList.add('hidden');
+                        
+                        // Gọi hàm hiển thị lời giải
                         viewDetailSolutions(); 
-                        return; // Dừng hàm, không render Lobby nữa
+                        return; // Dừng hàm ngay lập tức, không chạy phần hiển thị Lobby bên dưới
                     } else {
                         alert("Bạn chưa làm bài này lần nào nên không thể xem lời giải!");
                         window.location.href = "dashboard.html";
                         return;
                     }
                 }
-                // ---------------------------------------------------------
+                // --- [END] LOGIC MỚI ---
 
+                // 3. Nếu không phải xem lại thì hiển thị Lobby như bình thường
                 document.getElementById('lobbyTitle').textContent = examData.title;
                 document.getElementById('lobbyDuration').textContent = examData.duration || '∞';
                 
