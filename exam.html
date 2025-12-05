@@ -26,11 +26,19 @@
         .text-orange-custom { color: #FF6A00; }
         .bg-orange-custom { background-color: #FF6A00; }
         
+        /* Nút câu hỏi chung */
         .q-btn { width: 100%; aspect-ratio: 1; display: flex; align-items: center; justify-content: center; border-radius: 8px; font-weight: 700; font-size: 0.85rem; border: 1px solid #E5E7EB; background-color: white; color: #4B5563; transition: all 0.2s; position: relative; cursor: pointer; }
+        
+        /* Trạng thái khi làm bài */
         .q-btn.active { background-color: #FF6A00 !important; color: white !important; border-color: #FF6A00 !important; transform: scale(1.1); box-shadow: 0 4px 6px -1px rgba(255, 106, 0, 0.3); z-index: 10; }
         .q-btn.answered { background-color: #EFF6FF; color: #2563EB; border-color: #BFDBFE; }
         .q-btn.flagged::after { content: "\f024"; font-family: "Font Awesome 6 Free"; font-weight: 900; position: absolute; top: -4px; right: -4px; font-size: 10px; color: #EF4444; background: #FEF2F2; border-radius: 50%; padding: 2px; border: 1px solid #FECACA; }
         
+        /* Trạng thái khi xem lời giải */
+        .q-btn.correct { background-color: #10B981 !important; color: white !important; border-color: #059669 !important; }
+        .q-btn.wrong { background-color: #EF4444 !important; color: white !important; border-color: #DC2626 !important; }
+        .q-btn.partial { background-color: #F59E0B !important; color: white !important; border-color: #D97706 !important; } /* Cho câu đúng 1 phần */
+
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
         .custom-radio:checked + div { border-color: #FF6A00; background-color: #FFF7ED; color: #C2410C; font-weight: bold; }
@@ -135,13 +143,27 @@
         </div>
     </div>
 
-    <div id="solutionView" class="hidden flex-1 overflow-y-auto p-6 bg-gray-50 w-full max-w-5xl mx-auto pb-20">
-        <div class="flex justify-between items-center mb-6">
-            <h2 class="text-2xl font-bold text-gray-800"><i class="fa-solid fa-book-open text-blue-600 mr-2"></i> Lời giải chi tiết</h2>
-            <button onclick="window.location.href='dashboard.html'" class="px-4 py-2 bg-gray-200 text-gray-700 font-bold rounded-lg hover:bg-gray-300">Thoát</button>
-        </div>
-        <div id="solutionList" class="space-y-8">
+    <div id="solutionView" class="hidden fixed inset-0 z-[90] bg-gray-50 flex h-full">
+        <aside class="w-80 bg-white border-r border-gray-200 flex flex-col shrink-0">
+            <div class="p-5 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
+                <h3 class="font-bold text-gray-700">Kết quả chi tiết</h3>
+                <button onclick="window.location.href='dashboard.html'" class="text-xs font-bold text-gray-500 hover:text-blue-600">Thoát</button>
             </div>
+            <div class="p-3 border-b border-gray-100 bg-white text-xs flex gap-3 text-gray-500 justify-center">
+                <div class="flex items-center gap-1"><span class="w-3 h-3 bg-green-500 rounded-sm"></span> Đúng</div>
+                <div class="flex items-center gap-1"><span class="w-3 h-3 bg-red-500 rounded-sm"></span> Sai</div>
+                <div class="flex items-center gap-1"><span class="w-3 h-3 bg-gray-200 rounded-sm"></span> Chưa làm</div>
+            </div>
+            <div class="flex-1 overflow-y-auto p-5">
+                <div class="grid grid-cols-5 gap-3" id="solutionPalette">
+                    </div>
+            </div>
+        </aside>
+
+        <div class="flex-1 overflow-y-auto p-6 scroll-smooth bg-gray-100" id="solutionContentArea">
+            <div class="max-w-4xl mx-auto space-y-8 pb-20" id="solutionList">
+                </div>
+        </div>
     </div>
 
     <div id="passwordModal" class="fixed inset-0 z-[60] flex items-center justify-center bg-gray-900 bg-opacity-80 hidden">
@@ -201,6 +223,15 @@
             timer: document.getElementById('timer'),
             badge: document.getElementById('questionTypeBadge')
         };
+
+        // --- HÀM HỖ TRỢ ĐỊNH DẠNG ---
+        // Sửa lỗi hiển thị '\\' thành xuống dòng
+        function formatContent(text) {
+            if (!text) return "";
+            return text
+                .replace(/\\\\/g, '<br>') // Thay thế \\ thành <br>
+                .replace(/\n/g, '<br>');
+        }
 
         onAuthStateChanged(auth, async (user) => {
             if (user) {
@@ -281,23 +312,25 @@
             
             let typeName = "Câu hỏi"; if(q.type==='mc') typeName="Trắc nghiệm"; else if(q.type==='tf') typeName="Đúng/Sai"; else if(q.type==='short') typeName="Điền đáp án"; else if(q.type==='essay') typeName="Tự luận";
             dom.badge.textContent = typeName;
-            dom.content.innerHTML = q.content ? q.content.replace(/\n/g, '<br>') : "";
+            
+            // Dùng formatContent để sửa lỗi hiển thị \\
+            dom.content.innerHTML = formatContent(q.content);
             dom.options.innerHTML = '';
             
             if(q.type === 'mc') {
                 if(q.options) q.options.forEach((opt, i) => {
                     const chk = userAnswers[idx] === i;
                     const div = document.createElement('label'); div.className = "block cursor-pointer group";
-                    div.innerHTML = `<input type="radio" name="q" class="hidden custom-radio" ${chk?'checked':''}><div class="flex items-center p-4 border-2 border-gray-100 rounded-xl hover:border-blue-200 group-hover:bg-blue-50"><div class="check-circle w-8 h-8 rounded-full border-2 border-gray-200 flex items-center justify-center mr-4 font-bold text-gray-400">${String.fromCharCode(65+i)}</div><div class="flex-1 text-base">${opt}</div></div>`;
+                    div.innerHTML = `<input type="radio" name="q" class="hidden custom-radio" ${chk?'checked':''}><div class="flex items-center p-4 border-2 border-gray-100 rounded-xl hover:border-blue-200 group-hover:bg-blue-50"><div class="check-circle w-8 h-8 rounded-full border-2 border-gray-200 flex items-center justify-center mr-4 font-bold text-gray-400">${String.fromCharCode(65+i)}</div><div class="flex-1 text-base">${formatContent(opt)}</div></div>`;
                     div.querySelector('input').onchange = () => saveAnswer(idx, i); dom.options.appendChild(div);
                 });
             } else if (q.type === 'tf') {
-                 let h = `<div class="grid grid-cols-12 bg-gray-50 p-2 font-bold text-xs text-gray-500 uppercase rounded-t-lg"><div class="col-span-8">Mệnh đề</div><div class="col-span-2 text-center text-green-600">Đúng</div><div class="col-span-2 text-center text-red-500">Sai</div></div>`;
+                 let h = `<div class="grid grid-cols-12 bg-gray-100 p-3 font-bold text-xs text-gray-500 uppercase rounded-t-xl border border-gray-200"><div class="col-span-8">Mệnh đề</div><div class="col-span-2 text-center text-green-600">Đúng</div><div class="col-span-2 text-center text-red-500">Sai</div></div>`;
                  if(q.statements) q.statements.forEach((s, i) => {
                      const ans = userAnswers[idx] || [];
-                     h += `<div class="grid grid-cols-12 p-3 border-b items-center hover:bg-gray-50"><div class="col-span-8 text-sm font-medium text-gray-700">${s.text}</div><div class="col-span-2 text-center"><input type="radio" name="tf${i}" class="w-5 h-5 accent-green-600" onchange="window.saveTF(${idx},${i},true)" ${ans[i]===true?'checked':''}></div><div class="col-span-2 text-center"><input type="radio" name="tf${i}" class="w-5 h-5 accent-red-500" onchange="window.saveTF(${idx},${i},false)" ${ans[i]===false?'checked':''}></div></div>`;
+                     h += `<div class="grid grid-cols-12 p-3 border-b border-x border-gray-200 items-center hover:bg-gray-50 last:rounded-b-xl"><div class="col-span-8 text-sm font-medium text-gray-700">${formatContent(s.text)}</div><div class="col-span-2 text-center"><input type="radio" name="tf${i}" class="w-5 h-5 accent-green-600" onchange="window.saveTF(${idx},${i},true)" ${ans[i]===true?'checked':''}></div><div class="col-span-2 text-center"><input type="radio" name="tf${i}" class="w-5 h-5 accent-red-500" onchange="window.saveTF(${idx},${i},false)" ${ans[i]===false?'checked':''}></div></div>`;
                  });
-                 dom.options.innerHTML = `<div class="border rounded-lg overflow-hidden">${h}</div>`;
+                 dom.options.innerHTML = h;
             } else {
                 const isE = q.type==='essay';
                 const el = document.createElement(isE?'textarea':'input');
@@ -324,7 +357,7 @@
                 else {
                     const a = userAnswers[i];
                     let isDone = false;
-                    if(q.type === 'tf') isDone = Array.isArray(a) && a.length === q.statements.length && a.every(x => x !== null && x !== undefined);
+                    if(q.type === 'tf') isDone = Array.isArray(a) && a.length === (q.statements?.length || 0) && a.every(x => x !== null && x !== undefined);
                     else isDone = (a !== undefined && a !== null && a !== "");
                     if(isDone) btn.classList.add('answered');
                 }
@@ -333,7 +366,7 @@
         }
         function renderPalette() { updatePalette(); }
 
-        // --- XỬ LÝ NỘP BÀI MỚI ---
+        // --- XỬ LÝ NỘP BÀI ---
         window.checkFinish = () => {
             let unanswered = 0;
             currentQuestions.forEach((q, i) => {
@@ -354,16 +387,18 @@
             document.removeEventListener("visibilitychange", handleCheat);
             window.removeEventListener("blur", handleCheat);
 
-            // Tính điểm
             let correct = 0;
             currentQuestions.forEach((q,i) => {
                 const u = userAnswers[i];
                 if(q.type==='mc' && u===q.correct) correct++;
                 if(q.type==='short' && q.answer && u && u.trim().toLowerCase()===q.answer.trim().toLowerCase()) correct++;
-                if(q.type==='tf' && Array.isArray(u) && q.statements) { if(q.statements.every((s,si)=>s.isTrue===u[si])) correct++; }
+                if(q.type==='tf' && Array.isArray(u) && q.statements) { 
+                    let ok = true;
+                    if(u.length < q.statements.length) ok = false;
+                    else q.statements.forEach((s,si) => { if(u[si] !== s.isTrue) ok = false; });
+                    if(ok) correct++;
+                }
             });
-            
-            // Điểm trên thang 10
             const score = (correct * (10/Math.max(currentQuestions.length, 1))).toFixed(2);
 
             try {
@@ -378,10 +413,7 @@
                 });
 
                 document.getElementById('resultModal').classList.remove('hidden');
-                setTimeout(() => {
-                    document.getElementById('resultModal').classList.remove('opacity-0');
-                    document.getElementById('resultModalContent').classList.add('scale-100');
-                }, 50);
+                setTimeout(() => { document.getElementById('resultModal').classList.remove('opacity-0'); document.getElementById('resultModalContent').classList.add('scale-100'); }, 50);
 
                 if(examData.showScore === 'immediate' || (examData.showScore === 'after_exam' && timeLeft <= 0)) {
                     document.getElementById('scoreSection').classList.remove('hidden');
@@ -389,49 +421,80 @@
                     document.getElementById('correctCount').textContent = correct;
                     document.getElementById('totalCount').textContent = currentQuestions.length;
                 }
-
-                // Hiển thị nút xem lời giải nếu cho phép
                 if(examData.showResult === 'immediate' || (examData.showResult === 'after_exam' && timeLeft <= 0)) {
                     document.getElementById('btnViewSolution').classList.remove('hidden');
                 }
-
             } catch(e) { alert("Lỗi nộp bài: " + e.message); }
         }
 
-        // --- XEM LỜI GIẢI CHI TIẾT ---
+        // --- XEM LỜI GIẢI CHI TIẾT (MỚI) ---
         window.viewDetailSolutions = () => {
-            document.getElementById('resultModal').classList.add('hidden'); // Ẩn modal kết quả
-            document.getElementById('examMain').classList.add('hidden'); // Ẩn màn hình làm bài
+            document.getElementById('resultModal').classList.add('hidden');
+            document.getElementById('examMain').classList.add('hidden');
             document.getElementById('examHeader').classList.add('hidden');
+            
             const solutionView = document.getElementById('solutionView');
             solutionView.classList.remove('hidden');
             
             const list = document.getElementById('solutionList');
+            const palette = document.getElementById('solutionPalette');
+            
             list.innerHTML = '';
+            palette.innerHTML = '';
 
             currentQuestions.forEach((q, idx) => {
-                const userAns = userAnswers[idx];
+                const u = userAnswers[idx];
+                let isCorrect = false;
                 let ansDisplay = '';
-                
-                // Hiển thị kết quả của học sinh
-                if (q.type === 'mc') {
-                    const charUser = userAns !== undefined ? String.fromCharCode(65 + userAns) : "Chưa chọn";
-                    const charCorrect = String.fromCharCode(65 + q.correct);
-                    const color = userAns === q.correct ? 'text-green-600' : 'text-red-500';
-                    ansDisplay = `<div class="text-sm font-bold mt-2">Bạn chọn: <span class="${color}">${charUser}</span> | Đáp án đúng: <span class="text-green-600">${charCorrect}</span></div>`;
-                } else if (q.type === 'short') {
-                    const isCorrect = userAns && userAns.trim().toLowerCase() === q.answer.trim().toLowerCase();
-                    ansDisplay = `<div class="text-sm font-bold mt-2">Bạn trả lời: <span class="${isCorrect?'text-green-600':'text-red-500'}">${userAns||"Trống"}</span> | Đáp án: <span class="text-green-600">${q.answer}</span></div>`;
+
+                // Logic check đúng sai để tô màu
+                if(q.type === 'mc') {
+                    isCorrect = (u === q.correct);
+                    const charUser = u !== undefined ? String.fromCharCode(65 + u) : "Chưa làm";
+                    const charTrue = String.fromCharCode(65 + q.correct);
+                    ansDisplay = `<div>Bạn chọn: <b class="${isCorrect?'text-green-600':'text-red-500'}">${charUser}</b> | Đáp án: <b class="text-green-600">${charTrue}</b></div>`;
+                }
+                else if(q.type === 'short') {
+                    isCorrect = (u && u.trim().toLowerCase() === q.answer.trim().toLowerCase());
+                    ansDisplay = `<div>Bạn điền: <b class="${isCorrect?'text-green-600':'text-red-500'}">${u||'Trống'}</b> | Đáp án: <b class="text-green-600">${q.answer}</b></div>`;
+                }
+                else if(q.type === 'tf') {
+                    // Logic đúng sai từng ý
+                    let allRight = true;
+                    if(q.statements) {
+                        ansDisplay = '<ul class="mt-2 text-sm">';
+                        q.statements.forEach((s, i) => {
+                            const userChoice = (u && u[i] !== undefined) ? (u[i] ? 'Đúng' : 'Sai') : 'Trống';
+                            const trueChoice = s.isTrue ? 'Đúng' : 'Sai';
+                            const match = (u && u[i] === s.isTrue);
+                            if(!match) allRight = false;
+                            ansDisplay += `<li>- ${s.text}: Bạn chọn <b class="${match?'text-green-600':'text-red-500'}">${userChoice}</b> (Đáp án: ${trueChoice})</li>`;
+                        });
+                        ansDisplay += '</ul>';
+                    }
+                    isCorrect = allRight;
+                }
+                else {
+                    ansDisplay = `<div class="text-orange-500 italic">Câu tự luận cần giáo viên chấm.</div>`;
+                    isCorrect = null; // Màu vàng
                 }
 
-                // Render
+                // Render nút Palette
+                const btn = document.createElement('button');
+                btn.className = `q-btn ${isCorrect === true ? 'correct' : (isCorrect === false ? 'wrong' : 'partial')}`;
+                btn.textContent = idx + 1;
+                btn.onclick = () => document.getElementById(`sol-q-${idx}`).scrollIntoView({behavior: 'smooth', block: 'center'});
+                palette.appendChild(btn);
+
+                // Render Nội dung
                 const item = document.createElement('div');
+                item.id = `sol-q-${idx}`;
                 item.className = "bg-white p-6 rounded-2xl shadow-sm border border-gray-200";
                 item.innerHTML = `
-                    <div class="font-bold text-gray-500 text-sm mb-2">Câu ${idx + 1} (${q.type === 'mc' ? 'Trắc nghiệm' : (q.type === 'tf' ? 'Đúng sai' : 'Tự luận/Điền')})</div>
-                    <div class="mb-4 text-gray-800">${q.content ? q.content.replace(/\n/g, '<br>') : ''}</div>
-                    ${ansDisplay}
-                    ${q.solution ? `<div class="solution-box"><div class="font-bold text-green-700 mb-1"><i class="fa-solid fa-lightbulb mr-2"></i>Lời giải chi tiết:</div><div class="text-gray-700">${q.solution.replace(/\n/g, '<br>')}</div></div>` : ''}
+                    <div class="font-bold text-gray-500 text-sm mb-2">Câu ${idx + 1} (${q.type.toUpperCase()})</div>
+                    <div class="mb-4 text-gray-800 text-lg">${formatContent(q.content)}</div>
+                    <div class="bg-gray-50 p-3 rounded-lg border border-gray-200 mb-3">${ansDisplay}</div>
+                    ${q.solution ? `<div class="solution-box"><div class="font-bold text-green-700 mb-1"><i class="fa-solid fa-lightbulb mr-2"></i>Lời giải chi tiết:</div><div class="text-gray-700">${formatContent(q.solution)}</div></div>` : ''}
                 `;
                 list.appendChild(item);
             });
@@ -439,7 +502,7 @@
             if(window.MathJax) MathJax.typesetPromise([list]).catch(e=>console.log(e));
         }
         
-        // Buttons Nav
+        // Navigation Buttons
         document.getElementById('prevBtn').onclick = () => { if(currentIndex > 0) renderQuestion(currentIndex - 1); };
         document.getElementById('nextBtn').onclick = () => { if(currentIndex < currentQuestions.length - 1) renderQuestion(currentIndex + 1); };
         document.getElementById('prevBtnMob').onclick = () => { if(currentIndex > 0) renderQuestion(currentIndex - 1); };
@@ -447,11 +510,8 @@
         
         window.togglePaletteMobile = () => {
              const p = document.getElementById('paletteSidebar');
-             if(p.classList.contains('hidden')) {
-                 p.classList.remove('hidden', 'md:flex'); p.classList.add('fixed', 'inset-0', 'z-50', 'w-full', 'flex');
-             } else {
-                 p.classList.add('hidden', 'md:flex'); p.classList.remove('fixed', 'inset-0', 'z-50', 'w-full', 'flex');
-             }
+             if(p.classList.contains('hidden')) { p.classList.remove('hidden', 'md:flex'); p.classList.add('fixed', 'inset-0', 'z-50', 'w-full', 'flex'); }
+             else { p.classList.add('hidden', 'md:flex'); p.classList.remove('fixed', 'inset-0', 'z-50', 'w-full', 'flex'); }
         }
     </script>
 </body>
