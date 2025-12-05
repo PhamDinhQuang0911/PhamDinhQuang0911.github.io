@@ -38,7 +38,7 @@
         .preview-item:hover { border-color: #3B82F6; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); }
         .preview-item.active { border-color: #3B82F6; ring: 2px solid #DBEAFE; background-color: #F0F9FF; }
         
-        /* Quick Palette Compact Styles */
+        /* Quick Palette Styles */
         .palette-container { padding: 0.5rem; background: #F9FAFB; border-bottom: 1px solid #E5E7EB; overflow-y: auto; max-height: 120px; }
         .palette-grid { display: flex; flex-wrap: wrap; gap: 0.25rem; }
         .palette-btn { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; border-radius: 4px; border: 1px solid #D1D5DB; color: #4B5563; transition: all 0.2s; background: white; }
@@ -297,20 +297,31 @@
         window.customAlert = (message, type = 'info') => { return new Promise((resolve) => { modalTitle.innerText = type === 'error' ? 'Lỗi' : 'Thông báo'; modalMsg.innerText = message; modalIcon.innerHTML = type === 'error' ? '<i class="fa-solid fa-triangle-exclamation text-red-500"></i>' : '<i class="fa-solid fa-bell text-blue-500"></i>'; document.getElementById('modalInput').classList.add('hidden'); btnCancel.classList.add('hidden'); btnConfirm.innerText = "Đã hiểu"; modalEl.classList.remove('opacity-0', 'pointer-events-none'); modalBox.classList.remove('scale-95'); modalBox.classList.add('scale-100'); btnConfirm.onclick = () => { resolve(true); modalResolve = null; closeCustomModal(); }; modalResolve = resolve; }); };
         window.customConfirm = (message) => { return new Promise((resolve) => { modalTitle.innerText = "Xác nhận"; modalMsg.innerText = message; modalIcon.innerHTML = '<i class="fa-solid fa-circle-question text-orange-500"></i>'; document.getElementById('modalInput').classList.add('hidden'); btnCancel.classList.remove('hidden'); btnConfirm.innerText = "Đồng ý"; modalEl.classList.remove('opacity-0', 'pointer-events-none'); modalBox.classList.remove('scale-95'); modalBox.classList.add('scale-100'); btnConfirm.onclick = () => { resolve(true); modalResolve = null; closeCustomModal(); }; btnCancel.onclick = () => { resolve(false); modalResolve = null; closeCustomModal(); }; }); };
 
-        // --- CORE FORMATTER: TÁCH RIÊNG TEXT VÀ MATH (KHÔNG PHÁ HỎI LATEX) ---
+        // --- FIX CORE FORMATTER: TÁCH RIÊNG TEXT VÀ MATH ---
+        // Logic: Tách chuỗi theo $...$ hoặc \[...\] hoặc \(...\)
+        // Chỉ replace \n và \\ trong phần TEXT. Phần MATH giữ nguyên.
         function formatContent(text) {
             if (text === null || text === undefined) return "";
             
-            // Tách chuỗi bởi các ký hiệu Toán học: $...$, $$...$$, \(...\), \[...\]
-            const parts = String(text).split(/(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?:\$[^\n\r]*?\$))/g);
+            // 1. Regex split: (math_pattern)
+            // Lưu ý: Math pattern phải cover cả $...$, $$...$$, \(...\), \[...\]
+            // Thứ tự quan trọng: $$ trước $
+            const regex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?:\$[^\n\r]*?\$))/g;
+            
+            const parts = String(text).split(regex);
             
             return parts.map(part => {
-                // Nếu là Toán: Giữ nguyên 100% (MathJax sẽ lo)
-                if (part.trim().startsWith('$') || part.trim().startsWith('\\') || part.trim().startsWith('\\[')) {
+                // Kiểm tra xem part có phải là Math không
+                if (part.trim().startsWith('$') || part.trim().startsWith('\\(') || part.trim().startsWith('\\[')) {
+                    // LÀ MATH: Giữ nguyên 100% (kể cả \\ và \n)
                     return part; 
                 } else {
-                    // Nếu là Văn bản: Mới được thay \n thành <br>
-                    return part.replace(/\n/g, '<br>');
+                    // LÀ TEXT:
+                    // 1. Thay thế \\ bằng <br> (xuống dòng kiểu LaTeX text)
+                    // 2. Thay thế \n bằng <br> (xuống dòng kiểu Enter)
+                    return part
+                        .replace(/\\\\/g, '<br>') 
+                        .replace(/\n/g, '<br>');
                 }
             }).join('');
         }
@@ -325,6 +336,7 @@
             } else { window.location.href = 'index.html'; }
         });
 
+        // --- CORE FUNCTIONS ---
         window.loadExamData = async (id) => {
             try {
                 const docSnap = await getDoc(doc(db, "exams", id));
@@ -375,7 +387,7 @@
             let currentType = '';
             
             window.questions.forEach((q, idx) => {
-                // Palette
+                // FEATURE 3: Compact Quick Palette
                 const pBtn = document.createElement('button');
                 pBtn.className = `palette-btn ${idx === window.currentQIndex ? 'active' : ''}`;
                 pBtn.textContent = idx + 1;
@@ -392,6 +404,7 @@
                     list.appendChild(header);
                 }
 
+                // Render Preview Item
                 const div = document.createElement('div');
                 div.className = `preview-item p-4 rounded-lg mb-3 text-sm relative ${idx === window.currentQIndex ? 'active' : ''}`;
                 div.id = `q-preview-${idx}`;
@@ -440,8 +453,10 @@
         window.saveCurrentQuestionToMemory = () => {
             if (window.currentQIndex === -1 || !window.questions[window.currentQIndex]) return;
             const q = window.questions[window.currentQIndex];
+            
             const contentEl = document.getElementById('editContent');
-            if (!contentEl) return; // Safe check
+            if (!contentEl) return; 
+
             q.content = contentEl.value;
             const solEl = document.getElementById('editSolution');
             if(solEl) q.solution = solEl.value;
@@ -469,34 +484,61 @@
             if (window.currentQIndex !== -1 && window.currentQIndex !== index) saveCurrentQuestionToMemory();
             window.currentQIndex = index;
             renderPreviewList(); 
-            setTimeout(() => { const activeItem = document.getElementById(`q-preview-${index}`); if(activeItem) activeItem.scrollIntoView({behavior: 'smooth', block: 'nearest'}); }, 100);
+            
+            setTimeout(() => {
+                const activeItem = document.getElementById(`q-preview-${index}`);
+                if(activeItem) activeItem.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+            }, 100);
+
             const q = window.questions[index];
             const editor = document.getElementById('editorArea');
             let html = `<div class="mb-4"><label class="form-group-title">Nội dung</label><textarea id="editContent" class="form-input min-h-[120px]" oninput="autoSaveMemory()">${q.content || ''}</textarea></div>`;
+            
             if (q.type === 'mc') {
                 html += `<div class="grid grid-cols-1 gap-3 mb-4">`;
                 const opts = q.options || ["", "", "", ""];
-                opts.forEach((opt, i) => { html += `<div class="flex items-center gap-2"><div class="w-8 h-8 rounded-full border flex items-center justify-center font-bold cursor-pointer ${q.correct === i ? 'bg-blue-600 text-white' : 'bg-gray-50'}" onclick="setCorrectMC(${i})">${String.fromCharCode(65+i)}</div><input type="text" class="form-input mc-option" value="${opt}" placeholder="Phương án ${String.fromCharCode(65+i)}" oninput="autoSaveMemory()"></div>`; });
+                opts.forEach((opt, i) => {
+                    html += `<div class="flex items-center gap-2"><div class="w-8 h-8 rounded-full border flex items-center justify-center font-bold cursor-pointer ${q.correct === i ? 'bg-blue-600 text-white' : 'bg-gray-50'}" onclick="setCorrectMC(${i})">${String.fromCharCode(65+i)}</div><input type="text" class="form-input mc-option" value="${opt}" placeholder="Phương án ${String.fromCharCode(65+i)}" oninput="autoSaveMemory()"></div>`;
+                });
                 html += `</div>`;
             } else if (q.type === 'tf') {
                 html += `<div class="space-y-2 mb-4">`;
                 const stmts = q.statements || [{text:"", isTrue:false}, {text:"", isTrue:false}, {text:"", isTrue:false}, {text:"", isTrue:false}];
-                stmts.forEach((s, i) => { html += `<div class="flex items-center gap-2 border p-2 rounded"><span class="font-bold text-xs text-gray-400 w-4">${i+1}</span><input type="text" class="form-input tf-text" value="${s.text}" oninput="autoSaveMemory()"><label class="flex items-center gap-1"><input type="checkbox" class="w-4 h-4 tf-check" ${s.isTrue?'checked':''} onchange="autoSaveMemory()"><span class="text-xs font-bold text-green-600">Đúng</span></label></div>`; });
+                stmts.forEach((s, i) => {
+                    html += `<div class="flex items-center gap-2 border p-2 rounded"><span class="font-bold text-xs text-gray-400 w-4">${i+1}</span><input type="text" class="form-input tf-text" value="${s.text}" oninput="autoSaveMemory()"><label class="flex items-center gap-1"><input type="checkbox" class="w-4 h-4 tf-check" ${s.isTrue?'checked':''} onchange="autoSaveMemory()"><span class="text-xs font-bold text-green-600">Đúng</span></label></div>`;
+                });
                 html += `</div>`;
             } else if (q.type === 'short') {
                 html += `<div class="mb-4"><label class="form-group-title">Đáp án mẫu</label><input type="text" id="editShortAns" class="form-input font-bold text-green-700" value="${q.answer || ''}" oninput="autoSaveMemory()"></div>`;
             }
+
             html += `<div class="mb-4"><label class="form-group-title">Lời giải</label><textarea id="editSolution" class="form-input min-h-[80px]" oninput="autoSaveMemory()">${q.solution || ''}</textarea></div>`;
             html += `<div class="mb-4 w-1/3"><label class="form-group-title">Điểm</label><input type="number" id="editPoint" class="form-input font-bold text-orange-600" value="${q.point || 0}" step="0.1" oninput="autoSaveMemory()"></div>`;
+            
             editor.innerHTML = html;
         };
 
-        window.addNewQuestion = (type) => { if (window.currentQIndex !== -1) saveCurrentQuestionToMemory(); const newQ = { type: type, content: "", solution: "", point: 0 }; if (type === 'mc') { newQ.options = ["", "", "", ""]; newQ.correct = -1; } if (type === 'tf') { newQ.statements = [{text:"", isTrue:false}, {text:"", isTrue:false}, {text:"", isTrue:false}, {text:"", isTrue:false}]; } if (type === 'short') { newQ.answer = ""; } window.questions.push(newQ); sortQuestionsByType(); renderPreviewList(); loadQuestionToEditor(window.questions.length - 1); };
+        window.addNewQuestion = (type) => {
+            if (window.currentQIndex !== -1) saveCurrentQuestionToMemory();
+            const newQ = { type: type, content: "", solution: "", point: 0 };
+            if (type === 'mc') { newQ.options = ["", "", "", ""]; newQ.correct = -1; }
+            if (type === 'tf') { newQ.statements = [{text:"", isTrue:false}, {text:"", isTrue:false}, {text:"", isTrue:false}, {text:"", isTrue:false}]; }
+            if (type === 'short') { newQ.answer = ""; }
+            window.questions.push(newQ);
+            sortQuestionsByType(); 
+            renderPreviewList();
+            loadQuestionToEditor(window.questions.length - 1); 
+        };
+
         window.autoSaveMemory = () => { saveCurrentQuestionToMemory(); };
         window.setCorrectMC = (idx) => { window.questions[window.currentQIndex].correct = idx; loadQuestionToEditor(window.currentQIndex); };
         window.deleteCurrentQuestion = async () => { if (window.currentQIndex === -1) return; if(await window.customConfirm("Xóa câu hỏi này?")) { window.questions.splice(window.currentQIndex, 1); window.currentQIndex = -1; renderPreviewList(); document.getElementById('editorArea').innerHTML = ''; } };
 
-        function cleanLatex(text) { if (!text) return ""; let cleaned = text.replace(/^%.*$/gm, '').replace(/(?<!\\)%.*/g, '').replace(/^\s*\[.*?\]/gm, ''); return cleaned.trim(); }
+        function cleanLatex(text) {
+            if (!text) return "";
+            let cleaned = text.replace(/^%.*$/gm, '').replace(/(?<!\\)%.*/g, '').replace(/^\s*\[.*?\]/gm, '');
+            return cleaned.trim();
+        }
         function extractBracedContent(text) { let results = []; let braceCount = 0; let startIndex = -1; for (let i = 0; i < text.length; i++) { if (text[i] === '{') { if (braceCount === 0) startIndex = i + 1; braceCount++; } else if (text[i] === '}') { braceCount--; if (braceCount === 0 && startIndex !== -1) { results.push(text.substring(startIndex, i)); startIndex = -1; } } } return results; }
 
         window.handleTexUpload = (input) => {
