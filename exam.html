@@ -55,6 +55,10 @@
         .solution-box { border-left: 4px solid #10B981; background-color: #ECFDF5; padding: 1rem; border-radius: 0.5rem; margin-top: 1rem; }
         .modal { transition: opacity 0.2s ease; }
         .modal.opacity-0 { pointer-events: none; }
+        
+        /* History Table Styles */
+        .history-row:nth-child(even) { background-color: #F9FAFB; }
+        .history-row:hover { background-color: #EFF6FF; }
     </style>
 </head>
 <body class="h-screen flex flex-col overflow-hidden text-gray-800 bg-gray-50">
@@ -149,11 +153,29 @@
     </main>
 
     <div id="solutionView" class="hidden fixed inset-0 z-[90] bg-gray-50 flex h-full">
-        <aside class="w-80 bg-white border-r border-gray-200 flex flex-col shrink-0 hidden md:flex">
-            <div class="p-5 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
+        <aside class="w-80 bg-white border-r border-gray-200 flex flex-col shrink-0 hidden md:flex bg-gray-50">
+            <div class="p-5 border-b border-gray-200 bg-white flex justify-between items-center shadow-sm">
                 <h3 class="font-bold text-gray-700">Kết quả chi tiết</h3>
                 <button onclick="window.location.href='dashboard.html'" class="text-xs font-bold text-gray-500 hover:text-blue-600">Thoát</button>
             </div>
+
+            <div class="p-4 border-b border-gray-200 bg-white">
+                <h4 class="text-xs font-bold text-blue-600 uppercase mb-2 flex items-center gap-2"><i class="fa-solid fa-clock-rotate-left"></i> Lịch sử làm bài</h4>
+                <div class="bg-gray-50 rounded-lg border border-gray-100 overflow-hidden">
+                    <table class="w-full text-[10px] text-left text-gray-600">
+                        <thead class="bg-gray-100 text-gray-500 font-bold uppercase">
+                            <tr>
+                                <th class="px-2 py-1.5">Lần</th>
+                                <th class="px-2 py-1.5 text-center">Điểm</th>
+                                <th class="px-2 py-1.5 text-center">Vi phạm</th>
+                                <th class="px-2 py-1.5 text-right">Ngày nộp</th>
+                            </tr>
+                        </thead>
+                        <tbody id="historyTableBody" class="divide-y divide-gray-100"></tbody>
+                    </table>
+                </div>
+            </div>
+
             <div class="p-3 border-b border-gray-100 bg-white text-xs flex gap-3 text-gray-500 justify-center">
                 <div class="flex items-center gap-1"><span class="w-3 h-3 bg-green-500 rounded-sm"></span> Đúng</div>
                 <div class="flex items-center gap-1"><span class="w-3 h-3 bg-red-500 rounded-sm"></span> Sai</div>
@@ -202,9 +224,12 @@
 
     <div id="resultModal" class="fixed inset-0 z-[70] flex items-center justify-center bg-gray-900 bg-opacity-80 hidden opacity-0 transition-opacity duration-300">
         <div class="bg-white rounded-[2rem] p-8 max-w-sm w-full text-center shadow-2xl transform scale-90 transition-transform duration-300 relative" id="resultModalContent">
-            <div class="w-24 h-24 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-6 text-5xl shadow-inner animate-bounce">🏆</div>
-            <h2 class="text-3xl font-extrabold text-gray-800 mb-2">Hoàn thành!</h2>
-            <p class="text-gray-500 mb-6" id="resultMsg">Đã nộp bài thành công.</p>
+            <div id="resultIcon" class="w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-6 text-5xl shadow-inner animate-bounce">💪</div>
+            
+            <h2 class="text-2xl font-extrabold text-gray-800 mb-2" id="resultTitle">Hoàn thành!</h2>
+            
+            <p class="text-gray-500 mb-6 text-sm" id="resultMsg">Đã nộp bài thành công.</p>
+            
             <div id="scoreSection" class="bg-gray-50 rounded-2xl p-6 mb-6 border border-gray-100 hidden">
                 <p class="text-sm text-gray-400 uppercase font-bold tracking-wide mb-1">Điểm số</p>
                 <div class="text-6xl font-black text-orange-custom" id="scoreDisplay">--</div>
@@ -228,6 +253,7 @@
         let currentUser, examData, examId;
         let currentQuestions = [], userAnswers = {}, flaggedQuestions = {};
         let currentIndex = 0, timerInterval, timeLeft = 0, cheatCount = 0, isExamActive = false;
+        window.examHistory = []; // Store history
 
         const dom = { lobby: document.getElementById('lobbyScreen'), header: document.getElementById('examHeader'), main: document.getElementById('examMain'), content: document.getElementById('questionContent'), options: document.getElementById('answerOptions'), palette: document.getElementById('questionPalette'), timer: document.getElementById('timer'), badge: document.getElementById('questionTypeBadge') };
 
@@ -244,25 +270,14 @@
         window.closeCustomModal = () => { modalEl.classList.add('opacity-0', 'pointer-events-none'); modalBox.classList.remove('scale-100'); modalBox.classList.add('scale-95'); if (modalResolve) { modalResolve(null); modalResolve = null; } };
         window.customAlert = (message, type = 'info') => { return new Promise((resolve) => { modalTitle.innerText = type === 'error' ? 'Lỗi' : 'Thông báo'; modalMsg.innerText = message; modalIcon.innerHTML = type === 'error' ? '<i class="fa-solid fa-triangle-exclamation text-red-500"></i>' : '<i class="fa-solid fa-bell text-blue-500"></i>'; document.getElementById('modalInput').classList.add('hidden'); btnCancel.classList.add('hidden'); btnConfirm.innerText = "Đã hiểu"; modalEl.classList.remove('opacity-0', 'pointer-events-none'); modalBox.classList.remove('scale-95'); modalBox.classList.add('scale-100'); btnConfirm.onclick = () => { resolve(true); modalResolve = null; closeCustomModal(); }; modalResolve = resolve; }); };
 
-        // --- FIX: SPLIT CONTENT BY MATH TAGS TO PRESERVE LATEX ---
+        // FIX: Split Math/Text
         function formatContent(text) {
             if (text === null || text === undefined) return "";
-            
-            // Regex: Tách chuỗi bởi $...$, $$...$$, \(...\), \[...\]
-            // Phần trong ngoặc () của split sẽ được giữ lại trong mảng kết quả
             const regex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?:\$[^\n\r]*?\$))/g;
             const parts = String(text).split(regex);
-            
             return parts.map(part => {
-                // Nếu là công thức Toán (bắt đầu bằng $, \(, \[): Giữ nguyên 100% (kể cả \\)
-                if (part.trim().startsWith('$') || part.trim().startsWith('\\(') || part.trim().startsWith('\\[')) {
-                    return part; 
-                } else {
-                    // Nếu là văn bản thường:
-                    // 1. Thay \\ thành <br> (nếu giáo viên cố tình dùng \\ để xuống dòng văn bản)
-                    // 2. Thay \n thành <br> (xuống dòng Enter)
-                    return part.replace(/\\\\/g, '<br>').replace(/\n/g, '<br>');
-                }
+                if (part.trim().startsWith('$') || part.trim().startsWith('\\(') || part.trim().startsWith('\\[')) return part; 
+                else return part.replace(/\\\\/g, '<br>').replace(/\n/g, '<br>');
             }).join('');
         }
 
@@ -285,18 +300,19 @@
                 
                 const q = query(collection(db, "results"), where("examId","==",id), where("studentId","==",currentUser.uid));
                 const snapshot = await getDocs(q);
-                const att = snapshot.size;
+                
+                // Lưu lịch sử vào biến toàn cục
+                window.examHistory = [];
+                snapshot.forEach(doc => window.examHistory.push(doc.data()));
+                window.examHistory.sort((a, b) => new Date(b.submittedAt) - new Date(a.submittedAt));
+
+                const att = window.examHistory.length;
 
                 const urlParams = new URLSearchParams(window.location.search);
                 if (urlParams.get('mode') === 'review') {
                     if (att > 0) {
-                        const resultsList = [];
-                        snapshot.forEach(doc => resultsList.push(doc.data()));
-                        resultsList.sort((a, b) => new Date(b.submittedAt) - new Date(a.submittedAt));
-                        
                         currentQuestions = examData.questions || [];
-                        userAnswers = resultsList[0].answers || {};
-                        
+                        userAnswers = window.examHistory[0].answers || {};
                         document.getElementById('lobbyScreen').classList.add('hidden');
                         viewDetailSolutions(); 
                         return;
@@ -389,13 +405,8 @@
                 const isE = q.type==='essay';
                 const el = document.createElement(isE?'textarea':'input');
                 el.className = `w-full p-4 border-2 rounded-xl focus:border-blue-500 outline-none text-gray-800 ${isE?'min-h-[150px]':''}`;
-                if(!isE) { 
-                    el.type = 'text'; 
-                    // FIX: THÊM PLACEHOLDER CHO TRẢ LỜI NGẮN
-                    el.placeholder = "Chỉ nhập đáp án VD: 10,2"; 
-                } else {
-                    el.placeholder = "Nhập bài làm tự luận...";
-                }
+                if(!isE) { el.type = 'text'; el.placeholder = "Chỉ nhập đáp án VD: 10,2"; } 
+                else { el.placeholder = "Nhập bài làm tự luận..."; }
                 el.value = userAnswers[idx] || '';
                 el.onchange = (e) => saveAnswer(idx, e.target.value);
                 dom.options.appendChild(el);
@@ -454,6 +465,7 @@
             } else { submitReal(); }
         }
 
+        // --- FEATURE 2 & 3: DYNAMIC FEEDBACK & VISUALS ---
         window.submitReal = async (auto = false) => {
             isExamActive = false;
             clearInterval(timerInterval);
@@ -462,8 +474,6 @@
 
             let totalScore = 0;
             let correctCount = 0;
-
-            // FIX: Hàm chuẩn hóa dữ liệu Short Answer để so sánh
             const normalize = (str) => String(str).replace(/\$| /g, '').toLowerCase().trim();
 
             currentQuestions.forEach((q, i) => {
@@ -471,22 +481,13 @@
                 const qPoint = parseFloat(q.point) || 0;
 
                 if (q.type === 'mc') {
-                    if (u === q.correct) {
-                        totalScore += qPoint;
-                        correctCount++;
-                    }
+                    if (u === q.correct) { totalScore += qPoint; correctCount++; }
                 } else if (q.type === 'short') {
-                    // FIX: So sánh chuỗi đã chuẩn hóa (bỏ $, bỏ space)
-                    if (q.answer && u && normalize(u) === normalize(q.answer)) {
-                        totalScore += qPoint;
-                        correctCount++;
-                    }
+                    if (q.answer && u && normalize(u) === normalize(q.answer)) { totalScore += qPoint; correctCount++; }
                 } else if (q.type === 'tf') {
                     let matches = 0;
                     if (Array.isArray(u) && q.statements) {
-                        q.statements.forEach((s, si) => {
-                            if (u[si] === s.isTrue) matches++;
-                        });
+                        q.statements.forEach((s, si) => { if (u[si] === s.isTrue) matches++; });
                     }
                     let ratio = 0;
                     if (matches === 1) ratio = 0.1;
@@ -499,6 +500,37 @@
             });
 
             const finalScore = parseFloat(totalScore.toFixed(2));
+            
+            // --- NEW LOGIC: FEEDBACK & TROPHY ---
+            const resultIcon = document.getElementById('resultIcon');
+            const resultTitle = document.getElementById('resultTitle');
+            const resultMsg = document.getElementById('resultMsg');
+
+            if (finalScore >= 9) {
+                resultIcon.textContent = "🏆"; // Gold
+                resultIcon.className = "w-24 h-24 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-6 text-5xl shadow-inner animate-bounce";
+                resultTitle.textContent = "Tuyệt vời! Xuất sắc!";
+                resultMsg.textContent = "Điểm số ấn tượng! Em là niềm tự hào của lớp.";
+                resultTitle.className = "text-3xl font-extrabold text-yellow-600 mb-2";
+            } else if (finalScore >= 7) {
+                resultIcon.textContent = "🥈"; // Silver
+                resultIcon.className = "w-24 h-24 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-6 text-5xl shadow-inner animate-pulse";
+                resultTitle.textContent = "Làm tốt lắm!";
+                resultMsg.textContent = "Kết quả khá tốt, hãy cố gắng thêm chút nữa nhé.";
+                resultTitle.className = "text-3xl font-extrabold text-blue-600 mb-2";
+            } else if (finalScore >= 5) {
+                resultIcon.textContent = "🥉"; // Bronze
+                resultIcon.className = "w-24 h-24 bg-orange-100 rounded-full flex items-center justify-center mx-auto mb-6 text-5xl shadow-inner";
+                resultTitle.textContent = "Đạt yêu cầu";
+                resultMsg.textContent = "Cần ôn tập kỹ hơn để đạt điểm cao hơn.";
+                resultTitle.className = "text-3xl font-extrabold text-orange-600 mb-2";
+            } else {
+                resultIcon.textContent = "💪"; // Muscle/Encourage
+                resultIcon.className = "w-24 h-24 bg-gray-200 rounded-full flex items-center justify-center mx-auto mb-6 text-5xl shadow-inner";
+                resultTitle.textContent = "Cần cố gắng!";
+                resultMsg.textContent = "Đừng nản chí! Hãy xem lại bài và ôn luyện thêm.";
+                resultTitle.className = "text-3xl font-extrabold text-gray-600 mb-2";
+            }
 
             try {
                 await addDoc(collection(db, "results"), {
@@ -539,8 +571,26 @@
             
             list.innerHTML = '';
             palette.innerHTML = '';
+            
+            // --- FEATURE 1: HISTORY TABLE ---
+            const historyBody = document.getElementById('historyTableBody');
+            historyBody.innerHTML = '';
+            if (window.examHistory && window.examHistory.length > 0) {
+                window.examHistory.forEach((h, idx) => {
+                    const date = new Date(h.submittedAt);
+                    const dateStr = `${date.getDate()}/${date.getMonth()+1} ${date.getHours()}:${date.getMinutes()}`;
+                    const row = `<tr class="history-row border-b border-gray-50 last:border-0">
+                        <td class="px-2 py-2 font-bold text-gray-500">#${window.examHistory.length - idx}</td>
+                        <td class="px-2 py-2 text-center font-bold text-blue-600">${h.score}</td>
+                        <td class="px-2 py-2 text-center text-red-500 font-bold">${h.cheatCount}</td>
+                        <td class="px-2 py-2 text-right text-gray-400 text-[9px]">${dateStr}</td>
+                    </tr>`;
+                    historyBody.innerHTML += row;
+                });
+            } else {
+                historyBody.innerHTML = '<tr><td colspan="4" class="text-center py-2 text-gray-400">Chưa có lịch sử</td></tr>';
+            }
 
-            // FIX: Hàm chuẩn hóa để hiển thị đúng sai
             const normalize = (str) => String(str).replace(/\$| /g, '').toLowerCase().trim();
 
             currentQuestions.forEach((q, idx) => {
@@ -555,7 +605,6 @@
                     ansDisplay = `<div>Bạn chọn: <b class="${isCorrect?'text-green-600':'text-red-500'}">${charUser}</b> | Đáp án: <b class="text-green-600">${charTrue}</b></div>`;
                 }
                 else if(q.type === 'short') {
-                    // FIX logic màu sắc Short answer
                     isCorrect = (q.answer && u && normalize(u) === normalize(q.answer));
                     ansDisplay = `<div>Bạn điền: <b class="${isCorrect?'text-green-600':'text-red-500'}">${u||'Trống'}</b> | Đáp án: <b class="text-green-600">${q.answer}</b></div>`;
                 }
