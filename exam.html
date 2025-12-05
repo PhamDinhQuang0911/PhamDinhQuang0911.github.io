@@ -48,12 +48,10 @@
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         .animate-fade-in { animation: fadeIn 0.5s ease-out forwards; }
         
-        /* FIX MATHJAX DISPLAY */
         mjx-container { display: inline-block !important; margin: 0 2px !important; }
         mjx-container[display="true"] { display: block !important; margin: 1em 0 !important; overflow-x: auto; max-width: 100%; }
 
         .solution-box { border-left: 4px solid #10B981; background-color: #ECFDF5; padding: 1rem; border-radius: 0.5rem; margin-top: 1rem; }
-        
         .modal { transition: opacity 0.2s ease; }
         .modal.opacity-0 { pointer-events: none; }
     </style>
@@ -237,7 +235,6 @@
         // FIX: Xử lý chuỗi an toàn - GIỮ LẠI \\ CHO MATHJAX
         function formatContent(text) {
             if (text === null || text === undefined) return "";
-            // Chỉ thay thế \n (xuống dòng của text) thành <br>, giữ nguyên \\ để MathJax xử lý ma trận/hệ pt
             return String(text).replace(/\n/g, '<br>');
         }
 
@@ -423,32 +420,61 @@
             } else { submitReal(); }
         }
 
+        // --- [QUAN TRỌNG] LOGIC CHẤM ĐIỂM MỚI 2025 ---
         window.submitReal = async (auto = false) => {
             isExamActive = false;
             clearInterval(timerInterval);
             document.removeEventListener("visibilitychange", handleCheat);
             window.removeEventListener("blur", handleCheat);
 
-            let correct = 0;
-            currentQuestions.forEach((q,i) => {
+            let totalScore = 0;
+            let correctCount = 0;
+
+            currentQuestions.forEach((q, i) => {
                 const u = userAnswers[i];
-                if(q.type==='mc' && u===q.correct) correct++;
-                if(q.type==='short' && q.answer && u && String(u).trim().toLowerCase()===String(q.answer).trim().toLowerCase()) correct++;
-                if(q.type==='tf' && Array.isArray(u) && q.statements) { 
-                    let ok = true;
-                    if(u.length < q.statements.length) ok = false;
-                    else q.statements.forEach((s,si) => { if(u[si] !== s.isTrue) ok = false; });
-                    if(ok) correct++;
+                const qPoint = parseFloat(q.point) || 0; // Lấy điểm cấu hình từ Editor
+
+                if (q.type === 'mc') {
+                    if (u === q.correct) {
+                        totalScore += qPoint;
+                        correctCount++;
+                    }
+                } else if (q.type === 'short') {
+                    if (q.answer && u && String(u).trim().toLowerCase() === String(q.answer).trim().toLowerCase()) {
+                        totalScore += qPoint;
+                        correctCount++;
+                    }
+                } else if (q.type === 'tf') {
+                    // Logic chấm điểm Đúng/Sai lũy tiến
+                    let matches = 0;
+                    if (Array.isArray(u) && q.statements) {
+                        q.statements.forEach((s, si) => {
+                            if (u[si] === s.isTrue) matches++;
+                        });
+                    }
+                    
+                    // Quy tắc: 1 ý -> 10%, 2 ý -> 25%, 3 ý -> 50%, 4 ý -> 100%
+                    let ratio = 0;
+                    if (matches === 1) ratio = 0.1;
+                    else if (matches === 2) ratio = 0.25;
+                    else if (matches === 3) ratio = 0.5;
+                    else if (matches === 4) ratio = 1.0;
+                    
+                    totalScore += (qPoint * ratio);
+                    if (matches === 4) correctCount++;
                 }
+                // Essay: Tự luận không chấm tự động, điểm = 0 (giáo viên chấm sau)
             });
-            const score = (correct * (10/Math.max(currentQuestions.length, 1))).toFixed(2);
+
+            // Làm tròn 2 chữ số thập phân
+            const finalScore = parseFloat(totalScore.toFixed(2));
 
             try {
                 await addDoc(collection(db, "results"), {
                     examId, 
                     studentId: currentUser.uid,
                     studentName: currentUser.displayName || currentUser.email,
-                    score: parseFloat(score),
+                    score: finalScore,
                     answers: userAnswers,
                     cheatCount,
                     submittedAt: new Date().toISOString()
@@ -459,8 +485,8 @@
 
                 if(examData.showScore === 'immediate' || (examData.showScore === 'after_exam' && timeLeft <= 0)) {
                     document.getElementById('scoreSection').classList.remove('hidden');
-                    document.getElementById('scoreDisplay').textContent = score;
-                    document.getElementById('correctCount').textContent = correct;
+                    document.getElementById('scoreDisplay').textContent = finalScore;
+                    document.getElementById('correctCount').textContent = correctCount;
                     document.getElementById('totalCount').textContent = currentQuestions.length;
                 }
                 if(examData.showResult === 'immediate' || (examData.showResult === 'after_exam' && timeLeft <= 0)) {
@@ -530,7 +556,7 @@
                 item.id = `sol-q-${idx}`;
                 item.className = "bg-white p-6 rounded-2xl shadow-sm border border-gray-200";
                 item.innerHTML = `
-                    <div class="font-bold text-gray-500 text-sm mb-2">Câu ${idx + 1} (${q.type.toUpperCase()})</div>
+                    <div class="font-bold text-gray-500 text-sm mb-2">Câu ${idx + 1} (${q.type.toUpperCase()}) - ${q.point || 0}đ</div>
                     <div class="mb-4 text-gray-800 text-lg">${formatContent(q.content)}</div>
                     <div class="bg-gray-50 p-3 rounded-lg border border-gray-200 mb-3">${ansDisplay}</div>
                     ${q.solution ? `<div class="solution-box"><div class="font-bold text-green-700 mb-1"><i class="fa-solid fa-lightbulb mr-2"></i>Lời giải chi tiết:</div><div class="text-gray-700">${formatContent(q.solution)}</div></div>` : ''}
