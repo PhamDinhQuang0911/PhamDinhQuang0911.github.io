@@ -7,7 +7,6 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-    
     <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Pacifico&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
@@ -40,10 +39,8 @@
         .preview-item:hover { border-color: #3B82F6; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); }
         .preview-item.active { border-color: #3B82F6; ring: 2px solid #DBEAFE; background-color: #F0F9FF; }
         
-        /* Sticky Header Fix */
         .group-header { position: sticky; top: 0; background-color: #F9FAFB; z-index: 20; padding-top: 10px; padding-bottom: 5px; border-bottom: 1px solid #E5E7EB; }
 
-        /* Palette */
         .palette-container { padding: 0.5rem; background: #F9FAFB; border-bottom: 1px solid #E5E7EB; overflow-y: auto; max-height: 120px; }
         .palette-grid { display: flex; flex-wrap: wrap; gap: 0.25rem; }
         .palette-btn { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; border-radius: 4px; border: 1px solid #D1D5DB; color: #4B5563; transition: all 0.2s; background: white; }
@@ -62,7 +59,6 @@
         .toggle-checkbox:checked { right: 0; border-color: #68D391; }
         .toggle-checkbox:checked + .toggle-label { background-color: #68D391; }
         
-        /* Stats Progress Bar */
         .progress-bar-bg { background-color: #E5E7EB; border-radius: 9999px; height: 8px; overflow: hidden; }
         .progress-bar-fill { height: 100%; border-radius: 9999px; transition: width 0.5s ease; }
     </style>
@@ -214,7 +210,7 @@
 
                 <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
                     <div class="bg-white p-5 rounded-xl shadow-sm border-l-4 border-blue-500">
-                        <p class="text-gray-500 text-xs uppercase font-bold">Tổng bài nộp</p>
+                        <p class="text-gray-500 text-xs uppercase font-bold">Học sinh đã nộp</p>
                         <h3 class="text-3xl font-black text-gray-800 mt-1" id="statTotalSubmissions">0</h3>
                     </div>
                     <div class="bg-white p-5 rounded-xl shadow-sm border-l-4 border-green-500">
@@ -248,7 +244,7 @@
                     <div class="p-4 border-b border-gray-100 flex flex-col md:flex-row gap-4 justify-between bg-gray-50">
                         <div class="flex gap-2">
                             <button onclick="filterStats('all')" class="px-3 py-1.5 rounded-lg text-sm font-bold bg-blue-600 text-white shadow-sm" id="filterBtnAll">Tất cả</button>
-                            <button onclick="filterStats('class')" class="px-3 py-1.5 rounded-lg text-sm font-bold bg-white text-gray-600 border hover:bg-gray-100" id="filterBtnClass">Theo lớp</button>
+                            <button onclick="filterStats('class')" class="hidden px-3 py-1.5 rounded-lg text-sm font-bold bg-white text-gray-600 border hover:bg-gray-100" id="filterBtnClass">Theo lớp</button>
                         </div>
                         <div class="flex gap-2">
                             <select id="sortStats" class="form-input text-sm py-1.5 w-40" onchange="renderStatsTable()">
@@ -263,8 +259,8 @@
                             <thead class="bg-gray-100 text-gray-700 uppercase text-xs font-bold">
                                 <tr>
                                     <th class="px-6 py-3">Học sinh</th>
-                                    <th class="px-6 py-3 text-center">Điểm số</th>
-                                    <th class="px-6 py-3 text-center">Thời gian làm</th>
+                                    <th class="px-6 py-3 text-center">Điểm (Cao nhất)</th>
+                                    <th class="px-6 py-3 text-center">Số lượt</th>
                                     <th class="px-6 py-3 text-right">Ngày nộp</th>
                                 </tr>
                             </thead>
@@ -275,6 +271,16 @@
             </div>
         </div>
     </main>
+
+    <div id="historyModal" class="modal opacity-0 pointer-events-none fixed inset-0 z-[110] flex items-center justify-center bg-gray-900 bg-opacity-60 px-4">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-md transform scale-95 transition-transform duration-300 flex flex-col max-h-[80vh]">
+            <div class="p-4 border-b border-gray-100 flex justify-between items-center bg-blue-50 rounded-t-xl">
+                <h3 class="font-bold text-blue-800" id="histModalTitle">Lịch sử làm bài</h3>
+                <button onclick="closeHistoryModal()" class="text-gray-400 hover:text-red-500"><i class="fa-solid fa-times"></i></button>
+            </div>
+            <div class="p-4 overflow-y-auto" id="histModalContent"></div>
+        </div>
+    </div>
 
     <div id="customModal" class="fixed inset-0 z-[100] flex items-center justify-center opacity-0 pointer-events-none transition-opacity duration-300 px-4">
         <div class="absolute inset-0 bg-gray-900 bg-opacity-50 backdrop-blur-sm"></div>
@@ -358,9 +364,12 @@
         const app = initializeApp(firebaseConfig); const auth = getAuth(app); const db = getFirestore(app);
         
         let currentUser = null, currentExamId = null;
-        window.questions = []; // SINGLE SOURCE
+        window.questions = [];
         window.currentQIndex = -1;
-        let examResults = [], classStudentList = [];
+        
+        // STATS GLOBAL VARS
+        let statsMap = {}; // Map unique students
+        let classStudentList = []; // Full list from class
 
         // MODAL SYSTEM
         let modalResolve = null;
@@ -376,7 +385,6 @@
         window.customAlert = (message, type = 'info') => { return new Promise((resolve) => { modalTitle.innerText = type === 'error' ? 'Lỗi' : 'Thông báo'; modalMsg.innerText = message; modalIcon.innerHTML = type === 'error' ? '<i class="fa-solid fa-triangle-exclamation text-red-500"></i>' : '<i class="fa-solid fa-bell text-blue-500"></i>'; document.getElementById('modalInput').classList.add('hidden'); btnCancel.classList.add('hidden'); btnConfirm.innerText = "Đã hiểu"; modalEl.classList.remove('opacity-0', 'pointer-events-none'); modalBox.classList.remove('scale-95'); modalBox.classList.add('scale-100'); btnConfirm.onclick = () => { resolve(true); modalResolve = null; closeCustomModal(); }; modalResolve = resolve; }); };
         window.customConfirm = (message) => { return new Promise((resolve) => { modalTitle.innerText = "Xác nhận"; modalMsg.innerText = message; modalIcon.innerHTML = '<i class="fa-solid fa-circle-question text-orange-500"></i>'; document.getElementById('modalInput').classList.add('hidden'); btnCancel.classList.remove('hidden'); btnConfirm.innerText = "Đồng ý"; modalEl.classList.remove('opacity-0', 'pointer-events-none'); modalBox.classList.remove('scale-95'); modalBox.classList.add('scale-100'); btnConfirm.onclick = () => { resolve(true); modalResolve = null; closeCustomModal(); }; btnCancel.onclick = () => { resolve(false); modalResolve = null; closeCustomModal(); }; }); };
 
-        // FIX: SPLIT CONTENT BY MATH TAGS TO PRESERVE LATEX
         function formatContent(text) {
             if (text === null || text === undefined) return "";
             const regex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?:\$[^\n\r]*?\$))/g;
@@ -407,20 +415,42 @@
                     document.getElementById('settingGrade').value = data.grade || '12';
                     document.getElementById('settingSubject').value = data.subject || 'Toán học';
                     document.getElementById('settingDuration').value = data.duration || 45;
+                    document.getElementById('settingPurpose').value = data.purpose || 'exam';
+                    document.getElementById('settingStartTime').value = data.startTime || '';
+                    document.getElementById('settingEndTime').value = data.endTime || '';
                     document.getElementById('settingPassword').value = data.password || '';
                     
-                    // FIX: LOAD CHECKBOX & ATTEMPTS CORRECTLY
                     document.getElementById('settingAttempts').value = (data.attempts !== undefined) ? data.attempts : 1;
                     document.getElementById('settingProctoring').checked = (data.proctoring === true);
                     document.getElementById('settingShuffle').checked = (data.shuffle !== false);
 
                     if(data.showScore) document.querySelector(`input[name="settingShowScore"][value="${data.showScore}"]`).checked = true;
                     if(data.showResult) document.querySelector(`input[name="settingShowResult"][value="${data.showResult}"]`).checked = true;
+                    
+                    // FIX CLASS TAB LOGIC
+                    const filterBtn = document.getElementById('filterBtnClass');
                     if(data.accessType) {
                         document.querySelector(`input[name="settingAccess"][value="${data.accessType}"]`).checked = true;
                         window.togglePrivasySettings(data.accessType);
+                        if (data.accessType === 'class') {
+                            filterBtn.classList.remove('hidden');
+                        } else {
+                            filterBtn.classList.add('hidden');
+                        }
                     }
-                    if(data.allowedClassId) setTimeout(() => document.getElementById('settingClassSelect').value = data.allowedClassId, 500);
+                    
+                    if(data.allowedClassId) {
+                        setTimeout(async () => { 
+                            document.getElementById('settingClassSelect').value = data.allowedClassId;
+                            // Update Button Text
+                            const cls = await getDoc(doc(db, "classes", data.allowedClassId));
+                            if(cls.exists()) {
+                                filterBtn.textContent = cls.data().name; // Change "Theo lớp" to "Class Name"
+                                // Fetch full class list for stats
+                                classStudentList = cls.data().students || [];
+                            }
+                        }, 500);
+                    }
                     
                     window.questions = data.questions || [];
                     sortQuestionsByType();
@@ -467,7 +497,6 @@
                 pBtn.onclick = () => loadQuestionToEditor(idx);
                 palette.appendChild(pBtn);
 
-                // FIX: STICKY HEADER
                 let typeLabel = q.type === 'mc' ? 'TRẮC NGHIỆM' : (q.type === 'tf' ? 'ĐÚNG/SAI' : (q.type === 'short' ? 'TRẢ LỜI NGẮN' : 'TỰ LUẬN'));
                 if (q.type !== currentType) {
                     currentType = q.type;
@@ -631,6 +660,7 @@
             if (window.currentQIndex !== -1) saveCurrentQuestionToMemory(); 
             const title = document.getElementById('settingTitle').value;
             if(!title) return window.customAlert("Vui lòng nhập tên đề thi!", "error");
+
             const btn = status === 'published' ? document.getElementById('btnPublish') : document.getElementById('btnSaveDraft');
             const originalText = btn.innerHTML; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> ...'; btn.disabled = true;
 
@@ -671,57 +701,49 @@
             } catch(e) { console.error(e); window.customAlert("Lỗi lưu: " + e.message, "error"); } finally { btn.innerHTML = originalText; btn.disabled = false; }
         }
 
-        // --- FEATURE 3: STATISTICS & EXCEL EXPORT ---
+        // --- FEATURE 3: STATISTICS ---
         window.loadStats = async () => {
             if (!currentExamId) return;
             const qRes = query(collection(db, "results"), where("examId", "==", currentExamId));
             const snapRes = await getDocs(qRes);
-            examResults = [];
-            snapRes.forEach(doc => examResults.push(doc.data()));
+            
+            // Process raw results to group by student and find highest score
+            statsMap = {}; 
+            snapRes.forEach(doc => {
+                const r = doc.data();
+                // Use studentId (uid) as key. If unavailable, fallback to name (not recommended but fallback)
+                const key = r.studentId || r.studentName;
+                
+                if (!statsMap[key]) {
+                    statsMap[key] = { 
+                        ...r, 
+                        attempts: [r], 
+                        bestScore: r.score 
+                    };
+                } else {
+                    statsMap[key].attempts.push(r);
+                    if (r.score > statsMap[key].bestScore) {
+                        statsMap[key].bestScore = r.score; // Update best score
+                        // Update other display fields to match best attempt if desired, or keep latest?
+                        // Usually stats show Best Score but Last Attempt status. Let's show Best Score in table.
+                        statsMap[key].score = r.score; 
+                    }
+                }
+            });
 
-            const allowedClassId = document.getElementById('settingClassSelect').value;
-            classStudentList = [];
-            if (allowedClassId) {
-                const clsSnap = await getDoc(doc(db, "classes", allowedClassId));
-                if (clsSnap.exists()) classStudentList = clsSnap.data().students || [];
-            }
             renderStatsDashboard();
         };
 
-        // NEW: ANALYZE QUESTIONS (Đúng/Sai từng câu)
         window.renderStatsDashboard = () => {
-            const totalSubs = examResults.length;
+            // Use processed map
+            const uniqueStudents = Object.values(statsMap);
+            const totalSubs = uniqueStudents.length;
+            
             let totalScore = 0;
-            
-            // Question Analysis Data
-            const questionStats = window.questions.map(() => ({ correct: 0, total: 0 }));
-
-            examResults.forEach(r => {
-                totalScore += r.score;
-                // Analyze each answer
-                if (r.answers) {
-                    window.questions.forEach((q, idx) => {
-                        const u = r.answers[idx];
-                        if (u !== undefined && u !== null) {
-                            questionStats[idx].total++;
-                            // Simple correctness check
-                            let isCorrect = false;
-                            if (q.type === 'mc' && u === q.correct) isCorrect = true;
-                            else if (q.type === 'short' && q.answer && String(u).trim().toLowerCase() === String(q.answer).trim().toLowerCase()) isCorrect = true;
-                            else if (q.type === 'tf') {
-                                // TF is tricky, count as correct if full marks? Or avg? Let's count full correct for simplicity here
-                                let matches = 0;
-                                if(Array.isArray(u)) q.statements.forEach((s, i) => { if(u[i]===s.isTrue) matches++; });
-                                if(matches === 4) isCorrect = true;
-                            }
-                            if (isCorrect) questionStats[idx].correct++;
-                        }
-                    });
-                }
-            });
-            
+            uniqueStudents.forEach(r => totalScore += r.bestScore);
             const avg = totalSubs > 0 ? (totalScore / totalSubs).toFixed(2) : 0;
-            const scores = examResults.map(r => r.score);
+
+            const scores = uniqueStudents.map(r => r.bestScore);
             const maxScore = scores.length > 0 ? Math.max(...scores) : 0;
             const minScore = scores.length > 0 ? Math.min(...scores) : 0;
 
@@ -730,9 +752,10 @@
             document.getElementById('statMaxScore').textContent = maxScore;
             document.getElementById('statMinScore').textContent = minScore;
 
-            // Render Chart
+            // Chart
             const spectrum = Array(11).fill(0);
             scores.forEach(s => spectrum[Math.floor(s)]++);
+            
             const ctx = document.getElementById('scoreChart').getContext('2d');
             if(window.myChart) window.myChart.destroy();
             window.myChart = new Chart(ctx, {
@@ -744,18 +767,39 @@
                 options: { responsive: true, maintainAspectRatio: false }
             });
 
-            // Render Question Analysis List
+            // Question Analysis (Simple agg based on all attempts or best? Let's use ALL attempts for q-analysis as it reflects difficulty better)
+            // Re-fetch all raw results for this specific calc if needed, or just iterate statsMap.attempts
+            // For simplicity, we'll just use the main "best" entry or iterate all attempts if available in scope.
+            // Let's iterate ALL attempts stored in map
+            const qStats = window.questions.map(() => ({ correct: 0, total: 0 }));
+            Object.values(statsMap).forEach(student => {
+                student.attempts.forEach(attempt => {
+                    if(attempt.answers) {
+                        window.questions.forEach((q, idx) => {
+                            const u = attempt.answers[idx];
+                            if (u !== undefined && u !== null) {
+                                qStats[idx].total++;
+                                let isCorrect = false;
+                                if (q.type === 'mc' && u === q.correct) isCorrect = true;
+                                else if (q.type === 'short' && q.answer && String(u).trim().toLowerCase() === String(q.answer).trim().toLowerCase()) isCorrect = true;
+                                else if (q.type === 'tf') {
+                                    let matches = 0;
+                                    if(Array.isArray(u)) q.statements.forEach((s, i) => { if(u[i]===s.isTrue) matches++; });
+                                    if(matches === 4) isCorrect = true;
+                                }
+                                if (isCorrect) qStats[idx].correct++;
+                            }
+                        });
+                    }
+                });
+            });
+
             const qListDiv = document.getElementById('questionAnalysisList');
             qListDiv.innerHTML = '';
-            questionStats.forEach((stat, idx) => {
+            qStats.forEach((stat, idx) => {
                 const percent = stat.total > 0 ? Math.round((stat.correct / stat.total) * 100) : 0;
                 const colorClass = percent > 80 ? 'bg-green-500' : (percent > 50 ? 'bg-yellow-500' : 'bg-red-500');
-                const row = `<div class="flex items-center gap-2 text-xs">
-                    <span class="w-10 font-bold text-gray-500">Câu ${idx+1}</span>
-                    <div class="flex-1 progress-bar-bg"><div class="progress-bar-fill ${colorClass}" style="width: ${percent}%"></div></div>
-                    <span class="w-8 text-right font-bold text-gray-700">${percent}%</span>
-                </div>`;
-                qListDiv.innerHTML += row;
+                qListDiv.innerHTML += `<div class="flex items-center gap-2 text-xs"><span class="w-10 font-bold text-gray-500">Câu ${idx+1}</span><div class="flex-1 progress-bar-bg"><div class="progress-bar-fill ${colorClass}" style="width: ${percent}%"></div></div><span class="w-8 text-right font-bold text-gray-700">${percent}%</span></div>`;
             });
 
             renderStatsTable();
@@ -771,101 +815,97 @@
             const tbody = document.getElementById('statsTableBody');
             tbody.innerHTML = '';
             
-            let dataToShow = [];
+            let dataToShow = Object.values(statsMap);
             const allowedClassId = document.getElementById('settingClassSelect').value;
 
-            // Simple Logic: If filter class, show class list merge with results. Else show all results.
             if (filterType === 'class' && allowedClassId && classStudentList.length > 0) {
-                // Map results by identifier (using name for simplicity demo, ideally UID)
-                const doneMap = {};
-                examResults.forEach(r => { if (!doneMap[r.studentName] || r.score > doneMap[r.studentName].score) doneMap[r.studentName] = r; });
-                
-                classStudentList.forEach(st => {
-                    const res = doneMap[st.name]; // Basic matching
-                    if (res) dataToShow.push({ ...res, status: 'Đã làm' });
-                    else dataToShow.push({ studentName: st.name, score: '--', submittedAt: null, status: 'Chưa làm' });
+                // Merge logic: Show all students in class. If they did exam, show stats. If not, show "Chưa làm".
+                dataToShow = classStudentList.map(st => {
+                    // Find by student ID if possible, or name match
+                    // Since classStudentList might not have UID if imported via excel without auth sync, we use loose match.
+                    // Ideally match by username/email.
+                    const match = dataToShow.find(d => (d.studentName === st.name) || (st.username && d.studentName.includes(st.username)));
+                    
+                    if (match) return { ...match, status: 'Đã làm' };
+                    return { studentName: st.name, score: '--', submittedAt: null, status: 'Chưa làm', attempts: [] };
                 });
-            } else {
-                dataToShow = examResults.map(r => ({ ...r, status: 'Đã làm' }));
             }
 
             const sortType = document.getElementById('sortStats').value;
             dataToShow.sort((a, b) => {
-                if (sortType === 'score_desc') return (parseFloat(b.score)||0) - (parseFloat(a.score)||0);
-                if (sortType === 'score_asc') return (parseFloat(a.score)||0) - (parseFloat(b.score)||0);
+                const sA = parseFloat(a.score) || 0;
+                const sB = parseFloat(b.score) || 0;
+                if (sortType === 'score_desc') return sB - sA;
+                if (sortType === 'score_asc') return sA - sB;
                 if (sortType === 'time_desc') return new Date(b.submittedAt || 0) - new Date(a.submittedAt || 0);
             });
 
             dataToShow.forEach(r => {
                 const dateStr = r.submittedAt ? new Date(r.submittedAt).toLocaleString('vi-VN') : '--';
-                const scoreClass = r.score >= 8 ? 'text-green-600' : (r.score >= 5 ? 'text-blue-600' : 'text-red-500');
+                const scoreClass = r.status === 'Chưa làm' ? 'text-gray-400' : (r.score >= 8 ? 'text-green-600' : (r.score >= 5 ? 'text-blue-600' : 'text-red-500'));
+                const attemptCount = r.attempts ? r.attempts.length : 0;
+                
+                // Name clickable if attempts > 0
+                const nameHtml = attemptCount > 0 
+                    ? `<button onclick="showStudentHistory('${r.studentName}')" class="font-bold text-blue-600 hover:underline">${r.studentName}</button>`
+                    : r.studentName;
+
                 const row = `<tr class="bg-white border-b hover:bg-gray-50">
-                    <td class="px-6 py-3 font-medium text-gray-900">${r.studentName} <span class="text-xs text-gray-400 ml-1">${r.status}</span></td>
+                    <td class="px-6 py-3 font-medium text-gray-900">${nameHtml} <span class="text-xs text-gray-400 ml-1">${r.status || ''}</span></td>
                     <td class="px-6 py-3 text-center font-bold ${scoreClass}">${r.score}</td>
-                    <td class="px-6 py-3 text-center text-xs text-gray-500">--</td>
+                    <td class="px-6 py-3 text-center text-xs text-gray-500">${attemptCount}</td>
                     <td class="px-6 py-3 text-right text-xs text-gray-500">${dateStr}</td>
                 </tr>`;
                 tbody.innerHTML += row;
             });
         };
         
+        window.showStudentHistory = (studentName) => {
+            const studentData = Object.values(statsMap).find(s => s.studentName === studentName);
+            if (!studentData || !studentData.attempts) return;
+
+            const modal = document.getElementById('historyModal');
+            const content = document.getElementById('histModalContent');
+            const title = document.getElementById('histModalTitle');
+            
+            title.textContent = `Lịch sử: ${studentName}`;
+            content.innerHTML = `<table class="w-full text-sm text-left text-gray-600"><thead class="bg-gray-100"><tr><th class="p-2">Lần</th><th class="p-2 text-center">Điểm</th><th class="p-2 text-right">Ngày nộp</th></tr></thead><tbody class="divide-y divide-gray-100"></tbody></table>`;
+            
+            const tbody = content.querySelector('tbody');
+            // Sort attempts by date desc
+            const sortedAttempts = [...studentData.attempts].sort((a,b) => new Date(b.submittedAt) - new Date(a.submittedAt));
+            
+            sortedAttempts.forEach((att, idx) => {
+                const date = new Date(att.submittedAt).toLocaleString('vi-VN');
+                tbody.innerHTML += `<tr><td class="p-2">#${sortedAttempts.length - idx}</td><td class="p-2 text-center font-bold text-blue-600">${att.score}</td><td class="p-2 text-right text-xs">${date}</td></tr>`;
+            });
+
+            modal.classList.remove('opacity-0', 'pointer-events-none');
+            modal.querySelector('div').classList.add('scale-100');
+        };
+        window.closeHistoryModal = () => { document.getElementById('historyModal').classList.add('opacity-0', 'pointer-events-none'); };
+
         // --- NEW: EXPORT TO EXCEL ---
         window.exportToExcel = () => {
-            if (examResults.length === 0) return window.showToast("Chưa có dữ liệu để xuất!", "error");
-            
+            if (Object.keys(statsMap).length === 0) return window.showToast("Chưa có dữ liệu để xuất!", "error");
             const wb = XLSX.utils.book_new();
-            
-            // Sheet 1: Tổng hợp
-            const dataSummary = examResults.map((r, i) => ({
-                "STT": i + 1,
-                "Họ tên": r.studentName,
-                "Điểm số": r.score,
-                "Thời gian nộp": new Date(r.submittedAt).toLocaleString('vi-VN'),
-                "Số lần vi phạm": r.cheatCount
-            }));
+            const dataSummary = Object.values(statsMap).map((r, i) => ({ "STT": i + 1, "Họ tên": r.studentName, "Điểm cao nhất": r.bestScore, "Số lần thi": r.attempts.length, "Ngày nộp cuối": new Date(r.submittedAt).toLocaleString('vi-VN') }));
             const wsSummary = XLSX.utils.json_to_sheet(dataSummary);
             XLSX.utils.book_append_sheet(wb, wsSummary, "Tong_Hop");
-            
-            // Sheet 2: Chi tiết
-            const dataDetail = examResults.map(r => {
-                let row = { "Họ tên": r.studentName };
-                window.questions.forEach((q, idx) => {
-                    const u = r.answers[idx];
-                    let val = u;
-                    if (q.type === 'mc' && u !== undefined) val = String.fromCharCode(65 + u);
-                    if (q.type === 'tf' && Array.isArray(u)) val = u.map(b => b ? 'Đ' : 'S').join('-');
-                    row[`Câu ${idx+1}`] = val;
-                });
-                return row;
-            });
-            const wsDetail = XLSX.utils.json_to_sheet(dataDetail);
-            XLSX.utils.book_append_sheet(wb, wsDetail, "Chi_Tiet");
-
             const fileName = `KetQua_${document.getElementById('settingTitle').value.replace(/\s/g, '_')}.xlsx`;
             XLSX.writeFile(wb, fileName);
         };
 
+        // --- HELPERS ---
         window.switchView = (viewId) => {
             document.getElementById('view-settings').classList.add('hidden');
             document.getElementById('view-editor').classList.add('hidden');
             document.getElementById('view-editor').classList.remove('flex');
             document.getElementById('view-stats').classList.add('hidden');
-            
             document.querySelectorAll('.sidebar-item').forEach(i => i.classList.remove('active'));
-            
-            if (viewId === 'settings') { 
-                document.getElementById('view-settings').classList.remove('hidden'); 
-                document.getElementById('menu-settings').classList.add('active'); 
-            } else if (viewId === 'editor') { 
-                document.getElementById('view-editor').classList.remove('hidden'); 
-                document.getElementById('view-editor').classList.add('flex'); 
-                document.getElementById('menu-editor').classList.add('active'); 
-                if(window.MathJax) MathJax.typesetPromise(); 
-            } else if (viewId === 'stats') {
-                document.getElementById('view-stats').classList.remove('hidden');
-                document.getElementById('menu-stats').classList.add('active');
-                loadStats();
-            }
+            if (viewId === 'settings') { document.getElementById('view-settings').classList.remove('hidden'); document.getElementById('menu-settings').classList.add('active'); } 
+            else if (viewId === 'editor') { document.getElementById('view-editor').classList.remove('hidden'); document.getElementById('view-editor').classList.add('flex'); document.getElementById('menu-editor').classList.add('active'); if(window.MathJax) MathJax.typesetPromise(); } 
+            else if (viewId === 'stats') { document.getElementById('view-stats').classList.remove('hidden'); document.getElementById('menu-stats').classList.add('active'); loadStats(); }
         }
         
         window.copyLink = () => { document.getElementById("shareLinkInput").select(); document.execCommand("copy"); window.showToast("Đã sao chép link!"); }
