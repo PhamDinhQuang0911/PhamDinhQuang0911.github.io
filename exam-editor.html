@@ -15,7 +15,6 @@
         inlineMath: [['$', '$'], ['\\(', '\\)']],
         displayMath: [['$$', '$$'], ['\\[', '\\]']],
         processEscapes: true,
-        // CẤU HÌNH MACRO CHO GIÁO VIÊN TOÁN VIỆT NAM
         macros: {
           heva: ["\\left\\{\\begin{matrix} #1 \\end{matrix}\\right.", 1],
           hoac: ["\\left[\\begin{matrix} #1 \\end{matrix}\\right.", 1],
@@ -23,7 +22,8 @@
           deg: "^\\circ"
         }
       },
-      svg: { fontCache: 'global' }
+      svg: { fontCache: 'global' },
+      startup: { typeset: false }
     };
     </script>
     <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
@@ -36,11 +36,16 @@
         /* Preview Item Styles */
         .preview-item { transition: all 0.2s; border: 1px solid #E5E7EB; cursor: pointer; background: white; }
         .preview-item:hover { border-color: #3B82F6; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); }
-        .preview-item.active { border-color: #3B82F6; ring: 2px solid #DBEAFE; }
+        .preview-item.active { border-color: #3B82F6; ring: 2px solid #DBEAFE; background-color: #F0F9FF; }
         
-        /* MathJax Fix - Inline Display */
-        mjx-container { display: inline-block !important; margin: 0 2px !important; }
+        /* MathJax Fix - Inline Display & Array support */
+        mjx-container { display: inline-block !important; margin: 0 2px !important; vertical-align: middle; }
         mjx-container[display="true"] { display: block !important; margin: 1em 0 !important; }
+        
+        /* Quick Jump Palette */
+        .palette-btn { width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; border-radius: 6px; border: 1px solid #E5E7EB; color: #6B7280; transition: all 0.2s; }
+        .palette-btn:hover { border-color: #3B82F6; color: #3B82F6; }
+        .palette-btn.active { background-color: #3B82F6; color: white; border-color: #3B82F6; }
 
         /* Form & Scrollbar */
         .form-input { width: 100%; padding: 0.5rem 0.75rem; border-radius: 0.5rem; border: 1px solid #E5E7EB; outline: none; transition: all 0.2s; font-size: 0.9rem; }
@@ -168,6 +173,11 @@
                         <input type="file" id="texInput" accept=".tex,.txt" class="hidden" onchange="handleTexUpload(this)">
                     </div>
                 </div>
+                
+                <div id="quickPaletteContainer" class="p-3 bg-gray-50 border-b border-gray-100 overflow-x-auto whitespace-nowrap no-scrollbar hidden">
+                    <div class="flex flex-wrap gap-2" id="quickPalette"></div>
+                </div>
+
                 <div id="previewList" class="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50">
                     <div class="text-center py-10 text-gray-400 text-sm">Chưa có câu hỏi nào.<br>Hãy thêm câu hỏi hoặc Import Tex.</div>
                 </div>
@@ -177,10 +187,10 @@
                 <div class="p-3 border-b border-gray-200 flex justify-between items-center bg-white shrink-0">
                     <h3 class="font-bold text-gray-700 text-sm"><i class="fa-solid fa-pen-to-square mr-2 text-blue-600"></i>Chỉnh sửa</h3>
                     <div class="flex gap-2">
-                        <button onclick="addNewQuestion('mc')" class="p-1.5 bg-blue-50 text-blue-600 rounded hover:bg-blue-100 text-xs font-bold" title="Thêm Trắc nghiệm">+TN</button>
-                        <button onclick="addNewQuestion('tf')" class="p-1.5 bg-orange-50 text-orange-600 rounded hover:bg-orange-100 text-xs font-bold" title="Thêm Đúng/Sai">+ĐS</button>
-                        <button onclick="addNewQuestion('short')" class="p-1.5 bg-green-50 text-green-600 rounded hover:bg-green-100 text-xs font-bold" title="Thêm Điền khuyết">+Điền</button>
-                        <button onclick="addNewQuestion('essay')" class="p-1.5 bg-purple-50 text-purple-600 rounded hover:bg-purple-100 text-xs font-bold" title="Thêm Tự luận">+TL</button>
+                        <button onclick="addNewQuestion('mc')" class="p-1.5 bg-blue-50 text-blue-600 rounded hover:bg-blue-100 text-xs font-bold">+TN</button>
+                        <button onclick="addNewQuestion('tf')" class="p-1.5 bg-orange-50 text-orange-600 rounded hover:bg-orange-100 text-xs font-bold">+ĐS</button>
+                        <button onclick="addNewQuestion('short')" class="p-1.5 bg-green-50 text-green-600 rounded hover:bg-green-100 text-xs font-bold">+Điền</button>
+                        <button onclick="addNewQuestion('essay')" class="p-1.5 bg-purple-50 text-purple-600 rounded hover:bg-purple-100 text-xs font-bold">+TL</button>
                         <div class="w-[1px] h-6 bg-gray-200 mx-1"></div>
                         <button onclick="deleteCurrentQuestion()" class="p-1.5 bg-red-50 text-red-600 rounded hover:bg-red-100 text-xs"><i class="fa-solid fa-trash"></i></button>
                     </div>
@@ -268,7 +278,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
-        import { getFirestore, doc, getDoc, setDoc, collection, query, where, getDocs } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { getFirestore, doc, getDoc, setDoc, collection, query, where, getDocs, addDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
         const firebaseConfig = { apiKey: "AIzaSyCqAX3x1MbJ3do7m3EaH9JA4kFuVhlAc78", authDomain: "lms-thitracnghiem.firebaseapp.com", projectId: "lms-thitracnghiem", storageBucket: "lms-thitracnghiem.firebasestorage.app", messagingSenderId: "760187217240", appId: "1:760187217240:web:d043cd5808c349f87a712d" };
         const app = initializeApp(firebaseConfig); const auth = getAuth(app); const db = getFirestore(app);
@@ -291,10 +301,10 @@
         window.customAlert = (message, type = 'info') => { return new Promise((resolve) => { modalTitle.innerText = type === 'error' ? 'Lỗi' : 'Thông báo'; modalMsg.innerText = message; modalIcon.innerHTML = type === 'error' ? '<i class="fa-solid fa-triangle-exclamation text-red-500"></i>' : '<i class="fa-solid fa-bell text-blue-500"></i>'; document.getElementById('modalInput').classList.add('hidden'); btnCancel.classList.add('hidden'); btnConfirm.innerText = "Đã hiểu"; modalEl.classList.remove('opacity-0', 'pointer-events-none'); modalBox.classList.remove('scale-95'); modalBox.classList.add('scale-100'); btnConfirm.onclick = () => { resolve(true); modalResolve = null; closeCustomModal(); }; modalResolve = resolve; }); };
         window.customConfirm = (message) => { return new Promise((resolve) => { modalTitle.innerText = "Xác nhận"; modalMsg.innerText = message; modalIcon.innerHTML = '<i class="fa-solid fa-circle-question text-orange-500"></i>'; document.getElementById('modalInput').classList.add('hidden'); btnCancel.classList.remove('hidden'); btnConfirm.innerText = "Đồng ý"; modalEl.classList.remove('opacity-0', 'pointer-events-none'); modalBox.classList.remove('scale-95'); modalBox.classList.add('scale-100'); btnConfirm.onclick = () => { resolve(true); modalResolve = null; closeCustomModal(); }; btnCancel.onclick = () => { resolve(false); modalResolve = null; closeCustomModal(); }; }); };
 
-        // CONTENT FORMATTER (Fix lỗi \\ xuống dòng)
+        // FIX: Xử lý chuỗi an toàn - GIỮ LẠI \\ CHO MATHJAX
         function formatContent(text) {
             if (text === null || text === undefined) return "";
-            return String(text).replace(/\\\\/g, '<br>').replace(/\n/g, '<br>');
+            return String(text).replace(/\n/g, '<br>');
         }
 
         onAuthStateChanged(auth, async (user) => {
@@ -320,7 +330,7 @@
                     document.getElementById('settingPassword').value = data.password || '';
                     // Load Questions & Sort
                     window.questions = data.questions || [];
-                    sortQuestionsByType(); // Auto sort on load
+                    sortQuestionsByType();
                     renderPreviewList();
                     if(window.questions.length > 0) loadQuestionToEditor(0);
                     
@@ -342,24 +352,36 @@
 
         window.renderPreviewList = () => {
             const list = document.getElementById('previewList');
+            const palette = document.getElementById('quickPalette');
             document.getElementById('totalQCount').textContent = window.questions.length;
             list.innerHTML = '';
+            palette.innerHTML = '';
             
             if (window.questions.length === 0) {
                 list.innerHTML = '<div class="text-center py-10 text-gray-400 text-sm">Chưa có câu hỏi nào.</div>';
                 document.getElementById('editorArea').innerHTML = '<div class="absolute inset-0 flex items-center justify-center text-gray-300 text-sm"><p>Chọn câu hỏi bên trái để sửa</p></div>';
+                document.getElementById('quickPaletteContainer').classList.add('hidden');
                 window.currentQIndex = -1;
                 return;
             }
 
+            document.getElementById('quickPaletteContainer').classList.remove('hidden');
             let currentType = '';
+            
             window.questions.forEach((q, idx) => {
+                // FEATURE 3: Quick Palette
+                const pBtn = document.createElement('button');
+                pBtn.className = `palette-btn ${idx === window.currentQIndex ? 'active' : ''}`;
+                pBtn.textContent = idx + 1;
+                pBtn.onclick = () => loadQuestionToEditor(idx);
+                palette.appendChild(pBtn);
+
                 // Render Group Header
                 let typeLabel = q.type === 'mc' ? 'TRẮC NGHIỆM' : (q.type === 'tf' ? 'ĐÚNG/SAI' : (q.type === 'short' ? 'TRẢ LỜI NGẮN' : 'TỰ LUẬN'));
                 if (q.type !== currentType) {
                     currentType = q.type;
                     const header = document.createElement('div');
-                    header.className = "text-xs font-bold text-gray-500 uppercase mt-4 mb-2 pl-1 border-b border-gray-200 pb-1";
+                    header.className = "text-xs font-bold text-gray-500 uppercase mt-4 mb-2 pl-1 border-b border-gray-200 pb-1 sticky top-0 bg-gray-50 z-10";
                     header.textContent = `PHẦN: ${typeLabel}`;
                     list.appendChild(header);
                 }
@@ -367,9 +389,9 @@
                 // Render Preview Item
                 const div = document.createElement('div');
                 div.className = `preview-item p-4 rounded-lg mb-3 text-sm relative ${idx === window.currentQIndex ? 'active' : ''}`;
+                div.id = `q-preview-${idx}`;
                 div.onclick = () => loadQuestionToEditor(idx);
                 
-                // Content with MathJax
                 let html = `
                     <div class="flex justify-between mb-2">
                         <span class="font-bold text-blue-600">Câu ${idx+1}</span>
@@ -378,7 +400,6 @@
                     <div class="mb-3 text-gray-800">${formatContent(q.content)}</div>
                 `;
 
-                // Show options/solution preview
                 if (q.type === 'mc' && q.options) {
                     html += `<div class="grid grid-cols-2 gap-2 text-xs text-gray-600">`;
                     q.options.forEach((o, i) => {
@@ -386,11 +407,20 @@
                         html += `<div class="${isCorrect ? 'text-green-600 font-bold' : ''}">${String.fromCharCode(65+i)}. ${formatContent(o)}</div>`;
                     });
                     html += `</div>`;
+                } else if (q.type === 'tf' && q.statements) {
+                    // FEATURE 2: Fix True/False Preview
+                    html += `<div class="mt-2 space-y-1">`;
+                    q.statements.forEach((s, i) => {
+                        html += `<div class="flex justify-between text-xs border-b border-dashed border-gray-100 pb-1">
+                            <span class="flex-1 mr-2">- ${formatContent(s.text)}</span>
+                            <span class="font-bold ${s.isTrue ? 'text-green-600' : 'text-red-500'}">${s.isTrue ? 'Đúng' : 'Sai'}</span>
+                        </div>`;
+                    });
+                    html += `</div>`;
                 } else if (q.type === 'short') {
                     html += `<div class="text-xs text-green-600 mt-2"><b>Đ/A:</b> ${q.answer}</div>`;
                 }
 
-                // Show Solution if exists
                 if (q.solution) {
                     html += `<div class="mt-3 pt-2 border-t border-dashed border-gray-200 text-xs text-gray-500">
                         <b class="text-green-600"><i class="fa-solid fa-lightbulb"></i> Lời giải:</b> ${formatContent(q.solution)}
@@ -439,9 +469,14 @@
             window.currentQIndex = index;
             renderPreviewList(); 
             
+            // Scroll to active item in list
+            setTimeout(() => {
+                const activeItem = document.getElementById(`q-preview-${index}`);
+                if(activeItem) activeItem.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+            }, 100);
+
             const q = window.questions[index];
             const editor = document.getElementById('editorArea');
-            // Render Editor HTML
             let html = `<div class="mb-4"><label class="form-group-title">Nội dung</label><textarea id="editContent" class="form-input min-h-[120px]" oninput="autoSaveMemory()">${q.content || ''}</textarea></div>`;
             
             if (q.type === 'mc') {
@@ -477,6 +512,7 @@
             window.questions.push(newQ);
             sortQuestionsByType(); 
             renderPreviewList();
+            // Find new index (likely last unless reordered)
             loadQuestionToEditor(window.questions.length - 1); 
         };
 
@@ -600,7 +636,6 @@
         async function loadTeacherClasses() { const s = document.getElementById('settingClassSelect'); if (!currentUser) return; const q = query(collection(db, "classes"), where("teacherId", "==", currentUser.uid)); const snap = await getDocs(q); s.innerHTML = ''; const d = document.createElement('option'); d.value = ""; d.textContent = "-- Chọn lớp học --"; s.appendChild(d); snap.forEach(doc => { const o = document.createElement('option'); o.value = doc.id; o.textContent = doc.data().name; s.appendChild(o); }); }
         window.toggleSidebar = () => { const s = document.getElementById('mainSidebar'); const o = document.getElementById('sidebarOverlay'); if (s.classList.contains('-translate-x-full')) { s.classList.remove('-translate-x-full'); o.classList.remove('hidden'); } else { s.classList.add('-translate-x-full'); o.classList.add('hidden'); } }
         
-        // Scoring Logic
         window.openScoringModal = () => { document.getElementById('scoringModal').classList.remove('opacity-0', 'pointer-events-none'); document.getElementById('scoringModal').querySelector('div').classList.add('scale-100'); let cM=0, cTF=0, cE=0; let h=''; window.questions.forEach((q,i)=>{ if(q.type==='essay'){ cE++; h+=`<div class="flex items-center gap-2 text-sm"><span class="w-16 font-bold">Câu ${i+1}</span><input type="number" id="essay-score-${i}" class="form-input h-8 text-right w-20" value="${q.point||0}" step="0.1"></div>`; } else if(q.type==='tf') cTF++; else cM++; }); document.getElementById('countMcShort').textContent=cM; document.getElementById('countTF').textContent=cTF; document.getElementById('countEssay').textContent=cE; document.getElementById('essayScoreList').innerHTML = cE>0 ? h : '<p class="text-xs text-gray-400 italic">Không có câu tự luận.</p>'; }
         window.closeScoringModal = () => { document.getElementById('scoringModal').classList.add('opacity-0', 'pointer-events-none'); }
         window.applyScoring = () => { const tM = parseFloat(document.getElementById('scoreTotalMcShort').value)||0; const tTF = parseFloat(document.getElementById('scoreTotalTF').value)||0; let cM=0, cTF=0; window.questions.forEach(q=>{if(q.type==='mc'||q.type==='short')cM++; else if(q.type==='tf')cTF++;}); const pM=cM>0?(tM/cM):0; const pTF=cTF>0?(tTF/cTF):0; window.questions.forEach((q,i)=>{ if(q.type==='mc'||q.type==='short') q.point=parseFloat(pM.toFixed(2)); else if(q.type==='tf') q.point=parseFloat(pTF.toFixed(2)); else if(q.type==='essay'){ const inp=document.getElementById(`essay-score-${i}`); if(inp) q.point=parseFloat(inp.value)||0; } }); closeScoringModal(); renderPreviewList(); window.showToast("Đã chia điểm!"); }
