@@ -44,8 +44,19 @@
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         .animate-fade-in { animation: fadeIn 0.5s ease-out forwards; }
         
-        /* MathJax Scroll Fix */
-        mjx-container { overflow-x: auto; overflow-y: hidden; max-width: 100%; display: block !important; padding-bottom: 5px; }
+        /* FIX: MathJax hiển thị Inline chuẩn */
+        mjx-container { 
+            display: inline-block !important; /* Quan trọng: Để công thức nằm cùng dòng */
+            margin: 0 2px !important;
+        }
+        /* Chỉ cho phép cuộn ngang với công thức dạng khối (display math) */
+        mjx-container[display="true"] {
+            display: block !important;
+            overflow-x: auto;
+            overflow-y: hidden;
+            max-width: 100%;
+        }
+
         .solution-box { border-left: 4px solid #10B981; background-color: #ECFDF5; padding: 1rem; border-radius: 0.5rem; margin-top: 1rem; }
         
         /* Modal Transition */
@@ -229,10 +240,12 @@
         window.closeCustomModal = () => { modalEl.classList.add('opacity-0', 'pointer-events-none'); modalBox.classList.remove('scale-100'); modalBox.classList.add('scale-95'); if (modalResolve) { modalResolve(null); modalResolve = null; } };
         window.customAlert = (message, type = 'info') => { return new Promise((resolve) => { modalTitle.innerText = type === 'error' ? 'Lỗi' : 'Thông báo'; modalMsg.innerText = message; modalIcon.innerHTML = type === 'error' ? '<i class="fa-solid fa-triangle-exclamation text-red-500"></i>' : '<i class="fa-solid fa-bell text-blue-500"></i>'; document.getElementById('modalInput').classList.add('hidden'); btnCancel.classList.add('hidden'); btnConfirm.innerText = "Đã hiểu"; modalEl.classList.remove('opacity-0', 'pointer-events-none'); modalBox.classList.remove('scale-95'); modalBox.classList.add('scale-100'); btnConfirm.onclick = () => { resolve(true); modalResolve = null; closeCustomModal(); }; modalResolve = resolve; }); };
 
-        // FIX: Xử lý chuỗi an toàn
+        // FIX: Xử lý chuỗi an toàn - CHỈ XUỐNG DÒNG KHI CÓ \\
         function formatContent(text) {
             if (text === null || text === undefined) return "";
-            return String(text).replace(/\\\\/g, '<br>').replace(/\n/g, '<br>');
+            return String(text)
+                .replace(/\\\\/g, '<br>') // Chỉ \\ mới thành <br>
+                .replace(/\n/g, ' ');     // \n thành khoảng trắng để không vỡ dòng
         }
 
         onAuthStateChanged(auth, async (user) => {
@@ -402,8 +415,34 @@
                 else isDone = (a !== undefined && a !== null && a !== "");
                 if(!isDone) unanswered++;
             });
-            // Thay confirm mặc định bằng customAlert/Modal nếu muốn, ở đây tạm dùng alert logic
-            if(confirm(`Bạn còn ${unanswered} câu chưa làm. Nộp ngay?`)) submitReal();
+            // Thay confirm mặc định bằng customAlert/Modal
+            // Do customAlert là async, ta cần xử lý Promise
+            if(unanswered > 0) {
+                // Tự tạo modal confirm ở đây hoặc dùng customConfirm
+                // Tạm thời dùng alert mặc định của hệ thống để đảm bảo tính năng chạy,
+                // hoặc dùng customConfirm nếu đã định nghĩa (đã định nghĩa ở dưới nhưng là 1 chiều)
+                // Để đơn giản và đẹp, ta dùng customConfirm giả lập:
+                const modalEl = document.getElementById('customModal');
+                const modalTitle = document.getElementById('modalTitle');
+                const modalMsg = document.getElementById('modalMessage');
+                const btnConfirm = document.getElementById('btnConfirm');
+                const btnCancel = document.getElementById('btnCancel');
+                
+                modalTitle.innerText = "Xác nhận nộp bài";
+                modalMsg.innerText = `Bạn còn ${unanswered} câu chưa làm. Nộp ngay?`;
+                document.getElementById('modalInput').classList.add('hidden');
+                btnCancel.classList.remove('hidden');
+                btnConfirm.innerText = "Nộp bài";
+                
+                modalEl.classList.remove('opacity-0', 'pointer-events-none');
+                document.getElementById('customModalBox').classList.remove('scale-95');
+                document.getElementById('customModalBox').classList.add('scale-100');
+                
+                btnConfirm.onclick = () => { window.closeCustomModal(); submitReal(); };
+                btnCancel.onclick = () => { window.closeCustomModal(); };
+            } else {
+                submitReal();
+            }
         }
 
         window.submitReal = async (auto = false) => {
@@ -416,6 +455,7 @@
             currentQuestions.forEach((q,i) => {
                 const u = userAnswers[i];
                 if(q.type==='mc' && u===q.correct) correct++;
+                // FIX: trim lỗi
                 if(q.type==='short' && q.answer && u && String(u).trim().toLowerCase()===String(q.answer).trim().toLowerCase()) correct++;
                 if(q.type==='tf' && Array.isArray(u) && q.statements) { 
                     let ok = true;
@@ -495,7 +535,7 @@
                             const trueChoice = s.isTrue ? 'Đúng' : 'Sai';
                             const match = (u && u[i] === s.isTrue);
                             if(!match) allRight = false;
-                            ansDisplay += `<li>- ${s.text}: Bạn chọn <b class="${match?'text-green-600':'text-red-500'}">${userChoice}</b> (Đáp án: ${trueChoice})</li>`;
+                            ansDisplay += `<li>- ${formatContent(s.text)}: Bạn chọn <b class="${match?'text-green-600':'text-red-500'}">${userChoice}</b> (Đáp án: ${trueChoice})</li>`;
                         });
                         ansDisplay += '</ul>';
                     }
