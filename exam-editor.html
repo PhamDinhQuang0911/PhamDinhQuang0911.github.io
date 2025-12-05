@@ -33,31 +33,26 @@
         .font-handwriting { font-family: 'Pacifico', cursive; }
         .sidebar-item.active { background-color: #EFF6FF; color: #1D4ED8; font-weight: 700; border-right: 3px solid #1D4ED8; }
         
-        /* Preview Item Styles */
         .preview-item { transition: all 0.2s; border: 1px solid #E5E7EB; cursor: pointer; background: white; }
         .preview-item:hover { border-color: #3B82F6; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); }
         .preview-item.active { border-color: #3B82F6; ring: 2px solid #DBEAFE; background-color: #F0F9FF; }
         
-        /* MathJax Fix - Inline Display & Array support */
-        mjx-container { display: inline-block !important; margin: 0 2px !important; vertical-align: middle; }
-        mjx-container[display="true"] { display: block !important; margin: 1em 0 !important; }
-        
-        /* Quick Jump Palette */
-        .palette-btn { width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; border-radius: 6px; border: 1px solid #E5E7EB; color: #6B7280; transition: all 0.2s; }
+        /* QUICK PALETTE */
+        .palette-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.5rem; padding: 0.75rem; background: #F9FAFB; border-bottom: 1px solid #E5E7EB; }
+        .palette-btn { aspect-ratio: 1; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: 700; border-radius: 0.375rem; border: 1px solid #D1D5DB; color: #4B5563; transition: all 0.2s; background: white; }
         .palette-btn:hover { border-color: #3B82F6; color: #3B82F6; }
         .palette-btn.active { background-color: #3B82F6; color: white; border-color: #3B82F6; }
 
-        /* Form & Scrollbar */
+        /* MATHJAX FIX */
+        mjx-container { display: inline-block !important; margin: 0 2px !important; vertical-align: middle; }
+        mjx-container[display="true"] { display: block !important; margin: 1em 0 !important; overflow-x: auto; max-width: 100%; }
+
         .form-input { width: 100%; padding: 0.5rem 0.75rem; border-radius: 0.5rem; border: 1px solid #E5E7EB; outline: none; transition: all 0.2s; font-size: 0.9rem; }
         .form-input:focus { border-color: #3B82F6; ring: 2px solid #DBEAFE; }
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .glass { backdrop-filter: blur(2px); }
-        
-        /* Modal Transition */
         .modal { transition: opacity 0.2s ease; }
         .modal.opacity-0 { pointer-events: none; }
-
-        /* Custom Toggle */
         .toggle-checkbox:checked { right: 0; border-color: #68D391; }
         .toggle-checkbox:checked + .toggle-label { background-color: #68D391; }
     </style>
@@ -111,9 +106,7 @@
                 </div>
 
                 <div id="publishedLinkArea" class="hidden bg-green-50 p-4 rounded-xl border border-green-200 mb-6 shadow-sm">
-                    <label class="block text-xs font-bold text-green-700 uppercase mb-2 flex items-center gap-2">
-                        <i class="fa-solid fa-check-circle"></i> Link bài thi (Đã xuất bản)
-                    </label>
+                    <label class="block text-xs font-bold text-green-700 uppercase mb-2 flex items-center gap-2"><i class="fa-solid fa-check-circle"></i> Link bài thi (Đã xuất bản)</label>
                     <div class="flex gap-2">
                         <input type="text" id="settingShareLink" class="w-full px-3 py-2 border border-green-300 rounded-lg text-green-800 bg-white focus:outline-none text-sm font-mono" readonly>
                         <button onclick="copySettingLink()" class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-bold rounded-lg transition-colors text-sm whitespace-nowrap">Sao chép</button>
@@ -174,12 +167,12 @@
                     </div>
                 </div>
                 
-                <div id="quickPaletteContainer" class="p-3 bg-gray-50 border-b border-gray-100 overflow-x-auto whitespace-nowrap no-scrollbar hidden">
-                    <div class="flex flex-wrap gap-2" id="quickPalette"></div>
+                <div id="quickPaletteContainer" class="max-h-24 overflow-y-auto border-b border-gray-200 bg-gray-50 hidden">
+                    <div class="palette-grid" id="quickPalette"></div>
                 </div>
 
-                <div id="previewList" class="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50">
-                    <div class="text-center py-10 text-gray-400 text-sm">Chưa có câu hỏi nào.<br>Hãy thêm câu hỏi hoặc Import Tex.</div>
+                <div id="previewList" class="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50 scroll-smooth">
+                    <div class="text-center py-10 text-gray-400 text-sm">Chưa có câu hỏi nào.</div>
                 </div>
             </div>
 
@@ -284,7 +277,7 @@
         const app = initializeApp(firebaseConfig); const auth = getAuth(app); const db = getFirestore(app);
         
         let currentUser = null, currentExamId = null;
-        window.questions = []; // SINGLE SOURCE
+        window.questions = [];
         window.currentQIndex = -1;
 
         // MODAL SYSTEM
@@ -301,10 +294,26 @@
         window.customAlert = (message, type = 'info') => { return new Promise((resolve) => { modalTitle.innerText = type === 'error' ? 'Lỗi' : 'Thông báo'; modalMsg.innerText = message; modalIcon.innerHTML = type === 'error' ? '<i class="fa-solid fa-triangle-exclamation text-red-500"></i>' : '<i class="fa-solid fa-bell text-blue-500"></i>'; document.getElementById('modalInput').classList.add('hidden'); btnCancel.classList.add('hidden'); btnConfirm.innerText = "Đã hiểu"; modalEl.classList.remove('opacity-0', 'pointer-events-none'); modalBox.classList.remove('scale-95'); modalBox.classList.add('scale-100'); btnConfirm.onclick = () => { resolve(true); modalResolve = null; closeCustomModal(); }; modalResolve = resolve; }); };
         window.customConfirm = (message) => { return new Promise((resolve) => { modalTitle.innerText = "Xác nhận"; modalMsg.innerText = message; modalIcon.innerHTML = '<i class="fa-solid fa-circle-question text-orange-500"></i>'; document.getElementById('modalInput').classList.add('hidden'); btnCancel.classList.remove('hidden'); btnConfirm.innerText = "Đồng ý"; modalEl.classList.remove('opacity-0', 'pointer-events-none'); modalBox.classList.remove('scale-95'); modalBox.classList.add('scale-100'); btnConfirm.onclick = () => { resolve(true); modalResolve = null; closeCustomModal(); }; btnCancel.onclick = () => { resolve(false); modalResolve = null; closeCustomModal(); }; }); };
 
-        // FIX: Xử lý chuỗi an toàn - GIỮ LẠI \\ CHO MATHJAX
+        // --- CORE FORMATTER: TÁCH RIÊNG TEXT VÀ MATH ---
         function formatContent(text) {
             if (text === null || text === undefined) return "";
-            return String(text).replace(/\n/g, '<br>');
+            
+            // Chiến thuật: Tách chuỗi thành các phần (Văn bản) và (Toán).
+            // Chỉ thay \n thành <br> ở phần Văn bản.
+            // Phần Toán (trong $...$, $$...$$, \(...\)) giữ nguyên \\ để MathJax xử lý ma trận.
+            
+            const regex = /(\$\$[\s\S]*?\$\$|\$[\s\S]*?\$|\\\(.*?\\\)|\\\[.*?\\\])/g;
+            const parts = String(text).split(regex);
+            
+            return parts.map(part => {
+                // Kiểm tra xem part có phải là math không (bắt đầu bằng $, \(, \[)
+                if (part.trim().startsWith('$') || part.trim().startsWith('\\(') || part.trim().startsWith('\\[')) {
+                    return part; // Giữ nguyên công thức toán
+                } else {
+                    // Là văn bản thường: Chuyển \n thành <br>
+                    return part.replace(/\n/g, '<br>');
+                }
+            }).join('');
         }
 
         onAuthStateChanged(auth, async (user) => {
@@ -317,7 +326,6 @@
             } else { window.location.href = 'index.html'; }
         });
 
-        // --- CORE FUNCTIONS ---
         window.loadExamData = async (id) => {
             try {
                 const docSnap = await getDoc(doc(db, "exams", id));
@@ -328,7 +336,7 @@
                     document.getElementById('settingSubject').value = data.subject || 'Toán học';
                     document.getElementById('settingDuration').value = data.duration || 45;
                     document.getElementById('settingPassword').value = data.password || '';
-                    // Load Questions & Sort
+                    
                     window.questions = data.questions || [];
                     sortQuestionsByType();
                     renderPreviewList();
@@ -344,7 +352,6 @@
             } catch(e) { console.error(e); }
         };
 
-        // Hàm sắp xếp câu hỏi theo nhóm
         function sortQuestionsByType() {
             const order = { 'mc': 1, 'tf': 2, 'short': 3, 'essay': 4 };
             window.questions.sort((a, b) => (order[a.type] || 99) - (order[b.type] || 99));
@@ -376,7 +383,7 @@
                 pBtn.onclick = () => loadQuestionToEditor(idx);
                 palette.appendChild(pBtn);
 
-                // Render Group Header
+                // Group Header
                 let typeLabel = q.type === 'mc' ? 'TRẮC NGHIỆM' : (q.type === 'tf' ? 'ĐÚNG/SAI' : (q.type === 'short' ? 'TRẢ LỜI NGẮN' : 'TỰ LUẬN'));
                 if (q.type !== currentType) {
                     currentType = q.type;
@@ -408,12 +415,12 @@
                     });
                     html += `</div>`;
                 } else if (q.type === 'tf' && q.statements) {
-                    // FEATURE 2: Fix True/False Preview
+                    // FEATURE 2: Fix True/False Preview Logic
                     html += `<div class="mt-2 space-y-1">`;
                     q.statements.forEach((s, i) => {
                         html += `<div class="flex justify-between text-xs border-b border-dashed border-gray-100 pb-1">
-                            <span class="flex-1 mr-2">- ${formatContent(s.text)}</span>
-                            <span class="font-bold ${s.isTrue ? 'text-green-600' : 'text-red-500'}">${s.isTrue ? 'Đúng' : 'Sai'}</span>
+                            <span class="flex-1 mr-2 text-gray-700">- ${formatContent(s.text)}</span>
+                            <span class="font-bold ${s.isTrue ? 'text-green-600' : 'text-red-500'} whitespace-nowrap">${s.isTrue ? 'Đúng' : 'Sai'}</span>
                         </div>`;
                     });
                     html += `</div>`;
@@ -433,7 +440,6 @@
             if(window.MathJax) MathJax.typesetPromise([list]).catch(e=>{});
         };
 
-        // --- SAFE SAVE MEMORY (Fix lỗi null) ---
         window.saveCurrentQuestionToMemory = () => {
             if (window.currentQIndex === -1 || !window.questions[window.currentQIndex]) return;
             const q = window.questions[window.currentQIndex];
@@ -469,7 +475,6 @@
             window.currentQIndex = index;
             renderPreviewList(); 
             
-            // Scroll to active item in list
             setTimeout(() => {
                 const activeItem = document.getElementById(`q-preview-${index}`);
                 if(activeItem) activeItem.scrollIntoView({behavior: 'smooth', block: 'nearest'});
@@ -512,7 +517,6 @@
             window.questions.push(newQ);
             sortQuestionsByType(); 
             renderPreviewList();
-            // Find new index (likely last unless reordered)
             loadQuestionToEditor(window.questions.length - 1); 
         };
 
@@ -520,9 +524,9 @@
         window.setCorrectMC = (idx) => { window.questions[window.currentQIndex].correct = idx; loadQuestionToEditor(window.currentQIndex); };
         window.deleteCurrentQuestion = async () => { if (window.currentQIndex === -1) return; if(await window.customConfirm("Xóa câu hỏi này?")) { window.questions.splice(window.currentQIndex, 1); window.currentQIndex = -1; renderPreviewList(); document.getElementById('editorArea').innerHTML = ''; } };
 
-        // --- IMPORTER ---
         function cleanLatex(text) {
             if (!text) return "";
+            // Giữ lại \\ cho MathJax, chỉ xóa comments và ID
             let cleaned = text.replace(/^%.*$/gm, '').replace(/(?<!\\)%.*/g, '').replace(/^\s*\[.*?\]/gm, '');
             return cleaned.trim();
         }
@@ -537,7 +541,7 @@
                 const blockRegex = /\\begin\{(ex|bt|vd)\}([\s\S]*?)\\end\{\1\}/g;
                 let match, count = 0;
                 while ((match = blockRegex.exec(content)) !== null) {
-                    let fullBody = match[2].replace(/^\s*\[.*?\]/, ''); // Clean ID
+                    let fullBody = match[2].replace(/^\s*\[.*?\]/, ''); 
                     let qType = 'essay'; 
                     let qData = { content: '', solution: '', options: [], statements: [], answer: '', point: 0 };
                     const loigiaiIndex = fullBody.lastIndexOf('\\loigiai');
@@ -571,9 +575,8 @@
             reader.readAsText(file);
         }
 
-        // --- SAVE EXAM ---
         window.saveExam = async function(status) {
-            if (window.currentQIndex !== -1) saveCurrentQuestionToMemory(); // Save pending changes
+            if (window.currentQIndex !== -1) saveCurrentQuestionToMemory(); 
             const title = document.getElementById('settingTitle').value;
             if(!title) return window.customAlert("Vui lòng nhập tên đề thi!", "error");
 
@@ -610,7 +613,6 @@
                     document.getElementById('shareModal').querySelector('div').classList.add('scale-100');
                     document.getElementById('examStatus').textContent = '• Đã xuất bản';
                     document.getElementById('examStatus').classList.replace('text-orange-500', 'text-green-600');
-                    // UPDATE LINK AREA
                     document.getElementById('publishedLinkArea').classList.remove('hidden');
                     document.getElementById('settingShareLink').value = link;
                 } else { window.showToast("Đã lưu bản nháp thành công!", "success"); }
@@ -618,7 +620,6 @@
             } catch(e) { console.error(e); window.customAlert("Lỗi lưu: " + e.message, "error"); } finally { btn.innerHTML = originalText; btn.disabled = false; }
         }
 
-        // --- HELPERS ---
         window.switchView = (viewId) => {
             document.getElementById('view-settings').classList.add('hidden');
             document.getElementById('view-editor').classList.add('hidden');
