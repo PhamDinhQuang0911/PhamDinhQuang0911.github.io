@@ -14,14 +14,11 @@
         inlineMath: [['$', '$'], ['\\(', '\\)']],
         displayMath: [['$$', '$$'], ['\\[', '\\]']],
         processEscapes: true,
-        // ĐỊNH NGHĨA CÁC LỆNH TOÁN VIỆT NAM
         macros: {
           heva: ["\\left\\{\\begin{matrix} #1 \\end{matrix}\\right.", 1],
           hoac: ["\\left[\\begin{matrix} #1 \\end{matrix}\\right.", 1],
-          fun: ["\\mathit{#1}", 1], // Xử lý tên hàm
-          R: "\\mathbb{R}",
-          N: "\\mathbb{N}",
-          Z: "\\mathbb{Z}"
+          tich: "\\cdot",
+          deg: "^\\circ"
         }
       },
       svg: { fontCache: 'global' },
@@ -35,13 +32,11 @@
         .text-orange-custom { color: #FF6A00; }
         .bg-orange-custom { background-color: #FF6A00; }
         
-        /* Nút câu hỏi */
         .q-btn { width: 100%; aspect-ratio: 1; display: flex; align-items: center; justify-content: center; border-radius: 8px; font-weight: 700; font-size: 0.85rem; border: 1px solid #E5E7EB; background-color: white; color: #4B5563; transition: all 0.2s; position: relative; cursor: pointer; }
         .q-btn.active { background-color: #FF6A00 !important; color: white !important; border-color: #FF6A00 !important; transform: scale(1.1); box-shadow: 0 4px 6px -1px rgba(255, 106, 0, 0.3); z-index: 10; }
         .q-btn.answered { background-color: #EFF6FF; color: #2563EB; border-color: #BFDBFE; }
         .q-btn.flagged::after { content: "\f024"; font-family: "Font Awesome 6 Free"; font-weight: 900; position: absolute; top: -4px; right: -4px; font-size: 10px; color: #EF4444; background: #FEF2F2; border-radius: 50%; padding: 2px; border: 1px solid #FECACA; }
         
-        /* Trạng thái Review */
         .q-btn.correct { background-color: #10B981 !important; color: white !important; border-color: #059669 !important; }
         .q-btn.wrong { background-color: #EF4444 !important; color: white !important; border-color: #DC2626 !important; }
         .q-btn.partial { background-color: #F59E0B !important; color: white !important; border-color: #D97706 !important; }
@@ -53,22 +48,12 @@
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         .animate-fade-in { animation: fadeIn 0.5s ease-out forwards; }
         
-        /* FIX: MathJax hiển thị Inline chuẩn */
-        mjx-container { 
-            display: inline-block !important; /* Quan trọng: Để công thức nằm cùng dòng */
-            margin: 0 2px !important;
-        }
-        /* Chỉ cho phép cuộn ngang với công thức dạng khối (display math) */
-        mjx-container[display="true"] {
-            display: block !important;
-            overflow-x: auto;
-            overflow-y: hidden;
-            max-width: 100%;
-        }
+        /* FIX MATHJAX DISPLAY */
+        mjx-container { display: inline-block !important; margin: 0 2px !important; }
+        mjx-container[display="true"] { display: block !important; margin: 1em 0 !important; overflow-x: auto; max-width: 100%; }
 
         .solution-box { border-left: 4px solid #10B981; background-color: #ECFDF5; padding: 1rem; border-radius: 0.5rem; margin-top: 1rem; }
         
-        /* Modal Transition */
         .modal { transition: opacity 0.2s ease; }
         .modal.opacity-0 { pointer-events: none; }
     </style>
@@ -249,12 +234,11 @@
         window.closeCustomModal = () => { modalEl.classList.add('opacity-0', 'pointer-events-none'); modalBox.classList.remove('scale-100'); modalBox.classList.add('scale-95'); if (modalResolve) { modalResolve(null); modalResolve = null; } };
         window.customAlert = (message, type = 'info') => { return new Promise((resolve) => { modalTitle.innerText = type === 'error' ? 'Lỗi' : 'Thông báo'; modalMsg.innerText = message; modalIcon.innerHTML = type === 'error' ? '<i class="fa-solid fa-triangle-exclamation text-red-500"></i>' : '<i class="fa-solid fa-bell text-blue-500"></i>'; document.getElementById('modalInput').classList.add('hidden'); btnCancel.classList.add('hidden'); btnConfirm.innerText = "Đã hiểu"; modalEl.classList.remove('opacity-0', 'pointer-events-none'); modalBox.classList.remove('scale-95'); modalBox.classList.add('scale-100'); btnConfirm.onclick = () => { resolve(true); modalResolve = null; closeCustomModal(); }; modalResolve = resolve; }); };
 
-        // FIX: Xử lý chuỗi an toàn - CHỈ XUỐNG DÒNG KHI CÓ \\
+        // FIX: Xử lý chuỗi an toàn - GIỮ LẠI \\ CHO MATHJAX
         function formatContent(text) {
             if (text === null || text === undefined) return "";
-            return String(text)
-                .replace(/\\\\/g, '<br>') // Chỉ \\ mới thành <br>
-                .replace(/\n/g, ' ');     // \n thành khoảng trắng để không vỡ dòng
+            // Chỉ thay thế \n (xuống dòng của text) thành <br>, giữ nguyên \\ để MathJax xử lý ma trận/hệ pt
+            return String(text).replace(/\n/g, '<br>');
         }
 
         onAuthStateChanged(auth, async (user) => {
@@ -278,7 +262,6 @@
                 const snapshot = await getDocs(q);
                 const att = snapshot.size;
 
-                // --- FIX: LOGIC REVIEW MỚI ---
                 const urlParams = new URLSearchParams(window.location.search);
                 if (urlParams.get('mode') === 'review') {
                     if (att > 0) {
@@ -289,17 +272,15 @@
                         currentQuestions = examData.questions || [];
                         userAnswers = resultsList[0].answers || {};
                         
-                        // ẨN LOBBY NGAY LẬP TỨC
                         document.getElementById('lobbyScreen').classList.add('hidden');
                         viewDetailSolutions(); 
-                        return; // DỪNG HÀM TẠI ĐÂY
+                        return;
                     } else {
                         await window.customAlert("Bạn chưa làm bài này lần nào!", "error");
                         window.location.href = "dashboard.html";
                         return;
                     }
                 }
-                // -----------------------------
 
                 document.getElementById('lobbyTitle').textContent = examData.title;
                 document.getElementById('lobbyDuration').textContent = examData.duration || '∞';
@@ -414,7 +395,6 @@
         }
         function renderPalette() { updatePalette(); }
 
-        // --- XỬ LÝ NỘP BÀI ---
         window.checkFinish = () => {
             let unanswered = 0;
             currentQuestions.forEach((q, i) => {
@@ -424,34 +404,23 @@
                 else isDone = (a !== undefined && a !== null && a !== "");
                 if(!isDone) unanswered++;
             });
-            // Thay confirm mặc định bằng customAlert/Modal
-            // Do customAlert là async, ta cần xử lý Promise
             if(unanswered > 0) {
-                // Tự tạo modal confirm ở đây hoặc dùng customConfirm
-                // Tạm thời dùng alert mặc định của hệ thống để đảm bảo tính năng chạy,
-                // hoặc dùng customConfirm nếu đã định nghĩa (đã định nghĩa ở dưới nhưng là 1 chiều)
-                // Để đơn giản và đẹp, ta dùng customConfirm giả lập:
                 const modalEl = document.getElementById('customModal');
                 const modalTitle = document.getElementById('modalTitle');
                 const modalMsg = document.getElementById('modalMessage');
                 const btnConfirm = document.getElementById('btnConfirm');
                 const btnCancel = document.getElementById('btnCancel');
-                
                 modalTitle.innerText = "Xác nhận nộp bài";
                 modalMsg.innerText = `Bạn còn ${unanswered} câu chưa làm. Nộp ngay?`;
                 document.getElementById('modalInput').classList.add('hidden');
                 btnCancel.classList.remove('hidden');
                 btnConfirm.innerText = "Nộp bài";
-                
                 modalEl.classList.remove('opacity-0', 'pointer-events-none');
                 document.getElementById('customModalBox').classList.remove('scale-95');
                 document.getElementById('customModalBox').classList.add('scale-100');
-                
                 btnConfirm.onclick = () => { window.closeCustomModal(); submitReal(); };
                 btnCancel.onclick = () => { window.closeCustomModal(); };
-            } else {
-                submitReal();
-            }
+            } else { submitReal(); }
         }
 
         window.submitReal = async (auto = false) => {
@@ -464,7 +433,6 @@
             currentQuestions.forEach((q,i) => {
                 const u = userAnswers[i];
                 if(q.type==='mc' && u===q.correct) correct++;
-                // FIX: trim lỗi
                 if(q.type==='short' && q.answer && u && String(u).trim().toLowerCase()===String(q.answer).trim().toLowerCase()) correct++;
                 if(q.type==='tf' && Array.isArray(u) && q.statements) { 
                     let ok = true;
@@ -501,7 +469,6 @@
             } catch(e) { window.customAlert("Lỗi nộp bài: " + e.message, "error"); }
         }
 
-        // --- XEM LỜI GIẢI CHI TIẾT ---
         window.viewDetailSolutions = () => {
             document.getElementById('resultModal').classList.add('hidden');
             document.getElementById('examMain').classList.add('hidden');
@@ -521,7 +488,6 @@
                 let isCorrect = false;
                 let ansDisplay = '';
 
-                // Logic check đúng sai
                 if(q.type === 'mc') {
                     isCorrect = (u === q.correct);
                     const charUser = u !== undefined ? String.fromCharCode(65 + u) : "Chưa làm";
@@ -529,7 +495,6 @@
                     ansDisplay = `<div>Bạn chọn: <b class="${isCorrect?'text-green-600':'text-red-500'}">${charUser}</b> | Đáp án: <b class="text-green-600">${charTrue}</b></div>`;
                 }
                 else if(q.type === 'short') {
-                    // FIX: Thêm String() để tránh lỗi u.trim()
                     const userVal = String(u || '').trim().toLowerCase();
                     const trueVal = String(q.answer || '').trim().toLowerCase();
                     isCorrect = (userVal === trueVal);
@@ -552,17 +517,15 @@
                 }
                 else {
                     ansDisplay = `<div class="text-orange-500 italic">Câu tự luận cần giáo viên chấm.</div>`;
-                    isCorrect = null; // Màu vàng
+                    isCorrect = null;
                 }
 
-                // Render nút Palette
                 const btn = document.createElement('button');
                 btn.className = `q-btn ${isCorrect === true ? 'correct' : (isCorrect === false ? 'wrong' : 'partial')}`;
                 btn.textContent = idx + 1;
                 btn.onclick = () => document.getElementById(`sol-q-${idx}`).scrollIntoView({behavior: 'smooth', block: 'center'});
                 palette.appendChild(btn);
 
-                // Render Nội dung
                 const item = document.createElement('div');
                 item.id = `sol-q-${idx}`;
                 item.className = "bg-white p-6 rounded-2xl shadow-sm border border-gray-200";
@@ -575,7 +538,6 @@
                 list.appendChild(item);
             });
 
-            // FIX: Gọi MathJax render lại sau khi đã thêm nội dung vào DOM
             if(window.MathJax) {
                 setTimeout(() => {
                     MathJax.typesetPromise([list]).catch(e => console.log('MathJax error:', e));
@@ -583,7 +545,6 @@
             }
         }
         
-        // Navigation Buttons
         document.getElementById('prevBtn').onclick = () => { if(currentIndex > 0) renderQuestion(currentIndex - 1); };
         document.getElementById('nextBtn').onclick = () => { if(currentIndex < currentQuestions.length - 1) renderQuestion(currentIndex + 1); };
         document.getElementById('prevBtnMob').onclick = () => { if(currentIndex > 0) renderQuestion(currentIndex - 1); };
