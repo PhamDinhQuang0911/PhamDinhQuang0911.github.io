@@ -58,10 +58,59 @@
         /* History Table Styles */
         .history-row:nth-child(even) { background-color: #F9FAFB; }
         .history-row:hover { background-color: #EFF6FF; }
+        /* --- MỚI: Xử lý ảnh và công thức toán bị tràn trên điện thoại --- */
+        #questionContent img, #answerOptions img, .solution-box img {
+            max-width: 100% !important;
+            height: auto !important;
+            display: block;
+            margin: 10px auto;
+        }
+        
+        /* Cho phép cuộn ngang nếu công thức quá dài */
+        mjx-container {
+            max-width: 100% !important;
+            overflow-x: auto !important;
+            overflow-y: hidden;
+            display: inline-grid !important; /* Fix lỗi hiển thị heva/hoac */
+        }
+
+        /* --- MỚI: Sidebar trượt cho Mobile --- */
+        /* Class này giúp sidebar ẩn sang phải và trượt ra khi cần */
+        .mobile-sidebar {
+            position: fixed;
+            top: 0;
+            right: 0;
+            bottom: 0;
+            width: 280px;
+            background: white;
+            z-index: 50;
+            transform: translateX(100%); /* Mặc định ẩn sang phải */
+            transition: transform 0.3s ease-in-out;
+            box-shadow: -5px 0 15px rgba(0,0,0,0.1);
+        }
+        
+        .mobile-sidebar.open {
+            transform: translateX(0); /* Trượt ra */
+        }
+
+        /* Backdrop làm tối nền khi mở sidebar */
+        .sidebar-backdrop {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 40;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s;
+        }
+        .sidebar-backdrop.show {
+            opacity: 1;
+            pointer-events: auto;
+        }
     </style>
 </head>
 <body class="h-screen flex flex-col overflow-hidden text-gray-800 bg-gray-50">
-
+    <div id="mobileBackdrop" class="sidebar-backdrop" onclick="toggleMobilePalette()"></div>
     <div id="lobbyScreen" class="fixed inset-0 z-50 bg-white flex flex-col items-center justify-center p-4">
         <div class="max-w-md w-full bg-white rounded-3xl shadow-2xl border border-gray-100 p-8 text-center animate-fade-in relative overflow-hidden overflow-y-auto max-h-full">
             <div class="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-orange-400 to-pink-500"></div>
@@ -121,28 +170,37 @@
             </div>
         </div>
 
-        <aside id="paletteSidebar" class="w-80 bg-white border-l border-gray-200 hidden md:flex flex-col z-10">
-            <div class="p-5 border-b border-gray-100 bg-gray-50">
-                <h3 class="font-bold text-gray-700">Danh sách câu hỏi</h3>
-                <div class="flex flex-wrap gap-3 mt-3 text-xs text-gray-500">
-                    <div class="flex items-center gap-1"><span class="w-3 h-3 bg-orange-custom rounded-sm"></span> Đang làm</div>
-                    <div class="flex items-center gap-1"><span class="w-3 h-3 bg-blue-100 border border-blue-200 rounded-sm"></span> Đã làm</div>
-                    <div class="flex items-center gap-1"><span class="w-3 h-3 border border-red-200 bg-red-50 text-red-500 rounded-sm flex items-center justify-center text-[8px]"><i class="fa-solid fa-flag"></i></span> Đánh dấu</div>
+        <aside id="paletteSidebar" class="mobile-sidebar border-l border-gray-200 flex flex-col md:relative md:transform-none md:flex md:w-80 md:shadow-none">
+            <div class="p-5 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
+                <div>
+                    <h3 class="font-bold text-gray-700">Danh sách câu hỏi</h3>
+                    <div class="flex flex-wrap gap-3 mt-2 text-xs text-gray-500">
+                        <div class="flex items-center gap-1"><span class="w-3 h-3 bg-orange-custom rounded-sm"></span> Đang làm</div>
+                        <div class="flex items-center gap-1"><span class="w-3 h-3 bg-blue-100 border border-blue-200 rounded-sm"></span> Đã làm</div>
+                    </div>
                 </div>
+                <button onclick="toggleMobilePalette()" class="md:hidden text-gray-400 hover:text-red-500 p-2">
+                    <i class="fa-solid fa-xmark text-xl"></i>
+                </button>
             </div>
-            <div class="flex-1 overflow-y-auto p-5">
+            
+            <div class="flex-1 overflow-y-auto p-5 no-scrollbar">
                 <div class="grid grid-cols-5 gap-3" id="questionPalette"></div>
             </div>
+            
             <div class="p-5 border-t border-gray-200">
-                <button onclick="checkFinish()" class="w-full py-3 bg-green-600 hover:bg-green-700 text-white font-bold rounded-xl shadow-lg shadow-green-200 transition-all">Nộp bài thi</button>
+                 <button onclick="checkFinish()" class="w-full py-3 bg-green-600 hover:bg-green-700 text-white font-bold rounded-xl shadow-lg transition-all">Nộp bài thi</button>
             </div>
         </aside>
 
-        <div class="fixed bottom-0 left-0 w-full bg-white border-t border-gray-200 p-2 grid grid-cols-4 gap-2 z-30 md:hidden shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
-            <button id="prevBtnMob" class="py-2.5 bg-gray-100 rounded-lg text-gray-600"><i class="fa-solid fa-chevron-left"></i></button>
-            <button onclick="togglePaletteMobile()" class="py-2.5 bg-blue-50 text-blue-600 rounded-lg"><i class="fa-solid fa-list-ol"></i></button>
-            <button id="nextBtnMob" class="py-2.5 bg-gray-100 rounded-lg text-gray-600"><i class="fa-solid fa-chevron-right"></i></button>
-            <button onclick="checkFinish()" class="py-2.5 bg-blue-600 text-white font-bold rounded-lg text-xs uppercase flex items-center justify-center gap-1"><i class="fa-solid fa-paper-plane"></i> Nộp</button>
+        <div class="fixed bottom-0 left-0 w-full bg-white border-t border-gray-200 p-3 flex justify-between gap-2 z-30 md:hidden shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
+            <button id="prevBtnMob" class="flex-1 py-2.5 bg-gray-100 rounded-lg text-gray-600 font-bold"><i class="fa-solid fa-chevron-left"></i> Trước</button>
+            
+            <button onclick="toggleMobilePalette()" class="flex-1 py-2.5 bg-blue-50 text-blue-600 rounded-lg font-bold border border-blue-100">
+                <i class="fa-solid fa-list-ol mr-1"></i> Danh sách
+            </button>
+ 
+            <button id="nextBtnMob" class="flex-1 py-2.5 bg-gray-100 rounded-lg text-gray-600 font-bold">Sau <i class="fa-solid fa-chevron-right"></i></button>
         </div>
         
         <div class="hidden md:flex fixed bottom-8 left-1/2 transform -translate-x-1/2 bg-white px-6 py-3 rounded-full shadow-2xl border border-gray-100 gap-4 items-center z-40">
@@ -153,24 +211,17 @@
     </main>
 
     <div id="solutionView" class="hidden fixed inset-0 z-[90] bg-gray-50 flex h-full">
-        <aside class="w-80 bg-white border-r border-gray-200 flex flex-col shrink-0 hidden md:flex bg-gray-50">
+        <aside id="solutionSidebar" class="mobile-sidebar border-r border-gray-200 flex flex-col shrink-0 bg-gray-50 md:relative md:transform-none md:flex md:w-80">
             <div class="p-5 border-b border-gray-200 bg-white flex justify-between items-center shadow-sm">
                 <h3 class="font-bold text-gray-700">Kết quả chi tiết</h3>
-                <button onclick="window.location.href='dashboard.html'" class="text-xs font-bold text-gray-500 hover:text-blue-600">Thoát</button>
+                <button onclick="toggleSolutionSidebar()" class="md:hidden text-gray-400"><i class="fa-solid fa-xmark text-xl"></i></button>
+                <button onclick="window.location.href='dashboard.html'" class="hidden md:block text-xs font-bold text-gray-500 hover:text-blue-600">Thoát</button>
             </div>
 
             <div class="p-4 border-b border-gray-200 bg-white">
-                <h4 class="text-xs font-bold text-blue-600 uppercase mb-2 flex items-center gap-2"><i class="fa-solid fa-clock-rotate-left"></i> Lịch sử làm bài</h4>
-                <div class="bg-gray-50 rounded-lg border border-gray-100 overflow-hidden">
+                 <h4 class="text-xs font-bold text-blue-600 uppercase mb-2 flex items-center gap-2"><i class="fa-solid fa-clock-rotate-left"></i> Lịch sử làm bài</h4>
+                 <div class="bg-gray-50 rounded-lg border border-gray-100 overflow-hidden">
                     <table class="w-full text-[10px] text-left text-gray-600">
-                        <thead class="bg-gray-100 text-gray-500 font-bold uppercase">
-                            <tr>
-                                <th class="px-2 py-1.5">Lần</th>
-                                <th class="px-2 py-1.5 text-center">Điểm</th>
-                                <th class="px-2 py-1.5 text-center">Vi phạm</th>
-                                <th class="px-2 py-1.5 text-right">Ngày nộp</th>
-                            </tr>
-                        </thead>
                         <tbody id="historyTableBody" class="divide-y divide-gray-100"></tbody>
                     </table>
                 </div>
@@ -181,15 +232,18 @@
                 <div class="flex items-center gap-1"><span class="w-3 h-3 bg-red-500 rounded-sm"></span> Sai</div>
                 <div class="flex items-center gap-1"><span class="w-3 h-3 bg-yellow-500 rounded-sm"></span> 1 phần</div>
             </div>
-            <div class="flex-1 overflow-y-auto p-5">
+      
+            <div class="flex-1 overflow-y-auto p-5 no-scrollbar">
                 <div class="grid grid-cols-5 gap-3" id="solutionPalette"></div>
             </div>
         </aside>
 
         <div class="flex-1 overflow-y-auto p-4 md:p-6 scroll-smooth bg-gray-100 w-full" id="solutionContentArea">
             <div class="md:hidden mb-4 flex justify-between items-center bg-white p-3 rounded-lg shadow-sm">
-                <h3 class="font-bold text-gray-800">Kết quả chi tiết</h3>
-                <button onclick="window.location.href='dashboard.html'" class="px-3 py-1.5 bg-gray-100 rounded text-xs font-bold">Thoát</button>
+                 <button onclick="toggleSolutionSidebar()" class="text-blue-600 p-2"><i class="fa-solid fa-bars text-xl"></i></button>
+                 
+                 <h3 class="font-bold text-gray-800">Kết quả chi tiết</h3>
+                 <button onclick="window.location.href='dashboard.html'" class="px-3 py-1.5 bg-gray-100 rounded text-xs font-bold">Thoát</button>
             </div>
             <div class="max-w-4xl mx-auto space-y-6 pb-20" id="solutionList"></div>
         </div>
@@ -676,6 +730,40 @@
              if(p.classList.contains('hidden')) { p.classList.remove('hidden', 'md:flex'); p.classList.add('fixed', 'inset-0', 'z-50', 'w-full', 'flex'); }
              else { p.classList.add('hidden', 'md:flex'); p.classList.remove('fixed', 'inset-0', 'z-50', 'w-full', 'flex'); }
         }
+        // --- HÀM MỚI: ĐIỀU KHIỂN MENU MOBILE ---
+        // Gắn vào window để HTML gọi được
+        window.toggleMobilePalette = function() {
+            const sidebar = document.getElementById('paletteSidebar');
+            const backdrop = document.getElementById('mobileBackdrop');
+            
+            if (sidebar.classList.contains('open')) {
+                sidebar.classList.remove('open');
+                backdrop.classList.remove('show');
+            } else {
+                sidebar.classList.add('open');
+                backdrop.classList.add('show');
+            }
+        };
+
+        window.toggleSolutionSidebar = function() {
+            const sidebar = document.getElementById('solutionSidebar');
+            // Tái sử dụng backdrop của màn hình thi
+            const backdrop = document.getElementById('mobileBackdrop'); 
+            
+            // Cập nhật hành động click backdrop cho solution view
+            backdrop.onclick = window.toggleSolutionSidebar;
+
+            if (sidebar.classList.contains('open')) {
+                sidebar.classList.remove('open');
+                backdrop.classList.remove('show');
+            } else {
+                sidebar.classList.add('open');
+                backdrop.classList.add('show');
+            }
+        };
+        
+        // Tự động đóng menu khi chọn câu hỏi (Thêm vào hàm renderQuestion hoặc updatePalette nếu cần)
+        // Hiện tại người dùng tự đóng hoặc bấm backdrop để đóng.
     </script>
 </body>
 </html>
