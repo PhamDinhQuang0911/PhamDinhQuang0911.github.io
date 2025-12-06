@@ -98,7 +98,6 @@
     </aside>
 
     <main class="flex-1 flex flex-col overflow-hidden relative w-full">
-        
         <div class="md:hidden h-16 bg-white border-b border-gray-200 flex items-center justify-between px-4 sticky top-0 z-20 shrink-0 shadow-sm">
             <div class="flex items-center gap-3">
                 <button onclick="window.toggleSidebar()" class="text-gray-600 hover:text-orange-500 text-2xl p-1">
@@ -219,7 +218,8 @@
                 </div>
 
                 <div id="tabContentExams" class="hidden space-y-6 w-full max-w-7xl mx-auto">
-                    </div>
+                    <div id="teacherExamList" class="space-y-3"></div>
+                </div>
             </div>
         </div>
 
@@ -393,7 +393,7 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         // IMPORT THÊM updateProfile và updatePassword
         import { getAuth, onAuthStateChanged, signOut, createUserWithEmailAndPassword, updateProfile, updatePassword } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
-        import { getFirestore, doc, getDoc, setDoc, collection, addDoc, query, where, onSnapshot, updateDoc, deleteDoc, arrayUnion, getDocs } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { getFirestore, doc, getDoc, setDoc, collection, addDoc, query, where, onSnapshot, getDocs, updateDoc, deleteDoc, arrayUnion, limit } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
         // 1. CẤU HÌNH FIREBASE
         const firebaseConfig = {
@@ -506,6 +506,7 @@
 
                         if (currentRole === 'teacher' || currentRole === 'admin') {
                             document.getElementById('teacherMenu').classList.remove('hidden');
+                            // OPTIMIZATION: Use getDocs instead of onSnapshot for heavy loads
                             loadClasses();
                             loadFileManager();
                             const createBtn = document.getElementById('createClassBtn');
@@ -606,13 +607,16 @@
                 try {
                     await addDoc(collection(db, "classes"), { name: name, teacherId: currentUserUid, studentCount: 0, createdAt: new Date().toISOString() });
                     window.showNotification("Tạo lớp thành công!", "success");
+                    loadClasses(); // Refresh manually
                 } catch(e) { window.showNotification("Lỗi tạo lớp: " + e.message, "error"); }
             }
         }
 
-        function loadClasses() {
-            const q = query(collection(db, "classes"), where("teacherId", "==", currentUserUid));
-            onSnapshot(q, (snap) => {
+        // OPTIMIZATION: Use getDocs + limit instead of onSnapshot
+        async function loadClasses() {
+            try {
+                const q = query(collection(db, "classes"), where("teacherId", "==", currentUserUid), limit(100));
+                const snap = await getDocs(q);
                 const list = document.getElementById('classList'); 
                 list.innerHTML = '';
                 snap.forEach(d => {
@@ -622,8 +626,6 @@
                     const words = cl.name.trim().split(/\s+/);
                     let acronym = words.length >= 2 ? (words[0][0] + words[1][0]).toUpperCase() : words[0].substring(0, 2).toUpperCase();
                     
-                    // CẬP NHẬT: Gom nút Sửa và Xóa vào chung một khu vực góc phải (absolute)
-                    // Sử dụng flex gap-1 để chúng nằm cạnh nhau
                     card.innerHTML = `
                         <div class="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity z-10 flex gap-1">
                             <button onclick="event.stopPropagation(); window.openTeacherClassDetail('${d.id}', '${cl.name}')" class="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-full transition-colors" title="Chi tiết / Sửa">
@@ -643,13 +645,12 @@
                     list.appendChild(card);
                 });
                 
-                // Nút tạo lớp mới (giữ nguyên)
                 const addCard = document.createElement('button');
                 addCard.className = "border-2 border-dashed border-gray-300 rounded-xl p-5 flex flex-col items-center justify-center text-gray-400 hover:border-blue-400 hover:text-blue-500 transition-colors h-full min-h-[140px]";
                 addCard.innerHTML = `<i class="fa-solid fa-plus text-3xl mb-2"></i><span class="font-bold">Tạo lớp mới</span>`;
                 addCard.onclick = handleCreateClass;
                 list.appendChild(addCard);
-            });
+            } catch (e) { console.error(e); }
         }
         
         window.deleteClass = async (id) => {
@@ -657,6 +658,7 @@
                 try {
                     await deleteDoc(doc(db, "classes", id));
                     window.showNotification("Đã xóa lớp học", "success");
+                    loadClasses(); // Refresh
                 } catch(e) { window.showNotification("Lỗi: " + e.message, "error"); }
             }
         }
@@ -749,21 +751,38 @@
         window.openStudentClassDetail = async (classId, className) => { window.switchView('student-class-detail'); document.getElementById('detailClassName').textContent = className; const content = document.getElementById('classDetailContent'); content.innerHTML = '<p class="text-center text-gray-400 py-10">Đang tải danh sách bài tập...</p>'; try { const q = query(collection(db, "exams"), where("allowedClassId", "==", classId)); const snap = await getDocs(q); if (snap.empty) { content.innerHTML = '<div class="text-center py-10"><i class="fa-regular fa-folder-open text-4xl text-gray-300 mb-2"></i><p class="text-gray-500">Chưa có bài tập nào trong lớp này.</p></div>'; currentClassExamsData = []; return; } currentClassExamsData = []; snap.forEach(doc => currentClassExamsData.push({ id: doc.id, ...doc.data() })); window.sortClassExams('newest'); } catch (err) { console.error(err); content.innerHTML = '<p class="text-red-500 text-center">Lỗi tải dữ liệu.</p>'; } }
         window.sortClassExams = (order) => { const content = document.getElementById('classDetailContent'); currentClassExamsData.sort((a, b) => { const dateA = a.createdAt ? new Date(a.createdAt) : new Date(0); const dateB = b.createdAt ? new Date(b.createdAt) : new Date(0); return order === 'newest' ? dateB - dateA : dateA - dateB; }); let html = '<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">'; currentClassExamsData.forEach(exam => { const results = studentResultsMap[exam.id] || []; const attempts = results.length; const maxScore = attempts > 0 ? Math.max(...results.map(r => r.score)) : "--"; const isDone = attempts > 0; const now = new Date(); const endTime = exam.endTime ? new Date(exam.endTime) : null; const isExpired = endTime && endTime < now; const statusColor = isExpired ? 'text-red-500 bg-red-50' : 'text-green-600 bg-green-50'; const statusText = isExpired ? 'Đã hết hạn' : 'Đang mở'; const deadlineStr = endTime ? `${endTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} ${endTime.toLocaleDateString('vi-VN')}` : "Không giới hạn"; html += `<div class="bg-white p-5 rounded-2xl border ${isExpired ? 'border-gray-200 bg-gray-50' : 'border-blue-100 hover:border-blue-300'} shadow-sm flex flex-col justify-between transition-all hover:shadow-md"><div><div class="flex justify-between items-start mb-2"><h4 class="font-bold text-gray-800 text-lg line-clamp-2" title="${exam.title}">${exam.title}</h4><span class="text-[10px] font-bold px-2 py-1 rounded shrink-0 ml-2 ${statusColor}">${statusText}</span></div><div class="flex items-center gap-4 text-xs text-gray-500 mb-3"><span><i class="fa-solid fa-clock mr-1"></i> ${exam.duration} phút</span><span><i class="fa-solid fa-list mr-1"></i> ${exam.questionCount} câu</span></div><div class="bg-gray-50 p-3 rounded-xl mb-4 text-xs border border-gray-100 space-y-1"><div class="flex justify-between"><span>Trạng thái:</span> <span class="font-bold ${isDone?'text-green-600':'text-orange-500'}">${isDone?'Đã làm':'Chưa làm'}</span></div><div class="flex justify-between"><span>Số lần làm:</span> <span class="font-bold">${attempts} / ${exam.attempts || '∞'}</span></div><div class="flex justify-between"><span>Điểm cao nhất:</span> <span class="font-bold text-blue-600 text-sm">${maxScore}</span></div><div class="flex justify-between pt-1 mt-1 border-t border-gray-200 text-red-500 font-bold"><span>Hạn nộp:</span> <span>${deadlineStr}</span></div></div></div><button onclick="window.location.href='exam.html?id=${exam.id}'" class="w-full py-2.5 ${isExpired ? 'bg-gray-200 text-gray-500 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700 shadow-lg shadow-blue-200'} font-bold rounded-xl text-sm transition-all" ${isExpired ? 'disabled' : ''}>${isExpired ? 'Đã đóng' : (isDone ? 'Làm lại bài' : 'Bắt đầu làm bài')}</button></div>`; }); html += '</div>'; content.innerHTML = html; }
 
-        function loadFileManager() { const qFolders = query(collection(db, "folders"), where("teacherId", "==", currentUserUid)); onSnapshot(qFolders, (snap) => { folderData = []; snap.forEach(d => folderData.push({id: d.id, ...d.data()})); renderExplorer(); }); const qExams = query(collection(db, "exams"), where("teacherId", "==", currentUserUid)); onSnapshot(qExams, (snap) => { examData = []; snap.forEach(d => examData.push({id: d.id, ...d.data()})); renderExplorer(); }); }
+        // --- CÁC CHỨC NĂNG CHUNG KHÁC ---
+        // OPTIMIZATION: Use getDocs
+        async function loadFileManager() { 
+            try {
+                const qFolders = query(collection(db, "folders"), where("teacherId", "==", currentUserUid), limit(100)); 
+                const snapFolders = await getDocs(qFolders); 
+                folderData = []; 
+                snapFolders.forEach(d => folderData.push({id: d.id, ...d.data()})); 
+                
+                const qExams = query(collection(db, "exams"), where("teacherId", "==", currentUserUid), limit(100)); 
+                const snapExams = await getDocs(qExams);
+                examData = []; 
+                snapExams.forEach(d => examData.push({id: d.id, ...d.data()})); 
+                
+                renderExplorer(); 
+            } catch (e) { console.error(e); }
+        }
+        
         function renderExplorer() { const grid = document.getElementById('explorerGrid'); grid.innerHTML = ''; const currentFolders = folderData.filter(f => f.parentId === currentFolderId); const currentExams = examData.filter(e => (e.folderId || null) === currentFolderId); if (currentFolders.length === 0 && currentExams.length === 0) document.getElementById('emptyExplorerMsg').classList.remove('hidden'); else document.getElementById('emptyExplorerMsg').classList.add('hidden'); currentFolders.forEach(f => { const div = document.createElement('div'); div.className = "explorer-item bg-white p-4 rounded-xl border border-gray-200 relative group"; div.draggable = true; div.ondragstart = (evt) => window.handleDragStart(evt, f.id, 'folder'); div.ondragover = (evt) => window.handleDragOver(evt); div.ondragleave = (evt) => window.handleDragLeave(evt); div.ondrop = (evt) => window.handleDrop(evt, f.id); div.onclick = (e) => { if(!e.target.closest('button')) window.navigateFolder(f.id, f.name); }; div.innerHTML = `<div class="text-4xl text-yellow-400 mb-3 text-center pointer-events-none"><i class="fa-solid fa-folder"></i></div><p class="text-sm font-bold text-gray-700 text-center truncate px-2 pointer-events-none">${f.name}</p><div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"><button onclick="event.stopPropagation(); window.openContextMenu('${f.id}', 'folder', '${f.name}')" class="p-1 hover:bg-gray-100 rounded text-gray-500"><i class="fa-solid fa-ellipsis-vertical"></i></button></div>`; grid.appendChild(div); }); currentExams.forEach(exam => { const div = document.createElement('div'); div.className = "explorer-item bg-white p-4 rounded-xl border border-gray-200 relative group"; div.draggable = true; div.ondragstart = (evt) => window.handleDragStart(evt, exam.id, 'exam'); div.onclick = (e) => { if(!e.target.closest('button')) window.location.href = `exam-editor.html?id=${exam.id}`; }; div.innerHTML = `<div class="text-4xl text-blue-500 mb-3 text-center pointer-events-none"><i class="fa-regular fa-file-lines"></i></div><p class="text-sm font-bold text-gray-700 text-center truncate px-2 pointer-events-none" title="${exam.title}">${exam.title}</p><div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"><button onclick="event.stopPropagation(); window.openContextMenu('${exam.id}', 'exam', '${exam.title}')" class="p-1 hover:bg-gray-100 rounded text-gray-500"><i class="fa-solid fa-ellipsis-vertical"></i></button></div>`; grid.appendChild(div); }); renderBreadcrumb(); }
         window.handleDragStart = (e, id, type) => { e.dataTransfer.setData("text/plain", JSON.stringify({id, type})); e.target.classList.add('dragging'); e.stopPropagation(); }
         window.handleDragOver = (e) => { e.preventDefault(); e.currentTarget.classList.add('drag-over'); }
         window.handleDragLeave = (e) => { e.currentTarget.classList.remove('drag-over'); }
-        window.handleDrop = async (e, targetId) => { e.preventDefault(); e.stopPropagation(); e.currentTarget.classList.remove('drag-over'); try { const data = JSON.parse(e.dataTransfer.getData("text/plain")); if (data.id === targetId) return; const collName = data.type === 'folder' ? 'folders' : 'exams'; const field = data.type === 'folder' ? 'parentId' : 'folderId'; await updateDoc(doc(db, collName, data.id), { [field]: targetId }); window.showNotification("Đã di chuyển thành công!"); } catch (err) { console.error("Drop error", err); } document.querySelectorAll('.dragging').forEach(el => el.classList.remove('dragging')); }
+        window.handleDrop = async (e, targetId) => { e.preventDefault(); e.stopPropagation(); e.currentTarget.classList.remove('drag-over'); try { const data = JSON.parse(e.dataTransfer.getData("text/plain")); if (data.id === targetId) return; const collName = data.type === 'folder' ? 'folders' : 'exams'; const field = data.type === 'folder' ? 'parentId' : 'folderId'; await updateDoc(doc(db, collName, data.id), { [field]: targetId }); window.showNotification("Đã di chuyển thành công!"); loadFileManager(); } catch (err) { console.error("Drop error", err); } document.querySelectorAll('.dragging').forEach(el => el.classList.remove('dragging')); }
         window.navigateFolder = (id, name) => { if(id === 'root') { currentFolderId = null; breadcrumbs = []; } else { currentFolderId = id; breadcrumbs.push({id, name}); } renderExplorer(); }
-        window.createNewFolder = async () => { const name = await window.customPrompt("Nhập tên thư mục mới:", "VD: Toán Đại Số"); if(name) { try { await addDoc(collection(db, "folders"), { name, parentId: currentFolderId, teacherId: currentUserUid, createdAt: new Date().toISOString() }); window.showNotification("Đã tạo thư mục"); } catch(e) { window.showNotification("Lỗi: " + e.message, "error"); } } }
+        window.createNewFolder = async () => { const name = await window.customPrompt("Nhập tên thư mục mới:", "VD: Toán Đại Số"); if(name) { try { await addDoc(collection(db, "folders"), { name, parentId: currentFolderId, teacherId: currentUserUid, createdAt: new Date().toISOString() }); window.showNotification("Đã tạo thư mục"); loadFileManager(); } catch(e) { window.showNotification("Lỗi: " + e.message, "error"); } } }
         let breadcrumbs = [];
         function renderBreadcrumb() { const container = document.getElementById('breadcrumbContainer'); if (!currentFolderId) { container.innerHTML = '<span class="mx-2 text-gray-400">/</span><span>Tất cả</span>'; return; } let path = []; let curr = folderData.find(f => f.id === currentFolderId); while(curr) { path.unshift(curr); curr = folderData.find(f => f.id === curr.parentId); } let html = '<span class="mx-2 text-gray-400">/</span><button onclick="window.navigateFolder(\'root\')" class="hover:text-blue-600">...</button>'; path.forEach((p, idx) => { html += `<span class="mx-2 text-gray-400">/</span>`; if (idx === path.length - 1) html += `<span class="font-bold text-gray-800">${p.name}</span>`; else html += `<button onclick="window.navigateFolder('${p.id}')" class="hover:text-blue-600">${p.name}</button>`; }); container.innerHTML = html; }
         window.openContextMenu = (id, type, name) => { currentActionItem = {id, type, name}; document.getElementById('actionModalTitle').textContent = `Thao tác: ${name}`; const content = document.getElementById('dynamicContent'); content.innerHTML = `<div class="grid grid-cols-3 gap-3 mb-4"><button onclick="window.triggerAction('rename')" class="p-3 bg-blue-50 text-blue-600 rounded-lg font-bold hover:bg-blue-100 flex flex-col items-center"><i class="fa-solid fa-pen mb-1"></i> Đổi tên</button><button onclick="window.triggerAction('move')" class="p-3 bg-purple-50 text-purple-600 rounded-lg font-bold hover:bg-purple-100 flex flex-col items-center"><i class="fa-solid fa-arrow-right-to-bracket mb-1"></i> Di chuyển</button><button onclick="window.triggerAction('delete')" class="p-3 bg-red-50 text-red-600 rounded-lg font-bold hover:bg-red-100 flex flex-col items-center"><i class="fa-solid fa-trash mb-1"></i> Xóa</button></div><div id="subActionContent"></div>`; window.toggleModal('actionModal', true); }
-        window.triggerAction = async (action) => { const container = document.getElementById('subActionContent'); container.innerHTML = ''; if (action === 'rename') container.innerHTML = `<label class="block text-sm font-bold text-gray-700 mb-2">Tên mới</label><div class="flex gap-2"><input type="text" id="renameInput" value="${currentActionItem.name}" class="flex-1 border rounded px-3 py-2"><button onclick="window.commitRename()" class="bg-blue-600 text-white px-4 rounded font-bold">Lưu</button></div>`; else if (action === 'delete') { window.toggleModal('actionModal', false); if(await window.customConfirm(`Bạn chắc chắn muốn xóa "${currentActionItem.name}"?`)) { try { const collName = currentActionItem.type === 'folder' ? 'folders' : 'exams'; await deleteDoc(doc(db, collName, currentActionItem.id)); window.showNotification("Đã xóa!"); } catch(e) { window.showNotification(e.message, 'error'); } } } else if (action === 'move') { let html = '<p class="text-sm font-bold text-gray-700 mb-2">Chọn thư mục đến:</p><div class="h-40 overflow-y-auto border rounded p-1 space-y-1">'; html += `<button onclick="window.commitMove(null)" class="w-full text-left px-3 py-2 hover:bg-gray-100 rounded flex items-center gap-2"><i class="fa-solid fa-house text-gray-400"></i> Thư mục gốc</button>`; folderData.forEach(f => { if (f.id !== currentActionItem.id) html += `<button onclick="window.commitMove('${f.id}')" class="w-full text-left px-3 py-2 hover:bg-gray-100 rounded flex items-center gap-2"><i class="fa-solid fa-folder text-yellow-400"></i> ${f.name}</button>`; }); html += '</div>'; container.innerHTML = html; } }
-        window.commitRename = async () => { const newName = document.getElementById('renameInput').value; if(!newName) return; const collName = currentActionItem.type === 'folder' ? 'folders' : 'exams'; await updateDoc(doc(db, collName, currentActionItem.id), { name: newName, title: newName }); window.showNotification("Đã đổi tên"); window.toggleModal('actionModal', false); }
-        window.commitMove = async (targetFolderId) => { const collName = currentActionItem.type === 'folder' ? 'folders' : 'exams'; const field = currentActionItem.type === 'folder' ? 'parentId' : 'folderId'; await updateDoc(doc(db, collName, currentActionItem.id), { [field]: targetFolderId }); window.toggleModal('actionModal', false); window.showNotification("Đã di chuyển"); }
-
+        window.triggerAction = async (action) => { const container = document.getElementById('subActionContent'); container.innerHTML = ''; if (action === 'rename') container.innerHTML = `<label class="block text-sm font-bold text-gray-700 mb-2">Tên mới</label><div class="flex gap-2"><input type="text" id="renameInput" value="${currentActionItem.name}" class="flex-1 border rounded px-3 py-2"><button onclick="window.commitRename()" class="bg-blue-600 text-white px-4 rounded font-bold">Lưu</button></div>`; else if (action === 'delete') { window.toggleModal('actionModal', false); if(await window.customConfirm(`Bạn chắc chắn muốn xóa "${currentActionItem.name}"?`)) { try { const collName = currentActionItem.type === 'folder' ? 'folders' : 'exams'; await deleteDoc(doc(db, collName, currentActionItem.id)); window.showNotification("Đã xóa!"); loadFileManager(); } catch(e) { window.showNotification(e.message, 'error'); } } } else if (action === 'move') { let html = '<p class="text-sm font-bold text-gray-700 mb-2">Chọn thư mục đến:</p><div class="h-40 overflow-y-auto border rounded p-1 space-y-1">'; html += `<button onclick="window.commitMove(null)" class="w-full text-left px-3 py-2 hover:bg-gray-100 rounded flex items-center gap-2"><i class="fa-solid fa-house text-gray-400"></i> Thư mục gốc</button>`; folderData.forEach(f => { if (f.id !== currentActionItem.id) html += `<button onclick="window.commitMove('${f.id}')" class="w-full text-left px-3 py-2 hover:bg-gray-100 rounded flex items-center gap-2"><i class="fa-solid fa-folder text-yellow-400"></i> ${f.name}</button>`; }); html += '</div>'; container.innerHTML = html; } }
+        window.commitRename = async () => { const newName = document.getElementById('renameInput').value; if(!newName) return; const collName = currentActionItem.type === 'folder' ? 'folders' : 'exams'; await updateDoc(doc(db, collName, currentActionItem.id), { name: newName, title: newName }); window.showNotification("Đã đổi tên"); window.toggleModal('actionModal', false); loadFileManager(); }
+        window.commitMove = async (targetFolderId) => { const collName = currentActionItem.type === 'folder' ? 'folders' : 'exams'; const field = currentActionItem.type === 'folder' ? 'parentId' : 'folderId'; await updateDoc(doc(db, collName, currentActionItem.id), { [field]: targetFolderId }); window.toggleModal('actionModal', false); window.showNotification("Đã di chuyển"); loadFileManager(); }
+        
         // --- UPDATE: TEACHER CLASS EXAMS MANAGEMENT (ACTIVE/EXPIRED) ---
         async function loadClassExams(classId) {
             const container = document.getElementById('tabContentExams');
@@ -844,55 +863,10 @@
 
         window.switchTab = async (tabName) => { const btnStudents = document.getElementById('tabBtnStudents'); const btnExams = document.getElementById('tabBtnExams'); const contentStudents = document.getElementById('tabContentStudents'); const contentExams = document.getElementById('tabContentExams'); contentStudents.classList.add('hidden'); contentExams.classList.add('hidden'); btnStudents.className = `px-3 md:px-4 py-1.5 text-xs md:text-sm font-bold rounded-md transition-all text-gray-500 hover:text-gray-700 bg-transparent shadow-none`; btnExams.className = `px-3 md:px-4 py-1.5 text-xs md:text-sm font-bold rounded-md transition-all text-gray-500 hover:text-gray-700 bg-transparent shadow-none`; if (tabName === 'students') { contentStudents.classList.remove('hidden'); btnStudents.className = `px-3 md:px-4 py-1.5 text-xs md:text-sm font-bold rounded-md transition-all text-blue-700 bg-white shadow-sm`; } else { contentExams.classList.remove('hidden'); btnExams.className = `px-3 md:px-4 py-1.5 text-xs md:text-sm font-bold rounded-md transition-all text-blue-700 bg-white shadow-sm`; await loadClassExams(currentViewingClassId); } }
         
-        function renderStudentList(list) { const table = document.getElementById('studentListTable'); table.innerHTML = ''; document.getElementById('studentCountBadge').textContent = `${list.length} học sinh`; if (list.length === 0) document.getElementById('emptyStudentMsg').classList.remove('hidden'); else { document.getElementById('emptyStudentMsg').classList.add('hidden'); list.forEach((st, index) => { table.innerHTML += `<tr class="bg-white hover:bg-gray-50 border-b"><td class="px-6 py-3 font-medium text-gray-500">${index + 1}</td><td class="px-6 py-3 font-medium text-gray-900">${st.name}</td><td class="px-6 py-3 text-blue-600 font-medium">${st.username}</td><td class="px-6 py-3 font-mono text-gray-400">${st.password || '******'}</td><td class="px-6 py-3 text-center"><button onclick="window.openEditStudent(${index})" class="text-blue-500 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 p-2 rounded-lg transition-colors mr-1"><i class="fa-solid fa-pen-to-square"></i></button><button onclick="window.deleteStudent(${index})" class="text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 p-2 rounded-lg transition-colors"><i class="fa-solid fa-trash"></i></button></td></tr>`; }); } }
+        function renderStudentList(list) { const table = document.getElementById('studentListTable'); table.innerHTML = ''; document.getElementById('studentCountBadge').textContent = `${list.length} học sinh`; if (list.length === 0) document.getElementById('emptyStudentMsg').classList.remove('hidden'); else { document.getElementById('emptyStudentMsg').classList.add('hidden'); list.forEach((st, index) => { table.innerHTML += `<tr class="bg-white hover:bg-gray-50 border-b"><td class="px-6 py-3 font-medium text-gray-500">${index + 1}</td><td class="px-6 py-3 font-medium text-gray-900">${st.name}</td><td class="px-6 py-3 text-blue-600 font-medium">${st.username}</td><td class="px-6 py-3 font-mono text-gray-400">******</td><td class="px-6 py-3 text-center"><button onclick="window.openEditStudent(${index})" class="text-blue-500 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 p-2 rounded-lg transition-colors mr-1"><i class="fa-solid fa-pen-to-square"></i></button><button onclick="window.deleteStudent(${index})" class="text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 p-2 rounded-lg transition-colors"><i class="fa-solid fa-trash"></i></button></td></tr>`; }); } }
         window.openEditStudent = function(index) { editingStudentIndex = index; const st = currentClassStudents[index]; document.getElementById('editStuName').value = st.name || ''; document.getElementById('editStuSBD').value = st.sbd || ''; document.getElementById('editStuGender').value = st.gender || 'Nam'; document.getElementById('editStuPhone').value = st.phoneStudent || ''; document.getElementById('editStuParentPhone').value = st.phoneParent || ''; document.getElementById('editStuEmail').value = st.email || ''; document.getElementById('editStuUsername').value = st.username || ''; document.getElementById('editStuPassword').value = st.password || ''; document.getElementById('editStuPassword').type = "password"; window.toggleModal('editStudentModal', true); }
         window.deleteStudent = async function(index) { if(!await window.customConfirm("Bạn có chắc muốn xóa học sinh này khỏi lớp?")) return; try { currentClassStudents.splice(index, 1); await updateDoc(doc(db, "classes", currentViewingClassId), { students: currentClassStudents, studentCount: currentClassStudents.length }); renderStudentList(currentClassStudents); window.showNotification("Đã xóa học sinh.", "success"); } catch(e) { window.showNotification("Lỗi xóa: " + e.message, "error"); } }
-        
-        document.getElementById('saveStudentBtn').addEventListener('click', async () => {
-            if (editingStudentIndex === -1 || !currentViewingClassId) return;
-            
-            const updatedStudent = {
-                ...currentClassStudents[editingStudentIndex],
-                name: document.getElementById('editStuName').value,
-                sbd: document.getElementById('editStuSBD').value,
-                gender: document.getElementById('editStuGender').value,
-                phoneStudent: document.getElementById('editStuPhone').value,
-                phoneParent: document.getElementById('editStuParentPhone').value,
-                email: document.getElementById('editStuEmail').value,
-                username: document.getElementById('editStuUsername').value,
-                password: document.getElementById('editStuPassword').value // Mật khẩu mới
-            };
-
-            if(!updatedStudent.name || !updatedStudent.username || !updatedStudent.password) {
-                window.showNotification("Thiếu thông tin!", "error");
-                return;
-            }
-
-            try {
-                currentClassStudents[editingStudentIndex] = updatedStudent;
-                await updateDoc(doc(db, "classes", currentViewingClassId), { students: currentClassStudents });
-
-                const userQuery = query(collection(db, "users"), where("email", "==", updatedStudent.email));
-                const userSnap = await getDocs(userQuery);
-                if (!userSnap.empty) {
-                    const userDocId = userSnap.docs[0].id;
-                    await updateDoc(doc(db, "users", userDocId), {
-                        displayName: updatedStudent.name,
-                        password: updatedStudent.password, // Lưu pass mới vào DB để tham khảo
-                        phone: updatedStudent.phoneStudent,
-                        gender: updatedStudent.gender
-                    });
-                }
-
-                window.showNotification("Cập nhật thành công! (Lưu ý: Mật khẩu đăng nhập thực tế chưa đổi do giới hạn bảo mật)", "success");
-                renderStudentList(currentClassStudents);
-                window.toggleModal('editStudentModal', false);
-
-            } catch (e) {
-                window.showNotification("Lỗi: " + e.message, "error");
-            }
-        });
-
+        document.getElementById('saveStudentBtn').addEventListener('click', async () => { if (editingStudentIndex === -1 || !currentViewingClassId) return; const updatedStudent = { ...currentClassStudents[editingStudentIndex], name: document.getElementById('editStuName').value, sbd: document.getElementById('editStuSBD').value, gender: document.getElementById('editStuGender').value, phoneStudent: document.getElementById('editStuPhone').value, phoneParent: document.getElementById('editStuParentPhone').value, email: document.getElementById('editStuEmail').value, username: document.getElementById('editStuUsername').value, password: document.getElementById('editStuPassword').value }; if(!updatedStudent.name || !updatedStudent.username || !updatedStudent.password) { window.showNotification("Thiếu thông tin!", "error"); return; } try { currentClassStudents[editingStudentIndex] = updatedStudent; await updateDoc(doc(db, "classes", currentViewingClassId), { students: currentClassStudents }); window.showNotification("Cập nhật thành công!", "success"); renderStudentList(currentClassStudents); window.toggleModal('editStudentModal', false); } catch (e) { window.showNotification("Lỗi: " + e.message, "error"); } });
         document.getElementById('addStudentBtn').addEventListener('click', async () => { if (!currentViewingClassId) return; const name = document.getElementById('newStudentName').value; const user = document.getElementById('newStudentUser').value; const pass = document.getElementById('newStudentPass').value; if (!name || !user || !pass) { window.showNotification("Nhập đủ thông tin!", "error"); return; } const fakeEmail = `${user}@hocsinh.com`; try { await createStudentAuth(fakeEmail, pass, name); const newStudent = { name, username: user, password: pass, email: fakeEmail, createdAt: new Date().toISOString() }; await updateDoc(doc(db, "classes", currentViewingClassId), { students: arrayUnion(newStudent) }); currentClassStudents.push(newStudent); renderStudentList(currentClassStudents); await updateDoc(doc(db, "classes", currentViewingClassId), { studentCount: currentClassStudents.length }); document.getElementById('newStudentName').value = ''; document.getElementById('newStudentUser').value = ''; document.getElementById('newStudentPass').value = ''; window.showNotification("Thêm thành công và đã tạo tài khoản!", "success"); } catch (e) { console.error(e); if(e.code === 'auth/email-already-in-use') window.showNotification("Tên đăng nhập đã tồn tại!", "error"); else window.showNotification("Lỗi: " + e.message, "error"); } });
         async function createStudentAuth(email, password, displayName) { const secondaryApp = initializeApp(firebaseConfig, "Secondary"); const secondaryAuth = getAuth(secondaryApp); try { const userCredential = await createUserWithEmailAndPassword(secondaryAuth, email, password); await setDoc(doc(db, "users", userCredential.user.uid), { email: email, displayName: displayName, role: 'student', birthDate: '', authType: 'email', createdAt: new Date().toISOString(), password: password }); await signOut(secondaryAuth); return userCredential.user; } catch (error) { throw error; } finally { deleteApp(secondaryApp); } }
         window.downloadTemplate = () => { const data = [["Họ và tên", "Tên đăng nhập", "Mật khẩu", "SBD", "Giới tính", "SĐT HS", "SĐT PHHS"], ["Nguyễn Văn A", "nguyenvana", "123456", "001", "Nam", "098...", "091..."]]; const ws = XLSX.utils.aoa_to_sheet(data); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "DanhSach"); XLSX.writeFile(wb, "Mau_DS_Hoc_Sinh.xlsx"); }
