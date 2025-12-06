@@ -364,7 +364,7 @@
         const app = initializeApp(firebaseConfig); const auth = getAuth(app); const db = getFirestore(app);
         
         let currentUser = null, currentExamId = null;
-        window.questions = []; // SINGLE SOURCE
+        window.questions = [];
         window.currentQIndex = -1;
         
         // STATS GLOBAL VARS
@@ -385,7 +385,6 @@
         window.customAlert = (message, type = 'info') => { return new Promise((resolve) => { modalTitle.innerText = type === 'error' ? 'Lỗi' : 'Thông báo'; modalMsg.innerText = message; modalIcon.innerHTML = type === 'error' ? '<i class="fa-solid fa-triangle-exclamation text-red-500"></i>' : '<i class="fa-solid fa-bell text-blue-500"></i>'; document.getElementById('modalInput').classList.add('hidden'); btnCancel.classList.add('hidden'); btnConfirm.innerText = "Đã hiểu"; modalEl.classList.remove('opacity-0', 'pointer-events-none'); modalBox.classList.remove('scale-95'); modalBox.classList.add('scale-100'); btnConfirm.onclick = () => { resolve(true); modalResolve = null; closeCustomModal(); }; modalResolve = resolve; }); };
         window.customConfirm = (message) => { return new Promise((resolve) => { modalTitle.innerText = "Xác nhận"; modalMsg.innerText = message; modalIcon.innerHTML = '<i class="fa-solid fa-circle-question text-orange-500"></i>'; document.getElementById('modalInput').classList.add('hidden'); btnCancel.classList.remove('hidden'); btnConfirm.innerText = "Đồng ý"; modalEl.classList.remove('opacity-0', 'pointer-events-none'); modalBox.classList.remove('scale-95'); modalBox.classList.add('scale-100'); btnConfirm.onclick = () => { resolve(true); modalResolve = null; closeCustomModal(); }; btnCancel.onclick = () => { resolve(false); modalResolve = null; closeCustomModal(); }; }); };
 
-        // FIX: SPLIT CONTENT BY MATH TAGS TO PRESERVE LATEX
         function formatContent(text) {
             if (text === null || text === undefined) return "";
             const regex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?:\$[^\n\r]*?\$))/g;
@@ -399,27 +398,10 @@
         onAuthStateChanged(auth, async (user) => {
             if (user) {
                 currentUser = user;
-                // [IMPORTANT] Wait for classes to load first
-                await loadTeacherClasses();
-                
+                loadTeacherClasses();
                 const urlParams = new URLSearchParams(window.location.search);
                 const examId = urlParams.get('id');
-                const assignClassId = urlParams.get('assignToClass'); // GET PARAM FROM DASHBOARD
-
-                if (examId) { 
-                    currentExamId = examId; 
-                    loadExamData(examId); 
-                } else if (assignClassId) {
-                    // [NEW] AUTO ASSIGN LOGIC
-                    const classRadio = document.querySelector('input[name="settingAccess"][value="class"]');
-                    if(classRadio) {
-                        classRadio.checked = true;
-                        window.togglePrivasySettings('class');
-                        // Set dropdown value (classes loaded above)
-                        const select = document.getElementById('settingClassSelect');
-                        if(select) select.value = assignClassId;
-                    }
-                }
+                if (examId) { currentExamId = examId; loadExamData(examId); }
             } else { window.location.href = 'index.html'; }
         });
 
@@ -445,6 +427,7 @@
                     if(data.showScore) document.querySelector(`input[name="settingShowScore"][value="${data.showScore}"]`).checked = true;
                     if(data.showResult) document.querySelector(`input[name="settingShowResult"][value="${data.showResult}"]`).checked = true;
                     
+                    // FIX CLASS TAB LOGIC
                     const filterBtn = document.getElementById('filterBtnClass');
                     if(data.accessType) {
                         document.querySelector(`input[name="settingAccess"][value="${data.accessType}"]`).checked = true;
@@ -459,9 +442,11 @@
                     if(data.allowedClassId) {
                         setTimeout(async () => { 
                             document.getElementById('settingClassSelect').value = data.allowedClassId;
+                            // Update Button Text
                             const cls = await getDoc(doc(db, "classes", data.allowedClassId));
                             if(cls.exists()) {
-                                filterBtn.textContent = cls.data().name; 
+                                filterBtn.textContent = cls.data().name; // Change "Theo lớp" to "Class Name"
+                                // Fetch full class list for stats
                                 classStudentList = cls.data().students || [];
                             }
                         }, 500);
@@ -722,16 +707,25 @@
             const qRes = query(collection(db, "results"), where("examId", "==", currentExamId));
             const snapRes = await getDocs(qRes);
             
+            // Process raw results to group by student and find highest score
             statsMap = {}; 
             snapRes.forEach(doc => {
                 const r = doc.data();
+                // Use studentId (uid) as key. If unavailable, fallback to name (not recommended but fallback)
                 const key = r.studentId || r.studentName;
+                
                 if (!statsMap[key]) {
-                    statsMap[key] = { ...r, attempts: [r], bestScore: r.score };
+                    statsMap[key] = { 
+                        ...r, 
+                        attempts: [r], 
+                        bestScore: r.score 
+                    };
                 } else {
                     statsMap[key].attempts.push(r);
                     if (r.score > statsMap[key].bestScore) {
-                        statsMap[key].bestScore = r.score;
+                        statsMap[key].bestScore = r.score; // Update best score
+                        // Update other display fields to match best attempt if desired, or keep latest?
+                        // Usually stats show Best Score but Last Attempt status. Let's show Best Score in table.
                         statsMap[key].score = r.score; 
                     }
                 }
@@ -741,6 +735,7 @@
         };
 
         window.renderStatsDashboard = () => {
+            // Use processed map
             const uniqueStudents = Object.values(statsMap);
             const totalSubs = uniqueStudents.length;
             
@@ -757,6 +752,7 @@
             document.getElementById('statMaxScore').textContent = maxScore;
             document.getElementById('statMinScore').textContent = minScore;
 
+            // Chart
             const spectrum = Array(11).fill(0);
             scores.forEach(s => spectrum[Math.floor(s)]++);
             
@@ -771,6 +767,10 @@
                 options: { responsive: true, maintainAspectRatio: false }
             });
 
+            // Question Analysis (Simple agg based on all attempts or best? Let's use ALL attempts for q-analysis as it reflects difficulty better)
+            // Re-fetch all raw results for this specific calc if needed, or just iterate statsMap.attempts
+            // For simplicity, we'll just use the main "best" entry or iterate all attempts if available in scope.
+            // Let's iterate ALL attempts stored in map
             const qStats = window.questions.map(() => ({ correct: 0, total: 0 }));
             Object.values(statsMap).forEach(student => {
                 student.attempts.forEach(attempt => {
@@ -819,8 +819,13 @@
             const allowedClassId = document.getElementById('settingClassSelect').value;
 
             if (filterType === 'class' && allowedClassId && classStudentList.length > 0) {
+                // Merge logic: Show all students in class. If they did exam, show stats. If not, show "Chưa làm".
                 dataToShow = classStudentList.map(st => {
+                    // Find by student ID if possible, or name match
+                    // Since classStudentList might not have UID if imported via excel without auth sync, we use loose match.
+                    // Ideally match by username/email.
                     const match = dataToShow.find(d => (d.studentName === st.name) || (st.username && d.studentName.includes(st.username)));
+                    
                     if (match) return { ...match, status: 'Đã làm' };
                     return { studentName: st.name, score: '--', submittedAt: null, status: 'Chưa làm', attempts: [] };
                 });
@@ -840,6 +845,7 @@
                 const scoreClass = r.status === 'Chưa làm' ? 'text-gray-400' : (r.score >= 8 ? 'text-green-600' : (r.score >= 5 ? 'text-blue-600' : 'text-red-500'));
                 const attemptCount = r.attempts ? r.attempts.length : 0;
                 
+                // Name clickable if attempts > 0
                 const nameHtml = attemptCount > 0 
                     ? `<button onclick="showStudentHistory('${r.studentName}')" class="font-bold text-blue-600 hover:underline">${r.studentName}</button>`
                     : r.studentName;
@@ -866,6 +872,7 @@
             content.innerHTML = `<table class="w-full text-sm text-left text-gray-600"><thead class="bg-gray-100"><tr><th class="p-2">Lần</th><th class="p-2 text-center">Điểm</th><th class="p-2 text-right">Ngày nộp</th></tr></thead><tbody class="divide-y divide-gray-100"></tbody></table>`;
             
             const tbody = content.querySelector('tbody');
+            // Sort attempts by date desc
             const sortedAttempts = [...studentData.attempts].sort((a,b) => new Date(b.submittedAt) - new Date(a.submittedAt));
             
             sortedAttempts.forEach((att, idx) => {
@@ -878,6 +885,7 @@
         };
         window.closeHistoryModal = () => { document.getElementById('historyModal').classList.add('opacity-0', 'pointer-events-none'); };
 
+        // --- NEW: EXPORT TO EXCEL ---
         window.exportToExcel = () => {
             if (Object.keys(statsMap).length === 0) return window.showToast("Chưa có dữ liệu để xuất!", "error");
             const wb = XLSX.utils.book_new();
@@ -888,6 +896,7 @@
             XLSX.writeFile(wb, fileName);
         };
 
+        // --- HELPERS ---
         window.switchView = (viewId) => {
             document.getElementById('view-settings').classList.add('hidden');
             document.getElementById('view-editor').classList.add('hidden');
