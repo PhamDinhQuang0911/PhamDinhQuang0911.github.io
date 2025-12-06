@@ -900,64 +900,88 @@
         window.commitMove = async (targetFolderId) => { const collName = currentActionItem.type === 'folder' ? 'folders' : 'exams'; const field = currentActionItem.type === 'folder' ? 'parentId' : 'folderId'; await updateDoc(doc(db, collName, currentActionItem.id), { [field]: targetFolderId }); window.toggleModal('actionModal', false); window.showNotification("Đã di chuyển"); loadFileManager(); }
         
         // --- UPDATE: TEACHER CLASS EXAMS MANAGEMENT (ACTIVE/EXPIRED) ---
+        // --- HÀM ĐÃ CẬP NHẬT: TẢI ĐỀ THI LỚP HỌC (CÓ NÚT XEM LỜI GIẢI) ---
         async function loadClassExams(classId) {
             const container = document.getElementById('tabContentExams');
             container.innerHTML = '<p class="text-gray-400 italic text-center py-4">Đang tải danh sách đề...</p>';
 
             try {
-                // Fetch exams assigned to this class
-                const q = query(collection(db, "exams"), where("accessType", "==", "class"), where("allowedClassId", "==", classId));
+                // 1. Lấy đề thi của lớp
+                const q = query(collection(db, "exams"), 
+                    where("accessType", "==", "class"), 
+                    where("allowedClassId", "==", classId)
+                );
                 const snap = await getDocs(q);
-
-                const buttonHtml = `<div class="mb-4"><button onclick="window.location.href='exam-editor.html?assignToClass=${classId}'" class="px-4 py-2 bg-purple-600 text-white font-bold rounded-lg hover:bg-purple-700 shadow-md flex items-center gap-2"><i class="fa-solid fa-plus-circle"></i> Giao bài tập mới</button></div>`;
+                
+                // 2. Lấy kết quả làm bài của học sinh để biết đã làm chưa
+                const qRes = query(collection(db, "results"), where("studentId", "==", currentUser.uid));
+                const snapRes = await getDocs(qRes);
+                const myResults = {};
+                snapRes.forEach(d => myResults[d.data().examId] = d.data());
 
                 if (snap.empty) {
-                    container.innerHTML = `${buttonHtml}<div class="border rounded-2xl p-10 text-center bg-white border-dashed border-gray-300"><div class="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-4 text-blue-500 text-2xl"><i class="fa-solid fa-file-invoice"></i></div><h3 class="text-lg font-bold text-gray-700 mb-2">Chưa có bài tập nào</h3><p class="text-sm text-gray-500">Thầy chưa giao bài tập riêng cho lớp này.</p></div>`;
+                    container.innerHTML = `
+                        <div class="border rounded-xl p-8 text-center bg-gray-50 border-dashed border-gray-300">
+                            <div class="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4 text-blue-500 text-2xl"><i class="fa-solid fa-file-invoice"></i></div>
+                            <h3 class="text-lg font-bold text-gray-700 mb-2">Chưa có bài tập nào</h3>
+                            <p class="text-sm text-gray-500">Thầy chưa giao bài tập riêng cho lớp này.</p>
+                        </div>`;
                     return;
                 }
 
-                // Process and Sort
-                const exams = [];
-                snap.forEach(doc => exams.push({ id: doc.id, ...doc.data() }));
-                
-                // Sort by CreatedAt Descending
-                exams.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+                let html = '<div class="grid grid-cols-1 md:grid-cols-2 gap-4">';
+                snap.forEach(doc => {
+                    const exam = doc.data();
+                    const result = myResults[doc.id]; // Kiểm tra kết quả
+                    
+                    // --- LOGIC NÚT BẤM ---
+                    let buttonsHtml = '';
+                    let statusBadge = '';
 
-                const now = new Date();
-                const activeExams = [];
-                const expiredExams = [];
+                    if (result) {
+                        // Đã làm: Hiện 2 nút (Làm lại + Xem lời giải)
+                        statusBadge = `<span class="text-green-600 bg-green-50 px-2 py-1 rounded text-xs font-bold">Đã làm: ${result.score}đ</span>`;
+                        buttonsHtml = `
+                            <div class="flex gap-2 mt-4">
+                                <button onclick="window.location.href='exam.html?id=${doc.id}'" class="flex-1 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg transition-colors text-sm shadow-sm">
+                                    Làm lại
+                                </button>
+                                <button onclick="window.location.href='exam.html?id=${doc.id}&mode=review'" class="flex-1 py-2 bg-white text-blue-600 font-bold rounded-lg border border-blue-200 hover:bg-blue-50 transition-colors text-sm shadow-sm">
+                                    Xem lời giải
+                                </button>
+                            </div>
+                        `;
+                    } else {
+                        // Chưa làm: Hiện 1 nút (Làm bài)
+                        statusBadge = `<span class="text-orange-500 bg-orange-50 px-2 py-1 rounded text-xs font-bold">Chưa làm</span>`;
+                        buttonsHtml = `
+                            <button onclick="window.location.href='exam.html?id=${doc.id}'" class="w-full mt-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg transition-colors shadow-md">
+                                Làm bài ngay
+                            </button>
+                        `;
+                    }
 
-                exams.forEach(exam => {
-                    const endTime = exam.endTime ? new Date(exam.endTime) : null;
-                    if (!endTime || endTime > now) activeExams.push(exam);
-                    else expiredExams.push(exam);
+                    html += `
+                        <div class="bg-white p-5 rounded-xl border border-gray-200 hover:shadow-md transition-all">
+                            <div class="flex justify-between items-start mb-2">
+                                <h4 class="font-bold text-gray-800 text-lg truncate pr-2" title="${exam.title}">${exam.title}</h4>
+                                ${statusBadge}
+                            </div>
+                            <div class="text-xs text-gray-500 space-y-1">
+                                <p><i class="fa-regular fa-clock w-4"></i> Thời gian: <b>${exam.duration} phút</b></p>
+                                <p><i class="fa-solid fa-list-ol w-4"></i> Số câu: <b>${exam.questionCount || 0} câu</b></p>
+                                <p><i class="fa-solid fa-rotate-right w-4"></i> Số lượt: <b>${result ? (result.attempts || '1') : '0'} / ${exam.attempts || '∞'}</b></p>
+                            </div>
+                            ${buttonsHtml}
+                        </div>
+                    `;
                 });
-
-                let html = buttonHtml;
-
-                // Render Active
-                if (activeExams.length > 0) {
-                    html += `<h4 class="text-sm font-bold text-green-700 mb-2 mt-4 uppercase"><i class="fa-regular fa-clock mr-2"></i> Đang mở (Còn hạn)</h4><div class="space-y-3">`;
-                    activeExams.forEach(exam => {
-                        html += createExamCard(exam, 'text-green-600 bg-green-50', 'Đang mở');
-                    });
-                    html += `</div>`;
-                }
-
-                // Render Expired
-                if (expiredExams.length > 0) {
-                    html += `<h4 class="text-sm font-bold text-red-600 mb-2 mt-6 uppercase"><i class="fa-solid fa-box-archive mr-2"></i> Đã đóng (Hết hạn)</h4><div class="space-y-3">`;
-                    expiredExams.forEach(exam => {
-                        html += createExamCard(exam, 'text-red-500 bg-red-50', 'Hết hạn');
-                    });
-                    html += `</div>`;
-                }
-
+                html += '</div>';
                 container.innerHTML = html;
 
             } catch (e) {
                 console.error(e);
-                container.innerHTML = '<p class="text-red-500 italic text-center">Lỗi tải dữ liệu.</p>';
+                container.innerHTML = '<p class="text-red-500 italic text-center">Lỗi tải dữ liệu. Hãy kiểm tra Index trên Firebase.</p>';
             }
         }
 
