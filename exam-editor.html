@@ -386,15 +386,78 @@
         window.customAlert = (message, type = 'info') => { return new Promise((resolve) => { modalTitle.innerText = type === 'error' ? 'Lỗi' : 'Thông báo'; modalMsg.innerText = message; modalIcon.innerHTML = type === 'error' ? '<i class="fa-solid fa-triangle-exclamation text-red-500"></i>' : '<i class="fa-solid fa-bell text-blue-500"></i>'; document.getElementById('modalInput').classList.add('hidden'); btnCancel.classList.add('hidden'); btnConfirm.innerText = "Đã hiểu"; modalEl.classList.remove('opacity-0', 'pointer-events-none'); modalBox.classList.remove('scale-95'); modalBox.classList.add('scale-100'); btnConfirm.onclick = () => { resolve(true); modalResolve = null; closeCustomModal(); }; modalResolve = resolve; }); };
         window.customConfirm = (message) => { return new Promise((resolve) => { modalTitle.innerText = "Xác nhận"; modalMsg.innerText = message; modalIcon.innerHTML = '<i class="fa-solid fa-circle-question text-orange-500"></i>'; document.getElementById('modalInput').classList.add('hidden'); btnCancel.classList.remove('hidden'); btnConfirm.innerText = "Đồng ý"; modalEl.classList.remove('opacity-0', 'pointer-events-none'); modalBox.classList.remove('scale-95'); modalBox.classList.add('scale-100'); btnConfirm.onclick = () => { resolve(true); modalResolve = null; closeCustomModal(); }; btnCancel.onclick = () => { resolve(false); modalResolve = null; closeCustomModal(); }; }); };
 
+        // Hàm hỗ trợ xử lý TikZ lồng nhau
+        function processNestedTikz(text) {
+            if (!text) return "";
+            let result = "";
+            let remaining = String(text);
+            
+            while (true) {
+                const startIdx = remaining.indexOf("\\begin{tikzpicture}");
+                if (startIdx === -1) {
+                    result += remaining;
+                    break;
+                }
+                
+                // Thêm phần văn bản trước tikzpicture
+                result += remaining.substring(0, startIdx);
+                remaining = remaining.substring(startIdx);
+                
+                // Thuật toán tìm thẻ đóng tương ứng (xử lý lồng nhau)
+                let depth = 0;
+                let endIdx = -1;
+                let searchPos = 0; // Bắt đầu tìm từ ngay sau \begin{tikzpicture} đầu tiên
+                
+                // Độ dài của chuỗi thẻ
+                const openTag = "\\begin{tikzpicture}";
+                const closeTag = "\\end{tikzpicture}";
+                
+                // Bỏ qua thẻ mở đầu tiên để bắt đầu đếm
+                searchPos = openTag.length; 
+                depth = 1;
+
+                while (depth > 0) {
+                    const nextOpen = remaining.indexOf(openTag, searchPos);
+                    const nextClose = remaining.indexOf(closeTag, searchPos);
+                    
+                    if (nextClose === -1) {
+                        // Lỗi: Không tìm thấy thẻ đóng, lấy hết phần còn lại
+                        endIdx = remaining.length;
+                        depth = 0; 
+                        break;
+                    }
+                    
+                    if (nextOpen !== -1 && nextOpen < nextClose) {
+                        // Tìm thấy thẻ mở lồng bên trong
+                        depth++;
+                        searchPos = nextOpen + openTag.length;
+                    } else {
+                        // Tìm thấy thẻ đóng
+                        depth--;
+                        searchPos = nextClose + closeTag.length;
+                        if (depth === 0) {
+                            endIdx = searchPos;
+                        }
+                    }
+                }
+                
+                const tikzCode = remaining.substring(0, endIdx);
+                // Thêm thư viện cơ bản nếu cần và bọc vào thẻ script
+                result += `<div class="flex justify-center my-4 overflow-x-auto"><script type="text/tikz">${tikzCode}<\/script></div>`;
+                
+                remaining = remaining.substring(endIdx);
+            }
+            return result;
+        }
+
         function formatContent(text) {
             if (text === null || text === undefined) return "";
             
-            // 1. Xử lý TikZ: Bao bọc mã tikz trong thẻ script đặc biệt để thư viện TikZJax nhận diện
-            let processed = String(text).replace(/\\begin\{tikzpicture\}([\s\S]*?)\\end\{tikzpicture\}/g, (match) => {
-                return `<div class="flex justify-center my-4 overflow-x-auto"><script type="text/tikz">${match}<\/script></div>`;
-            });
+            // 1. Xử lý TikZ với thuật toán đếm thẻ (Stack)
+            let processed = processNestedTikz(text);
 
             // 2. Xử lý MathJax và xuống dòng
+            // Regex tách các thành phần: Block Math, Inline Math, và thẻ script TikZ vừa tạo
             const regex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?:\$[^\n\r]*?\$)|<script type="text\/tikz">[\s\S]*?<\/script>)/g;
             const parts = processed.split(regex);
             
