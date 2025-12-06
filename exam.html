@@ -22,6 +22,7 @@
         }
       },
       svg: { fontCache: 'global' },
+      // Tắt render tự động để JS kiểm soát
       startup: { typeset: false }
     };
     </script>
@@ -60,16 +61,11 @@
         /* CSS CHỐNG TRÀN & ẨN THANH CUỘN XÁM */
         #questionContent img, #answerOptions img, .solution-box img { max-width: 100% !important; height: auto !important; display: block; margin: 10px auto; border-radius: 8px; }
         
+        /* MathJax Container Style */
         mjx-container { 
-            max-width: 100% !important; 
-            overflow-x: auto !important; 
-            overflow-y: hidden; 
-            display: inline-grid !important; /* Fix lỗi heva/hoac */
-            scrollbar-width: none; /* Firefox: Ẩn thanh cuộn */
-            -ms-overflow-style: none; /* IE: Ẩn thanh cuộn */
-        }
-        mjx-container::-webkit-scrollbar { 
-            display: none; /* Chrome/Safari: Ẩn thanh cuộn */
+            /* Mặc định hiển thị, sẽ được JS can thiệp scale nếu cần */
+            display: inline-block !important; 
+            overflow: visible !important;
         }
         
         .no-scrollbar::-webkit-scrollbar { display: none; }
@@ -128,7 +124,12 @@
         </div>
         <div class="flex items-center gap-3 md:gap-6">
             <div id="cheatWarning" class="hidden flex items-center gap-1 text-red-500 bg-red-50 px-3 py-1 rounded-full text-xs font-bold border border-red-100 animate-pulse"><i class="fa-solid fa-triangle-exclamation"></i> <span id="cheatCount">0</span> vi phạm</div>
-            <div class="flex items-center gap-2 bg-gray-900 text-white px-4 py-2 rounded-lg shadow-lg"><i class="fa-regular fa-clock text-orange-400 animate-pulse"></i><span id="timer" class="font-mono font-bold text-lg md:text-xl tracking-widest">00:00</span></div>
+            
+            <div class="bg-gradient-to-r from-red-600 to-orange-500 text-white px-4 py-2 rounded-lg shadow-lg border-2 border-white flex items-center gap-2 animate-pulse-slow">
+                <i class="fa-regular fa-clock"></i>
+                <span id="timer" class="font-mono font-extrabold text-lg md:text-xl tracking-widest">00:00</span>
+            </div>
+            
             <button onclick="checkFinish()" class="hidden md:block px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg transition-all shadow-md shadow-blue-200">Nộp bài</button>
         </div>
     </header>
@@ -286,20 +287,40 @@
         window.customAlert = (msg, type='info') => { return new Promise(resolve => { modalTitle.innerText=type==='error'?'Lỗi':'Thông báo'; modalMsg.innerText=msg; btnCancel.classList.add('hidden'); btnConfirm.innerText="Đã hiểu"; modalEl.classList.remove('opacity-0','pointer-events-none'); modalBox.classList.add('scale-100'); btnConfirm.onclick=()=>{resolve(true);closeCustomModal();}; }); };
         window.customConfirm = (msg) => { return new Promise(resolve => { modalTitle.innerText="Xác nhận"; modalMsg.innerText=msg; btnCancel.classList.remove('hidden'); btnConfirm.innerText="Đồng ý"; modalEl.classList.remove('opacity-0','pointer-events-none'); modalBox.classList.add('scale-100'); btnConfirm.onclick=()=>{resolve(true);closeCustomModal();}; btnCancel.onclick=()=>{resolve(false);closeCustomModal();}; }); };
 
-        // --- HÀM XỬ LÝ FORMAT VĂN BẢN (FIX LỖI XUỐNG DÒNG) ---
+        // --- XỬ LÝ FORMAT VĂN BẢN THÔNG MINH (YÊU CẦU 2) ---
         function formatContent(text) {
-            if (text === null || text === undefined) return "";
-            let s = String(text);
-            // Thay thế \n thành <br>
-            s = s.replace(/\n/g, '<br>');
-            // Thay thế \\ thành <br> nếu không nằm trong công thức toán
-            // Logic: Chỉ replace nếu không nằm giữa $$ hoặc \[ \]
-            // (Đơn giản hóa: Replace hết vì MathJax sẽ tự xử lý lại nếu cần, hoặc để an toàn chỉ replace \n)
-            // Tuy nhiên user yêu cầu fix lỗi \\ xuống dòng trong text. 
-            // Ta sẽ thay thế \\ thành <br> nhưng cẩn thận. 
-            // Tốt nhất là replace \\ (có khoảng trắng hoặc cuối dòng)
-            s = s.replace(/\\\\/g, '<br>'); 
-            return s;
+            if (!text) return "";
+            // Tách chuỗi dựa trên các dấu công thức toán: $$...$$, \[...\], \(...\), $...$
+            const parts = String(text).split(/(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?:\$[^\n\r]*?\$))/g);
+
+            return parts.map(part => {
+                // Kiểm tra xem phần này có phải là công thức toán không
+                const isMath = /^\$\$|^\\\[|^\\\(|^\$/.test(part);
+                if (isMath) {
+                    return part; // Giữ nguyên công thức toán (để MathJax xử lý \\)
+                } else {
+                    // Nếu là văn bản thường:
+                    // 1. Thay thế \\ thành <br>
+                    // 2. Thay thế \n thành <br>
+                    return part.replace(/\\\\/g, '<br>').replace(/\n/g, '<br>');
+                }
+            }).join('');
+        }
+
+        // --- XỬ LÝ SCALE CÔNG THỨC TOÁN (YÊU CẦU 3) ---
+        function autoScaleMath() {
+            // Chỉ chạy sau khi MathJax đã render xong
+            document.querySelectorAll('mjx-container').forEach(node => {
+                const parent = node.parentElement;
+                if(parent && parent.offsetWidth > 0 && node.offsetWidth > parent.offsetWidth) {
+                    // Nếu công thức dài hơn cha của nó -> Thu nhỏ lại
+                    const scale = (parent.offsetWidth / node.offsetWidth) * 0.95; // Nhân 0.95 để có chút lề
+                    
+                    node.style.transform = `scale(${scale})`;
+                    node.style.transformOrigin = 'left center';
+                    node.style.marginRight = `-${node.offsetWidth - (node.offsetWidth * scale)}px`; // Fix khoảng trắng thừa
+                }
+            });
         }
 
         onAuthStateChanged(auth, async (user) => {
@@ -374,6 +395,7 @@
         function startExam() {
             dom.lobby.classList.add('hidden');
             dom.header.classList.remove('hidden'); dom.main.classList.remove('hidden');
+            
             currentQuestions = [...(examData.questions || [])];
             if(examData.shuffle) currentQuestions.sort(()=>Math.random()-0.5);
             
@@ -445,7 +467,13 @@
                 dom.options.appendChild(ta);
             }
 
-            if(window.MathJax) setTimeout(() => MathJax.typesetPromise([dom.content, dom.options]).catch(()=>{}), 50);
+            if(window.MathJax) {
+                // Chạy MathJax
+                MathJax.typesetPromise([dom.content, dom.options]).then(() => {
+                    // Sau khi MathJax chạy xong thì mới chạy Scale
+                    autoScaleMath();
+                }).catch(()=>{});
+            }
             updatePalette();
             closeAllSidebars();
         }
@@ -601,7 +629,12 @@
                 list.appendChild(item);
             });
             
-            if(window.MathJax) setTimeout(() => MathJax.typesetPromise([list]).catch(()=>{}), 100);
+            if(window.MathJax) {
+                // Chạy MathJax -> sau đó chạy Scale
+                MathJax.typesetPromise([list]).then(() => {
+                    autoScaleMath();
+                }).catch(()=>{});
+            }
         }
 
         document.getElementById('prevBtn').onclick = () => { if(currentIndex > 0) renderQuestion(currentIndex - 1); };
