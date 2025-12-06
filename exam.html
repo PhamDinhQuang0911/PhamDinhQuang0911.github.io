@@ -22,18 +22,20 @@
         }
       },
       svg: { fontCache: 'global' },
-      // Tắt render tự động để JS kiểm soát
       startup: { typeset: false }
     };
     </script>
     <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+    <link rel="stylesheet" type="text/css" href="https://tikzjax.com/v1/fonts.css">
+    <script src="https://tikzjax.com/v1/tikzjax.js"></script>
 
     <style>
         body { font-family: 'Nunito', sans-serif; background-color: #F3F4F6; overscroll-behavior-y: none; }
         .text-orange-custom { color: #FF6A00; }
         .bg-orange-custom { background-color: #FF6A00; }
         
-        /* CSS SIDEBAR MOBILE (TRƯỢT) */
+        /* CSS SIDEBAR MOBILE */
         .mobile-sidebar {
             position: fixed; top: 0; right: 0; bottom: 0; width: 280px;
             background: white; z-index: 50;
@@ -53,21 +55,36 @@
         .q-btn.active { background-color: #FF6A00 !important; color: white !important; border-color: #FF6A00 !important; transform: scale(1.1); box-shadow: 0 4px 6px -1px rgba(255, 106, 0, 0.3); z-index: 10; }
         .q-btn.answered { background-color: #EFF6FF; color: #2563EB; border-color: #BFDBFE; }
         .q-btn.flagged::after { content: "\f024"; font-family: "Font Awesome 6 Free"; font-weight: 900; position: absolute; top: -4px; right: -4px; font-size: 10px; color: #EF4444; background: #FEF2F2; border-radius: 50%; padding: 2px; border: 1px solid #FECACA; }
-        
         .q-btn.correct { background-color: #10B981 !important; color: white !important; border-color: #059669 !important; }
         .q-btn.wrong { background-color: #EF4444 !important; color: white !important; border-color: #DC2626 !important; }
         .q-btn.partial { background-color: #F59E0B !important; color: white !important; border-color: #D97706 !important; }
 
-        /* CSS CHỐNG TRÀN & ẨN THANH CUỘN XÁM */
+        /* CSS CHỐNG TRÀN */
         #questionContent img, #answerOptions img, .solution-box img { max-width: 100% !important; height: auto !important; display: block; margin: 10px auto; border-radius: 8px; }
+        mjx-container { max-width: 100% !important; overflow-x: auto !important; overflow-y: hidden; display: inline-grid !important; scrollbar-width: none; -ms-overflow-style: none; }
+        mjx-container::-webkit-scrollbar { display: none; }
         
-        /* MathJax Container Style */
-        mjx-container { 
-            /* Mặc định hiển thị, sẽ được JS can thiệp scale nếu cần */
-            display: inline-block !important; 
-            overflow: visible !important;
+        /* CSS CHO IMMINI (Chia cột văn bản và hình) */
+        .immini-container {
+            display: flex;
+            gap: 1rem;
+            align-items: flex-start;
+            flex-wrap: wrap; /* Tự xuống dòng trên mobile */
         }
-        
+        .immini-text { flex: 1; min-width: 200px; }
+        .immini-graphic { 
+            flex-shrink: 0; 
+            display: flex; 
+            justify-content: center; 
+            align-items: center; 
+            max-width: 100%;
+        }
+        /* Mobile: Hình immini ra giữa */
+        @media (max-width: 640px) {
+            .immini-container { flex-direction: column; }
+            .immini-graphic { width: 100%; }
+        }
+
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
         .custom-radio:checked + div { border-color: #FF6A00; background-color: #FFF7ED; color: #C2410C; font-weight: bold; }
@@ -75,7 +92,6 @@
         
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         .animate-fade-in { animation: fadeIn 0.5s ease-out forwards; }
-        
         .pb-mobile-nav { padding-bottom: 80px; }
         .solution-box { border-left: 4px solid #10B981; background-color: #ECFDF5; padding: 1rem; border-radius: 0.5rem; margin-top: 1rem; }
     </style>
@@ -124,12 +140,10 @@
         </div>
         <div class="flex items-center gap-3 md:gap-6">
             <div id="cheatWarning" class="hidden flex items-center gap-1 text-red-500 bg-red-50 px-3 py-1 rounded-full text-xs font-bold border border-red-100 animate-pulse"><i class="fa-solid fa-triangle-exclamation"></i> <span id="cheatCount">0</span> vi phạm</div>
-            
             <div class="bg-gradient-to-r from-red-600 to-orange-500 text-white px-4 py-2 rounded-lg shadow-lg border-2 border-white flex items-center gap-2 animate-pulse-slow">
                 <i class="fa-regular fa-clock"></i>
                 <span id="timer" class="font-mono font-extrabold text-lg md:text-xl tracking-widest">00:00</span>
             </div>
-            
             <button onclick="checkFinish()" class="hidden md:block px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg transition-all shadow-md shadow-blue-200">Nộp bài</button>
         </div>
     </header>
@@ -287,38 +301,76 @@
         window.customAlert = (msg, type='info') => { return new Promise(resolve => { modalTitle.innerText=type==='error'?'Lỗi':'Thông báo'; modalMsg.innerText=msg; btnCancel.classList.add('hidden'); btnConfirm.innerText="Đã hiểu"; modalEl.classList.remove('opacity-0','pointer-events-none'); modalBox.classList.add('scale-100'); btnConfirm.onclick=()=>{resolve(true);closeCustomModal();}; }); };
         window.customConfirm = (msg) => { return new Promise(resolve => { modalTitle.innerText="Xác nhận"; modalMsg.innerText=msg; btnCancel.classList.remove('hidden'); btnConfirm.innerText="Đồng ý"; modalEl.classList.remove('opacity-0','pointer-events-none'); modalBox.classList.add('scale-100'); btnConfirm.onclick=()=>{resolve(true);closeCustomModal();}; btnCancel.onclick=()=>{resolve(false);closeCustomModal();}; }); };
 
-        // --- XỬ LÝ FORMAT VĂN BẢN THÔNG MINH (YÊU CẦU 2) ---
+        // --- XỬ LÝ VĂN BẢN (TEXT PARSER) ---
+        // Tách biệt Text (xử lý xuống dòng) và Math (giữ nguyên)
+        // Hỗ trợ cả immini, center
         function formatContent(text) {
             if (!text) return "";
-            // Tách chuỗi dựa trên các dấu công thức toán: $$...$$, \[...\], \(...\), $...$
-            const parts = String(text).split(/(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?:\$[^\n\r]*?\$))/g);
+            let s = String(text);
 
+            // 1. Xử lý \immini{Text}{Img/Tikz}
+            // Mẫu: \immini{...}{...}
+            // Sử dụng Regex đơn giản, giả sử không lồng ngoặc quá phức tạp
+            // Nếu muốn robust hơn cần parser đệ quy, nhưng regex này đủ cho hầu hết case
+            s = s.replace(/\\immini\s*\{((?:[^{}]|{[^{}]*})*)\}\s*\{((?:[^{}]|{[^{}]*})*)\}/g, (match, p1, p2) => {
+                return `<div class="immini-container"><div class="immini-text">${formatTextOnly(p1)}</div><div class="immini-graphic">${formatGraphics(p2)}</div></div>`;
+            });
+
+            // 2. Xử lý \begin{center}...\end{center}
+            s = s.replace(/\\begin\{center\}([\s\S]*?)\\end\{center\}/g, '<div class="text-center w-full my-2">$1</div>');
+
+            // 3. Xử lý phần còn lại (nếu chưa được xử lý bởi immini)
+            // Nếu chuỗi chứa immini container thì ta đã format bên trong rồi, cẩn thận format lại
+            if (!s.includes('immini-container')) {
+                s = formatTextOnly(s);
+            }
+            
+            return s;
+        }
+
+        // Hàm xử lý Text (Xuống dòng) nhưng bỏ qua Math
+        function formatTextOnly(text) {
+            // Tách các khối Math ra: $$...$$, \[...\], \(...\), $...$
+            const parts = text.split(/(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?:\$[^\n\r]*?\$))/g);
+            
             return parts.map(part => {
-                // Kiểm tra xem phần này có phải là công thức toán không
                 const isMath = /^\$\$|^\\\[|^\\\(|^\$/.test(part);
-                if (isMath) {
-                    return part; // Giữ nguyên công thức toán (để MathJax xử lý \\)
-                } else {
-                    // Nếu là văn bản thường:
-                    // 1. Thay thế \\ thành <br>
-                    // 2. Thay thế \n thành <br>
-                    return part.replace(/\\\\/g, '<br>').replace(/\n/g, '<br>');
-                }
+                if (isMath) return part; // Math: Giữ nguyên \\
+                
+                // Text: 
+                // 1. \n -> <br>
+                // 2. \\ -> <br> (Nếu user dùng \\ để xuống dòng trong text)
+                return part.replace(/\\\\/g, '<br>').replace(/\n/g, '<br>');
             }).join('');
         }
 
-        // --- XỬ LÝ SCALE CÔNG THỨC TOÁN (YÊU CẦU 3) ---
+        // Hàm xử lý đồ họa (TikZ hoặc Ảnh)
+        function formatGraphics(content) {
+            // 1. TikZ
+            if (content.includes('\\begin{tikzpicture}')) {
+                return `<script type="text/tikz">${content}<\/script>`;
+            }
+            // 2. Ảnh \includegraphics
+            if (content.includes('\\includegraphics')) {
+                // Lấy đường dẫn trong {...}
+                const match = content.match(/\\includegraphics(?:\[.*?\])?\{(.*?)\}/);
+                if (match && match[1]) {
+                    return `<img src="${match[1]}" alt="Image" />`;
+                }
+            }
+            // Mặc định trả về text nếu không match
+            return content;
+        }
+
+        // --- SCALE CÔNG THỨC DÀI ---
         function autoScaleMath() {
-            // Chỉ chạy sau khi MathJax đã render xong
             document.querySelectorAll('mjx-container').forEach(node => {
                 const parent = node.parentElement;
                 if(parent && parent.offsetWidth > 0 && node.offsetWidth > parent.offsetWidth) {
-                    // Nếu công thức dài hơn cha của nó -> Thu nhỏ lại
-                    const scale = (parent.offsetWidth / node.offsetWidth) * 0.95; // Nhân 0.95 để có chút lề
-                    
+                    const scale = (parent.offsetWidth / node.offsetWidth) * 0.95;
                     node.style.transform = `scale(${scale})`;
                     node.style.transformOrigin = 'left center';
-                    node.style.marginRight = `-${node.offsetWidth - (node.offsetWidth * scale)}px`; // Fix khoảng trắng thừa
+                    node.style.marginRight = `-${node.offsetWidth - (node.offsetWidth * scale)}px`;
                 }
             });
         }
@@ -468,10 +520,11 @@
             }
 
             if(window.MathJax) {
-                // Chạy MathJax
+                // Chạy MathJax sau đó chạy Scale
                 MathJax.typesetPromise([dom.content, dom.options]).then(() => {
-                    // Sau khi MathJax chạy xong thì mới chạy Scale
                     autoScaleMath();
+                    // Process TikZ
+                    if (window.tikzjax) window.tikzjax.process();
                 }).catch(()=>{});
             }
             updatePalette();
@@ -629,12 +682,7 @@
                 list.appendChild(item);
             });
             
-            if(window.MathJax) {
-                // Chạy MathJax -> sau đó chạy Scale
-                MathJax.typesetPromise([list]).then(() => {
-                    autoScaleMath();
-                }).catch(()=>{});
-            }
+            if(window.MathJax) setTimeout(() => MathJax.typesetPromise([list]).catch(()=>{}), 100);
         }
 
         document.getElementById('prevBtn').onclick = () => { if(currentIndex > 0) renderQuestion(currentIndex - 1); };
