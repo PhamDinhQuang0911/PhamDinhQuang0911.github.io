@@ -27,7 +27,8 @@
     };
     </script>
     <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
-
+    <link rel="stylesheet" type="text/css" href="https://tikzjax.com/v1/fonts.css">
+    <script src="https://tikzjax.com/v1/tikzjax.js"></script>
     <style>
         body { font-family: 'Nunito', sans-serif; background-color: #F3F4F6; overscroll-behavior-y: none; }
         .text-orange-custom { color: #FF6A00; }
@@ -288,20 +289,29 @@
         window.customConfirm = (msg) => { return new Promise(resolve => { modalTitle.innerText="Xác nhận"; modalMsg.innerText=msg; btnCancel.classList.remove('hidden'); btnConfirm.innerText="Đồng ý"; modalEl.classList.remove('opacity-0','pointer-events-none'); modalBox.classList.add('scale-100'); btnConfirm.onclick=()=>{resolve(true);closeCustomModal();}; btnCancel.onclick=()=>{resolve(false);closeCustomModal();}; }); };
 
         // --- XỬ LÝ FORMAT VĂN BẢN THÔNG MINH (YÊU CẦU 2) ---
+        // --- XỬ LÝ FORMAT VĂN BẢN THÔNG MINH (CẬP NHẬT TIKZ) ---
         function formatContent(text) {
             if (!text) return "";
-            // Tách chuỗi dựa trên các dấu công thức toán: $$...$$, \[...\], \(...\), $...$
-            const parts = String(text).split(/(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?:\$[^\n\r]*?\$))/g);
+            
+            // 1. Xử lý TikZ: Bao bọc mã tikz trong thẻ script đặc biệt
+            let processed = String(text).replace(/\\begin\{tikzpicture\}([\s\S]*?)\\end\{tikzpicture\}/g, (match) => {
+                return `<div class="flex justify-center my-4 overflow-x-auto"><script type="text/tikz">${match}<\/script></div>`;
+            });
+
+            // 2. Tách chuỗi: Toán học, TikZ Script, và Văn bản thường
+            // Regex này bắt: Block Math, Inline Math, và cả thẻ <script> ta vừa tạo ra ở bước 1
+            const regex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?:\$[^\n\r]*?\$)|<script type="text\/tikz">[\s\S]*?<\/script>)/g;
+            const parts = processed.split(regex);
 
             return parts.map(part => {
-                // Kiểm tra xem phần này có phải là công thức toán không
-                const isMath = /^\$\$|^\\\[|^\\\(|^\$/.test(part);
-                if (isMath) {
-                    return part; // Giữ nguyên công thức toán (để MathJax xử lý \\)
+                // Kiểm tra xem phần này có phải là TikZ hoặc công thức toán không
+                const isTikZ = part.includes('<script type="text/tikz">');
+                const isMath = /^\$\$|^\\\[|^\\\(|^\$/.test(part.trim());
+                
+                if (isMath || isTikZ) {
+                    return part; // Giữ nguyên để thư viện xử lý
                 } else {
-                    // Nếu là văn bản thường:
-                    // 1. Thay thế \\ thành <br>
-                    // 2. Thay thế \n thành <br>
+                    // Nếu là văn bản thường: replace xuống dòng
                     return part.replace(/\\\\/g, '<br>').replace(/\n/g, '<br>');
                 }
             }).join('');
