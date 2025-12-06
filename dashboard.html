@@ -747,7 +747,114 @@
         // --- 7. LOGIC HỌC SINH ---
         async function loadStudentResults() { try { const q = query(collection(db, "results"), where("studentId", "==", currentUserUid)); const snap = await getDocs(q); studentResultsMap = {}; snap.forEach(doc => { const res = doc.data(); if (!studentResultsMap[res.examId]) studentResultsMap[res.examId] = []; studentResultsMap[res.examId].push(res); }); } catch (err) { console.error("Lỗi tải kết quả:", err); } }
         async function loadStudentClasses() { try { const q = query(collection(db, "classes")); const snapshot = await getDocs(q); const container = document.getElementById('studentClassList'); container.innerHTML = ''; let hasClass = false; snapshot.forEach(docSnap => { const classData = docSnap.data(); const students = classData.students || []; const isMember = students.some(s => (s.email && s.email.toLowerCase() === currentUser.email.toLowerCase()) || (s.username && `${s.username}@hocsinh.com`.toLowerCase() === currentUser.email.toLowerCase())); if (isMember) { hasClass = true; const card = document.createElement('div'); card.className = "bg-white p-6 rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-shadow cursor-pointer"; const words = classData.name.trim().split(/\s+/); let acronym = words.length >= 2 ? (words[0][0] + words[1][0]).toUpperCase() : words[0].substring(0, 2).toUpperCase(); card.innerHTML = `<div class="flex items-center gap-4 mb-4"><div class="w-12 h-12 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center font-bold text-xl">${acronym}</div><div><h3 class="font-bold text-gray-800 text-lg leading-tight">${classData.name}</h3><p class="text-xs text-gray-500">${classData.students.length} thành viên</p></div></div><button onclick="window.openStudentClassDetail('${docSnap.id}', '${classData.name}')" class="w-full py-2 bg-blue-50 text-blue-600 rounded-lg text-sm font-bold hover:bg-blue-100 transition-colors">Vào lớp</button>`; container.appendChild(card); } }); if (!hasClass) container.innerHTML = '<p class="text-gray-400 italic col-span-3">Bạn chưa tham gia lớp học nào.</p>'; } catch (err) { console.error("Lỗi tải lớp học sinh:", err); } }
-        async function loadAssignedExams() { const container = document.getElementById('assignedExamsList'); container.innerHTML = '<p class="text-gray-400 italic col-span-3">Đang kiểm tra bài tập...</p>'; try { const qClasses = query(collection(db, "classes")); const snapClasses = await getDocs(qClasses); const myClassIds = []; const myClassNames = {}; snapClasses.forEach(doc => { const cl = doc.data(); const students = cl.students || []; const isMember = students.some(s => (s.email && s.email.toLowerCase() === currentUser.email.toLowerCase()) || (s.username && `${s.username}@hocsinh.com`.toLowerCase() === currentUser.email.toLowerCase())); if (isMember) { myClassIds.push(doc.id); myClassNames[doc.id] = cl.name; } }); if (myClassIds.length === 0) { container.innerHTML = '<p class="text-gray-400 italic col-span-3">Bạn chưa tham gia lớp học nào.</p>'; return; } const qExams = query(collection(db, "exams"), where("accessType", "==", "class"), where("status", "==", "published")); const snapExams = await getDocs(qExams); container.innerHTML = ''; let count = 0; const now = new Date(); snapExams.forEach(doc => { const exam = doc.data(); if (myClassIds.includes(exam.allowedClassId)) { const endTime = exam.endTime ? new Date(exam.endTime) : null; if (!endTime || endTime > now) { count++; const className = myClassNames[exam.allowedClassId] || "Lớp học"; const results = studentResultsMap[doc.id] || []; const attempts = results.length; const maxScore = attempts > 0 ? Math.max(...results.map(r => r.score)) : "--"; const isDone = attempts > 0; const statusHTML = isDone ? `<span class="text-xs font-bold text-green-600 bg-green-50 px-2 py-1 rounded">Đã làm (${attempts} lần) - Điểm: ${maxScore}</span>` : `<span class="text-xs font-bold text-orange-600 bg-orange-50 px-2 py-1 rounded">Chưa làm</span>`; const div = document.createElement('div'); div.className = "bg-white rounded-2xl shadow-md p-6 border-l-4 border-purple-500 hover:shadow-xl transition-all relative overflow-hidden group"; div.innerHTML = `<div class="absolute top-0 right-0 bg-purple-100 text-purple-600 text-xs font-bold px-3 py-1 rounded-bl-xl">${className}</div><h3 class="font-bold text-gray-800 text-lg mb-1 mt-2">${exam.title}</h3><div class="mb-3">${statusHTML}</div><p class="text-xs text-gray-500 mb-4"><i class="fa-regular fa-clock mr-1"></i> ${exam.duration} phút • ${exam.questionCount || 0} câu</p><button onclick="window.location.href='exam.html?id=${doc.id}'" class="w-full py-2 bg-purple-50 text-purple-600 font-bold rounded-lg group-hover:bg-purple-600 group-hover:text-white transition-colors">${isDone ? 'Làm lại' : 'Làm bài ngay'}</button>`; container.appendChild(div); } } }); if (count === 0) container.innerHTML = '<div class="col-span-3 text-center py-8 bg-white rounded-xl border border-dashed border-gray-300"><p class="text-gray-500 font-bold">Không có bài tập mới!</p></div>'; } catch (err) { console.error("Lỗi tải bài tập:", err); container.innerHTML = '<p class="text-red-400 italic col-span-3">Lỗi tải dữ liệu.</p>'; } }
+        // --- HÀM ĐÃ CẬP NHẬT: TẢI BÀI TẬP VÀ TRẠNG THÁI LÀM BÀI ---
+        async function loadAssignedExams() {
+            const container = document.getElementById('assignedExamsList');
+            container.innerHTML = '<p class="text-gray-400 italic col-span-3">Đang kiểm tra bài tập...</p>';
+
+            try {
+                // 1. Lấy danh sách lớp của học sinh
+                const qClasses = query(collection(db, "classes"));
+                const snapClasses = await getDocs(qClasses);
+                const myClassIds = [];
+                const myClassNames = {};
+
+                snapClasses.forEach(doc => {
+                    const cl = doc.data();
+                    const students = cl.students || [];
+                    const isMember = students.some(s => 
+                        (s.email && s.email.toLowerCase() === currentUser.email.toLowerCase()) ||
+                        (s.username && `${s.username}@hocsinh.com`.toLowerCase() === currentUser.email.toLowerCase())
+                    );
+                    if (isMember) {
+                        myClassIds.push(doc.id);
+                        myClassNames[doc.id] = cl.name;
+                    }
+                });
+
+                if (myClassIds.length === 0) {
+                    container.innerHTML = '<p class="text-gray-400 italic col-span-3">Bạn chưa tham gia lớp học nào.</p>';
+                    return;
+                }
+
+                // 2. (MỚI) Lấy kết quả thi của học sinh để biết đã làm bài nào chưa
+                const qResults = query(collection(db, "results"), where("studentId", "==", currentUser.uid));
+                const snapResults = await getDocs(qResults);
+                const myResults = {}; // Map: examId -> resultData
+                snapResults.forEach(doc => {
+                    const data = doc.data();
+                    // Lưu kết quả mới nhất nếu làm nhiều lần (tùy chọn logic)
+                    myResults[data.examId] = data; 
+                });
+
+                // 3. Lấy các đề thi được giao
+                const qExams = query(collection(db, "exams"), where("accessType", "==", "class"), where("status", "==", "published"));
+                const snapExams = await getDocs(qExams);
+                
+                container.innerHTML = '';
+                let count = 0;
+
+                snapExams.forEach(doc => {
+                    const exam = doc.data();
+                    if (myClassIds.includes(exam.allowedClassId)) {
+                        count++;
+                        const className = myClassNames[exam.allowedClassId] || "Lớp học";
+                        const result = myResults[doc.id]; // Kiểm tra xem có kết quả chưa
+
+                        // --- LOGIC ĐỔI NÚT BẤM ---
+                        let actionBtn = '';
+                        let statusBadge = '';
+
+                        if (result) {
+                            // Đã làm -> Hiện nút Xem lời giải (Màu Xanh Lá)
+                            statusBadge = `<span class="text-xs font-bold text-green-600 bg-green-50 px-2 py-1 rounded border border-green-100">Điểm: ${result.score}</span>`;
+                            actionBtn = `
+                                <button onclick="window.location.href='exam.html?id=${doc.id}&mode=review'" class="w-full py-2 bg-green-50 text-green-700 font-bold rounded-lg border border-green-200 hover:bg-green-100 hover:text-green-800 transition-colors flex items-center justify-center gap-2">
+                                    <i class="fa-solid fa-eye"></i> Xem lời giải
+                                </button>`;
+                        } else {
+                            // Chưa làm -> Hiện nút Làm bài (Màu Tím)
+                            statusBadge = `<span class="text-xs font-bold text-orange-500 bg-orange-50 px-2 py-1 rounded border border-orange-100">Chưa làm</span>`;
+                            actionBtn = `
+                                <button onclick="window.location.href='exam.html?id=${doc.id}'" class="w-full py-2 bg-purple-50 text-purple-600 font-bold rounded-lg border border-purple-100 group-hover:bg-purple-600 group-hover:text-white transition-colors">
+                                    Làm bài ngay
+                                </button>`;
+                        }
+
+                        // Render Card
+                        const div = document.createElement('div');
+                        div.className = "bg-white rounded-2xl shadow-md p-6 border-l-4 border-purple-500 hover:shadow-xl transition-all relative overflow-hidden group";
+                        div.innerHTML = `
+                            <div class="flex justify-between items-start mb-2">
+                                <div class="bg-gray-100 text-gray-600 text-[10px] font-bold px-2 py-1 rounded uppercase tracking-wide">${className}</div>
+                                ${statusBadge}
+                            </div>
+                            <h3 class="font-bold text-gray-800 text-lg mb-1 mt-1 truncate" title="${exam.title}">${exam.title}</h3>
+                            <p class="text-xs text-gray-500 mb-4 flex items-center gap-2">
+                                <span><i class="fa-regular fa-clock"></i> ${exam.duration} phút</span>
+                                <span>•</span>
+                                <span>${exam.questionCount || 0} câu</span>
+                            </p>
+                            ${actionBtn}
+                        `;
+                        container.appendChild(div);
+                    }
+                });
+
+                if (count === 0) {
+                    container.innerHTML = '<div class="col-span-3 text-center py-8 bg-white rounded-xl border border-dashed border-gray-300"><p class="text-gray-500 font-bold">Chưa có bài tập nào!</p></div>';
+                }
+
+            } catch (err) {
+                console.error("Lỗi tải bài tập:", err);
+                // Gợi ý tạo index nếu lỗi
+                if (err.message.includes("indexes")) {
+                    container.innerHTML = '<p class="text-red-500 italic col-span-3 text-sm">Hệ thống cần tạo Index. Vui lòng báo giáo viên bấm F12 để kiểm tra.</p>';
+                } else {
+                    container.innerHTML = '<p class="text-red-400 italic col-span-3">Lỗi tải dữ liệu.</p>';
+                }
+            }
+        }
         window.openStudentClassDetail = async (classId, className) => { window.switchView('student-class-detail'); document.getElementById('detailClassName').textContent = className; const content = document.getElementById('classDetailContent'); content.innerHTML = '<p class="text-center text-gray-400 py-10">Đang tải danh sách bài tập...</p>'; try { const q = query(collection(db, "exams"), where("allowedClassId", "==", classId)); const snap = await getDocs(q); if (snap.empty) { content.innerHTML = '<div class="text-center py-10"><i class="fa-regular fa-folder-open text-4xl text-gray-300 mb-2"></i><p class="text-gray-500">Chưa có bài tập nào trong lớp này.</p></div>'; currentClassExamsData = []; return; } currentClassExamsData = []; snap.forEach(doc => currentClassExamsData.push({ id: doc.id, ...doc.data() })); window.sortClassExams('newest'); } catch (err) { console.error(err); content.innerHTML = '<p class="text-red-500 text-center">Lỗi tải dữ liệu.</p>'; } }
         window.sortClassExams = (order) => { const content = document.getElementById('classDetailContent'); currentClassExamsData.sort((a, b) => { const dateA = a.createdAt ? new Date(a.createdAt) : new Date(0); const dateB = b.createdAt ? new Date(b.createdAt) : new Date(0); return order === 'newest' ? dateB - dateA : dateA - dateB; }); let html = '<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">'; currentClassExamsData.forEach(exam => { const results = studentResultsMap[exam.id] || []; const attempts = results.length; const maxScore = attempts > 0 ? Math.max(...results.map(r => r.score)) : "--"; const isDone = attempts > 0; const now = new Date(); const endTime = exam.endTime ? new Date(exam.endTime) : null; const isExpired = endTime && endTime < now; const statusColor = isExpired ? 'text-red-500 bg-red-50' : 'text-green-600 bg-green-50'; const statusText = isExpired ? 'Đã hết hạn' : 'Đang mở'; const deadlineStr = endTime ? `${endTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} ${endTime.toLocaleDateString('vi-VN')}` : "Không giới hạn"; html += `<div class="bg-white p-5 rounded-2xl border ${isExpired ? 'border-gray-200 bg-gray-50' : 'border-blue-100 hover:border-blue-300'} shadow-sm flex flex-col justify-between transition-all hover:shadow-md"><div><div class="flex justify-between items-start mb-2"><h4 class="font-bold text-gray-800 text-lg line-clamp-2" title="${exam.title}">${exam.title}</h4><span class="text-[10px] font-bold px-2 py-1 rounded shrink-0 ml-2 ${statusColor}">${statusText}</span></div><div class="flex items-center gap-4 text-xs text-gray-500 mb-3"><span><i class="fa-solid fa-clock mr-1"></i> ${exam.duration} phút</span><span><i class="fa-solid fa-list mr-1"></i> ${exam.questionCount} câu</span></div><div class="bg-gray-50 p-3 rounded-xl mb-4 text-xs border border-gray-100 space-y-1"><div class="flex justify-between"><span>Trạng thái:</span> <span class="font-bold ${isDone?'text-green-600':'text-orange-500'}">${isDone?'Đã làm':'Chưa làm'}</span></div><div class="flex justify-between"><span>Số lần làm:</span> <span class="font-bold">${attempts} / ${exam.attempts || '∞'}</span></div><div class="flex justify-between"><span>Điểm cao nhất:</span> <span class="font-bold text-blue-600 text-sm">${maxScore}</span></div><div class="flex justify-between pt-1 mt-1 border-t border-gray-200 text-red-500 font-bold"><span>Hạn nộp:</span> <span>${deadlineStr}</span></div></div></div><button onclick="window.location.href='exam.html?id=${exam.id}'" class="w-full py-2.5 ${isExpired ? 'bg-gray-200 text-gray-500 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700 shadow-lg shadow-blue-200'} font-bold rounded-xl text-sm transition-all" ${isExpired ? 'disabled' : ''}>${isExpired ? 'Đã đóng' : (isDone ? 'Làm lại bài' : 'Bắt đầu làm bài')}</button></div>`; }); html += '</div>'; content.innerHTML = html; }
 
