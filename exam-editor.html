@@ -387,6 +387,25 @@
         window.customConfirm = (message) => { return new Promise((resolve) => { modalTitle.innerText = "Xác nhận"; modalMsg.innerText = message; modalIcon.innerHTML = '<i class="fa-solid fa-circle-question text-orange-500"></i>'; document.getElementById('modalInput').classList.add('hidden'); btnCancel.classList.remove('hidden'); btnConfirm.innerText = "Đồng ý"; modalEl.classList.remove('opacity-0', 'pointer-events-none'); modalBox.classList.remove('scale-95'); modalBox.classList.add('scale-100'); btnConfirm.onclick = () => { resolve(true); modalResolve = null; closeCustomModal(); }; btnCancel.onclick = () => { resolve(false); modalResolve = null; closeCustomModal(); }; }); };
 
         // Hàm hỗ trợ xử lý TikZ lồng nhau
+        // Hàm làm sạch mã TikZ: Loại bỏ các lệnh không hỗ trợ như \resizebox, \begin{center}
+        function cleanTikzCode(code) {
+            let cleaned = code;
+
+            // 1. Xử lý \resizebox bao quanh tikzpicture con
+            // Mẫu: \resizebox{1cm}{!}{ \begin{tikzpicture}... \end{tikzpicture} }
+            // Logic: Thay thế toàn bộ cụm \resizebox bằng nội dung \begin{tikzpicture}...\end{tikzpicture} bên trong nó
+            const resizeRegex = /\\resizebox\{[^}]+\}\{[^}]+\}\{\s*(\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\})\s*\}/g;
+            cleaned = cleaned.replace(resizeRegex, "$1");
+
+            // 2. Xử lý trường hợp \resizebox dùng cho đối tượng khác (nếu có, xóa lệnh giữ nội dung - rủi ro hơn nên chỉ xử lý đơn giản)
+            // Nếu regex trên không bắt được (do ngoặc lồng nhau phức tạp), ta xóa tạm dòng chứa resizebox nếu nó nằm riêng lẻ
+            
+            // 3. Loại bỏ \begin{center} và \end{center} nếu lỡ bị dính vào trong chuỗi TikZ
+            cleaned = cleaned.replace(/\\begin\{center\}/g, "").replace(/\\end\{center\}/g, "");
+
+            return cleaned;
+        }
+
         function processNestedTikz(text) {
             if (!text) return "";
             let result = "";
@@ -403,47 +422,41 @@
                 result += remaining.substring(0, startIdx);
                 remaining = remaining.substring(startIdx);
                 
-                // Thuật toán tìm thẻ đóng tương ứng (xử lý lồng nhau)
+                // Thuật toán tìm thẻ đóng tương ứng (Stack)
                 let depth = 0;
                 let endIdx = -1;
-                let searchPos = 0; // Bắt đầu tìm từ ngay sau \begin{tikzpicture} đầu tiên
-                
-                // Độ dài của chuỗi thẻ
                 const openTag = "\\begin{tikzpicture}";
                 const closeTag = "\\end{tikzpicture}";
-                
-                // Bỏ qua thẻ mở đầu tiên để bắt đầu đếm
-                searchPos = openTag.length; 
+                let searchPos = openTag.length; 
                 depth = 1;
 
                 while (depth > 0) {
                     const nextOpen = remaining.indexOf(openTag, searchPos);
                     const nextClose = remaining.indexOf(closeTag, searchPos);
                     
-                    if (nextClose === -1) {
-                        // Lỗi: Không tìm thấy thẻ đóng, lấy hết phần còn lại
-                        endIdx = remaining.length;
-                        depth = 0; 
-                        break;
-                    }
+                    if (nextClose === -1) { endIdx = remaining.length; depth = 0; break; }
                     
                     if (nextOpen !== -1 && nextOpen < nextClose) {
-                        // Tìm thấy thẻ mở lồng bên trong
-                        depth++;
-                        searchPos = nextOpen + openTag.length;
+                        depth++; searchPos = nextOpen + openTag.length;
                     } else {
-                        // Tìm thấy thẻ đóng
-                        depth--;
-                        searchPos = nextClose + closeTag.length;
-                        if (depth === 0) {
-                            endIdx = searchPos;
-                        }
+                        depth--; searchPos = nextClose + closeTag.length;
+                        if (depth === 0) endIdx = searchPos;
                     }
                 }
                 
-                const tikzCode = remaining.substring(0, endIdx);
-                // Thêm thư viện cơ bản nếu cần và bọc vào thẻ script
-                result += `<div class="flex justify-center my-4 overflow-x-auto"><script type="text/tikz">${tikzCode}<\/script></div>`;
+                // Lấy mã TikZ thô
+                let rawTikz = remaining.substring(0, endIdx);
+                
+                // BƯỚC QUAN TRỌNG: Làm sạch mã trước khi đưa vào thẻ script
+                let finalTikz = cleanTikzCode(rawTikz);
+
+                // Thêm một số thư viện thường dùng vào đầu mỗi hình để tránh lỗi thiếu thư viện
+                // Lưu ý: TikZJax hỗ trợ các thư viện chuẩn, ta thêm calc để tính toán tọa độ ($...$)
+                if (!finalTikz.includes("\\usetikzlibrary")) {
+                   finalTikz = "\\usetikzlibrary{calc,intersections,arrows.meta}\n" + finalTikz;
+                }
+
+                result += `<div class="flex justify-center my-4 overflow-x-auto"><script type="text/tikz">${finalTikz}<\/script></div>`;
                 
                 remaining = remaining.substring(endIdx);
             }
@@ -453,20 +466,18 @@
         function formatContent(text) {
             if (text === null || text === undefined) return "";
             
-            // 1. Xử lý TikZ với thuật toán đếm thẻ (Stack)
+            // 1. Xử lý TikZ lồng nhau và làm sạch
             let processed = processNestedTikz(text);
 
             // 2. Xử lý MathJax và xuống dòng
-            // Regex tách các thành phần: Block Math, Inline Math, và thẻ script TikZ vừa tạo
+            // Regex tách các thành phần
             const regex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?:\$[^\n\r]*?\$)|<script type="text\/tikz">[\s\S]*?<\/script>)/g;
             const parts = processed.split(regex);
             
             return parts.map(part => {
-                // Giữ nguyên script tikz hoặc công thức toán
                 if (part.includes('<script type="text/tikz">') || part.trim().startsWith('$') || part.trim().startsWith('\\(') || part.trim().startsWith('\\[')) {
                     return part;
                 }
-                // Thay thế xuống dòng cho văn bản thường
                 else return part.replace(/\\\\/g, '<br>').replace(/\n/g, '<br>');
             }).join('');
         }
