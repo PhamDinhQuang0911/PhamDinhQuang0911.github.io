@@ -900,64 +900,133 @@
         window.commitMove = async (targetFolderId) => { const collName = currentActionItem.type === 'folder' ? 'folders' : 'exams'; const field = currentActionItem.type === 'folder' ? 'parentId' : 'folderId'; await updateDoc(doc(db, collName, currentActionItem.id), { [field]: targetFolderId }); window.toggleModal('actionModal', false); window.showNotification("Đã di chuyển"); loadFileManager(); }
         
         // --- UPDATE: TEACHER CLASS EXAMS MANAGEMENT (ACTIVE/EXPIRED) ---
+        // --- HÀM TẢI ĐỀ THI TRONG LỚP (ĐÃ TÁCH ROLE) ---
         async function loadClassExams(classId) {
             const container = document.getElementById('tabContentExams');
-            container.innerHTML = '<p class="text-gray-400 italic text-center py-4">Đang tải danh sách đề...</p>';
+            container.innerHTML = '<div class="text-center py-8"><i class="fa-solid fa-spinner fa-spin text-2xl text-blue-500"></i><p class="text-gray-400 mt-2">Đang tải dữ liệu...</p></div>';
 
             try {
-                // Fetch exams assigned to this class
-                const q = query(collection(db, "exams"), where("accessType", "==", "class"), where("allowedClassId", "==", classId));
+                // 1. Lấy danh sách đề thi của lớp này
+                const q = query(collection(db, "exams"), 
+                    where("accessType", "==", "class"), 
+                    where("allowedClassId", "==", classId)
+                );
                 const snap = await getDocs(q);
 
-                const buttonHtml = `<div class="mb-4"><button onclick="window.location.href='exam-editor.html?assignToClass=${classId}'" class="px-4 py-2 bg-purple-600 text-white font-bold rounded-lg hover:bg-purple-700 shadow-md flex items-center gap-2"><i class="fa-solid fa-plus-circle"></i> Giao bài tập mới</button></div>`;
-
                 if (snap.empty) {
-                    container.innerHTML = `${buttonHtml}<div class="border rounded-2xl p-10 text-center bg-white border-dashed border-gray-300"><div class="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-4 text-blue-500 text-2xl"><i class="fa-solid fa-file-invoice"></i></div><h3 class="text-lg font-bold text-gray-700 mb-2">Chưa có bài tập nào</h3><p class="text-sm text-gray-500">Thầy chưa giao bài tập riêng cho lớp này.</p></div>`;
+                    container.innerHTML = `
+                        <div class="border-2 border-dashed border-gray-200 rounded-xl p-8 text-center bg-gray-50">
+                            <div class="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4 text-gray-400 text-2xl"><i class="fa-regular fa-folder-open"></i></div>
+                            <h3 class="text-gray-500 font-bold">Chưa có đề thi nào</h3>
+                            ${currentRole === 'teacher' ? '<p class="text-sm text-gray-400 mt-1">Thầy hãy vào "Ngân hàng đề thi" để tạo và giao đề nhé.</p>' : ''}
+                        </div>`;
                     return;
                 }
 
-                // Process and Sort
-                const exams = [];
-                snap.forEach(doc => exams.push({ id: doc.id, ...doc.data() }));
+                // 2. Chuẩn bị dữ liệu kết quả (Chỉ dành cho Học sinh)
+                const myResults = {};
+                if (currentRole === 'student') {
+                    const qRes = query(collection(db, "results"), where("studentId", "==", currentUser.uid));
+                    const snapRes = await getDocs(qRes);
+                    snapRes.forEach(d => {
+                        // Lưu kết quả có điểm cao nhất hoặc mới nhất
+                        const r = d.data();
+                        if (!myResults[r.examId] || r.score > myResults[r.examId].score) {
+                            myResults[r.examId] = r;
+                        }
+                    });
+                }
+
+                // 3. Render danh sách
+                let html = '<div class="grid grid-cols-1 gap-4">';
                 
-                // Sort by CreatedAt Descending
-                exams.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+                snap.forEach(doc => {
+                    const exam = doc.data();
+                    const examId = doc.id;
+                    
+                    // --- GIAO DIỆN CHO GIÁO VIÊN ---
+                    if (currentRole === 'teacher' || currentRole === 'admin') {
+                        const statusBadge = exam.status === 'published' 
+                            ? '<span class="bg-green-100 text-green-700 px-2 py-1 rounded text-xs font-bold">Đang mở</span>' 
+                            : '<span class="bg-orange-100 text-orange-700 px-2 py-1 rounded text-xs font-bold">Bản nháp</span>';
+                        
+                        html += `
+                            <div class="bg-white p-5 rounded-xl border border-gray-200 hover:border-blue-300 transition-all flex justify-between items-center group cursor-pointer" onclick="window.location.href='exam-editor.html?id=${examId}'">
+                                <div class="flex items-center gap-4">
+                                    <div class="w-12 h-12 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center text-xl"><i class="fa-solid fa-file-pen"></i></div>
+                                    <div>
+                                        <h4 class="font-bold text-gray-800 text-lg group-hover:text-blue-600 transition-colors">${exam.title}</h4>
+                                        <div class="text-xs text-gray-500 flex gap-3 mt-1">
+                                            <span><i class="fa-regular fa-clock"></i> ${exam.duration} phút</span>
+                                            <span><i class="fa-solid fa-list-ol"></i> ${exam.questionCount || 0} câu</span>
+                                            <span><i class="fa-solid fa-calendar-days"></i> Hạn: ${exam.endTime ? new Date(exam.endTime).toLocaleDateString('vi-VN') : 'Không giới hạn'}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="text-right">
+                                    ${statusBadge}
+                                    <div class="text-xs text-gray-400 mt-2"><i class="fa-solid fa-gear mr-1"></i> Cài đặt</div>
+                                </div>
+                            </div>
+                        `;
+                    } 
+                    
+                    // --- GIAO DIỆN CHO HỌC SINH ---
+                    else {
+                        const result = myResults[examId];
+                        let footerHtml = '';
+                        let statusHtml = '';
 
-                const now = new Date();
-                const activeExams = [];
-                const expiredExams = [];
+                        if (result) {
+                            // Đã làm
+                            statusHtml = `<span class="bg-green-100 text-green-700 px-2 py-1 rounded text-xs font-bold">Điểm cao nhất: ${result.score}</span>`;
+                            footerHtml = `
+                                <div class="flex gap-2 mt-4">
+                                    <button onclick="window.location.href='exam.html?id=${examId}'" class="flex-1 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg text-sm transition-colors shadow-sm">
+                                        <i class="fa-solid fa-rotate-right mr-1"></i> Làm lại
+                                    </button>
+                                    <button onclick="window.location.href='exam.html?id=${examId}&mode=review'" class="flex-1 py-2 bg-white text-blue-600 border border-blue-200 font-bold rounded-lg text-sm hover:bg-blue-50 transition-colors">
+                                        <i class="fa-solid fa-eye mr-1"></i> Xem lời giải
+                                    </button>
+                                </div>`;
+                        } else {
+                            // Chưa làm
+                            statusHtml = `<span class="bg-orange-100 text-orange-700 px-2 py-1 rounded text-xs font-bold">Chưa làm</span>`;
+                            footerHtml = `
+                                <button onclick="window.location.href='exam.html?id=${examId}'" class="w-full mt-4 py-2.5 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-lg text-sm transition-colors shadow-md">
+                                    <i class="fa-solid fa-play mr-1"></i> Bắt đầu làm bài
+                                </button>`;
+                        }
 
-                exams.forEach(exam => {
-                    const endTime = exam.endTime ? new Date(exam.endTime) : null;
-                    if (!endTime || endTime > now) activeExams.push(exam);
-                    else expiredExams.push(exam);
+                        html += `
+                            <div class="bg-white p-5 rounded-xl border border-gray-200 hover:shadow-md transition-all">
+                                <div class="flex justify-between items-start mb-3">
+                                    <div class="flex items-center gap-3">
+                                        <div class="w-10 h-10 rounded-full bg-purple-50 text-purple-600 flex items-center justify-center"><i class="fa-solid fa-book"></i></div>
+                                        <div>
+                                            <h4 class="font-bold text-gray-800 text-lg leading-tight">${exam.title}</h4>
+                                            <p class="text-xs text-gray-500 mt-0.5">Hạn nộp: ${exam.endTime ? new Date(exam.endTime).toLocaleString('vi-VN') : 'Không'}</p>
+                                        </div>
+                                    </div>
+                                    ${statusHtml}
+                                </div>
+                                <div class="bg-gray-50 p-3 rounded-lg flex justify-between text-xs text-gray-600 mb-2">
+                                    <span><i class="fa-regular fa-clock"></i> ${exam.duration} phút</span>
+                                    <span><i class="fa-solid fa-list"></i> ${exam.questionCount||0} câu</span>
+                                    <span><i class="fa-solid fa-rotate"></i> ${result ? (result.attempts||'N/A') : 0}/${exam.attempts||'∞'} lần</span>
+                                </div>
+                                ${footerHtml}
+                            </div>
+                        `;
+                    }
                 });
-
-                let html = buttonHtml;
-
-                // Render Active
-                if (activeExams.length > 0) {
-                    html += `<h4 class="text-sm font-bold text-green-700 mb-2 mt-4 uppercase"><i class="fa-regular fa-clock mr-2"></i> Đang mở (Còn hạn)</h4><div class="space-y-3">`;
-                    activeExams.forEach(exam => {
-                        html += createExamCard(exam, 'text-green-600 bg-green-50', 'Đang mở');
-                    });
-                    html += `</div>`;
-                }
-
-                // Render Expired
-                if (expiredExams.length > 0) {
-                    html += `<h4 class="text-sm font-bold text-red-600 mb-2 mt-6 uppercase"><i class="fa-solid fa-box-archive mr-2"></i> Đã đóng (Hết hạn)</h4><div class="space-y-3">`;
-                    expiredExams.forEach(exam => {
-                        html += createExamCard(exam, 'text-red-500 bg-red-50', 'Hết hạn');
-                    });
-                    html += `</div>`;
-                }
-
+                
+                html += '</div>';
                 container.innerHTML = html;
 
             } catch (e) {
                 console.error(e);
-                container.innerHTML = '<p class="text-red-500 italic text-center">Lỗi tải dữ liệu.</p>';
+                container.innerHTML = `<div class="text-center text-red-500 py-4"><p>Lỗi tải dữ liệu!</p><p class="text-xs">${e.message}</p></div>`;
             }
         }
 
@@ -977,7 +1046,28 @@
                     </div>`;
         }
 
-        window.switchTab = async (tabName) => { const btnStudents = document.getElementById('tabBtnStudents'); const btnExams = document.getElementById('tabBtnExams'); const contentStudents = document.getElementById('tabContentStudents'); const contentExams = document.getElementById('tabContentExams'); contentStudents.classList.add('hidden'); contentExams.classList.add('hidden'); btnStudents.className = `px-3 md:px-4 py-1.5 text-xs md:text-sm font-bold rounded-md transition-all text-gray-500 hover:text-gray-700 bg-transparent shadow-none`; btnExams.className = `px-3 md:px-4 py-1.5 text-xs md:text-sm font-bold rounded-md transition-all text-gray-500 hover:text-gray-700 bg-transparent shadow-none`; if (tabName === 'students') { contentStudents.classList.remove('hidden'); btnStudents.className = `px-3 md:px-4 py-1.5 text-xs md:text-sm font-bold rounded-md transition-all text-blue-700 bg-white shadow-sm`; } else { contentExams.classList.remove('hidden'); btnExams.className = `px-3 md:px-4 py-1.5 text-xs md:text-sm font-bold rounded-md transition-all text-blue-700 bg-white shadow-sm`; await loadClassExams(currentViewingClassId); } }
+        // --- HÀM CHUYỂN TAB (SỬA LỖI) ---
+        window.switchTab = async function(tabName) {
+            const btnStudents = document.getElementById('tabBtnStudents');
+            const btnExams = document.getElementById('tabBtnExams');
+            const contentStudents = document.getElementById('tabContentStudents');
+            const contentExams = document.getElementById('tabContentExams');
+
+            if (tabName === 'students') {
+                btnStudents.className = "tab-btn active px-4 py-3 text-sm font-medium text-blue-600 border-b-2 border-blue-600";
+                btnExams.className = "tab-btn px-4 py-3 text-sm font-medium text-gray-600 hover:text-blue-600 border-b-2 border-transparent";
+                contentStudents.classList.remove('hidden');
+                contentExams.classList.add('hidden');
+            } else {
+                btnExams.className = "tab-btn active px-4 py-3 text-sm font-medium text-blue-600 border-b-2 border-blue-600";
+                btnStudents.className = "tab-btn px-4 py-3 text-sm font-medium text-gray-600 hover:text-blue-600 border-b-2 border-transparent";
+                contentStudents.classList.add('hidden');
+                contentExams.classList.remove('hidden');
+                
+                // Gọi hàm tải đề thi (Đã tách logic GV/HS)
+                await loadClassExams(currentViewingClassId);
+            }
+        };
         
         function renderStudentList(list) { const table = document.getElementById('studentListTable'); table.innerHTML = ''; document.getElementById('studentCountBadge').textContent = `${list.length} học sinh`; if (list.length === 0) document.getElementById('emptyStudentMsg').classList.remove('hidden'); else { document.getElementById('emptyStudentMsg').classList.add('hidden'); list.forEach((st, index) => { table.innerHTML += `<tr class="bg-white hover:bg-gray-50 border-b"><td class="px-6 py-3 font-medium text-gray-500">${index + 1}</td><td class="px-6 py-3 font-medium text-gray-900">${st.name}</td><td class="px-6 py-3 text-blue-600 font-medium">${st.username}</td><td class="px-6 py-3 font-mono text-gray-400">******</td><td class="px-6 py-3 text-center"><button onclick="window.openEditStudent(${index})" class="text-blue-500 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 p-2 rounded-lg transition-colors mr-1"><i class="fa-solid fa-pen-to-square"></i></button><button onclick="window.deleteStudent(${index})" class="text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 p-2 rounded-lg transition-colors"><i class="fa-solid fa-trash"></i></button></td></tr>`; }); } }
         window.openEditStudent = function(index) { editingStudentIndex = index; const st = currentClassStudents[index]; document.getElementById('editStuName').value = st.name || ''; document.getElementById('editStuSBD').value = st.sbd || ''; document.getElementById('editStuGender').value = st.gender || 'Nam'; document.getElementById('editStuPhone').value = st.phoneStudent || ''; document.getElementById('editStuParentPhone').value = st.phoneParent || ''; document.getElementById('editStuEmail').value = st.email || ''; document.getElementById('editStuUsername').value = st.username || ''; document.getElementById('editStuPassword').value = st.password || ''; document.getElementById('editStuPassword').type = "password"; window.toggleModal('editStudentModal', true); }
