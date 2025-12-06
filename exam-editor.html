@@ -29,7 +29,8 @@
     };
     </script>
     <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
-
+    <link rel="stylesheet" type="text/css" href="https://tikzjax.com/v1/fonts.css">
+    <script src="https://tikzjax.com/v1/tikzjax.js"></script>
     <style>
         body { font-family: 'Nunito', sans-serif; background-color: #F8F9FA; }
         .font-handwriting { font-family: 'Pacifico', cursive; }
@@ -387,10 +388,22 @@
 
         function formatContent(text) {
             if (text === null || text === undefined) return "";
-            const regex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?:\$[^\n\r]*?\$))/g;
-            const parts = String(text).split(regex);
+            
+            // 1. Xử lý TikZ: Bao bọc mã tikz trong thẻ script đặc biệt để thư viện TikZJax nhận diện
+            let processed = String(text).replace(/\\begin\{tikzpicture\}([\s\S]*?)\\end\{tikzpicture\}/g, (match) => {
+                return `<div class="flex justify-center my-4 overflow-x-auto"><script type="text/tikz">${match}<\/script></div>`;
+            });
+
+            // 2. Xử lý MathJax và xuống dòng
+            const regex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?:\$[^\n\r]*?\$)|<script type="text\/tikz">[\s\S]*?<\/script>)/g;
+            const parts = processed.split(regex);
+            
             return parts.map(part => {
-                if (part.trim().startsWith('$') || part.trim().startsWith('\\(') || part.trim().startsWith('\\[')) return part; 
+                // Giữ nguyên script tikz hoặc công thức toán
+                if (part.includes('<script type="text/tikz">') || part.trim().startsWith('$') || part.trim().startsWith('\\(') || part.trim().startsWith('\\[')) {
+                    return part;
+                }
+                // Thay thế xuống dòng cho văn bản thường
                 else return part.replace(/\\\\/g, '<br>').replace(/\n/g, '<br>');
             }).join('');
         }
