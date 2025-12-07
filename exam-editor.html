@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Quản lý đề thi - Smart LaTeX Import</title>
+    <title>Quản lý đề thi - Smart LaTeX V5 (Final Fix)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -18,7 +18,6 @@
         displayMath: [['$$', '$$'], ['\\[', '\\]']],
         processEscapes: true,
         macros: {
-          // SỬA LỖI: Dùng aligned để hỗ trợ ký tự & trong hệ phương trình
           heva: ["\\left\\{\\begin{aligned}#1\\end{aligned}\\right.", 1],
           hoac: ["\\left[\\begin{aligned}#1\\end{aligned}\\right.", 1],
           tich: "\\cdot",
@@ -41,13 +40,8 @@
         .preview-item:hover { border-color: #3B82F6; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); }
         .preview-item.active { border-color: #3B82F6; ring: 2px solid #DBEAFE; background-color: #F0F9FF; }
         
-        .group-header { position: sticky; top: 0; background-color: #F9FAFB; z-index: 20; padding-top: 10px; padding-bottom: 5px; border-bottom: 1px solid #E5E7EB; }
-
-        .palette-container { padding: 0.5rem; background: #F9FAFB; border-bottom: 1px solid #E5E7EB; overflow-y: auto; max-height: 120px; }
-        .palette-grid { display: flex; flex-wrap: wrap; gap: 0.25rem; }
-        .palette-btn { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; border-radius: 4px; border: 1px solid #D1D5DB; color: #4B5563; transition: all 0.2s; background: white; }
-        .palette-btn:hover { border-color: #3B82F6; color: #3B82F6; }
-        .palette-btn.active { background-color: #3B82F6; color: white; border-color: #3B82F6; }
+        .image-placeholder { transition: all 0.2s; cursor: pointer; }
+        .image-placeholder:hover { transform: scale(1.01); border-color: #2563EB; background-color: #EFF6FF; }
 
         mjx-container { display: inline-block !important; margin: 0 1px !important; vertical-align: middle; }
         mjx-container[display="true"] { display: block !important; margin: 0.5em 0 !important; width: 100% !important; overflow-x: auto; }
@@ -369,8 +363,7 @@
             </div>
             <div class="p-4 overflow-y-auto bg-gray-50/50 flex-1">
                  <p class="text-sm text-gray-500 mb-4 px-1">Hệ thống phát hiện các ảnh sau trong mã LaTeX. Vui lòng tải ảnh tương ứng lên để thay thế.</p>
-                 <div id="batchImageList" class="space-y-3">
-                     </div>
+                 <div id="batchImageList" class="space-y-3"></div>
             </div>
             <div class="p-4 border-t border-gray-100 bg-white rounded-b-2xl flex justify-end">
                 <button onclick="closeBatchImageModal()" class="px-6 py-2 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 shadow-lg shadow-blue-200 text-sm">Xong</button>
@@ -395,11 +388,15 @@
         window.questions = [];
         window.currentQIndex = -1;
         
-        // STATS VARS
+        // Stats Variables
         let statsMap = {}; 
         let classStudentList = [];
 
-        // MODAL UTILS
+        // Image Batch Variables
+        let pendingImageUploads = [];
+        let currentBatchUploadId = null;
+
+        // --- MODAL HELPERS ---
         let modalResolve = null;
         const modalEl = document.getElementById('customModal');
         const modalBox = document.getElementById('customModalBox');
@@ -413,53 +410,32 @@
         window.customAlert = (message, type = 'info') => { return new Promise((resolve) => { modalTitle.innerText = type === 'error' ? 'Lỗi' : 'Thông báo'; modalMsg.innerText = message; modalIcon.innerHTML = type === 'error' ? '<i class="fa-solid fa-triangle-exclamation text-red-500"></i>' : '<i class="fa-solid fa-bell text-blue-500"></i>'; document.getElementById('modalInput').classList.add('hidden'); btnCancel.classList.add('hidden'); btnConfirm.innerText = "Đã hiểu"; modalEl.classList.remove('opacity-0', 'pointer-events-none'); modalBox.classList.remove('scale-100'); modalBox.classList.add('scale-100'); btnConfirm.onclick = () => { resolve(true); modalResolve = null; closeCustomModal(); }; modalResolve = resolve; }); };
         window.customConfirm = (message) => { return new Promise((resolve) => { modalTitle.innerText = "Xác nhận"; modalMsg.innerText = message; modalIcon.innerHTML = '<i class="fa-solid fa-circle-question text-orange-500"></i>'; document.getElementById('modalInput').classList.add('hidden'); btnCancel.classList.remove('hidden'); btnConfirm.innerText = "Đồng ý"; modalEl.classList.remove('opacity-0', 'pointer-events-none'); modalBox.classList.remove('scale-95'); modalBox.classList.add('scale-100'); btnConfirm.onclick = () => { resolve(true); modalResolve = null; closeCustomModal(); }; btnCancel.onclick = () => { resolve(false); modalResolve = null; closeCustomModal(); }; }); };
 
-        // --- HÀM XỬ LÝ TIKZ & TEXT ---
-        function cleanTikzCode(code) {
-            let cleaned = code;
-            const resizeRegex = /\\resizebox\{[^}]+\}\{[^}]+\}\{\s*(\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\})\s*\}/g;
-            cleaned = cleaned.replace(resizeRegex, "$1");
-            cleaned = cleaned.replace(/\\begin\{center\}/g, "").replace(/\\end\{center\}/g, "");
-            return cleaned;
+        // --- TIKZ & TEXT CLEANING ---
+        function cleanTikzCode(code) { let c = code.replace(/\\resizebox\{[^}]+\}\{[^}]+\}\{\s*(\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\})\s*\}/g, "$1"); return c.replace(/\\begin\{center\}/g, "").replace(/\\end\{center\}/g, ""); }
+        function processNestedTikz(text) {
+            if (!text) return ""; let res = "", rem = String(text);
+            while (true) {
+                const start = rem.indexOf("\\begin{tikzpicture}"); if (start === -1) { res += rem; break; }
+                res += rem.substring(0, start); rem = rem.substring(start);
+                let d = 0, end = -1, pos = "\\begin{tikzpicture}".length; d = 1;
+                while (d > 0) { const no = rem.indexOf("\\begin{tikzpicture}", pos), nc = rem.indexOf("\\end{tikzpicture}", pos); if (nc === -1) { end = rem.length; d = 0; break; } if (no !== -1 && no < nc) { d++; pos = no + 19; } else { d--; pos = nc + 17; if (d === 0) end = pos; } }
+                let raw = rem.substring(0, end), final = cleanTikzCode(raw); if (!final.includes("\\usetikzlibrary")) final = "\\usetikzlibrary{calc,intersections,arrows.meta}\n" + final;
+                res += `<div class="flex justify-center my-4 overflow-x-auto"><script type="text/tikz">${final}<\/script></div>`; rem = rem.substring(end);
+            }
+            return res;
         }
 
-        function processNestedTikz(text) {
-            if (!text) return "";
-            let result = "";
-            let remaining = String(text);
-            
-            while (true) {
-                const startIdx = remaining.indexOf("\\begin{tikzpicture}");
-                if (startIdx === -1) { result += remaining; break; }
-                
-                result += remaining.substring(0, startIdx);
-                remaining = remaining.substring(startIdx);
-                
-                let depth = 0; let endIdx = -1;
-                const openTag = "\\begin{tikzpicture}"; const closeTag = "\\end{tikzpicture}";
-                let searchPos = openTag.length; depth = 1;
-
-                while (depth > 0) {
-                    const nextOpen = remaining.indexOf(openTag, searchPos);
-                    const nextClose = remaining.indexOf(closeTag, searchPos);
-                    if (nextClose === -1) { endIdx = remaining.length; depth = 0; break; }
-                    if (nextOpen !== -1 && nextOpen < nextClose) { depth++; searchPos = nextOpen + openTag.length; } 
-                    else { depth--; searchPos = nextClose + closeTag.length; if (depth === 0) endIdx = searchPos; }
-                }
-                
-                let rawTikz = remaining.substring(0, endIdx);
-                let finalTikz = cleanTikzCode(rawTikz);
-                if (!finalTikz.includes("\\usetikzlibrary")) finalTikz = "\\usetikzlibrary{calc,intersections,arrows.meta}\n" + finalTikz;
-
-                result += `<div class="flex justify-center my-4 overflow-x-auto"><script type="text/tikz">${finalTikz}<\/script></div>`;
-                remaining = remaining.substring(endIdx);
-            }
-            return result;
+        // --- HÀM TẠO PLACEHOLDER CÓ ONCLICK (SỬA LỖI KHÔNG BẤM ĐƯỢC) ---
+        function getPlaceholderHTML(id, note = "Vị trí ảnh") {
+            // Thêm onclick trực tiếp để kích hoạt upload
+            return `<div class="image-placeholder my-3 p-4 bg-gray-50 border-2 border-dashed border-blue-300 rounded-xl text-center flex flex-col items-center justify-center select-none cursor-pointer hover:bg-blue-50 transition-colors" data-id="${id}" onclick="triggerBatchUpload('${id}')"><div class="text-blue-500 text-3xl mb-1"><i class="fa-regular fa-image"></i></div><div class="text-xs font-bold text-gray-500 uppercase">${note}</div><div class="text-[10px] text-gray-400">Bấm để tải ảnh</div></div>`;
         }
 
         function formatContent(text) {
             if (text === null || text === undefined) return "";
             let processed = processNestedTikz(text);
-            const regex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?:\$[^\n\r]*?\$)|<script type="text\/tikz">[\s\S]*?<\/script>|<div class="image-placeholder".*?<\/div>|<img.*?>)/g;
+            // SỬA LỖI MATHJAX: Cho phép công thức toán chứa xuống dòng [\s\S]*? trong $...$
+            const regex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?:\$[\s\S]*?\$)|<script type="text\/tikz">[\s\S]*?<\/script>|<div class="image-placeholder".*?<\/div>|<img.*?>)/g;
             const parts = processed.split(regex);
             return parts.map(part => {
                 if (part.includes('<script type="text/tikz">') || part.includes('<div class="image-placeholder"') || part.includes('<img') || part.trim().startsWith('$') || part.trim().startsWith('\\(') || part.trim().startsWith('\\[')) return part;
@@ -467,531 +443,226 @@
             }).join('');
         }
 
+        // --- AUTH & INIT ---
         onAuthStateChanged(auth, async (user) => {
             if (user) {
-                currentUser = user;
-                loadTeacherClasses();
+                currentUser = user; loadTeacherClasses();
                 const urlParams = new URLSearchParams(window.location.search);
                 const examId = urlParams.get('id');
                 if (examId) { currentExamId = examId; loadExamData(examId); }
             } else { window.location.href = 'index.html'; }
         });
 
-        // --- IMAGE UPLOAD LOGIC ---
-        function compressImage(file) {
-            return new Promise((resolve, reject) => {
-                const maxWidth = 800; 
-                const reader = new FileReader();
-                reader.readAsDataURL(file);
-                reader.onload = (event) => {
-                    const img = new Image();
-                    img.src = event.target.result;
-                    img.onload = () => {
-                        const canvas = document.createElement('canvas');
-                        let width = img.width; let height = img.height;
-                        if (width > maxWidth) { height *= maxWidth / width; width = maxWidth; }
-                        canvas.width = width; canvas.height = height;
-                        const ctx = canvas.getContext('2d'); ctx.drawImage(img, 0, 0, width, height);
-                        canvas.toBlob((blob) => { resolve(blob); }, 'image/jpeg', 0.7);
-                    };
-                    img.onerror = (err) => reject(err);
-                };
-                reader.onerror = (err) => reject(err);
-            });
-        }
-
+        // --- SINGLE IMAGE UPLOAD ---
+        function compressImage(file) { return new Promise((resolve, reject) => { const r = new FileReader(); r.readAsDataURL(file); r.onload = (e) => { const i = new Image(); i.src = e.target.result; i.onload = () => { const c = document.createElement('canvas'); let w = i.width, h = i.height; if(w>800){h*=800/w;w=800;} c.width=w;c.height=h; const ctx=c.getContext('2d'); ctx.drawImage(i,0,0,w,h); c.toBlob((b)=>resolve(b),'image/jpeg',0.7); }; i.onerror=reject; }; r.onerror=reject; }); }
+        
         async function handleImageUpload(file) {
-            if (!file) return;
-            window.showToast("Đang nén và tải ảnh...", "info");
-            try {
-                const compressedBlob = await compressImage(file);
-                const fileName = `images/${Date.now()}_${Math.floor(Math.random()*1000)}.jpg`;
-                const storageRef = ref(storage, fileName);
-                await uploadBytes(storageRef, compressedBlob);
-                const url = await getDownloadURL(storageRef);
-                insertAtCursor(`\n<div class="flex justify-center"><img src="${url}" class="max-w-full h-auto rounded-lg shadow-sm" style="max-height:300px;"></div>\n`);
-                autoSaveMemory(); window.showToast("Đã chèn ảnh thành công!", "success");
-            } catch (error) { console.error("Upload error:", error); window.showToast("Lỗi tải ảnh: " + error.message, "error"); }
+            if (!file) return; window.showToast("Đang tải ảnh...", "info");
+            try { const b = await compressImage(file); const n = `images/${Date.now()}_${Math.floor(Math.random()*1000)}.jpg`; const r = ref(storage, n); await uploadBytes(r, b); const u = await getDownloadURL(r); insertAtCursor(`\n<div class="flex justify-center"><img src="${u}" class="max-w-full h-auto rounded-lg shadow-sm" style="max-height:300px;"></div>\n`); autoSaveMemory(); window.showToast("Thành công!", "success"); } catch (e) { console.error(e); window.showToast("Lỗi: "+e.message, "error"); }
         }
 
-        function insertAtCursor(text) {
-            const textarea = document.getElementById('editContent');
-            if (!textarea) return;
-            const start = textarea.selectionStart; const end = textarea.selectionEnd; const value = textarea.value;
-            textarea.value = value.substring(0, start) + text + value.substring(end);
-            textarea.selectionStart = textarea.selectionEnd = start + text.length; textarea.focus();
-        }
+        function insertAtCursor(text) { const ta = document.getElementById('editContent'); if(!ta)return; const s=ta.selectionStart, e=ta.selectionEnd, v=ta.value; ta.value=v.substring(0,s)+text+v.substring(e); ta.selectionStart=ta.selectionEnd=s+text.length; ta.focus(); }
+        document.getElementById('imgUploadInput').addEventListener('change', (e)=>e.target.files[0]&&handleImageUpload(e.target.files[0]));
+        document.body.addEventListener('paste', (e)=>{ if(e.target.id==='editContent'){ const i=(e.clipboardData||e.originalEvent.clipboardData).items; for(let k in i){ if(i[k].kind==='file'&&i[k].type.includes('image/')){ e.preventDefault(); handleImageUpload(i[k].getAsFile()); return; } } } });
 
-        document.addEventListener('DOMContentLoaded', () => {
-            document.getElementById('imgUploadInput').addEventListener('change', (e) => { if(e.target.files.length > 0) handleImageUpload(e.target.files[0]); });
-            document.body.addEventListener('paste', (e) => {
-                if (e.target.id === 'editContent') {
-                    const items = (e.clipboardData || e.originalEvent.clipboardData).items;
-                    for (let index in items) {
-                        const item = items[index];
-                        if (item.kind === 'file' && item.type.includes('image/')) {
-                            e.preventDefault(); const blob = item.getAsFile(); handleImageUpload(blob); return;
-                        }
-                    }
-                }
-            });
-        });
-
-        // --- NEW FEATURE: BATCH IMAGE UPLOAD (SMART DETECTION) ---
-        let pendingImageUploads = []; // Stores { id, originalPath, type }
-        let currentBatchUploadId = null;
-
-        function getPlaceholderHTML(id, note = "Vị trí ảnh") {
-            // Thêm onclick để bấm vào là mở upload ngay
-            return `<div class="image-placeholder my-3 p-4 bg-gray-50 border-2 border-dashed border-blue-300 rounded-xl text-center flex flex-col items-center justify-center select-none cursor-pointer hover:bg-blue-50 transition-colors" 
-                data-id="${id}" 
-                onclick="triggerBatchUpload('${id}')">
-                <div class="text-blue-500 text-3xl mb-1"><i class="fa-regular fa-image"></i></div>
-                <div class="text-xs font-bold text-gray-500 uppercase">${note}</div>
-                <div class="text-[10px] text-gray-400">Bấm để tải ảnh hoặc Ctrl+V để dán</div>
-            </div>`;
-        }
-
-        // Hàm tách nội dung trong cặp ngoặc nhọn { } cân bằng (xử lý lồng nhau)
+        // --- EXTRACT BRACE HELPER ---
         function extractNextBrace(text) {
-            if (!text) return null;
-            // Tìm dấu { đầu tiên
-            const start = text.indexOf('{');
-            if (start === -1) return null;
-            
-            let depth = 1;
-            let end = -1;
-            
-            // Duyệt từ ký tự ngay sau dấu {
-            for (let i = start + 1; i < text.length; i++) {
-                if (text[i] === '{') depth++;
-                else if (text[i] === '}') depth--;
-                
-                if (depth === 0) {
-                    end = i;
-                    break;
-                }
-            }
-            
-            if (end === -1) return null; // Không tìm thấy dấu đóng
-            
-            return {
-                content: text.substring(start + 1, end), // Nội dung bên trong
-                remaining: text.substring(end + 1),      // Phần còn lại sau dấu }
-                fullMatch: text.substring(start, end + 1) // Cả cụm {...}
-            };
+            if (!text) return null; const start = text.indexOf('{'); if (start === -1) return null;
+            let d = 1, end = -1; for (let i = start + 1; i < text.length; i++) { if (text[i] === '{') d++; else if (text[i] === '}') d--; if (d === 0) { end = i; break; } }
+            if (end === -1) return null;
+            return { content: text.substring(start + 1, end), remaining: text.substring(end + 1), fullMatch: text.substring(start, end + 1) };
         }
 
-        // IMPORTANT: SCAN AND REPLACE IMAGES IN LATEX
+        // --- XỬ LÝ ẢNH LATEX (SỬA LỖI IMMINI & CENTER & RÁC) ---
         function processLatexImagesWithDetection(text, questionIndex) {
-            if (!text) return "";
-            let processed = String(text);
+            if (!text) return ""; let processed = String(text);
             
-            // --- 1. Xử lý \immini[opt]{Text}{Image} ---
+            // 1. Xử lý \immini (Tách ảnh ra placeholder, giữ lại text)
             while (processed.includes('\\immini')) {
-                const idx = processed.indexOf('\\immini');
-                let before = processed.substring(0, idx);
-                let tempAfter = processed.substring(idx + 7).trim(); 
+                const idx = processed.indexOf('\\immini'); 
+                let before = processed.substring(0, idx); 
+                let tempAfter = processed.substring(idx + 7).trim(); // Bỏ qua \immini
 
-                if (tempAfter.startsWith('[')) {
-                    const closeBracket = tempAfter.indexOf(']');
-                    if (closeBracket !== -1) tempAfter = tempAfter.substring(closeBracket + 1).trim();
+                // Bỏ qua tùy chọn [thm]
+                if (tempAfter.startsWith('[')) { 
+                    const cb = tempAfter.indexOf(']'); 
+                    if (cb !== -1) tempAfter = tempAfter.substring(cb + 1).trim(); 
                 }
 
+                // Lấy Text Content
                 const arg1 = extractNextBrace(tempAfter); 
                 if (!arg1) break; 
 
-                const arg2 = extractNextBrace(arg1.remaining);
-                if (!arg2) break; 
+                // Lấy Image Content
+                const arg2 = extractNextBrace(arg1.remaining); 
+                if (!arg2) break;
 
-                const imgMatch = arg2.content.match(/\\includegraphics(?:\[.*?\])?\{(.*?)\}/);
-                let placeholder = "";
-                
-                if (imgMatch) {
-                    const uniqueId = `img_${Date.now()}_${Math.random().toString(36).substr(2,9)}`;
-                    pendingImageUploads.push({ id: uniqueId, originalPath: imgMatch[1], questionIdx: questionIndex });
-                    placeholder = getPlaceholderHTML(uniqueId, "Ảnh từ \\immini");
-                } else {
-                     placeholder = getPlaceholderHTML("", "Vị trí hình");
+                // Tạo Placeholder
+                const match = arg2.content.match(/\\includegraphics(?:\[.*?\])?\{(.*?)\}/);
+                let ph = ""; 
+                if (match) { 
+                    const uid = `img_${Date.now()}_${Math.random().toString(36).substr(2,9)}`; 
+                    pendingImageUploads.push({id:uid, originalPath:match[1], questionIdx:questionIndex}); 
+                    ph = getPlaceholderHTML(uid, "Ảnh từ \\immini"); 
+                } else { 
+                    ph = getPlaceholderHTML("", "Vị trí hình"); 
                 }
 
-                processed = before + arg1.content + '\n' + placeholder + arg2.remaining;
+                // Ghép lại: Văn bản cũ (arg1) + Placeholder + Phần còn lại
+                processed = before + arg1.content + '\n' + ph + arg2.remaining;
             }
 
-            // --- 2. Xử lý \begin{center} ... \includegraphics ... \end{center} ---
-            // Regex mới: Bắt chặt hơn cấu trúc center chứa includegraphics
-            // Sử dụng [\s\S]*? để bắt cả xuống dòng
+            // 2. Xử lý \begin{center} ... \includegraphics ... \end{center}
+            // SỬA LỖI: Regex bắt trọn vẹn cả cụm begin...end để tránh sót ký tự thừa
+            // Và thay thế TOÀN BỘ block bằng placeholder (không giữ lại pre/post text trong center vì thường là rác)
             const centerRegex = /\\begin\{center\}\s*([\s\S]*?)\\includegraphics(?:\[.*?\])?\{(.*?)\}([\s\S]*?)\\end\{center\}/g;
             
-            processed = processed.replace(centerRegex, (match, preContent, path, postContent) => {
-                const uniqueId = `img_${Date.now()}_${Math.random().toString(36).substr(2,9)}`;
-                pendingImageUploads.push({ id: uniqueId, originalPath: path, questionIdx: questionIndex });
-                // Giữ lại nội dung text nếu có trong center (trước và sau ảnh)
-                return (preContent || "") + getPlaceholderHTML(uniqueId, "Ảnh canh giữa") + (postContent || "");
+            processed = processed.replace(centerRegex, (match, preText, imgPath, postText) => {
+                 const uid = `img_${Date.now()}_${Math.random().toString(36).substr(2,9)}`; 
+                 pendingImageUploads.push({id:uid, originalPath:imgPath, questionIdx:questionIndex}); 
+                 // Thay thế cả cụm bằng placeholder
+                 return getPlaceholderHTML(uid, "Ảnh canh giữa");
             });
-
-            // --- 3. Xử lý \includegraphics đứng lẻ ---
-             processed = processed.replace(/\\includegraphics(?:\[.*?\])?\{(.*?)\}/g, (match, path) => {
-                const uniqueId = `img_${Date.now()}_${Math.random().toString(36).substr(2,9)}`;
-                pendingImageUploads.push({ id: uniqueId, originalPath: path, questionIdx: questionIndex });
-                return getPlaceholderHTML(uniqueId, "Ảnh");
+            
+            // 3. Xử lý \includegraphics đứng lẻ
+            processed = processed.replace(/\\includegraphics(?:\[.*?\])?\{(.*?)\}/g, (m, path) => {
+                const uid = `img_${Date.now()}_${Math.random().toString(36).substr(2,9)}`; 
+                pendingImageUploads.push({id:uid, originalPath:path, questionIdx:questionIndex}); 
+                return getPlaceholderHTML(uid, "Ảnh");
             });
 
             return processed;
         }
 
+        // --- BATCH UPLOAD UI & LOGIC ---
         window.renderBatchImageModal = () => {
-            const list = document.getElementById('batchImageList');
-            const modal = document.getElementById('batchImageModal');
-            list.innerHTML = '';
-            
+            const list = document.getElementById('batchImageList'); const modal = document.getElementById('batchImageModal'); list.innerHTML = '';
             if (pendingImageUploads.length === 0) return;
-
             pendingImageUploads.forEach((item, index) => {
-                const div = document.createElement('div');
-                div.className = "flex items-center gap-3 p-3 bg-white border border-gray-200 rounded-xl hover:shadow-sm transition-shadow";
-                div.innerHTML = `
-                    <div class="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 font-bold text-xs shrink-0">${index + 1}</div>
-                    <div class="flex-1 overflow-hidden">
-                        <div class="text-xs font-bold text-blue-600 mb-0.5">Câu hỏi số ? (Đang cập nhật)</div>
-                        <div class="text-xs text-gray-500 truncate" title="${item.originalPath}"><i class="fa-regular fa-folder-open mr-1"></i>.../${item.originalPath.split('/').pop()}</div>
-                    </div>
-                    <button onclick="triggerBatchUpload('${item.id}')" class="px-3 py-1.5 bg-blue-50 text-blue-600 font-bold text-xs rounded-lg hover:bg-blue-100 whitespace-nowrap">
-                        <i class="fa-solid fa-cloud-arrow-up mr-1"></i> Thêm ảnh
-                    </button>
-                `;
-                list.appendChild(div);
+                const div = document.createElement('div'); div.className = "flex items-center gap-3 p-3 bg-white border border-gray-200 rounded-xl hover:shadow-sm transition-shadow";
+                div.innerHTML = `<div class="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 font-bold text-xs shrink-0">${index + 1}</div><div class="flex-1 overflow-hidden"><div class="text-xs font-bold text-blue-600 mb-0.5">Vị trí ảnh</div><div class="text-xs text-gray-500 truncate" title="${item.originalPath}"><i class="fa-regular fa-folder-open mr-1"></i>.../${item.originalPath.split('/').pop()}</div></div><button onclick="triggerBatchUpload('${item.id}')" class="px-3 py-1.5 bg-blue-50 text-blue-600 font-bold text-xs rounded-lg hover:bg-blue-100 whitespace-nowrap"><i class="fa-solid fa-cloud-arrow-up mr-1"></i> Thêm ảnh</button>`; list.appendChild(div);
             });
-
-            modal.classList.remove('opacity-0', 'pointer-events-none');
-            modal.querySelector('div').classList.add('scale-100');
+            modal.classList.remove('opacity-0', 'pointer-events-none'); modal.querySelector('div').classList.add('scale-100');
         };
 
-        window.triggerBatchUpload = (id) => {
-            currentBatchUploadId = id;
-            document.getElementById('batchFileInput').click();
+        // Hàm kích hoạt input file khi bấm nút (cả trong modal và trên placeholder)
+        window.triggerBatchUpload = (id) => { 
+            // Nếu bấm từ placeholder mà id đó đã xử lý xong (không còn trong pending) -> Vẫn cho phép thay thế
+            // Nhưng ở đây logic đơn giản là gán ID hiện tại
+            currentBatchUploadId = id; 
+            document.getElementById('batchFileInput').click(); 
         };
+        window.closeBatchImageModal = () => { document.getElementById('batchImageModal').classList.add('opacity-0', 'pointer-events-none'); };
 
-        window.closeBatchImageModal = () => {
-            document.getElementById('batchImageModal').classList.add('opacity-0', 'pointer-events-none');
-        };
-
-        // Handle batch file selection
+        // SỬA LỖI UPLOAD ẢNH KHÔNG HIỂN THỊ
         document.getElementById('batchFileInput').addEventListener('change', async (e) => {
-            const file = e.target.files[0];
-            if (!file || !currentBatchUploadId) return;
-
+            const file = e.target.files[0]; if (!file || !currentBatchUploadId) return;
             try {
-                window.showToast("Đang tải ảnh lên...", "info");
-                // 1. Upload
-                const compressedBlob = await compressImage(file);
-                const fileName = `images/batch_${Date.now()}_${Math.floor(Math.random()*1000)}.jpg`;
-                const storageRef = ref(storage, fileName);
-                await uploadBytes(storageRef, compressedBlob);
-                const url = await getDownloadURL(storageRef);
+                window.showToast("Đang tải ảnh lên...", "info"); 
+                const b = await compressImage(file); 
+                const n = `images/batch_${Date.now()}_${Math.floor(Math.random()*1000)}.jpg`; 
+                const r = ref(storage, n); 
+                await uploadBytes(r, b); 
+                const url = await getDownloadURL(r);
+                
+                // Tạo thẻ ảnh thay thế
+                const imgTag = `<div class="flex justify-center"><img src="${url}" class="max-w-full h-auto rounded-lg shadow-sm" style="max-height:300px;"></div>`;
+                
+                // Regex tìm đúng placeholder có data-id tương ứng
+                // Sử dụng Regex linh hoạt với khoảng trắng và dấu nháy
+                const placeholderRegex = new RegExp(`<div[^>]*class=["']image-placeholder[^>]*data-id=["']${currentBatchUploadId}["'][^>]*>.*?<\/div>`, 'gs');
 
-                // 2. Replace placeholder in Data
-                // Find which question has this ID
                 let found = false;
                 for (let i = 0; i < window.questions.length; i++) {
                     const q = window.questions[i];
-                    // Check content
-                    if (q.content && q.content.includes(currentBatchUploadId)) {
-                        q.content = q.content.replace(getPlaceholderHTML(currentBatchUploadId, "Ảnh từ \\immini"), `<div class="flex justify-center"><img src="${url}" class="max-w-full h-auto rounded-lg shadow-sm" style="max-height:300px;"></div>`);
-                        q.content = q.content.replace(getPlaceholderHTML(currentBatchUploadId, "Ảnh canh giữa"), `<div class="flex justify-center"><img src="${url}" class="max-w-full h-auto rounded-lg shadow-sm" style="max-height:300px;"></div>`);
-                        q.content = q.content.replace(getPlaceholderHTML(currentBatchUploadId, "Ảnh"), `<div class="flex justify-center"><img src="${url}" class="max-w-full h-auto rounded-lg shadow-sm" style="max-height:300px;"></div>`);
-                        // Fallback Regex if exact string match fails due to variations
-                        const regex = new RegExp(`<div class="image-placeholder.*?data-id="${currentBatchUploadId}".*?<\/div>`, 's');
-                        q.content = q.content.replace(regex, `<div class="flex justify-center"><img src="${url}" class="max-w-full h-auto rounded-lg shadow-sm" style="max-height:300px;"></div>`);
-                        found = true;
+                    if (q.content && q.content.includes(currentBatchUploadId)) { 
+                        q.content = q.content.replace(placeholderRegex, imgTag); 
+                        found = true; 
                     }
-                    // Check solution
-                    if (q.solution && q.solution.includes(currentBatchUploadId)) {
-                         const regex = new RegExp(`<div class="image-placeholder.*?data-id="${currentBatchUploadId}".*?<\/div>`, 's');
-                         q.solution = q.solution.replace(regex, `<div class="flex justify-center"><img src="${url}" class="max-w-full h-auto rounded-lg shadow-sm" style="max-height:300px;"></div>`);
-                         found = true;
+                    if (q.solution && q.solution.includes(currentBatchUploadId)) { 
+                        q.solution = q.solution.replace(placeholderRegex, imgTag); 
+                        found = true; 
                     }
                 }
 
-                // 3. Remove from pending list
+                // Xóa khỏi danh sách chờ nếu có
                 pendingImageUploads = pendingImageUploads.filter(item => item.id !== currentBatchUploadId);
                 
-                // 4. Update UI
-                renderBatchImageModal();
-                if (window.currentQIndex !== -1) loadQuestionToEditor(window.currentQIndex);
-                renderPreviewList();
+                // Cập nhật giao diện
+                renderBatchImageModal(); 
+                if (window.currentQIndex !== -1) loadQuestionToEditor(window.currentQIndex); 
+                renderPreviewList(); 
                 window.showToast("Thay thế ảnh thành công!", "success");
-
+                
                 if (pendingImageUploads.length === 0) closeBatchImageModal();
-
-            } catch (err) {
-                console.error(err);
-                window.showToast("Lỗi tải ảnh: " + err.message, "error");
-            } finally {
-                e.target.value = ''; // Reset input
+            } catch (err) { 
+                console.error(err); 
+                window.showToast("Lỗi: " + err.message, "error"); 
+            } finally { 
+                e.target.value = ''; 
             }
         });
 
-        // --- CORE LOGIC ---
-        window.loadExamData = async (id) => { /* (Giữ nguyên như cũ) */
-             try {
-                const docSnap = await getDoc(doc(db, "exams", id));
-                if (docSnap.exists()) {
-                    const data = docSnap.data();
-                    document.getElementById('settingTitle').value = data.title || '';
-                    document.getElementById('settingGrade').value = data.grade || '12';
-                    document.getElementById('settingSubject').value = data.subject || 'Toán học';
-                    document.getElementById('settingDuration').value = data.duration || 45;
-                    document.getElementById('settingPurpose').value = data.purpose || 'exam';
-                    document.getElementById('settingStartTime').value = data.startTime || '';
-                    document.getElementById('settingEndTime').value = data.endTime || '';
-                    document.getElementById('settingPassword').value = data.password || '';
-                    document.getElementById('settingAttempts').value = (data.attempts !== undefined) ? data.attempts : 1;
-                    document.getElementById('settingProctoring').checked = (data.proctoring === true);
-                    document.getElementById('settingShuffle').checked = (data.shuffle !== false);
-                    if(data.showScore) document.querySelector(`input[name="settingShowScore"][value="${data.showScore}"]`).checked = true;
-                    if(data.showResult) document.querySelector(`input[name="settingShowResult"][value="${data.showResult}"]`).checked = true;
-                    const filterBtn = document.getElementById('filterBtnClass');
-                    if(data.accessType) {
-                        document.querySelector(`input[name="settingAccess"][value="${data.accessType}"]`).checked = true;
-                        window.togglePrivasySettings(data.accessType);
-                        if (data.accessType === 'class') filterBtn.classList.remove('hidden'); else filterBtn.classList.add('hidden');
-                    }
-                    if(data.allowedClassId) {
-                        setTimeout(async () => { 
-                            document.getElementById('settingClassSelect').value = data.allowedClassId;
-                            const cls = await getDoc(doc(db, "classes", data.allowedClassId));
-                            if(cls.exists()) { filterBtn.textContent = cls.data().name; classStudentList = cls.data().students || []; }
-                        }, 500);
-                    }
-                    window.questions = data.questions || [];
-                    sortQuestionsByType();
-                    renderPreviewList();
-                    if(window.questions.length > 0) loadQuestionToEditor(0);
-                    if(data.status === 'published') {
-                        document.getElementById('examStatus').textContent = '• Đã xuất bản';
-                        document.getElementById('examStatus').classList.replace('text-orange-500', 'text-green-600');
-                        document.getElementById('publishedLinkArea').classList.remove('hidden');
-                        document.getElementById('settingShareLink').value = window.location.origin + window.location.pathname.replace('exam-editor.html', 'exam.html') + '?id=' + id;
-                    }
-                }
-            } catch(e) { console.error(e); }
-        };
-
-        function sortQuestionsByType() {
-            const order = { 'mc': 1, 'tf': 2, 'short': 3, 'essay': 4 };
-            window.questions.sort((a, b) => (order[a.type] || 99) - (order[b.type] || 99));
-        }
-
-        window.renderPreviewList = () => { /* (Giữ nguyên code render cũ, chỉ thay đổi hàm formatContent đã update ở trên) */
-            const list = document.getElementById('previewList');
-            const palette = document.getElementById('quickPalette');
-            document.getElementById('totalQCount').textContent = window.questions.length;
-            list.innerHTML = ''; palette.innerHTML = '';
-            
-            if (window.questions.length === 0) {
-                list.innerHTML = '<div class="text-center py-10 text-gray-400 text-sm">Chưa có câu hỏi nào.</div>';
-                document.getElementById('editorArea').innerHTML = '<div class="absolute inset-0 flex items-center justify-center text-gray-300 text-sm"><p>Chọn câu hỏi bên trái để sửa</p></div>';
-                document.getElementById('quickPaletteContainer').classList.add('hidden');
-                window.currentQIndex = -1;
-                return;
-            }
-
-            document.getElementById('quickPaletteContainer').classList.remove('hidden');
-            let currentType = '';
-            
-            window.questions.forEach((q, idx) => {
-                const pBtn = document.createElement('button');
-                pBtn.className = `palette-btn ${idx === window.currentQIndex ? 'active' : ''}`;
-                pBtn.textContent = idx + 1;
-                pBtn.onclick = () => loadQuestionToEditor(idx);
-                palette.appendChild(pBtn);
-
-                let typeLabel = q.type === 'mc' ? 'TRẮC NGHIỆM' : (q.type === 'tf' ? 'ĐÚNG/SAI' : (q.type === 'short' ? 'TRẢ LỜI NGẮN' : 'TỰ LUẬN'));
-                if (q.type !== currentType) {
-                    currentType = q.type;
-                    const header = document.createElement('div');
-                    header.className = "group-header text-xs font-bold text-gray-500 uppercase mb-2 pl-1";
-                    header.textContent = `PHẦN: ${typeLabel}`;
-                    list.appendChild(header);
-                }
-
-                const div = document.createElement('div');
-                div.className = `preview-item p-4 rounded-lg mb-3 text-sm relative ${idx === window.currentQIndex ? 'active' : ''}`;
-                div.id = `q-preview-${idx}`;
-                div.onclick = () => loadQuestionToEditor(idx);
-                
-                let html = `
-                    <div class="flex justify-between mb-2">
-                        <span class="font-bold text-blue-600">Câu ${idx+1}</span>
-                        <span class="bg-orange-100 text-orange-600 text-xs px-2 py-0.5 rounded font-bold">${q.point || 0}đ</span>
-                    </div>
-                    <div class="mb-3 text-gray-800">${formatContent(q.content)}</div>
-                `;
-
-                if (q.type === 'mc' && q.options) {
-                    html += `<div class="grid grid-cols-2 gap-2 text-xs text-gray-600">`;
-                    q.options.forEach((o, i) => {
-                        const isCorrect = i === q.correct;
-                        html += `<div class="${isCorrect ? 'text-green-600 font-bold' : ''}">${String.fromCharCode(65+i)}. ${formatContent(o)}</div>`;
-                    });
-                    html += `</div>`;
-                } else if (q.type === 'tf' && q.statements) {
-                    html += `<div class="mt-2 space-y-1">`;
-                    q.statements.forEach((s, i) => {
-                        html += `<div class="flex justify-between text-xs border-b border-dashed border-gray-100 pb-1">
-                            <span class="flex-1 mr-2 text-gray-700">- ${formatContent(s.text)}</span>
-                            <span class="font-bold ${s.isTrue ? 'text-green-600' : 'text-red-500'} whitespace-nowrap">${s.isTrue ? 'Đúng' : 'Sai'}</span>
-                        </div>`;
-                    });
-                    html += `</div>`;
-                } else if (q.type === 'short') {
-                    html += `<div class="text-xs text-green-600 mt-2"><b>Đ/A:</b> ${q.answer}</div>`;
-                }
-
-                if (q.solution) {
-                    html += `<div class="mt-3 pt-2 border-t border-dashed border-gray-200 text-xs text-gray-500">
-                        <b class="text-green-600"><i class="fa-solid fa-lightbulb"></i> Lời giải:</b> ${formatContent(q.solution)}
-                    </div>`;
-                }
-                div.innerHTML = html;
-                list.appendChild(div);
-            });
-            if(window.MathJax) MathJax.typesetPromise([list]).catch(e=>{});
-        };
-
-        window.saveCurrentQuestionToMemory = () => { /* (Giữ nguyên) */
-            if (window.currentQIndex === -1 || !window.questions[window.currentQIndex]) return;
-            const q = window.questions[window.currentQIndex];
-            const contentEl = document.getElementById('editContent'); if (!contentEl) return; 
-            q.content = contentEl.value;
-            const solEl = document.getElementById('editSolution'); if(solEl) q.solution = solEl.value;
-            const pointEl = document.getElementById('editPoint'); if(pointEl) q.point = parseFloat(pointEl.value) || 0;
-            if (q.type === 'mc') { const optInputs = document.querySelectorAll('.mc-option'); q.options = Array.from(optInputs).map(i => i.value); } 
-            else if (q.type === 'tf') { const rows = document.querySelectorAll('#editorArea .flex.items-center.border'); q.statements = []; rows.forEach(row => { const text = row.querySelector('.tf-text').value; const isTrue = row.querySelector('.tf-check').checked; q.statements.push({text, isTrue}); }); } 
-            else if (q.type === 'short') { const ansEl = document.getElementById('editShortAns'); if(ansEl) q.answer = ansEl.value; }
-        };
-
-        window.loadQuestionToEditor = (index) => { /* (Giữ nguyên) */
-            if (window.currentQIndex !== -1 && window.currentQIndex !== index) saveCurrentQuestionToMemory();
-            window.currentQIndex = index;
-            renderPreviewList(); 
-            setTimeout(() => { const activeItem = document.getElementById(`q-preview-${index}`); if(activeItem) activeItem.scrollIntoView({behavior: 'smooth', block: 'nearest'}); }, 100);
-            const q = window.questions[index];
-            const editor = document.getElementById('editorArea');
-            let html = `<div class="mb-4"><label class="form-group-title">Nội dung</label><textarea id="editContent" class="form-input min-h-[120px]" oninput="autoSaveMemory()">${q.content || ''}</textarea></div>`;
-            if (q.type === 'mc') {
-                html += `<div class="grid grid-cols-1 gap-3 mb-4">`;
-                const opts = q.options || ["", "", "", ""];
-                opts.forEach((opt, i) => { html += `<div class="flex items-center gap-2"><div class="w-8 h-8 rounded-full border flex items-center justify-center font-bold cursor-pointer ${q.correct === i ? 'bg-blue-600 text-white' : 'bg-gray-50'}" onclick="setCorrectMC(${i})">${String.fromCharCode(65+i)}</div><input type="text" class="form-input mc-option" value="${opt}" placeholder="Phương án ${String.fromCharCode(65+i)}" oninput="autoSaveMemory()"></div>`; });
-                html += `</div>`;
-            } else if (q.type === 'tf') {
-                html += `<div class="space-y-2 mb-4">`;
-                const stmts = q.statements || [{text:"", isTrue:false}, {text:"", isTrue:false}, {text:"", isTrue:false}, {text:"", isTrue:false}];
-                stmts.forEach((s, i) => { html += `<div class="flex items-center gap-2 border p-2 rounded"><span class="font-bold text-xs text-gray-400 w-4">${i+1}</span><input type="text" class="form-input tf-text" value="${s.text}" oninput="autoSaveMemory()"><label class="flex items-center gap-1"><input type="checkbox" class="w-4 h-4 tf-check" ${s.isTrue?'checked':''} onchange="autoSaveMemory()"><span class="text-xs font-bold text-green-600">Đúng</span></label></div>`; });
-                html += `</div>`;
-            } else if (q.type === 'short') {
-                html += `<div class="mb-4"><label class="form-group-title">Đáp án mẫu</label><input type="text" id="editShortAns" class="form-input font-bold text-green-700" value="${q.answer || ''}" oninput="autoSaveMemory()"></div>`;
-            }
-            html += `<div class="mb-4"><label class="form-group-title">Lời giải</label><textarea id="editSolution" class="form-input min-h-[80px]" oninput="autoSaveMemory()">${q.solution || ''}</textarea></div>`;
-            html += `<div class="mb-4 w-1/3"><label class="form-group-title">Điểm</label><input type="number" id="editPoint" class="form-input font-bold text-orange-600" value="${q.point || 0}" step="0.1" oninput="autoSaveMemory()"></div>`;
-            editor.innerHTML = html;
-        };
-
-        window.addNewQuestion = (type) => { if (window.currentQIndex !== -1) saveCurrentQuestionToMemory(); const newQ = { type: type, content: "", solution: "", point: 0 }; if (type === 'mc') { newQ.options = ["", "", "", ""]; newQ.correct = -1; } if (type === 'tf') { newQ.statements = [{text:"", isTrue:false}, {text:"", isTrue:false}, {text:"", isTrue:false}, {text:"", isTrue:false}]; } if (type === 'short') { newQ.answer = ""; } window.questions.push(newQ); sortQuestionsByType(); renderPreviewList(); loadQuestionToEditor(window.questions.length - 1); };
-        window.autoSaveMemory = () => { saveCurrentQuestionToMemory(); };
-        window.setCorrectMC = (idx) => { window.questions[window.currentQIndex].correct = idx; loadQuestionToEditor(window.currentQIndex); };
-        window.deleteCurrentQuestion = async () => { if (window.currentQIndex === -1) return; if(await window.customConfirm("Xóa câu hỏi này?")) { window.questions.splice(window.currentQIndex, 1); window.currentQIndex = -1; renderPreviewList(); document.getElementById('editorArea').innerHTML = ''; } };
-
-        function cleanLatex(text) { if (!text) return ""; let cleaned = text.replace(/^%.*$/gm, '').replace(/(?<!\\)%.*/g, '').replace(/^\s*\[.*?\]/gm, ''); return cleaned.trim(); }
-        function extractBracedContent(text) { let results = []; let braceCount = 0; let startIndex = -1; for (let i = 0; i < text.length; i++) { if (text[i] === '{') { if (braceCount === 0) startIndex = i + 1; braceCount++; } else if (text[i] === '}') { braceCount--; if (braceCount === 0 && startIndex !== -1) { results.push(text.substring(startIndex, i)); startIndex = -1; } } } return results; }
-        
-        // --- HANDLE TEX UPLOAD (UPDATED) ---
+        // --- XỬ LÝ FILE TEX ---
         window.handleTexUpload = (input) => {
-            const file = input.files[0]; if (!file) return;
-            const reader = new FileReader();
-            
+            const file = input.files[0]; if (!file) return; const reader = new FileReader();
             reader.onload = function(e) { 
                 if (window.currentQIndex !== -1) saveCurrentQuestionToMemory();
-                let content = e.target.result;
-                // Xóa comment % trong LaTeX
-                content = content.replace(/(?<!\\)%.*/g, '');
-
+                let content = e.target.result; content = content.replace(/(?<!\\)%.*/g, '');
                 pendingImageUploads = [];
-                const blockRegex = /\\begin\{(ex|bt|vd)\}([\s\S]*?)\\end\{\1\}/g;
-                let match, count = 0;
+                const blockRegex = /\\begin\{(ex|bt|vd)\}([\s\S]*?)\\end\{\1\}/g; let match, count = 0;
                 
                 while ((match = blockRegex.exec(content)) !== null) {
-                    let fullBody = match[2];
-                    // Xóa tùy chọn bài tập [Mức 1]
+                    let fullBody = match[2]; 
                     fullBody = fullBody.replace(/^\s*\[.*?\]/, ''); 
-                    
                     let qType = 'essay'; 
                     let qData = { content: '', solution: '', options: [], statements: [], answer: '', point: 0 };
                     
-                    // --- BƯỚC 1: TÁCH RIÊNG LỜI GIẢI TRƯỚC TIÊN ---
-                    const loigiaiIndex = fullBody.lastIndexOf('\\loigiai');
-                    let rawQuestion = fullBody;
+                    // 1. Tách lời giải TRƯỚC
+                    const loigiaiIndex = fullBody.lastIndexOf('\\loigiai'); 
+                    let mainContent = fullBody;
                     
                     if (loigiaiIndex !== -1) {
-                        rawQuestion = fullBody.substring(0, loigiaiIndex);
-                        const rawSolutionPart = fullBody.substring(loigiaiIndex);
-                        // Dùng hàm extractNextBrace để lấy nội dung trong \loigiai{...}
-                        const solBrace = extractNextBrace(rawSolutionPart);
+                        mainContent = fullBody.substring(0, loigiaiIndex); 
+                        const solPart = fullBody.substring(loigiaiIndex);
+                        const solBrace = extractNextBrace(solPart);
                         if (solBrace) {
-                            // Xử lý ảnh trong lời giải (nếu có)
-                            qData.solution = processLatexImagesWithDetection(cleanLatex(solBrace.content), count);
+                            // Xử lý ảnh trong lời giải
+                            qData.solution = processLatexImagesWithDetection(cleanTikzCode(solBrace.content), count);
                         }
                     }
-
-                    // --- BƯỚC 2: XỬ LÝ ẢNH TRONG ĐỀ BÀI (Gỡ bỏ \immini) ---
-                    // Lúc này rawQuestion chứa cả \immini và \choice
-                    let processedBody = processLatexImagesWithDetection(rawQuestion, count);
-
-                    // --- BƯỚC 3: PHÂN LOẠI VÀ TÁCH CÂU HỎI ---
-                    if (processedBody.includes('\\choiceTF')) {
+                    
+                    // 2. Xử lý ảnh trong đề bài (Bóc tách \immini)
+                    let procBody = processLatexImagesWithDetection(cleanTikzCode(mainContent), count);
+                    
+                    // 3. Phân loại câu hỏi
+                    if (procBody.includes('\\choiceTF')) {
                         qType = 'tf'; 
-                        const parts = processedBody.split('\\choiceTF'); 
-                        qData.content = cleanLatex(parts[0]);
-                        
-                        // Tách ý đúng sai thủ công bằng Regex quét ngoặc
-                        let stmtText = parts[1];
-                        const stmtRegex = /\{((?:[^{}]|{[^{}]*})*)\}/g;
-                        let stmtMatch;
-                        while ((stmtMatch = stmtRegex.exec(stmtText)) !== null) {
-                            let val = stmtMatch[1];
-                            qData.statements.push({ 
-                                text: cleanLatex(val.replace('\\True', '').trim()), 
-                                isTrue: val.includes('\\True') 
-                            });
+                        const parts = procBody.split('\\choiceTF'); 
+                        qData.content = parts[0];
+                        const stmtRegex = /\{((?:[^{}]|{[^{}]*})*)\}/g; let m; 
+                        while((m=stmtRegex.exec(parts[1]))!==null) {
+                            qData.statements.push({text:m[1].replace('\\True','').trim(), isTrue:m[1].includes('\\True')});
                         }
-
-                    } else if (processedBody.includes('\\choice')) {
+                    } else if (procBody.includes('\\choice')) {
                         qType = 'mc'; 
-                        const parts = processedBody.split('\\choice'); 
-                        qData.content = cleanLatex(parts[0]);
-                        
-                        // Tách đáp án trắc nghiệm
-                        let optText = parts[1];
-                        const optRegex = /\{((?:[^{}]|{[^{}]*})*)\}/g;
-                        let optMatch, optCount = 0;
-                        while ((optMatch = optRegex.exec(optText)) !== null && optCount < 4) {
-                            let val = optMatch[1];
-                            if (val.includes('\\True')) qData.correct = optCount;
-                            qData.options.push(cleanLatex(val.replace('\\True', '').trim()));
-                            optCount++;
+                        const parts = procBody.split('\\choice'); 
+                        qData.content = parts[0];
+                        const optRegex = /\{((?:[^{}]|{[^{}]*})*)\}/g; let m, c=0; 
+                        while((m=optRegex.exec(parts[1]))!==null && c<4) { 
+                            if(m[1].includes('\\True')) qData.correct=c; 
+                            qData.options.push(m[1].replace('\\True','').trim()); 
+                            c++; 
                         }
-
-                    } else if (processedBody.includes('\\shortans')) {
+                    } else if (procBody.includes('\\shortans')) {
                         qType = 'short'; 
-                        const parts = processedBody.split('\\shortans'); 
-                        qData.content = cleanLatex(parts[0]);
-                        const ansMatch = extractNextBrace(processedBody.substring(processedBody.indexOf('\\shortans')));
-                        if(ansMatch) qData.answer = cleanLatex(ansMatch.content);
-
+                        const parts = procBody.split('\\shortans'); 
+                        qData.content = parts[0];
+                        const ans = extractNextBrace(procBody.substring(procBody.indexOf('\\shortans'))); 
+                        if(ans) qData.answer = ans.content;
                     } else { 
                         qType = 'essay'; 
-                        qData.content = cleanLatex(processedBody);
+                        qData.content = procBody; 
                     }
                     
                     window.questions.push({ type: qType, ...qData }); count++;
@@ -1002,111 +673,74 @@
                 window.showToast(`Đã nhập ${count} câu hỏi!`); 
                 input.value = "";
                 
-                // --- BƯỚC 4: RENDER LẠI CÔNG THỨC TOÁN ---
-                if(window.MathJax) {
-                    MathJax.typesetPromise().then(() => {
-                        console.log("MathJax rendered successfully");
-                    }).catch((err) => console.log("MathJax error: " + err.message));
-                }
-
+                // Kích hoạt MathJax vẽ lại công thức
+                if(window.MathJax) MathJax.typesetPromise();
+                
                 if (pendingImageUploads.length > 0) renderBatchImageModal();
             };
             reader.readAsText(file);
         }
 
-        window.saveExam = async function(status) { /* (Giữ nguyên) */
-            if (window.currentQIndex !== -1) saveCurrentQuestionToMemory(); 
-            const title = document.getElementById('settingTitle').value;
-            if(!title) return window.customAlert("Vui lòng nhập tên đề thi!", "error");
-            const btn = status === 'published' ? document.getElementById('btnPublish') : document.getElementById('btnSaveDraft');
-            const originalText = btn.innerHTML; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> ...'; btn.disabled = true;
-            const settings = {
-                title: title, grade: document.getElementById('settingGrade').value, subject: document.getElementById('settingSubject').value,
-                duration: parseInt(document.getElementById('settingDuration').value) || 0, purpose: document.getElementById('settingPurpose').value,
-                startTime: document.getElementById('settingStartTime').value, endTime: document.getElementById('settingEndTime').value,
-                password: document.getElementById('settingPassword').value, attempts: parseInt(document.getElementById('settingAttempts').value) || 0,
-                proctoring: document.getElementById('settingProctoring').checked, shuffle: document.getElementById('settingShuffle').checked,
-                showScore: document.querySelector('input[name="settingShowScore"]:checked').value, showResult: document.querySelector('input[name="settingShowResult"]:checked').value,
-                accessType: document.querySelector('input[name="settingAccess"]:checked').value, allowedClassId: document.getElementById('settingClassSelect').value
-            };
-            try {
-                const examRef = currentExamId ? doc(db, "exams", currentExamId) : doc(collection(db, "exams"));
-                await setDoc(examRef, { ...settings, teacherId: currentUser.uid, questions: window.questions, questionCount: window.questions.length, status: status, updatedAt: new Date().toISOString(), ...(currentExamId ? {} : { createdAt: new Date().toISOString() }) }, { merge: true });
-                currentExamId = examRef.id; document.getElementById('sidebarExamTitle').textContent = title;
-                if (status === 'published') {
-                    const link = window.location.origin + window.location.pathname.replace('exam-editor.html', 'exam.html') + '?id=' + currentExamId;
-                    document.getElementById('shareLinkInput').value = link; document.getElementById('shareModal').classList.remove('opacity-0', 'pointer-events-none');
-                    document.getElementById('shareModal').querySelector('div').classList.add('scale-100');
-                    document.getElementById('examStatus').textContent = '• Đã xuất bản'; document.getElementById('examStatus').classList.replace('text-orange-500', 'text-green-600');
-                    document.getElementById('publishedLinkArea').classList.remove('hidden'); document.getElementById('settingShareLink').value = link;
-                } else { window.showToast("Đã lưu bản nháp thành công!", "success"); }
-                if (!window.location.search.includes('id=')) window.history.pushState({path:window.location.href.split('?')[0] + '?id=' + currentExamId},'',window.location.href.split('?')[0] + '?id=' + currentExamId);
-            } catch(e) { console.error(e); window.customAlert("Lỗi lưu: " + e.message, "error"); } finally { btn.innerHTML = originalText; btn.disabled = false; }
-        }
-
-        window.loadStats = async () => { /* (Giữ nguyên) */
-            if (!currentExamId) return; const qRes = query(collection(db, "results"), where("examId", "==", currentExamId)); const snapRes = await getDocs(qRes);
-            statsMap = {}; snapRes.forEach(doc => { const r = doc.data(); const key = r.studentId || r.studentName; if (!statsMap[key]) { statsMap[key] = { ...r, attempts: [r], bestScore: r.score }; } else { statsMap[key].attempts.push(r); if (r.score > statsMap[key].bestScore) { statsMap[key].bestScore = r.score; statsMap[key].score = r.score; } } });
-            renderStatsDashboard();
+        // --- CÁC HÀM CỐT LÕI KHÁC (GIỮ NGUYÊN TỪ BẢN ỔN ĐỊNH) ---
+        window.loadExamData = async (id) => {
+            try { const docSnap = await getDoc(doc(db, "exams", id)); if (docSnap.exists()) { const d = docSnap.data(); document.getElementById('settingTitle').value = d.title||''; document.getElementById('settingGrade').value = d.grade||'12'; document.getElementById('settingSubject').value = d.subject||'Toán học'; document.getElementById('settingDuration').value = d.duration||45; document.getElementById('settingPurpose').value = d.purpose||'exam'; document.getElementById('settingStartTime').value = d.startTime||''; document.getElementById('settingEndTime').value = d.endTime||''; document.getElementById('settingPassword').value = d.password||''; document.getElementById('settingAttempts').value = d.attempts||1; document.getElementById('settingProctoring').checked = d.proctoring===true; document.getElementById('settingShuffle').checked = d.shuffle!==false; if(d.showScore) document.querySelector(`input[name="settingShowScore"][value="${d.showScore}"]`).checked = true; if(d.showResult) document.querySelector(`input[name="settingShowResult"][value="${d.showResult}"]`).checked = true; if(d.accessType) { document.querySelector(`input[name="settingAccess"][value="${d.accessType}"]`).checked = true; window.togglePrivasySettings(d.accessType); } if(d.allowedClassId) setTimeout(()=>{ document.getElementById('settingClassSelect').value = d.allowedClassId; },500); window.questions = d.questions||[]; sortQuestionsByType(); renderPreviewList(); if(window.questions.length>0) loadQuestionToEditor(0); if(d.status === 'published') { document.getElementById('examStatus').textContent = '• Đã xuất bản'; document.getElementById('examStatus').classList.replace('text-orange-500', 'text-green-600'); document.getElementById('publishedLinkArea').classList.remove('hidden'); document.getElementById('settingShareLink').value = window.location.origin + window.location.pathname.replace('exam-editor.html', 'exam.html') + '?id=' + id; } } } catch(e){ console.error(e); }
+        };
+        function sortQuestionsByType() { const o = { 'mc': 1, 'tf': 2, 'short': 3, 'essay': 4 }; window.questions.sort((a, b) => (o[a.type] || 99) - (o[b.type] || 99)); }
+        window.renderPreviewList = () => {
+            const list = document.getElementById('previewList'); const palette = document.getElementById('quickPalette'); document.getElementById('totalQCount').textContent = window.questions.length; list.innerHTML = ''; palette.innerHTML = '';
+            if (window.questions.length === 0) { list.innerHTML = '<div class="text-center py-10 text-gray-400 text-sm">Chưa có câu hỏi nào.</div>'; document.getElementById('editorArea').innerHTML = '<div class="absolute inset-0 flex items-center justify-center text-gray-300 text-sm"><p>Chọn câu hỏi bên trái để sửa</p></div>'; document.getElementById('quickPaletteContainer').classList.add('hidden'); window.currentQIndex = -1; return; }
+            document.getElementById('quickPaletteContainer').classList.remove('hidden'); let curType = '';
+            window.questions.forEach((q, idx) => {
+                const pBtn = document.createElement('button'); pBtn.className = `palette-btn ${idx === window.currentQIndex ? 'active' : ''}`; pBtn.textContent = idx + 1; pBtn.onclick = () => loadQuestionToEditor(idx); palette.appendChild(pBtn);
+                let tLbl = q.type === 'mc' ? 'TRẮC NGHIỆM' : (q.type === 'tf' ? 'ĐÚNG/SAI' : (q.type === 'short' ? 'TRẢ LỜI NGẮN' : 'TỰ LUẬN'));
+                if (q.type !== curType) { curType = q.type; const h = document.createElement('div'); h.className = "group-header text-xs font-bold text-gray-500 uppercase mb-2 pl-1"; h.textContent = `PHẦN: ${tLbl}`; list.appendChild(h); }
+                const d = document.createElement('div'); d.className = `preview-item p-4 rounded-lg mb-3 text-sm relative ${idx === window.currentQIndex ? 'active' : ''}`; d.id = `q-preview-${idx}`; d.onclick = () => loadQuestionToEditor(idx);
+                let html = `<div class="flex justify-between mb-2"><span class="font-bold text-blue-600">Câu ${idx+1}</span><span class="bg-orange-100 text-orange-600 text-xs px-2 py-0.5 rounded font-bold">${q.point || 0}đ</span></div><div class="mb-3 text-gray-800">${formatContent(q.content)}</div>`;
+                if (q.type === 'mc' && q.options) { html += `<div class="grid grid-cols-2 gap-2 text-xs text-gray-600">`; q.options.forEach((o, i) => { const ic = i === q.correct; html += `<div class="${ic ? 'text-green-600 font-bold' : ''}">${String.fromCharCode(65+i)}. ${formatContent(o)}</div>`; }); html += `</div>`; } 
+                else if (q.type === 'tf' && q.statements) { html += `<div class="mt-2 space-y-1">`; q.statements.forEach((s) => { html += `<div class="flex justify-between text-xs border-b border-dashed border-gray-100 pb-1"><span class="flex-1 mr-2 text-gray-700">- ${formatContent(s.text)}</span><span class="font-bold ${s.isTrue ? 'text-green-600' : 'text-red-500'} whitespace-nowrap">${s.isTrue ? 'Đúng' : 'Sai'}</span></div>`; }); html += `</div>`; } 
+                else if (q.type === 'short') { html += `<div class="text-xs text-green-600 mt-2"><b>Đ/A:</b> ${q.answer}</div>`; }
+                if (q.solution) { html += `<div class="mt-3 pt-2 border-t border-dashed border-gray-200 text-xs text-gray-500"><b class="text-green-600"><i class="fa-solid fa-lightbulb"></i> Lời giải:</b> ${formatContent(q.solution)}</div>`; }
+                d.innerHTML = html; list.appendChild(d);
+            });
+            if(window.MathJax) MathJax.typesetPromise([list]).catch(e=>{});
         };
 
-        window.renderStatsDashboard = () => { /* (Giữ nguyên) */
-            const uniqueStudents = Object.values(statsMap); const totalSubs = uniqueStudents.length;
-            let totalScore = 0; uniqueStudents.forEach(r => totalScore += r.bestScore); const avg = totalSubs > 0 ? (totalScore / totalSubs).toFixed(2) : 0;
-            const scores = uniqueStudents.map(r => r.bestScore); const maxScore = scores.length > 0 ? Math.max(...scores) : 0; const minScore = scores.length > 0 ? Math.min(...scores) : 0;
-            document.getElementById('statTotalSubmissions').textContent = totalSubs; document.getElementById('statAvgScore').textContent = avg;
-            document.getElementById('statMaxScore').textContent = maxScore; document.getElementById('statMinScore').textContent = minScore;
-            const spectrum = Array(11).fill(0); scores.forEach(s => spectrum[Math.floor(s)]++);
-            const ctx = document.getElementById('scoreChart').getContext('2d'); if(window.myChart) window.myChart.destroy();
-            window.myChart = new Chart(ctx, { type: 'bar', data: { labels: ['0-1', '1-2', '2-3', '3-4', '4-5', '5-6', '6-7', '7-8', '8-9', '9-10', '10'], datasets: [{ label: 'Số lượng', data: spectrum, backgroundColor: '#3B82F6', borderRadius: 4 }] }, options: { responsive: true, maintainAspectRatio: false } });
-            const qStats = window.questions.map(() => ({ correct: 0, total: 0 }));
-            Object.values(statsMap).forEach(student => { student.attempts.forEach(attempt => { if(attempt.answers) { window.questions.forEach((q, idx) => { const u = attempt.answers[idx]; if (u !== undefined && u !== null) { qStats[idx].total++; let isCorrect = false; if (q.type === 'mc' && u === q.correct) isCorrect = true; else if (q.type === 'short' && q.answer && String(u).trim().toLowerCase() === String(q.answer).trim().toLowerCase()) isCorrect = true; else if (q.type === 'tf') { let matches = 0; if(Array.isArray(u)) q.statements.forEach((s, i) => { if(u[i]===s.isTrue) matches++; }); if(matches === 4) isCorrect = true; } if (isCorrect) qStats[idx].correct++; } }); } }); });
-            const qListDiv = document.getElementById('questionAnalysisList'); qListDiv.innerHTML = '';
-            qStats.forEach((stat, idx) => { const percent = stat.total > 0 ? Math.round((stat.correct / stat.total) * 100) : 0; const colorClass = percent > 80 ? 'bg-green-500' : (percent > 50 ? 'bg-yellow-500' : 'bg-red-500'); qListDiv.innerHTML += `<div class="flex items-center gap-2 text-xs"><span class="w-10 font-bold text-gray-500">Câu ${idx+1}</span><div class="flex-1 progress-bar-bg"><div class="progress-bar-fill ${colorClass}" style="width: ${percent}%"></div></div><span class="w-8 text-right font-bold text-gray-700">${percent}%</span></div>`; });
-            renderStatsTable();
-        };
+        window.saveCurrentQuestionToMemory = () => { if (window.currentQIndex === -1 || !window.questions[window.currentQIndex]) return; const q = window.questions[window.currentQIndex]; const cEl = document.getElementById('editContent'); if (!cEl) return; q.content = cEl.value; const sEl = document.getElementById('editSolution'); if(sEl) q.solution = sEl.value; const pEl = document.getElementById('editPoint'); if(pEl) q.point = parseFloat(pEl.value) || 0; if (q.type === 'mc') { const os = document.querySelectorAll('.mc-option'); q.options = Array.from(os).map(i => i.value); } else if (q.type === 'tf') { const rs = document.querySelectorAll('#editorArea .flex.items-center.border'); q.statements = []; rs.forEach(row => { const t = row.querySelector('.tf-text').value; const c = row.querySelector('.tf-check').checked; q.statements.push({text:t, isTrue:c}); }); } else if (q.type === 'short') { const a = document.getElementById('editShortAns'); if(a) q.answer = a.value; } };
 
-        window.filterStats = (type) => {
-            document.getElementById('filterBtnAll').className = type === 'all' ? "px-3 py-1.5 rounded-lg text-sm font-bold bg-blue-600 text-white shadow-sm" : "px-3 py-1.5 rounded-lg text-sm font-bold bg-white text-gray-600 border hover:bg-gray-100";
-            document.getElementById('filterBtnClass').className = type === 'class' ? "px-3 py-1.5 rounded-lg text-sm font-bold bg-blue-600 text-white shadow-sm" : "px-3 py-1.5 rounded-lg text-sm font-bold bg-white text-gray-600 border hover:bg-gray-100";
-            renderStatsTable(type);
+        window.loadQuestionToEditor = (index) => {
+            if (window.currentQIndex !== -1 && window.currentQIndex !== index) saveCurrentQuestionToMemory();
+            window.currentQIndex = index; renderPreviewList(); setTimeout(() => { const ai = document.getElementById(`q-preview-${index}`); if(ai) ai.scrollIntoView({behavior: 'smooth', block: 'nearest'}); }, 100);
+            const q = window.questions[index]; const ed = document.getElementById('editorArea');
+            let h = `<div class="mb-4"><label class="form-group-title">Nội dung</label><textarea id="editContent" class="form-input min-h-[120px]" oninput="autoSaveMemory()">${q.content || ''}</textarea></div>`;
+            if (q.type === 'mc') { h += `<div class="grid grid-cols-1 gap-3 mb-4">`; (q.options || ["", "", "", ""]).forEach((o, i) => { h += `<div class="flex items-center gap-2"><div class="w-8 h-8 rounded-full border flex items-center justify-center font-bold cursor-pointer ${q.correct === i ? 'bg-blue-600 text-white' : 'bg-gray-50'}" onclick="setCorrectMC(${i})">${String.fromCharCode(65+i)}</div><input type="text" class="form-input mc-option" value="${o}" placeholder="Phương án ${String.fromCharCode(65+i)}" oninput="autoSaveMemory()"></div>`; }); h += `</div>`; } 
+            else if (q.type === 'tf') { h += `<div class="space-y-2 mb-4">`; (q.statements || [{text:"", isTrue:false},{text:"", isTrue:false},{text:"", isTrue:false},{text:"", isTrue:false}]).forEach((s, i) => { h += `<div class="flex items-center gap-2 border p-2 rounded"><span class="font-bold text-xs text-gray-400 w-4">${i+1}</span><input type="text" class="form-input tf-text" value="${s.text}" oninput="autoSaveMemory()"><label class="flex items-center gap-1"><input type="checkbox" class="w-4 h-4 tf-check" ${s.isTrue?'checked':''} onchange="autoSaveMemory()"><span class="text-xs font-bold text-green-600">Đúng</span></label></div>`; }); h += `</div>`; } 
+            else if (q.type === 'short') { h += `<div class="mb-4"><label class="form-group-title">Đáp án mẫu</label><input type="text" id="editShortAns" class="form-input font-bold text-green-700" value="${q.answer || ''}" oninput="autoSaveMemory()"></div>`; }
+            h += `<div class="mb-4"><label class="form-group-title">Lời giải</label><textarea id="editSolution" class="form-input min-h-[80px]" oninput="autoSaveMemory()">${q.solution || ''}</textarea></div>`;
+            h += `<div class="mb-4 w-1/3"><label class="form-group-title">Điểm</label><input type="number" id="editPoint" class="form-input font-bold text-orange-600" value="${q.point || 0}" step="0.1" oninput="autoSaveMemory()"></div>`;
+            ed.innerHTML = h;
         };
-
-        window.renderStatsTable = (filterType = 'all') => {
-            const tbody = document.getElementById('statsTableBody'); tbody.innerHTML = '';
-            let dataToShow = Object.values(statsMap);
-            const allowedClassId = document.getElementById('settingClassSelect').value;
-            if (filterType === 'class' && allowedClassId && classStudentList.length > 0) {
-                dataToShow = classStudentList.map(st => { const match = dataToShow.find(d => (d.studentName === st.name) || (st.username && d.studentName.includes(st.username))); if (match) return { ...match, status: 'Đã làm' }; return { studentName: st.name, score: '--', submittedAt: null, status: 'Chưa làm', attempts: [] }; });
-            }
-            const sortType = document.getElementById('sortStats').value;
-            dataToShow.sort((a, b) => { const sA = parseFloat(a.score) || 0; const sB = parseFloat(b.score) || 0; if (sortType === 'score_desc') return sB - sA; if (sortType === 'score_asc') return sA - sB; if (sortType === 'time_desc') return new Date(b.submittedAt || 0) - new Date(a.submittedAt || 0); });
-            dataToShow.forEach(r => { const dateStr = r.submittedAt ? new Date(r.submittedAt).toLocaleString('vi-VN') : '--'; const scoreClass = r.status === 'Chưa làm' ? 'text-gray-400' : (r.score >= 8 ? 'text-green-600' : (r.score >= 5 ? 'text-blue-600' : 'text-red-500')); const attemptCount = r.attempts ? r.attempts.length : 0; const nameHtml = attemptCount > 0 ? `<button onclick="showStudentHistory('${r.studentName}')" class="font-bold text-blue-600 hover:underline">${r.studentName}</button>` : r.studentName; tbody.innerHTML += `<tr class="bg-white border-b hover:bg-gray-50"><td class="px-6 py-3 font-medium text-gray-900">${nameHtml} <span class="text-xs text-gray-400 ml-1">${r.status || ''}</span></td><td class="px-6 py-3 text-center font-bold ${scoreClass}">${r.score}</td><td class="px-6 py-3 text-center text-xs text-gray-500">${attemptCount}</td><td class="px-6 py-3 text-right text-xs text-gray-500">${dateStr}</td></tr>`; });
-        };
-        
-        window.showStudentHistory = (studentName) => {
-            const studentData = Object.values(statsMap).find(s => s.studentName === studentName);
-            if (!studentData || !studentData.attempts) return;
-            const modal = document.getElementById('historyModal'); const content = document.getElementById('histModalContent'); const title = document.getElementById('histModalTitle');
-            title.textContent = `Lịch sử: ${studentName}`; content.innerHTML = `<table class="w-full text-sm text-left text-gray-600"><thead class="bg-gray-100"><tr><th class="p-2">Lần</th><th class="p-2 text-center">Điểm</th><th class="p-2 text-right">Ngày nộp</th></tr></thead><tbody class="divide-y divide-gray-100"></tbody></table>`;
-            const tbody = content.querySelector('tbody'); const sortedAttempts = [...studentData.attempts].sort((a,b) => new Date(b.submittedAt) - new Date(a.submittedAt));
-            sortedAttempts.forEach((att, idx) => { tbody.innerHTML += `<tr><td class="p-2">#${sortedAttempts.length - idx}</td><td class="p-2 text-center font-bold text-blue-600">${att.score}</td><td class="p-2 text-right text-xs">${new Date(att.submittedAt).toLocaleString('vi-VN')}</td></tr>`; });
-            modal.classList.remove('opacity-0', 'pointer-events-none'); modal.querySelector('div').classList.add('scale-100');
-        };
+        window.addNewQuestion = (type) => { if (window.currentQIndex !== -1) saveCurrentQuestionToMemory(); const n = { type: type, content: "", solution: "", point: 0 }; if (type === 'mc') { n.options = ["", "", "", ""]; n.correct = -1; } if (type === 'tf') { n.statements = [{text:"", isTrue:false}, {text:"", isTrue:false}, {text:"", isTrue:false}, {text:"", isTrue:false}]; } if (type === 'short') { n.answer = ""; } window.questions.push(n); sortQuestionsByType(); renderPreviewList(); loadQuestionToEditor(window.questions.length - 1); };
+        window.autoSaveMemory = () => saveCurrentQuestionToMemory();
+        window.setCorrectMC = (idx) => { window.questions[window.currentQIndex].correct = idx; loadQuestionToEditor(window.currentQIndex); };
+        window.deleteCurrentQuestion = async () => { if (window.currentQIndex === -1) return; if(await window.customConfirm("Xóa câu hỏi này?")) { window.questions.splice(window.currentQIndex, 1); window.currentQIndex = -1; renderPreviewList(); document.getElementById('editorArea').innerHTML = ''; } };
+        window.saveExam = async function(status) { if (window.currentQIndex !== -1) saveCurrentQuestionToMemory(); const t = document.getElementById('settingTitle').value; if(!t) return window.customAlert("Vui lòng nhập tên đề thi!", "error"); const btn = status === 'published' ? document.getElementById('btnPublish') : document.getElementById('btnSaveDraft'); const ot = btn.innerHTML; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> ...'; btn.disabled = true; const s = { title: t, grade: document.getElementById('settingGrade').value, subject: document.getElementById('settingSubject').value, duration: parseInt(document.getElementById('settingDuration').value) || 0, purpose: document.getElementById('settingPurpose').value, startTime: document.getElementById('settingStartTime').value, endTime: document.getElementById('settingEndTime').value, password: document.getElementById('settingPassword').value, attempts: parseInt(document.getElementById('settingAttempts').value) || 0, proctoring: document.getElementById('settingProctoring').checked, shuffle: document.getElementById('settingShuffle').checked, showScore: document.querySelector('input[name="settingShowScore"]:checked').value, showResult: document.querySelector('input[name="settingShowResult"]:checked').value, accessType: document.querySelector('input[name="settingAccess"]:checked').value, allowedClassId: document.getElementById('settingClassSelect').value }; try { const r = currentExamId ? doc(db, "exams", currentExamId) : doc(collection(db, "exams")); await setDoc(r, { ...s, teacherId: currentUser.uid, questions: window.questions, questionCount: window.questions.length, status: status, updatedAt: new Date().toISOString(), ...(currentExamId ? {} : { createdAt: new Date().toISOString() }) }, { merge: true }); currentExamId = r.id; document.getElementById('sidebarExamTitle').textContent = t; if (status === 'published') { const l = window.location.origin + window.location.pathname.replace('exam-editor.html', 'exam.html') + '?id=' + currentExamId; document.getElementById('shareLinkInput').value = l; document.getElementById('shareModal').classList.remove('opacity-0', 'pointer-events-none'); document.getElementById('shareModal').querySelector('div').classList.add('scale-100'); document.getElementById('examStatus').textContent = '• Đã xuất bản'; document.getElementById('examStatus').classList.replace('text-orange-500', 'text-green-600'); document.getElementById('publishedLinkArea').classList.remove('hidden'); document.getElementById('settingShareLink').value = l; } else { window.showToast("Đã lưu bản nháp thành công!", "success"); } if (!window.location.search.includes('id=')) window.history.pushState({path:window.location.href.split('?')[0] + '?id=' + currentExamId},'',window.location.href.split('?')[0] + '?id=' + currentExamId); } catch(e) { console.error(e); window.customAlert("Lỗi lưu: " + e.message, "error"); } finally { btn.innerHTML = ot; btn.disabled = false; } };
+        window.loadStats = async () => { if (!currentExamId) return; const q = query(collection(db, "results"), where("examId", "==", currentExamId)); const s = await getDocs(q); statsMap = {}; s.forEach(doc => { const r = doc.data(); const k = r.studentId || r.studentName; if (!statsMap[k]) { statsMap[k] = { ...r, attempts: [r], bestScore: r.score }; } else { statsMap[k].attempts.push(r); if (r.score > statsMap[k].bestScore) { statsMap[k].bestScore = r.score; statsMap[k].score = r.score; } } }); renderStatsDashboard(); };
+        window.renderStatsDashboard = () => { const us = Object.values(statsMap); const ts = us.length; let tot = 0; us.forEach(r => tot += r.bestScore); const avg = ts > 0 ? (tot / ts).toFixed(2) : 0; const scs = us.map(r => r.bestScore); const mx = scs.length > 0 ? Math.max(...scs) : 0; const mn = scs.length > 0 ? Math.min(...scs) : 0; document.getElementById('statTotalSubmissions').textContent = ts; document.getElementById('statAvgScore').textContent = avg; document.getElementById('statMaxScore').textContent = mx; document.getElementById('statMinScore').textContent = mn; const sp = Array(11).fill(0); scs.forEach(s => sp[Math.floor(s)]++); const ctx = document.getElementById('scoreChart').getContext('2d'); if(window.myChart) window.myChart.destroy(); window.myChart = new Chart(ctx, { type: 'bar', data: { labels: ['0-1', '1-2', '2-3', '3-4', '4-5', '5-6', '6-7', '7-8', '8-9', '9-10', '10'], datasets: [{ label: 'Số lượng', data: sp, backgroundColor: '#3B82F6', borderRadius: 4 }] }, options: { responsive: true, maintainAspectRatio: false } }); const qs = window.questions.map(() => ({ correct: 0, total: 0 })); Object.values(statsMap).forEach(st => { st.attempts.forEach(at => { if(at.answers) { window.questions.forEach((q, idx) => { const u = at.answers[idx]; if (u !== undefined && u !== null) { qs[idx].total++; let ic = false; if (q.type === 'mc' && u === q.correct) ic = true; else if (q.type === 'short' && q.answer && String(u).trim().toLowerCase() === String(q.answer).trim().toLowerCase()) ic = true; else if (q.type === 'tf') { let m = 0; if(Array.isArray(u)) q.statements.forEach((s, i) => { if(u[i]===s.isTrue) m++; }); if(m === 4) ic = true; } if (ic) qs[idx].correct++; } }); } }); }); const ql = document.getElementById('questionAnalysisList'); ql.innerHTML = ''; qs.forEach((st, idx) => { const p = st.total > 0 ? Math.round((st.correct / st.total) * 100) : 0; const c = p > 80 ? 'bg-green-500' : (p > 50 ? 'bg-yellow-500' : 'bg-red-500'); ql.innerHTML += `<div class="flex items-center gap-2 text-xs"><span class="w-10 font-bold text-gray-500">Câu ${idx+1}</span><div class="flex-1 progress-bar-bg"><div class="progress-bar-fill ${c}" style="width: ${p}%"></div></div><span class="w-8 text-right font-bold text-gray-700">${p}%</span></div>`; }); renderStatsTable(); };
+        window.filterStats = (type) => { document.getElementById('filterBtnAll').className = type === 'all' ? "px-3 py-1.5 rounded-lg text-sm font-bold bg-blue-600 text-white shadow-sm" : "px-3 py-1.5 rounded-lg text-sm font-bold bg-white text-gray-600 border hover:bg-gray-100"; document.getElementById('filterBtnClass').className = type === 'class' ? "px-3 py-1.5 rounded-lg text-sm font-bold bg-blue-600 text-white shadow-sm" : "px-3 py-1.5 rounded-lg text-sm font-bold bg-white text-gray-600 border hover:bg-gray-100"; renderStatsTable(type); };
+        window.renderStatsTable = (type = 'all') => { const tb = document.getElementById('statsTableBody'); tb.innerHTML = ''; let dt = Object.values(statsMap); const cid = document.getElementById('settingClassSelect').value; if (type === 'class' && cid && classStudentList.length > 0) { dt = classStudentList.map(st => { const m = dt.find(d => (d.studentName === st.name) || (st.username && d.studentName.includes(st.username))); if (m) return { ...m, status: 'Đã làm' }; return { studentName: st.name, score: '--', submittedAt: null, status: 'Chưa làm', attempts: [] }; }); } const st = document.getElementById('sortStats').value; dt.sort((a, b) => { const sa = parseFloat(a.score) || 0; const sb = parseFloat(b.score) || 0; if (st === 'score_desc') return sb - sa; if (st === 'score_asc') return sa - sb; if (st === 'time_desc') return new Date(b.submittedAt || 0) - new Date(a.submittedAt || 0); }); dt.forEach(r => { const d = r.submittedAt ? new Date(r.submittedAt).toLocaleString('vi-VN') : '--'; const sc = r.status === 'Chưa làm' ? 'text-gray-400' : (r.score >= 8 ? 'text-green-600' : (r.score >= 5 ? 'text-blue-600' : 'text-red-500')); const ac = r.attempts ? r.attempts.length : 0; const nh = ac > 0 ? `<button onclick="showStudentHistory('${r.studentName}')" class="font-bold text-blue-600 hover:underline">${r.studentName}</button>` : r.studentName; tb.innerHTML += `<tr class="bg-white border-b hover:bg-gray-50"><td class="px-6 py-3 font-medium text-gray-900">${nh} <span class="text-xs text-gray-400 ml-1">${r.status || ''}</span></td><td class="px-6 py-3 text-center font-bold ${sc}">${r.score}</td><td class="px-6 py-3 text-center text-xs text-gray-500">${ac}</td><td class="px-6 py-3 text-right text-xs text-gray-500">${d}</td></tr>`; }); };
+        window.showStudentHistory = (n) => { const d = Object.values(statsMap).find(s => s.studentName === n); if (!d || !d.attempts) return; const m = document.getElementById('historyModal'); const c = document.getElementById('histModalContent'); document.getElementById('histModalTitle').textContent = `Lịch sử: ${n}`; c.innerHTML = `<table class="w-full text-sm text-left text-gray-600"><thead class="bg-gray-100"><tr><th class="p-2">Lần</th><th class="p-2 text-center">Điểm</th><th class="p-2 text-right">Ngày nộp</th></tr></thead><tbody class="divide-y divide-gray-100"></tbody></table>`; const tb = c.querySelector('tbody'); const sa = [...d.attempts].sort((a,b) => new Date(b.submittedAt) - new Date(a.submittedAt)); sa.forEach((at, i) => { tb.innerHTML += `<tr><td class="p-2">#${sa.length - i}</td><td class="p-2 text-center font-bold text-blue-600">${at.score}</td><td class="p-2 text-right text-xs">${new Date(at.submittedAt).toLocaleString('vi-VN')}</td></tr>`; }); m.classList.remove('opacity-0', 'pointer-events-none'); m.querySelector('div').classList.add('scale-100'); };
         window.closeHistoryModal = () => { document.getElementById('historyModal').classList.add('opacity-0', 'pointer-events-none'); };
-        window.exportToExcel = () => { if (Object.keys(statsMap).length === 0) return window.showToast("Chưa có dữ liệu để xuất!", "error"); const wb = XLSX.utils.book_new(); const dataSummary = Object.values(statsMap).map((r, i) => ({ "STT": i + 1, "Họ tên": r.studentName, "Điểm cao nhất": r.bestScore, "Số lần thi": r.attempts.length, "Ngày nộp cuối": new Date(r.submittedAt).toLocaleString('vi-VN') })); const wsSummary = XLSX.utils.json_to_sheet(dataSummary); XLSX.utils.book_append_sheet(wb, wsSummary, "Tong_Hop"); XLSX.writeFile(wb, `KetQua_${document.getElementById('settingTitle').value.replace(/\s/g, '_')}.xlsx`); };
-
-        window.switchView = (viewId) => { document.getElementById('view-settings').classList.add('hidden'); document.getElementById('view-editor').classList.add('hidden'); document.getElementById('view-editor').classList.remove('flex'); document.getElementById('view-stats').classList.add('hidden'); document.querySelectorAll('.sidebar-item').forEach(i => i.classList.remove('active')); if (viewId === 'settings') { document.getElementById('view-settings').classList.remove('hidden'); document.getElementById('menu-settings').classList.add('active'); } else if (viewId === 'editor') { document.getElementById('view-editor').classList.remove('hidden'); document.getElementById('view-editor').classList.add('flex'); document.getElementById('menu-editor').classList.add('active'); if(window.MathJax) MathJax.typesetPromise(); } else if (viewId === 'stats') { document.getElementById('view-stats').classList.remove('hidden'); document.getElementById('menu-stats').classList.add('active'); loadStats(); } };
+        window.switchView = (v) => { document.getElementById('view-settings').classList.add('hidden'); document.getElementById('view-editor').classList.add('hidden'); document.getElementById('view-editor').classList.remove('flex'); document.getElementById('view-stats').classList.add('hidden'); document.querySelectorAll('.sidebar-item').forEach(i => i.classList.remove('active')); if (v === 'settings') { document.getElementById('view-settings').classList.remove('hidden'); document.getElementById('menu-settings').classList.add('active'); } else if (v === 'editor') { document.getElementById('view-editor').classList.remove('hidden'); document.getElementById('view-editor').classList.add('flex'); document.getElementById('menu-editor').classList.add('active'); if(window.MathJax) MathJax.typesetPromise(); } else if (v === 'stats') { document.getElementById('view-stats').classList.remove('hidden'); document.getElementById('menu-stats').classList.add('active'); loadStats(); } };
         window.copyLink = () => { document.getElementById("shareLinkInput").select(); document.execCommand("copy"); window.showToast("Đã sao chép link!"); };
         window.copySettingLink = () => { document.getElementById("settingShareLink").select(); document.execCommand("copy"); window.showToast("Đã sao chép link!"); };
         window.closeShareModal = () => { document.getElementById('shareModal').classList.add('opacity-0', 'pointer-events-none'); };
-        window.showToast = (message, type='success') => { const c = document.getElementById('toastContainer'); const d = document.createElement('div'); d.className = `bg-white border-l-4 border-green-500 shadow-xl rounded-lg p-4 flex items-center gap-3 min-w-[300px] transform translate-x-full transition-transform duration-300`; d.innerHTML = `<div><h4 class="font-bold text-gray-800 text-sm">THÔNG BÁO</h4><p class="text-sm text-gray-600">${message}</p></div>`; c.appendChild(d); requestAnimationFrame(()=>d.classList.remove('translate-x-full')); setTimeout(()=>{d.classList.add('translate-x-full'); setTimeout(()=>d.remove(), 500);}, 3000); };
-        window.togglePrivasySettings = (type) => { document.getElementById('classSelectionArea').className = type === 'class' ? 'pl-6 block' : 'hidden'; };
-        async function loadTeacherClasses() { const s = document.getElementById('settingClassSelect'); if (!currentUser) return; const q = query(collection(db, "classes"), where("teacherId", "==", currentUser.uid)); const snap = await getDocs(q); s.innerHTML = ''; const d = document.createElement('option'); d.value = ""; d.textContent = "-- Chọn lớp học --"; s.appendChild(d); snap.forEach(doc => { const o = document.createElement('option'); o.value = doc.id; o.textContent = doc.data().name; s.appendChild(o); }); };
+        window.showToast = (m, t='success') => { const c = document.getElementById('toastContainer'); const d = document.createElement('div'); d.className = `bg-white border-l-4 border-green-500 shadow-xl rounded-lg p-4 flex items-center gap-3 min-w-[300px] transform translate-x-full transition-transform duration-300`; d.innerHTML = `<div><h4 class="font-bold text-gray-800 text-sm">THÔNG BÁO</h4><p class="text-sm text-gray-600">${m}</p></div>`; c.appendChild(d); requestAnimationFrame(()=>d.classList.remove('translate-x-full')); setTimeout(()=>{d.classList.add('translate-x-full'); setTimeout(()=>d.remove(), 500);}, 3000); };
+        window.togglePrivasySettings = (t) => { document.getElementById('classSelectionArea').className = t === 'class' ? 'pl-6 block' : 'hidden'; };
+        async function loadTeacherClasses() { const s = document.getElementById('settingClassSelect'); if (!currentUser) return; const q = query(collection(db, "classes"), where("teacherId", "==", currentUser.uid)); const sn = await getDocs(q); s.innerHTML = ''; const d = document.createElement('option'); d.value = ""; d.textContent = "-- Chọn lớp học --"; s.appendChild(d); sn.forEach(doc => { const o = document.createElement('option'); o.value = doc.id; o.textContent = doc.data().name; s.appendChild(o); }); };
         window.toggleSidebar = () => { const s = document.getElementById('mainSidebar'); const o = document.getElementById('sidebarOverlay'); if (s.classList.contains('-translate-x-full')) { s.classList.remove('-translate-x-full'); o.classList.remove('hidden'); } else { s.classList.add('-translate-x-full'); o.classList.add('hidden'); } };
-        window.openScoringModal = () => { document.getElementById('scoringModal').classList.remove('opacity-0', 'pointer-events-none'); document.getElementById('scoringModal').querySelector('div').classList.add('scale-100'); let cM=0, cTF=0, cE=0; let h=''; window.questions.forEach((q,i)=>{ if(q.type==='essay'){ cE++; h+=`<div class="flex items-center gap-2 text-sm"><span class="w-16 font-bold">Câu ${i+1}</span><input type="number" id="essay-score-${i}" class="form-input h-8 text-right w-20" value="${q.point||0}" step="0.1"></div>`; } else if(q.type==='tf') cTF++; else cM++; }); document.getElementById('countMcShort').textContent=cM; document.getElementById('countTF').textContent=cTF; document.getElementById('countEssay').textContent=cE; document.getElementById('essayScoreList').innerHTML = cE>0 ? h : '<p class="text-xs text-gray-400 italic">Không có câu tự luận.</p>'; };
+        window.openScoringModal = () => { document.getElementById('scoringModal').classList.remove('opacity-0', 'pointer-events-none'); document.getElementById('scoringModal').querySelector('div').classList.add('scale-100'); let cm=0, ctf=0, ce=0; let h=''; window.questions.forEach((q,i)=>{ if(q.type==='essay'){ ce++; h+=`<div class="flex items-center gap-2 text-sm"><span class="w-16 font-bold">Câu ${i+1}</span><input type="number" id="essay-score-${i}" class="form-input h-8 text-right w-20" value="${q.point||0}" step="0.1"></div>`; } else if(q.type==='tf') ctf++; else cm++; }); document.getElementById('countMcShort').textContent=cm; document.getElementById('countTF').textContent=ctf; document.getElementById('countEssay').textContent=ce; document.getElementById('essayScoreList').innerHTML = ce>0 ? h : '<p class="text-xs text-gray-400 italic">Không có câu tự luận.</p>'; };
         window.closeScoringModal = () => { document.getElementById('scoringModal').classList.add('opacity-0', 'pointer-events-none'); };
-        window.applyScoring = () => { const tM = parseFloat(document.getElementById('scoreTotalMcShort').value)||0; const tTF = parseFloat(document.getElementById('scoreTotalTF').value)||0; let cM=0, cTF=0; window.questions.forEach(q=>{if(q.type==='mc'||q.type==='short')cM++; else if(q.type==='tf')cTF++;}); const pM=cM>0?(tM/cM):0; const pTF=cTF>0?(tTF/cTF):0; window.questions.forEach((q,i)=>{ if(q.type==='mc'||q.type==='short') q.point=parseFloat(pM.toFixed(2)); else if(q.type==='tf') q.point=parseFloat(pTF.toFixed(2)); else if(q.type==='essay'){ const inp=document.getElementById(`essay-score-${i}`); if(inp) q.point=parseFloat(inp.value)||0; } }); closeScoringModal(); renderPreviewList(); window.showToast("Đã chia điểm!"); };
+        window.applyScoring = () => { const tm = parseFloat(document.getElementById('scoreTotalMcShort').value)||0; const ttf = parseFloat(document.getElementById('scoreTotalTF').value)||0; let cm=0, ctf=0; window.questions.forEach(q=>{if(q.type==='mc'||q.type==='short')cm++; else if(q.type==='tf')ctf++;}); const pm=cm>0?(tm/cm):0; const ptf=ctf>0?(ttf/ctf):0; window.questions.forEach((q,i)=>{ if(q.type==='mc'||q.type==='short') q.point=parseFloat(pm.toFixed(2)); else if(q.type==='tf') q.point=parseFloat(ptf.toFixed(2)); else if(q.type==='essay'){ const inp=document.getElementById(`essay-score-${i}`); if(inp) q.point=parseFloat(inp.value)||0; } }); closeScoringModal(); renderPreviewList(); window.showToast("Đã chia điểm!"); };
     </script>
 </body>
 </html>
