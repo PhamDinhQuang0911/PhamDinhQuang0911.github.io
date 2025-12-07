@@ -358,7 +358,25 @@
     </div>
 
     <div id="toastContainer" class="fixed top-5 right-5 z-[110] flex flex-col gap-3 pointer-events-none"></div>
+    <div id="imgManagerModal" class="modal opacity-0 pointer-events-none fixed inset-0 z-[120] flex items-center justify-center bg-gray-900 bg-opacity-70 px-4 transition-opacity duration-300">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-2xl transform scale-95 transition-transform duration-300 flex flex-col max-h-[85vh]">
+            <div class="p-4 border-b border-gray-100 flex justify-between items-center bg-blue-50 rounded-t-xl shrink-0">
+                <div>
+                    <h3 class="font-bold text-blue-800 text-lg"><i class="fa-regular fa-images mr-2"></i>Quản lý hình ảnh còn thiếu</h3>
+                    <p class="text-xs text-gray-500">Hệ thống phát hiện các ảnh sau chưa có dữ liệu</p>
+                </div>
+                <button onclick="window.closeImgManager()" class="text-gray-400 hover:text-red-500 w-8 h-8 flex items-center justify-center rounded-full hover:bg-white transition-colors"><i class="fa-solid fa-times text-xl"></i></button>
+            </div>
+            
+            <div class="flex-1 overflow-y-auto p-0 bg-gray-50" id="imgManagerList"></div>
 
+            <div class="p-4 border-t border-gray-100 bg-white rounded-b-xl flex justify-between items-center shrink-0">
+                <div class="text-xs text-gray-500 italic" id="imgManagerStatus">Đang chờ xử lý...</div>
+                <button onclick="window.closeImgManager()" class="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg shadow-md transition-colors">Hoàn tất</button>
+            </div>
+        </div>
+    </div>
+    <input type="file" id="singleImgInput" accept="image/*" class="hidden">
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
@@ -811,6 +829,115 @@
 
         function cleanLatex(text) { if (!text) return ""; let cleaned = text.replace(/^%.*$/gm, '').replace(/(?<!\\)%.*/g, '').replace(/^\s*\[.*?\]/gm, ''); return cleaned.trim(); }
         function extractBracedContent(text) { let results = []; let braceCount = 0; let startIndex = -1; for (let i = 0; i < text.length; i++) { if (text[i] === '{') { if (braceCount === 0) startIndex = i + 1; braceCount++; } else if (text[i] === '}') { braceCount--; if (braceCount === 0 && startIndex !== -1) { results.push(text.substring(startIndex, i)); startIndex = -1; } } } return results; }
+        // --- LOGIC QUẢN LÝ ẢNH TẬP TRUNG (NEW) ---
+        window.pendingImages = []; 
+        let currentUploadId = null;
+
+        // 1. Hàm quét và đánh dấu vị trí ảnh trong Latex
+        function processLatexImages(text) {
+            if (!text) return "";
+            let processed = String(text);
+
+            const registerImage = (path, type) => {
+                const id = `IMG_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+                window.pendingImages.push({ id: id, path: path, type: type, status: 'pending' });
+                return `<div id="${id}" class="image-placeholder-box p-4 my-2 border-2 border-dashed border-gray-300 rounded bg-gray-50 text-center text-gray-400 text-xs">Đang chờ ảnh: ${path}...</div>`;
+            };
+
+            // Quét \includegraphics
+            processed = processed.replace(/\\includegraphics(?:\[.*?\])?\{(.*?)\}/g, (match, path) => registerImage(path, 'includegraphics'));
+
+            // Quét \immini
+            while (processed.includes('\\immini')) {
+                const idx = processed.indexOf('\\immini');
+                let before = processed.substring(0, idx);
+                let after = processed.substring(idx + 7).trim();
+                if (after.startsWith('[')) after = after.substring(after.indexOf(']') + 1); // Bỏ option
+                
+                const arg1 = extractBracedContent(after); // Nội dung text (dùng hàm có sẵn hoặc hàm helper dưới)
+                if(!arg1 || arg1.length === 0) break;
+                // Giả lập logic lấy text và hình: Ở đây ta dùng regex đơn giản hơn để tránh lỗi nếu hàm extract cũ không tương thích
+                // Để đơn giản, ta sẽ replace luôn cả cụm immini bằng Text + Placeholder
+                 processed = processed.replace(/\\immini(?:\[.*?\])?\{((?:[^{}]|{[^{}]*})*)\}\{((?:[^{}]|{[^{}]*})*)\}/g, (match, textContent, imgCode) => {
+                    return textContent + '\n' + registerImage("Hình minh họa (immini)", 'immini');
+                });
+                break; // Thoát loop để tránh infinite nếu regex fail, thực tế nên dùng parser tốt hơn
+            }
+
+            // Quét Center chứa TikZ/Image
+            processed = processed.replace(/\\begin\{center\}([\s\S]*?)\\end\{center\}/g, (match, inner) => {
+                if (inner.includes('tikzpicture') || inner.includes('\\includegraphics')) {
+                    if (inner.includes('image-placeholder-box')) return inner; // Đã xử lý
+                    return registerImage("Hình vẽ (Center)", 'tikz');
+                }
+                return match;
+            });
+
+            // Quét TikZ rời
+            processed = processed.replace(/\\begin\{tikzpicture\}([\s\S]*?)\\end\{tikzpicture\}/g, () => registerImage("Mã hình TikZ", 'tikz'));
+            
+            return processed;
+        }
+
+        // 2. Các hàm UI cho Popup Quản lý ảnh
+        window.openImgManager = () => {
+            renderImgManagerItems();
+            const modal = document.getElementById('imgManagerModal');
+            modal.classList.remove('opacity-0', 'pointer-events-none');
+            modal.querySelector('div').classList.remove('scale-95');
+        };
+
+        window.closeImgManager = () => {
+            const modal = document.getElementById('imgManagerModal');
+            modal.classList.add('opacity-0', 'pointer-events-none');
+            modal.querySelector('div').classList.add('scale-95');
+            if(window.currentQIndex !== -1) loadQuestionToEditor(window.currentQIndex);
+        };
+
+        window.renderImgManagerItems = () => {
+            const list = document.getElementById('imgManagerList');
+            list.innerHTML = '';
+            const remaining = window.pendingImages.filter(img => img.status === 'pending');
+            document.getElementById('imgManagerStatus').textContent = `Còn lại: ${remaining.length} hình ảnh`;
+
+            window.pendingImages.forEach((img, index) => {
+                const div = document.createElement('div');
+                div.className = `flex items-center justify-between p-4 border-b border-gray-100 ${img.status === 'done' ? 'bg-green-50' : 'bg-white hover:bg-gray-50'}`;
+                
+                let statusBadge = img.status === 'pending' ? '<span class="text-xs font-bold text-orange-500 bg-orange-100 px-2 py-1 rounded">Chưa có ảnh</span>' : (img.status === 'uploading' ? '<span class="text-xs text-blue-500"><i class="fa-solid fa-spinner fa-spin"></i> Loading...</span>' : '<span class="text-xs font-bold text-green-600 bg-green-100 px-2 py-1 rounded">Đã xong</span>');
+                let actionBtn = img.status === 'done' ? `<img src="${img.url}" class="w-10 h-10 object-cover rounded border">` : `<button onclick="window.triggerSingleUpload('${img.id}')" class="px-3 py-1.5 bg-blue-600 text-white text-xs font-bold rounded hover:bg-blue-700">Chọn ảnh</button>`;
+                
+                div.innerHTML = `<div class="flex items-center gap-3 overflow-hidden"><div class="w-6 h-6 rounded bg-gray-100 flex items-center justify-center text-xs font-bold">${index + 1}</div><div class="min-w-0"><p class="text-sm font-bold truncate" title="${img.path}">${img.path.length>40?'...'+img.path.slice(-40):img.path}</p><p class="text-[10px] text-gray-400">${img.id}</p></div></div><div class="flex items-center gap-2 shrink-0">${statusBadge}${actionBtn}</div>`;
+                list.appendChild(div);
+            });
+        };
+
+        window.triggerSingleUpload = (id) => { currentUploadId = id; document.getElementById('singleImgInput').value = ""; document.getElementById('singleImgInput').click(); };
+
+        // 3. Event Listener cho Input File ẩn
+        setTimeout(() => {
+            const fileInput = document.getElementById('singleImgInput');
+            if(fileInput) fileInput.addEventListener('change', async (e) => {
+                const file = e.target.files[0]; if (!file || !currentUploadId) return;
+                const imgObj = window.pendingImages.find(i => i.id === currentUploadId);
+                if(imgObj) { imgObj.status = 'uploading'; renderImgManagerItems(); }
+                try {
+                    const compressedBlob = await compressImage(file);
+                    const fileName = `images/exam_assets/${Date.now()}_${currentUploadId}.jpg`;
+                    const storageRef = ref(storage, fileName);
+                    await uploadBytes(storageRef, compressedBlob);
+                    const url = await getDownloadURL(storageRef);
+                    
+                    // Replace Placeholder bằng Ảnh thật trong dữ liệu câu hỏi
+                    const imgTag = `<div class="flex justify-center my-2"><img src="${url}" class="max-w-full h-auto rounded-lg shadow-sm" style="max-height:300px;"></div>`;
+                    window.questions.forEach(q => {
+                        if (q.content && q.content.includes(currentUploadId)) q.content = q.content.replace(new RegExp(`<div id="${currentUploadId}".*?</div>`, 'g'), imgTag);
+                        if (q.solution && q.solution.includes(currentUploadId)) q.solution = q.solution.replace(new RegExp(`<div id="${currentUploadId}".*?</div>`, 'g'), imgTag);
+                    });
+                    if(imgObj) { imgObj.status = 'done'; imgObj.url = url; renderImgManagerItems(); }
+                } catch (err) { window.showToast("Lỗi: " + err.message, "error"); }
+            });
+        }, 1000);
         // --- CÁC HÀM XỬ LÝ ẢNH LATEX THÔNG MINH ---
 
         // 1. Tạo mã HTML cho khung giữ chỗ (Placeholder)
@@ -910,89 +1037,70 @@
             reader.onload = function(e) { 
                 if (window.currentQIndex !== -1) saveCurrentQuestionToMemory();
                 
-                let content = e.target.result;
-                
-                // --- BƯỚC MỚI: Xóa các comment % trong LaTeX để tránh lỗi parse ---
-                content = content.replace(/(?<!\\)%.*/g, '');
+                // Reset danh sách ảnh chờ
+                window.pendingImages = []; 
 
+                let content = e.target.result.replace(/(?<!\\)%.*/g, ''); // Xóa comment
                 const blockRegex = /\\begin\{(ex|bt|vd)\}([\s\S]*?)\\end\{\1\}/g;
                 let match, count = 0;
                 
                 while ((match = blockRegex.exec(content)) !== null) {
-                    let fullBody = match[2];
-                    
-                    // Xóa tùy chọn bài tập vd: [Mức 1]
-                    fullBody = fullBody.replace(/^\s*\[.*?\]/, ''); 
-
+                    let fullBody = match[2].replace(/^\s*\[.*?\]/, ''); 
                     let qType = 'essay'; 
                     let qData = { content: '', solution: '', options: [], statements: [], answer: '', point: 0 };
                     
-                    // Tách Lời giải (nếu có)
                     const loigiaiIndex = fullBody.lastIndexOf('\\loigiai');
                     let mainContent = fullBody;
                     
                     if (loigiaiIndex !== -1) {
                         const afterLoigiai = fullBody.substring(loigiaiIndex);
-                        const braceContent = extractBracedContent(afterLoigiai); // Dùng hàm cũ của bạn
-                        if (braceContent.length > 0) {
-                            // --- XỬ LÝ ẢNH TRONG LỜI GIẢI ---
-                            qData.solution = processLatexImages(cleanLatex(braceContent[0]));
-                        }
+                        const braceContent = extractBracedContent(afterLoigiai);
+                        // CẬP NHẬT GỌI processLatexImages
+                        if (braceContent.length > 0) qData.solution = processLatexImages(cleanLatex(braceContent[0]));
                         mainContent = fullBody.substring(0, loigiaiIndex);
                     }
                     
-                    // Phân loại câu hỏi
                     if (mainContent.includes('\\choiceTF')) {
                         qType = 'tf'; 
                         const parts = mainContent.split('\\choiceTF'); 
-                        // --- XỬ LÝ ẢNH TRONG CÂU HỎI ---
+                        // CẬP NHẬT GỌI processLatexImages
                         qData.content = processLatexImages(cleanLatex(parts[0]));
-                        
                         const rawStatements = extractBracedContent(parts[1]);
-                        rawStatements.forEach(stmt => { 
-                            qData.statements.push({ 
-                                text: cleanLatex(stmt.replace('\\True', '').trim()), 
-                                isTrue: stmt.includes('\\True') 
-                            }); 
-                        });
-
+                        rawStatements.forEach(stmt => { qData.statements.push({ text: cleanLatex(stmt.replace('\\True', '').trim()), isTrue: stmt.includes('\\True') }); });
                     } else if (mainContent.includes('\\choice')) {
                         qType = 'mc'; 
                         const parts = mainContent.split('\\choice'); 
-                        // --- XỬ LÝ ẢNH TRONG CÂU HỎI ---
+                        // CẬP NHẬT GỌI processLatexImages
                         qData.content = processLatexImages(cleanLatex(parts[0]));
-                        
                         const rawOptions = extractBracedContent(parts[1]);
-                        rawOptions.forEach((opt, idx) => { 
-                            if (idx < 4) { 
-                                qData.options.push(cleanLatex(opt.replace('\\True', '').trim())); 
-                                if (opt.includes('\\True')) qData.correct = idx; 
-                            } 
-                        });
-
+                        rawOptions.forEach((opt, idx) => { if (idx < 4) { qData.options.push(cleanLatex(opt.replace('\\True', '').trim())); if (opt.includes('\\True')) qData.correct = idx; } });
                     } else if (mainContent.includes('\\shortans')) {
                         qType = 'short'; 
                         const parts = mainContent.split('\\shortans'); 
-                        // --- XỬ LÝ ẢNH TRONG CÂU HỎI ---
+                        // CẬP NHẬT GỌI processLatexImages
                         qData.content = processLatexImages(cleanLatex(parts[0]));
-                        
                         const ansContent = extractBracedContent(mainContent.substring(mainContent.indexOf('\\shortans')));
                         if(ansContent.length > 0) qData.answer = cleanLatex(ansContent[0]);
-
                     } else { 
                         qType = 'essay'; 
-                        // --- XỬ LÝ ẢNH TRONG CÂU HỎI ---
+                        // CẬP NHẬT GỌI processLatexImages
                         qData.content = processLatexImages(cleanLatex(mainContent));
                     }
                     
-                    window.questions.push({ type: qType, ...qData }); 
-                    count++;
+                    window.questions.push({ type: qType, ...qData }); count++;
                 }
                 
                 sortQuestionsByType();
                 renderPreviewList();
-                window.showToast(`Đã nhập ${count} câu hỏi!`);
-                input.value = ""; // Reset input
+                input.value = ""; 
+
+                // TỰ ĐỘNG MỞ POPUP NẾU CÓ ẢNH
+                if (window.pendingImages.length > 0) {
+                    window.openImgManager();
+                    window.showToast(`Phát hiện ${window.pendingImages.length} ảnh cần tải lên!`, "info");
+                } else {
+                    window.showToast(`Đã nhập ${count} câu hỏi thành công!`);
+                }
             };
             reader.readAsText(file);
         }
