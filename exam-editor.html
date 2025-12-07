@@ -459,10 +459,16 @@
         function formatContent(text) {
             if (text === null || text === undefined) return "";
             let processed = processNestedTikz(text);
-            const regex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?:\$[^\n\r]*?\$)|<script type="text\/tikz">[\s\S]*?<\/script>|<div class="image-placeholder".*?<\/div>|<img.*?>)/g;
+            // Regex cho phép xuống dòng trong công thức toán
+            const regex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?:\$[\s\S]*?\$)|<script type="text\/tikz">[\s\S]*?<\/script>|<div class="image-placeholder".*?<\/div>|<img.*?>)/g;
             const parts = processed.split(regex);
             return parts.map(part => {
-                if (part.includes('<script type="text/tikz">') || part.includes('<div class="image-placeholder"') || part.includes('<img') || part.trim().startsWith('$') || part.trim().startsWith('\\(') || part.trim().startsWith('\\[')) return part;
+                if (part.includes('<script type="text/tikz">') || 
+                    part.includes('<div class="image-placeholder"') || 
+                    part.includes('<img') || 
+                    part.trim().startsWith('$') || 
+                    part.trim().startsWith('\\(') || 
+                    part.trim().startsWith('\\[')) return part;
                 else return part.replace(/\\\\/g, '<br>').replace(/\n/g, '<br>');
             }).join('');
         }
@@ -907,6 +913,7 @@
         function extractBracedContent(text) { let results = []; let braceCount = 0; let startIndex = -1; for (let i = 0; i < text.length; i++) { if (text[i] === '{') { if (braceCount === 0) startIndex = i + 1; braceCount++; } else if (text[i] === '}') { braceCount--; if (braceCount === 0 && startIndex !== -1) { results.push(text.substring(startIndex, i)); startIndex = -1; } } } return results; }
         
         // --- HANDLE TEX UPLOAD (UPDATED) ---
+        // XỬ LÝ FILE UPLOAD (ĐÃ NÂNG CẤP ĐỂ BẮT ĐÚNG NGOẶC LỒNG NHAU)
         window.handleTexUpload = (input) => {
             const file = input.files[0]; if (!file) return;
             const reader = new FileReader();
@@ -914,7 +921,7 @@
             reader.onload = function(e) { 
                 if (window.currentQIndex !== -1) saveCurrentQuestionToMemory();
                 let content = e.target.result;
-                // Xóa comment % trong LaTeX
+                // Xóa comment % để tránh lỗi parse
                 content = content.replace(/(?<!\\)%.*/g, '');
 
                 pendingImageUploads = [];
@@ -923,75 +930,77 @@
                 
                 while ((match = blockRegex.exec(content)) !== null) {
                     let fullBody = match[2];
-                    // Xóa tùy chọn bài tập [Mức 1]
                     fullBody = fullBody.replace(/^\s*\[.*?\]/, ''); 
                     
                     let qType = 'essay'; 
                     let qData = { content: '', solution: '', options: [], statements: [], answer: '', point: 0 };
                     
-                    // --- BƯỚC 1: TÁCH RIÊNG LỜI GIẢI TRƯỚC TIÊN ---
+                    // 1. Tách và xử lý Lời giải trước
                     const loigiaiIndex = fullBody.lastIndexOf('\\loigiai');
-                    let rawQuestion = fullBody;
+                    let mainContent = fullBody;
                     
                     if (loigiaiIndex !== -1) {
-                        rawQuestion = fullBody.substring(0, loigiaiIndex);
-                        const rawSolutionPart = fullBody.substring(loigiaiIndex);
-                        // Dùng hàm extractNextBrace để lấy nội dung trong \loigiai{...}
-                        const solBrace = extractNextBrace(rawSolutionPart);
+                        mainContent = fullBody.substring(0, loigiaiIndex);
+                        const solPart = fullBody.substring(loigiaiIndex);
+                        const solBrace = extractNextBrace(solPart);
                         if (solBrace) {
-                            // Xử lý ảnh trong lời giải (nếu có)
-                            qData.solution = processLatexImagesWithDetection(cleanLatex(solBrace.content), count);
+                            qData.solution = processLatexImagesWithDetection(cleanTikzCode(solBrace.content), count);
                         }
                     }
-
-                    // --- BƯỚC 2: XỬ LÝ ẢNH TRONG ĐỀ BÀI (Gỡ bỏ \immini) ---
-                    // Lúc này rawQuestion chứa cả \immini và \choice
-                    let processedBody = processLatexImagesWithDetection(rawQuestion, count);
-
-                    // --- BƯỚC 3: PHÂN LOẠI VÀ TÁCH CÂU HỎI ---
-                    if (processedBody.includes('\\choiceTF')) {
+                    
+                    // 2. Xử lý ảnh trong đề bài
+                    let procBody = processLatexImagesWithDetection(cleanTikzCode(mainContent), count);
+                    
+                    // 3. Phân loại và tách đáp án (SỬ DỤNG extractNextBrace THAY CHO REGEX CŨ)
+                    if (procBody.includes('\\choiceTF')) {
                         qType = 'tf'; 
-                        const parts = processedBody.split('\\choiceTF'); 
-                        qData.content = cleanLatex(parts[0]);
+                        const parts = procBody.split('\\choiceTF'); 
+                        qData.content = parts[0].trim();
                         
-                        // Tách ý đúng sai thủ công bằng Regex quét ngoặc
-                        let stmtText = parts[1];
-                        const stmtRegex = /\{((?:[^{}]|{[^{}]*})*)\}/g;
-                        let stmtMatch;
-                        while ((stmtMatch = stmtRegex.exec(stmtText)) !== null) {
-                            let val = stmtMatch[1];
-                            qData.statements.push({ 
-                                text: cleanLatex(val.replace('\\True', '').trim()), 
-                                isTrue: val.includes('\\True') 
+                        let remainingText = parts[1];
+                        // Vòng lặp bóc tách từng ngoặc {} cho câu Đúng/Sai
+                        while(true) {
+                            const brace = extractNextBrace(remainingText);
+                            if (!brace) break;
+                            
+                            let val = brace.content;
+                            qData.statements.push({
+                                text: val.replace('\\True', '').trim(),
+                                isTrue: val.includes('\\True')
                             });
+                            remainingText = brace.remaining;
                         }
 
-                    } else if (processedBody.includes('\\choice')) {
+                    } else if (procBody.includes('\\choice')) {
                         qType = 'mc'; 
-                        const parts = processedBody.split('\\choice'); 
-                        qData.content = cleanLatex(parts[0]);
+                        const parts = procBody.split('\\choice'); 
+                        qData.content = parts[0].trim();
                         
-                        // Tách đáp án trắc nghiệm
-                        let optText = parts[1];
-                        const optRegex = /\{((?:[^{}]|{[^{}]*})*)\}/g;
-                        let optMatch, optCount = 0;
-                        while ((optMatch = optRegex.exec(optText)) !== null && optCount < 4) {
-                            let val = optMatch[1];
+                        let remainingText = parts[1];
+                        let optCount = 0;
+                        // Vòng lặp bóc tách 4 phương án trắc nghiệm
+                        while(optCount < 4) {
+                            const brace = extractNextBrace(remainingText);
+                            if (!brace) break;
+                            
+                            let val = brace.content;
                             if (val.includes('\\True')) qData.correct = optCount;
-                            qData.options.push(cleanLatex(val.replace('\\True', '').trim()));
+                            qData.options.push(val.replace('\\True', '').trim());
+                            
+                            remainingText = brace.remaining;
                             optCount++;
                         }
 
-                    } else if (processedBody.includes('\\shortans')) {
+                    } else if (procBody.includes('\\shortans')) {
                         qType = 'short'; 
-                        const parts = processedBody.split('\\shortans'); 
-                        qData.content = cleanLatex(parts[0]);
-                        const ansMatch = extractNextBrace(processedBody.substring(processedBody.indexOf('\\shortans')));
-                        if(ansMatch) qData.answer = cleanLatex(ansMatch.content);
+                        const parts = procBody.split('\\shortans'); 
+                        qData.content = parts[0].trim();
+                        const ans = extractNextBrace(procBody.substring(procBody.indexOf('\\shortans')));
+                        if(ans) qData.answer = ans.content;
 
                     } else { 
                         qType = 'essay'; 
-                        qData.content = cleanLatex(processedBody);
+                        qData.content = procBody; 
                     }
                     
                     window.questions.push({ type: qType, ...qData }); count++;
@@ -1002,13 +1011,10 @@
                 window.showToast(`Đã nhập ${count} câu hỏi!`); 
                 input.value = "";
                 
-                // --- BƯỚC 4: RENDER LẠI CÔNG THỨC TOÁN ---
-                if(window.MathJax) {
-                    MathJax.typesetPromise().then(() => {
-                        console.log("MathJax rendered successfully");
-                    }).catch((err) => console.log("MathJax error: " + err.message));
-                }
-
+                // Vẽ lại công thức toán
+                if(window.MathJax) MathJax.typesetPromise();
+                
+                // Hiện popup nếu có ảnh cần upload
                 if (pendingImageUploads.length > 0) renderBatchImageModal();
             };
             reader.readAsText(file);
