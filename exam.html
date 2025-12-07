@@ -9,7 +9,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     
     <script>
-    // --- CẤU HÌNH MATHJAX (ĐỒNG BỘ VỚI EDITOR ĐỂ HIỆN ĐÚNG HỆ PT) ---
+    // --- CẤU HÌNH MATHJAX (ĐỒNG BỘ VỚI EDITOR) ---
     window.MathJax = {
       tex: {
         inlineMath: [['$', '$'], ['\\(', '\\)']],
@@ -34,7 +34,7 @@
         .text-orange-custom { color: #FF6A00; }
         .bg-orange-custom { background-color: #FF6A00; }
         
-        /* CSS SIDEBAR MOBILE (TRƯỢT) */
+        /* CSS SIDEBAR MOBILE */
         .mobile-sidebar {
             position: fixed; top: 0; right: 0; bottom: 0; width: 280px;
             background: white; z-index: 50;
@@ -59,14 +59,9 @@
         .q-btn.wrong { background-color: #EF4444 !important; color: white !important; border-color: #DC2626 !important; }
         .q-btn.partial { background-color: #F59E0B !important; color: white !important; border-color: #D97706 !important; }
 
-        /* CSS CHỐNG TRÀN & ẨN THANH CUỘN XÁM */
+        /* CSS ẢNH & MATHJAX */
         #questionContent img, #answerOptions img, .solution-box img { max-width: 100% !important; height: auto !important; display: block; margin: 10px auto; border-radius: 8px; }
-        
-        /* MathJax Container Style */
-        mjx-container { 
-            display: inline-block !important; 
-            overflow: visible !important;
-        }
+        mjx-container { display: inline-block !important; overflow: visible !important; }
         
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
@@ -287,8 +282,7 @@
         window.customAlert = (msg, type='info') => { return new Promise(resolve => { modalTitle.innerText=type==='error'?'Lỗi':'Thông báo'; modalMsg.innerText=msg; btnCancel.classList.add('hidden'); btnConfirm.innerText="Đã hiểu"; modalEl.classList.remove('opacity-0','pointer-events-none'); modalBox.classList.add('scale-100'); btnConfirm.onclick=()=>{resolve(true);closeCustomModal();}; }); };
         window.customConfirm = (msg) => { return new Promise(resolve => { modalTitle.innerText="Xác nhận"; modalMsg.innerText=msg; btnCancel.classList.remove('hidden'); btnConfirm.innerText="Đồng ý"; modalEl.classList.remove('opacity-0','pointer-events-none'); modalBox.classList.add('scale-100'); btnConfirm.onclick=()=>{resolve(true);closeCustomModal();}; btnCancel.onclick=()=>{resolve(false);closeCustomModal();}; }); };
 
-        // --- CÁC HÀM XỬ LÝ NỘI DUNG (QUAN TRỌNG ĐỂ HIỆN ẢNH TỪ FIREBASE) ---
-        
+        // --- CÁC HÀM XỬ LÝ NỘI DUNG & ẢNH ---
         function cleanTikzCode(code) { 
             let c = code.replace(/\\resizebox\{[^}]+\}\{[^}]+\}\{\s*(\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\})\s*\}/g, "$1"); 
             return c.replace(/\\begin\{center\}/g, "").replace(/\\end\{center\}/g, ""); 
@@ -318,27 +312,25 @@
             return res;
         }
 
-        // HÀM HIỂN THỊ NỘI DUNG MỚI (FIX LỖI KHÔNG HIỆN ẢNH)
+        // --- HÀM HIỂN THỊ QUAN TRỌNG: NHẬN DIỆN ẢNH TỪ EDITOR ---
         window.formatContent = (text) => {
             if (text === null || text === undefined) return "";
             
             let processed = processNestedTikz(text);
             
-            // Dọn dẹp ký tự thừa
+            // Dọn rác văn bản
             processed = processed.replace(/^\s*\}\s*$/gm, ''); 
             processed = processed.replace(/\}\s*$/g, '');
 
-            // REGEX MỚI: Bắt chính xác khối div chứa ảnh mà Editor tạo ra
-            // Sử dụng [\s\S]*? để bắt nội dung nhiều dòng trong thẻ div
-            // Quan trọng: bắt cụm 'group relative' vì Editor gán class này cho div bao ngoài ảnh
-            const regex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?:\$[\s\S]*?\$)|<script type="text\/tikz">[\s\S]*?<\/script>|<div[^>]*class=["'].*?group relative.*?["'][^>]*>[\s\S]*?<\/div>|<img.*?>)/g;
+            // Regex bao gồm: Công thức toán, TikZ, Ảnh trong group relative (từ Editor), thẻ img thường
+            const regex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?:\$[\s\S]*?\$)|<script type="text\/tikz">[\s\S]*?<\/script>|<div[^>]*class=["']group relative[^>]*>[\s\S]*?<\/div>|<img.*?>)/g;
             
             const parts = processed.split(regex);
             
             return parts.map(part => {
-                // Nếu là thành phần đặc biệt (Toán, TikZ, Ảnh) -> Giữ nguyên HTML
+                // Kiểm tra các thành phần đặc biệt
                 if (part.includes('<script type="text/tikz">') || 
-                    part.includes('group relative') || // Nhận diện khối ảnh từ Editor
+                    part.includes('class="group relative') || // QUAN TRỌNG: Hiển thị khối ảnh từ Editor
                     part.includes('<img') || 
                     part.trim().startsWith('$') || 
                     part.trim().startsWith('\\(') || 
@@ -346,14 +338,13 @@
                     return part;
                 }
                 else {
-                    // Nếu là văn bản thường -> Xử lý xuống dòng và xóa dấu }
+                    // Xử lý văn bản thường
                     let cleanPart = part.replace(/\}/g, '');
                     return cleanPart.replace(/\\\\/g, '<br>').replace(/\n/g, '<br>');
                 }
             }).join('');
         };
         
-        // --- XỬ LÝ SCALE CÔNG THỨC TOÁN ---
         function autoScaleMath() {
             document.querySelectorAll('mjx-container').forEach(node => {
                 const parent = node.parentElement;
@@ -469,7 +460,6 @@
             const badge = dom.badge;
             badge.textContent = q.type==='mc'?'TRẮC NGHIỆM':(q.type==='tf'?'ĐÚNG/SAI':(q.type==='short'?'TRẢ LỜI NGẮN':'TỰ LUẬN'));
             
-            // Format nội dung câu hỏi (chứa ảnh)
             dom.content.innerHTML = window.formatContent(q.content);
             dom.options.innerHTML = '';
 
@@ -481,7 +471,6 @@
                 q.options.forEach((opt, i) => {
                     const checked = userAnswers[idx] === i;
                     const div = document.createElement('label'); div.className = "block cursor-pointer group w-full";
-                    // Format nội dung đáp án (chứa ảnh)
                     div.innerHTML = `<input type="radio" name="q" class="hidden custom-radio" ${checked?'checked':''}><div class="flex items-start p-4 border-2 border-gray-100 rounded-xl hover:border-blue-300 group-hover:bg-blue-50 group-hover:shadow-sm h-full"><div class="check-circle w-8 h-8 rounded-full border-2 border-gray-200 flex items-center justify-center mr-4 font-bold text-gray-400 shrink-0 mt-0.5">${String.fromCharCode(65+i)}</div><div class="flex-1 text-gray-700 leading-relaxed">${window.formatContent(opt)}</div></div>`;
                     div.querySelector('input').onchange = () => { userAnswers[idx]=i; updatePalette(); };
                     dom.options.appendChild(div);
@@ -513,7 +502,9 @@
             }
 
             if(window.MathJax) {
+                // Chạy MathJax
                 MathJax.typesetPromise([dom.content, dom.options]).then(() => {
+                    // Sau khi MathJax chạy xong thì mới chạy Scale
                     autoScaleMath();
                 }).catch(()=>{});
             }
@@ -673,6 +664,7 @@
             });
             
             if(window.MathJax) {
+                // Chạy MathJax -> sau đó chạy Scale
                 MathJax.typesetPromise([list]).then(() => {
                     autoScaleMath();
                 }).catch(()=>{});
