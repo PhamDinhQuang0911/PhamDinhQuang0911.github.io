@@ -192,7 +192,10 @@
                         <button onclick="addNewQuestion('tf')" class="p-1.5 bg-orange-50 text-orange-600 rounded hover:bg-orange-100 text-xs font-bold">+ĐS</button>
                         <button onclick="addNewQuestion('short')" class="p-1.5 bg-green-50 text-green-600 rounded hover:bg-green-100 text-xs font-bold">+Điền</button>
                         <button onclick="addNewQuestion('essay')" class="p-1.5 bg-purple-50 text-purple-600 rounded hover:bg-purple-100 text-xs font-bold">+TL</button>
-                        <div class="w-[1px] h-6 bg-gray-200 mx-1"></div>
+                        <div class="w-[1px] h-6 bg-gray-200 mx-1"></div
+                         <button onclick="document.getElementById('imgUploadInput').click()" class="p-1.5 bg-gray-100 text-gray-600 rounded hover:bg-gray-200 text-xs font-bold" title="Chèn ảnh"><i class="fa-regular fa-image"></i> Ảnh</button>
+                        <input type="file" id="imgUploadInput" accept="image/*" class="hidden">
+                        <div class="w-[1px] h-6 bg-gray-200 mx-1"></div>                                             
                         <button onclick="deleteCurrentQuestion()" class="p-1.5 bg-red-50 text-red-600 rounded hover:bg-red-100 text-xs"><i class="fa-solid fa-trash"></i></button>
                     </div>
                 </div>
@@ -360,9 +363,10 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
         import { getFirestore, doc, getDoc, setDoc, collection, query, where, getDocs, addDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js";
 
         const firebaseConfig = { apiKey: "AIzaSyCqAX3x1MbJ3do7m3EaH9JA4kFuVhlAc78", authDomain: "lms-thitracnghiem.firebaseapp.com", projectId: "lms-thitracnghiem", storageBucket: "lms-thitracnghiem.firebasestorage.app", messagingSenderId: "760187217240", appId: "1:760187217240:web:d043cd5808c349f87a712d" };
-        const app = initializeApp(firebaseConfig); const auth = getAuth(app); const db = getFirestore(app);
+        const app = initializeApp(firebaseConfig); const auth = getAuth(app); const db = getFirestore(app); const storage = getStorage(app);
         
         let currentUser = null, currentExamId = null;
         window.questions = [];
@@ -491,7 +495,115 @@
                 if (examId) { currentExamId = examId; loadExamData(examId); }
             } else { window.location.href = 'index.html'; }
         });
+        // --- LOGIC XỬ LÝ ẢNH (NÉN & UPLOAD) ---
+        
+        // 1. Hàm nén ảnh (Resize max 800px & Quality 0.7)
+        function compressImage(file) {
+            return new Promise((resolve, reject) => {
+                const maxWidth = 800; // Chiều rộng tối đa
+                const reader = new FileReader();
+                reader.readAsDataURL(file);
+                reader.onload = (event) => {
+                    const img = new Image();
+                    img.src = event.target.result;
+                    img.onload = () => {
+                        const canvas = document.createElement('canvas');
+                        let width = img.width;
+                        let height = img.height;
 
+                        // Tính toán tỷ lệ resize
+                        if (width > maxWidth) {
+                            height *= maxWidth / width;
+                            width = maxWidth;
+                        }
+
+                        canvas.width = width;
+                        canvas.height = height;
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(img, 0, 0, width, height);
+
+                        // Xuất ra Blob (JPEG, chất lượng 70%)
+                        canvas.toBlob((blob) => {
+                            resolve(blob);
+                        }, 'image/jpeg', 0.7);
+                    };
+                    img.onerror = (err) => reject(err);
+                };
+                reader.onerror = (err) => reject(err);
+            });
+        }
+
+        // 2. Hàm upload lên Firebase Storage
+        async function handleImageUpload(file) {
+            if (!file) return;
+            
+            // Hiển thị thông báo đang tải
+            const oldToast = document.getElementById('toastContainer').innerHTML;
+            window.showToast("Đang nén và tải ảnh...", "info");
+
+            try {
+                // Nén ảnh
+                const compressedBlob = await compressImage(file);
+                
+                // Tạo tên file ngẫu nhiên
+                const fileName = `images/${Date.now()}_${Math.floor(Math.random()*1000)}.jpg`;
+                const storageRef = ref(storage, fileName);
+
+                // Upload
+                await uploadBytes(storageRef, compressedBlob);
+                const url = await getDownloadURL(storageRef);
+
+                // Chèn thẻ img vào vị trí con trỏ trong textarea
+                insertAtCursor(`\n<div class="flex justify-center"><img src="${url}" class="max-w-full h-auto rounded-lg shadow-sm" style="max-height:300px;"></div>\n`);
+                
+                // Trigger lưu auto save
+                autoSaveMemory();
+                window.showToast("Đã chèn ảnh thành công!", "success");
+
+            } catch (error) {
+                console.error("Upload error:", error);
+                window.showToast("Lỗi tải ảnh: " + error.message, "error");
+            }
+        }
+
+        // 3. Hàm hỗ trợ chèn text vào vị trí con trỏ
+        function insertAtCursor(text) {
+            const textarea = document.getElementById('editContent');
+            if (!textarea) return;
+
+            const start = textarea.selectionStart;
+            const end = textarea.selectionEnd;
+            const value = textarea.value;
+
+            textarea.value = value.substring(0, start) + text + value.substring(end);
+            textarea.selectionStart = textarea.selectionEnd = start + text.length;
+            textarea.focus();
+        }
+
+        // 4. Lắng nghe sự kiện PASTE và CHỌN FILE
+        document.addEventListener('DOMContentLoaded', () => {
+            // Xử lý nút chọn file
+            document.getElementById('imgUploadInput').addEventListener('change', (e) => {
+                if(e.target.files.length > 0) handleImageUpload(e.target.files[0]);
+            });
+
+            // Xử lý sự kiện Paste (Ctrl+V) vào ô nội dung
+            // Sử dụng Event Delegation vì textarea có thể được render lại
+            document.body.addEventListener('paste', (e) => {
+                if (e.target.id === 'editContent') {
+                    const items = (e.clipboardData || e.originalEvent.clipboardData).items;
+                    for (let index in items) {
+                        const item = items[index];
+                        if (item.kind === 'file' && item.type.includes('image/')) {
+                            e.preventDefault(); // Chặn paste mặc định
+                            const blob = item.getAsFile();
+                            handleImageUpload(blob);
+                            return; // Chỉ xử lý 1 ảnh đầu tiên tìm thấy
+                        }
+                    }
+                }
+            });
+        });
         // --- CORE FUNCTIONS ---
         window.loadExamData = async (id) => {
             try {
