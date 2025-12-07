@@ -549,13 +549,17 @@
             </div>`;
         }
 
+        // Hàm tách nội dung trong cặp ngoặc nhọn { } cân bằng (xử lý lồng nhau)
         function extractNextBrace(text) {
+            if (!text) return null;
+            // Tìm dấu { đầu tiên
             const start = text.indexOf('{');
             if (start === -1) return null;
             
             let depth = 1;
             let end = -1;
-            // Bắt đầu tìm từ ký tự sau dấu { đầu tiên
+            
+            // Duyệt từ ký tự ngay sau dấu {
             for (let i = start + 1; i < text.length; i++) {
                 if (text[i] === '{') depth++;
                 else if (text[i] === '}') depth--;
@@ -566,13 +570,12 @@
                 }
             }
             
-            if (end === -1) return null;
+            if (end === -1) return null; // Không tìm thấy dấu đóng
             
             return {
-                content: text.substring(start + 1, end), // Nội dung bên trong (không có {})
+                content: text.substring(start + 1, end), // Nội dung bên trong
                 remaining: text.substring(end + 1),      // Phần còn lại sau dấu }
-                fullMatch: text.substring(start, end + 1), // Bao gồm cả {}
-                endIndex: end // Vị trí kết thúc
+                fullMatch: text.substring(start, end + 1) // Cả cụm {...}
             };
         }
 
@@ -581,28 +584,25 @@
             if (!text) return "";
             let processed = String(text);
             
-            // --- 1. Xử lý \immini[tùy chọn]{Nội dung}{Hình ảnh} ---
-            // Cần dùng vòng lặp thủ công vì Regex không xử lý tốt ngoặc lồng nhau
-            while (true) {
+            // --- 1. Xử lý \immini[opt]{Text}{Image} ---
+            while (processed.includes('\\immini')) {
                 const idx = processed.indexOf('\\immini');
-                if (idx === -1) break;
-
                 let before = processed.substring(0, idx);
-                let tempAfter = processed.substring(idx + 7); // Bỏ qua chữ \immini
+                let tempAfter = processed.substring(idx + 7).trim(); // Bỏ qua \immini và khoảng trắng thừa
 
                 // Bỏ qua tùy chọn [...] ví dụ \immini[thm]
-                if (tempAfter.trim().startsWith('[')) {
+                if (tempAfter.startsWith('[')) {
                     const closeBracket = tempAfter.indexOf(']');
                     if (closeBracket !== -1) {
-                        tempAfter = tempAfter.substring(closeBracket + 1);
+                        tempAfter = tempAfter.substring(closeBracket + 1).trim();
                     }
                 }
 
-                // Lấy Argument 1: Nội dung văn bản (có thể chứa cả \choice)
+                // Lấy Argument 1: Nội dung văn bản
                 const arg1 = extractNextBrace(tempAfter); 
-                if (!arg1) break; // Lỗi cú pháp LaTeX, thoát vòng lặp để tránh treo
+                if (!arg1) break; // Lỗi cú pháp, thoát để tránh treo
 
-                // Lấy Argument 2: Chứa hình ảnh
+                // Lấy Argument 2: Hình ảnh
                 const arg2 = extractNextBrace(arg1.remaining);
                 if (!arg2) break; // Lỗi cú pháp
 
@@ -611,22 +611,18 @@
                 let placeholder = "";
                 
                 if (imgMatch) {
-                    // Tạo ID duy nhất cho ảnh này
                     const uniqueId = `img_${Date.now()}_${Math.random().toString(36).substr(2,9)}`;
-                    // Đẩy vào hàng đợi upload
                     pendingImageUploads.push({
                         id: uniqueId,
-                        originalPath: imgMatch[1], // Đường dẫn ảnh trong file tex
+                        originalPath: imgMatch[1],
                         questionIdx: questionIndex
                     });
                     placeholder = getPlaceholderHTML(uniqueId, "Ảnh từ \\immini");
                 } else {
-                    // Trường hợp immini nhưng bên trong là TikZ hoặc lệnh khác
-                     placeholder = getPlaceholderHTML("", "Vị trí hình (Không tìm thấy path)");
+                     placeholder = getPlaceholderHTML("", "Vị trí hình");
                 }
 
-                // QUAN TRỌNG: Thay thế cụm \immini bằng: Nội dung Text + Placeholder
-                // arg2.remaining là phần văn bản còn lại sau cụm immini
+                // Thay thế: Giữ lại nội dung Text + Placeholder, bỏ cấu trúc \immini
                 processed = before + arg1.content + '\n' + placeholder + arg2.remaining;
             }
 
@@ -637,25 +633,17 @@
                     const imgMatch = innerContent.match(/\\includegraphics(?:\[.*?\])?\{(.*?)\}/);
                      if (imgMatch) {
                         const uniqueId = `img_${Date.now()}_${Math.random().toString(36).substr(2,9)}`;
-                        pendingImageUploads.push({
-                            id: uniqueId,
-                            originalPath: imgMatch[1],
-                            questionIdx: questionIndex
-                        });
+                        pendingImageUploads.push({ id: uniqueId, originalPath: imgMatch[1], questionIdx: questionIndex });
                         return getPlaceholderHTML(uniqueId, "Ảnh canh giữa");
                     }
                 }
                 return match; 
             });
 
-            // --- 3. Xử lý \includegraphics đứng lẻ (chưa được xử lý ở trên) ---
+            // --- 3. Xử lý \includegraphics đứng lẻ ---
              processed = processed.replace(/\\includegraphics(?:\[.*?\])?\{(.*?)\}/g, (match, path) => {
                 const uniqueId = `img_${Date.now()}_${Math.random().toString(36).substr(2,9)}`;
-                pendingImageUploads.push({
-                    id: uniqueId,
-                    originalPath: path,
-                    questionIdx: questionIndex
-                });
+                pendingImageUploads.push({ id: uniqueId, originalPath: path, questionIdx: questionIndex });
                 return getPlaceholderHTML(uniqueId, "Ảnh");
             });
 
@@ -936,95 +924,84 @@
             reader.onload = function(e) { 
                 if (window.currentQIndex !== -1) saveCurrentQuestionToMemory();
                 let content = e.target.result;
-                // Xóa comment
+                // Xóa comment % trong LaTeX
                 content = content.replace(/(?<!\\)%.*/g, '');
 
-                // Reset danh sách chờ upload ảnh
                 pendingImageUploads = [];
-
                 const blockRegex = /\\begin\{(ex|bt|vd)\}([\s\S]*?)\\end\{\1\}/g;
                 let match, count = 0;
                 
                 while ((match = blockRegex.exec(content)) !== null) {
                     let fullBody = match[2];
-                    // Xóa tùy chọn bài tập vd: [Mức 1]
+                    // Xóa tùy chọn bài tập [Mức 1]
                     fullBody = fullBody.replace(/^\s*\[.*?\]/, ''); 
                     
                     let qType = 'essay'; 
                     let qData = { content: '', solution: '', options: [], statements: [], answer: '', point: 0 };
                     
-                    // 1. Tách Lời giải (nếu có)
+                    // --- BƯỚC 1: TÁCH RIÊNG LỜI GIẢI TRƯỚC TIÊN ---
                     const loigiaiIndex = fullBody.lastIndexOf('\\loigiai');
-                    let mainContent = fullBody; // Mặc định là toàn bộ
+                    let rawQuestion = fullBody;
                     
                     if (loigiaiIndex !== -1) {
-                        const afterLoigiai = fullBody.substring(loigiaiIndex);
-                        const braceContent = extractBracedContent(afterLoigiai);
-                        if (braceContent) {
-                            // Xử lý ảnh trong lời giải
-                            qData.solution = processLatexImagesWithDetection(cleanLatex(braceContent.content), count);
+                        rawQuestion = fullBody.substring(0, loigiaiIndex);
+                        const rawSolutionPart = fullBody.substring(loigiaiIndex);
+                        // Dùng hàm extractNextBrace để lấy nội dung trong \loigiai{...}
+                        const solBrace = extractNextBrace(rawSolutionPart);
+                        if (solBrace) {
+                            // Xử lý ảnh trong lời giải (nếu có)
+                            qData.solution = processLatexImagesWithDetection(cleanLatex(solBrace.content), count);
                         }
-                        // Phần còn lại là đề bài
-                        mainContent = fullBody.substring(0, loigiaiIndex);
                     }
 
-                    // --- BƯỚC QUAN TRỌNG: XỬ LÝ ẢNH TRONG ĐỀ BÀI TRƯỚC KHI TÁCH TRẮC NGHIỆM ---
-                    // Việc này giúp "bóc" \immini ra, để lộ \choice bên trong
-                    mainContent = processLatexImagesWithDetection(mainContent, count);
-                    
-                    // 2. Phân loại và tách trắc nghiệm (Sau khi đã làm sạch immini)
-                    if (mainContent.includes('\\choiceTF')) {
+                    // --- BƯỚC 2: XỬ LÝ ẢNH TRONG ĐỀ BÀI (Gỡ bỏ \immini) ---
+                    // Lúc này rawQuestion chứa cả \immini và \choice
+                    let processedBody = processLatexImagesWithDetection(rawQuestion, count);
+
+                    // --- BƯỚC 3: PHÂN LOẠI VÀ TÁCH CÂU HỎI ---
+                    if (processedBody.includes('\\choiceTF')) {
                         qType = 'tf'; 
-                        const parts = mainContent.split('\\choiceTF'); 
-                        qData.content = cleanLatex(parts[0]); // Nội dung câu hỏi
-                        
-                        // Tách các ý đúng sai
-                        const rawStatements = extractBracedContent(parts[1]); 
-                        // Cần logic tách {ý 1}{ý 2}... vì extractBracedContent cũ chỉ trả về mảng
-                        // Ta dùng regex đơn giản hoặc loop để lấy các ngoặc
-                         let stmtText = parts[1];
-                         let stmtMatch;
-                         // Regex tìm {...} liên tiếp
-                         const stmtRegex = /\{((?:[^{}]|{[^{}]*})*)\}/g;
-                         while ((stmtMatch = stmtRegex.exec(stmtText)) !== null) {
-                             let val = stmtMatch[1];
-                             let isTrue = val.includes('\\True');
-                             qData.statements.push({ 
-                                 text: cleanLatex(val.replace('\\True', '').trim()), 
-                                 isTrue: isTrue 
-                             });
-                         }
-
-                    } else if (mainContent.includes('\\choice')) {
-                        qType = 'mc'; 
-                        const parts = mainContent.split('\\choice'); 
-                        qData.content = cleanLatex(parts[0]); // Nội dung câu hỏi
-                        
-                        const rawOptions = extractBracedContent(parts[1]);
-                         // Tương tự, nếu extractBracedContent trả về object thì phải xử lý khác
-                         // Nhưng ở đây ta dùng logic quét ngoặc thủ công cho options
-                         let optText = parts[1];
-                         let optRegex = /\{((?:[^{}]|{[^{}]*})*)\}/g;
-                         let optMatch;
-                         let optCount = 0;
-                         while ((optMatch = optRegex.exec(optText)) !== null && optCount < 4) {
-                             let val = optMatch[1];
-                             if (val.includes('\\True')) qData.correct = optCount;
-                             qData.options.push(cleanLatex(val.replace('\\True', '').trim()));
-                             optCount++;
-                         }
-
-                    } else if (mainContent.includes('\\shortans')) {
-                        qType = 'short'; 
-                        const parts = mainContent.split('\\shortans'); 
+                        const parts = processedBody.split('\\choiceTF'); 
                         qData.content = cleanLatex(parts[0]);
                         
-                        const ansContent = extractBracedContent(mainContent.substring(mainContent.indexOf('\\shortans')));
-                        if(ansContent) qData.answer = cleanLatex(ansContent.content);
+                        // Tách ý đúng sai thủ công bằng Regex quét ngoặc
+                        let stmtText = parts[1];
+                        const stmtRegex = /\{((?:[^{}]|{[^{}]*})*)\}/g;
+                        let stmtMatch;
+                        while ((stmtMatch = stmtRegex.exec(stmtText)) !== null) {
+                            let val = stmtMatch[1];
+                            qData.statements.push({ 
+                                text: cleanLatex(val.replace('\\True', '').trim()), 
+                                isTrue: val.includes('\\True') 
+                            });
+                        }
+
+                    } else if (processedBody.includes('\\choice')) {
+                        qType = 'mc'; 
+                        const parts = processedBody.split('\\choice'); 
+                        qData.content = cleanLatex(parts[0]);
+                        
+                        // Tách đáp án trắc nghiệm
+                        let optText = parts[1];
+                        const optRegex = /\{((?:[^{}]|{[^{}]*})*)\}/g;
+                        let optMatch, optCount = 0;
+                        while ((optMatch = optRegex.exec(optText)) !== null && optCount < 4) {
+                            let val = optMatch[1];
+                            if (val.includes('\\True')) qData.correct = optCount;
+                            qData.options.push(cleanLatex(val.replace('\\True', '').trim()));
+                            optCount++;
+                        }
+
+                    } else if (processedBody.includes('\\shortans')) {
+                        qType = 'short'; 
+                        const parts = processedBody.split('\\shortans'); 
+                        qData.content = cleanLatex(parts[0]);
+                        const ansMatch = extractNextBrace(processedBody.substring(processedBody.indexOf('\\shortans')));
+                        if(ansMatch) qData.answer = cleanLatex(ansMatch.content);
 
                     } else { 
                         qType = 'essay'; 
-                        qData.content = cleanLatex(mainContent);
+                        qData.content = cleanLatex(processedBody);
                     }
                     
                     window.questions.push({ type: qType, ...qData }); count++;
@@ -1035,10 +1012,14 @@
                 window.showToast(`Đã nhập ${count} câu hỏi!`); 
                 input.value = "";
                 
-                // Hiển thị modal nếu có ảnh cần upload
-                if (pendingImageUploads.length > 0) {
-                    renderBatchImageModal();
+                // --- BƯỚC 4: RENDER LẠI CÔNG THỨC TOÁN ---
+                if(window.MathJax) {
+                    MathJax.typesetPromise().then(() => {
+                        console.log("MathJax rendered successfully");
+                    }).catch((err) => console.log("MathJax error: " + err.message));
                 }
+
+                if (pendingImageUploads.length > 0) renderBatchImageModal();
             };
             reader.readAsText(file);
         }
