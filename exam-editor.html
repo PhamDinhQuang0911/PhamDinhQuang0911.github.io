@@ -552,13 +552,28 @@
         function extractNextBrace(text) {
             const start = text.indexOf('{');
             if (start === -1) return null;
-            let depth = 1; let end = -1;
+            
+            let depth = 1;
+            let end = -1;
+            // Bắt đầu tìm từ ký tự sau dấu { đầu tiên
             for (let i = start + 1; i < text.length; i++) {
-                if (text[i] === '{') depth++; else if (text[i] === '}') depth--;
-                if (depth === 0) { end = i; break; }
+                if (text[i] === '{') depth++;
+                else if (text[i] === '}') depth--;
+                
+                if (depth === 0) {
+                    end = i;
+                    break;
+                }
             }
+            
             if (end === -1) return null;
-            return { content: text.substring(start + 1, end), remaining: text.substring(end + 1), fullMatch: text.substring(0, end + 1) };
+            
+            return {
+                content: text.substring(start + 1, end), // Nội dung bên trong (không có {})
+                remaining: text.substring(end + 1),      // Phần còn lại sau dấu }
+                fullMatch: text.substring(start, end + 1), // Bao gồm cả {}
+                endIndex: end // Vị trí kết thúc
+            };
         }
 
         // IMPORTANT: SCAN AND REPLACE IMAGES IN LATEX
@@ -566,45 +581,59 @@
             if (!text) return "";
             let processed = String(text);
             
-            // 1. Handle \immini{Text}{Image}
-            // Logic: Remove \immini wrapper, keep Text, replace Image with Placeholder and queue it.
-            while (processed.includes('\\immini')) {
+            // --- 1. Xử lý \immini[tùy chọn]{Nội dung}{Hình ảnh} ---
+            // Cần dùng vòng lặp thủ công vì Regex không xử lý tốt ngoặc lồng nhau
+            while (true) {
                 const idx = processed.indexOf('\\immini');
-                let before = processed.substring(0, idx);
-                let after = processed.substring(idx + 7);
-                // Skip options like [thm]
-                if (after.trim().startsWith('[')) { const closeBracket = after.indexOf(']'); if (closeBracket !== -1) after = after.substring(closeBracket + 1); }
-                
-                const arg1 = extractNextBrace(after); // Text content
-                if (!arg1) break;
-                const arg2 = extractNextBrace(arg1.remaining); // Image content
-                if (!arg2) break;
+                if (idx === -1) break;
 
-                // Scan Arg2 for \includegraphics
+                let before = processed.substring(0, idx);
+                let tempAfter = processed.substring(idx + 7); // Bỏ qua chữ \immini
+
+                // Bỏ qua tùy chọn [...] ví dụ \immini[thm]
+                if (tempAfter.trim().startsWith('[')) {
+                    const closeBracket = tempAfter.indexOf(']');
+                    if (closeBracket !== -1) {
+                        tempAfter = tempAfter.substring(closeBracket + 1);
+                    }
+                }
+
+                // Lấy Argument 1: Nội dung văn bản (có thể chứa cả \choice)
+                const arg1 = extractNextBrace(tempAfter); 
+                if (!arg1) break; // Lỗi cú pháp LaTeX, thoát vòng lặp để tránh treo
+
+                // Lấy Argument 2: Chứa hình ảnh
+                const arg2 = extractNextBrace(arg1.remaining);
+                if (!arg2) break; // Lỗi cú pháp
+
+                // Quét tìm đường dẫn ảnh trong Argument 2
                 const imgMatch = arg2.content.match(/\\includegraphics(?:\[.*?\])?\{(.*?)\}/);
                 let placeholder = "";
+                
                 if (imgMatch) {
+                    // Tạo ID duy nhất cho ảnh này
                     const uniqueId = `img_${Date.now()}_${Math.random().toString(36).substr(2,9)}`;
+                    // Đẩy vào hàng đợi upload
                     pendingImageUploads.push({
                         id: uniqueId,
-                        originalPath: imgMatch[1],
+                        originalPath: imgMatch[1], // Đường dẫn ảnh trong file tex
                         questionIdx: questionIndex
                     });
                     placeholder = getPlaceholderHTML(uniqueId, "Ảnh từ \\immini");
                 } else {
-                    placeholder = getPlaceholderHTML("", "Ảnh (Lỗi đọc path)");
+                    // Trường hợp immini nhưng bên trong là TikZ hoặc lệnh khác
+                     placeholder = getPlaceholderHTML("", "Vị trí hình (Không tìm thấy path)");
                 }
 
-                // Rewrite: Text + Placeholder (Removing the \immini structure)
+                // QUAN TRỌNG: Thay thế cụm \immini bằng: Nội dung Text + Placeholder
+                // arg2.remaining là phần văn bản còn lại sau cụm immini
                 processed = before + arg1.content + '\n' + placeholder + arg2.remaining;
             }
 
-            // 2. Handle \begin{center} ... \includegraphics ... \end{center}
-            // Remove center tags, keep image placeholder
+            // --- 2. Xử lý \begin{center} ... \includegraphics ... \end{center} ---
             const centerRegex = /\\begin\{center\}([\s\S]*?)\\end\{center\}/g;
             processed = processed.replace(centerRegex, (match, innerContent) => {
                 if (innerContent.includes('\\includegraphics')) {
-                    // Extract path
                     const imgMatch = innerContent.match(/\\includegraphics(?:\[.*?\])?\{(.*?)\}/);
                      if (imgMatch) {
                         const uniqueId = `img_${Date.now()}_${Math.random().toString(36).substr(2,9)}`;
@@ -619,7 +648,7 @@
                 return match; 
             });
 
-            // 3. Handle standalone \includegraphics (not caught above)
+            // --- 3. Xử lý \includegraphics đứng lẻ (chưa được xử lý ở trên) ---
              processed = processed.replace(/\\includegraphics(?:\[.*?\])?\{(.*?)\}/g, (match, path) => {
                 const uniqueId = `img_${Date.now()}_${Math.random().toString(36).substr(2,9)}`;
                 pendingImageUploads.push({
@@ -907,9 +936,10 @@
             reader.onload = function(e) { 
                 if (window.currentQIndex !== -1) saveCurrentQuestionToMemory();
                 let content = e.target.result;
+                // Xóa comment
                 content = content.replace(/(?<!\\)%.*/g, '');
 
-                // Reset pending list
+                // Reset danh sách chờ upload ảnh
                 pendingImageUploads = [];
 
                 const blockRegex = /\\begin\{(ex|bt|vd)\}([\s\S]*?)\\end\{\1\}/g;
@@ -917,43 +947,86 @@
                 
                 while ((match = blockRegex.exec(content)) !== null) {
                     let fullBody = match[2];
+                    // Xóa tùy chọn bài tập vd: [Mức 1]
                     fullBody = fullBody.replace(/^\s*\[.*?\]/, ''); 
+                    
                     let qType = 'essay'; 
                     let qData = { content: '', solution: '', options: [], statements: [], answer: '', point: 0 };
                     
+                    // 1. Tách Lời giải (nếu có)
                     const loigiaiIndex = fullBody.lastIndexOf('\\loigiai');
-                    let mainContent = fullBody;
+                    let mainContent = fullBody; // Mặc định là toàn bộ
+                    
                     if (loigiaiIndex !== -1) {
                         const afterLoigiai = fullBody.substring(loigiaiIndex);
                         const braceContent = extractBracedContent(afterLoigiai);
-                        if (braceContent.length > 0) {
-                            // Process Solution Images
-                            qData.solution = processLatexImagesWithDetection(cleanLatex(braceContent[0]), count);
+                        if (braceContent) {
+                            // Xử lý ảnh trong lời giải
+                            qData.solution = processLatexImagesWithDetection(cleanLatex(braceContent.content), count);
                         }
+                        // Phần còn lại là đề bài
                         mainContent = fullBody.substring(0, loigiaiIndex);
                     }
+
+                    // --- BƯỚC QUAN TRỌNG: XỬ LÝ ẢNH TRONG ĐỀ BÀI TRƯỚC KHI TÁCH TRẮC NGHIỆM ---
+                    // Việc này giúp "bóc" \immini ra, để lộ \choice bên trong
+                    mainContent = processLatexImagesWithDetection(mainContent, count);
                     
+                    // 2. Phân loại và tách trắc nghiệm (Sau khi đã làm sạch immini)
                     if (mainContent.includes('\\choiceTF')) {
                         qType = 'tf'; 
                         const parts = mainContent.split('\\choiceTF'); 
-                        qData.content = processLatexImagesWithDetection(cleanLatex(parts[0]), count);
-                        const rawStatements = extractBracedContent(parts[1]);
-                        rawStatements.forEach(stmt => { qData.statements.push({ text: cleanLatex(stmt.replace('\\True', '').trim()), isTrue: stmt.includes('\\True') }); });
+                        qData.content = cleanLatex(parts[0]); // Nội dung câu hỏi
+                        
+                        // Tách các ý đúng sai
+                        const rawStatements = extractBracedContent(parts[1]); 
+                        // Cần logic tách {ý 1}{ý 2}... vì extractBracedContent cũ chỉ trả về mảng
+                        // Ta dùng regex đơn giản hoặc loop để lấy các ngoặc
+                         let stmtText = parts[1];
+                         let stmtMatch;
+                         // Regex tìm {...} liên tiếp
+                         const stmtRegex = /\{((?:[^{}]|{[^{}]*})*)\}/g;
+                         while ((stmtMatch = stmtRegex.exec(stmtText)) !== null) {
+                             let val = stmtMatch[1];
+                             let isTrue = val.includes('\\True');
+                             qData.statements.push({ 
+                                 text: cleanLatex(val.replace('\\True', '').trim()), 
+                                 isTrue: isTrue 
+                             });
+                         }
+
                     } else if (mainContent.includes('\\choice')) {
                         qType = 'mc'; 
                         const parts = mainContent.split('\\choice'); 
-                        qData.content = processLatexImagesWithDetection(cleanLatex(parts[0]), count);
+                        qData.content = cleanLatex(parts[0]); // Nội dung câu hỏi
+                        
                         const rawOptions = extractBracedContent(parts[1]);
-                        rawOptions.forEach((opt, idx) => { if (idx < 4) { qData.options.push(cleanLatex(opt.replace('\\True', '').trim())); if (opt.includes('\\True')) qData.correct = idx; } });
+                         // Tương tự, nếu extractBracedContent trả về object thì phải xử lý khác
+                         // Nhưng ở đây ta dùng logic quét ngoặc thủ công cho options
+                         let optText = parts[1];
+                         let optRegex = /\{((?:[^{}]|{[^{}]*})*)\}/g;
+                         let optMatch;
+                         let optCount = 0;
+                         while ((optMatch = optRegex.exec(optText)) !== null && optCount < 4) {
+                             let val = optMatch[1];
+                             if (val.includes('\\True')) qData.correct = optCount;
+                             qData.options.push(cleanLatex(val.replace('\\True', '').trim()));
+                             optCount++;
+                         }
+
                     } else if (mainContent.includes('\\shortans')) {
                         qType = 'short'; 
                         const parts = mainContent.split('\\shortans'); 
-                        qData.content = processLatexImagesWithDetection(cleanLatex(parts[0]), count);
+                        qData.content = cleanLatex(parts[0]);
+                        
                         const ansContent = extractBracedContent(mainContent.substring(mainContent.indexOf('\\shortans')));
-                        if(ansContent.length > 0) qData.answer = cleanLatex(ansContent[0]);
+                        if(ansContent) qData.answer = cleanLatex(ansContent.content);
+
                     } else { 
-                        qType = 'essay'; qData.content = processLatexImagesWithDetection(cleanLatex(mainContent), count);
+                        qType = 'essay'; 
+                        qData.content = cleanLatex(mainContent);
                     }
+                    
                     window.questions.push({ type: qType, ...qData }); count++;
                 }
                 
@@ -962,7 +1035,7 @@
                 window.showToast(`Đã nhập ${count} câu hỏi!`); 
                 input.value = "";
                 
-                // Show modal if images detected
+                // Hiển thị modal nếu có ảnh cần upload
                 if (pendingImageUploads.length > 0) {
                     renderBatchImageModal();
                 }
