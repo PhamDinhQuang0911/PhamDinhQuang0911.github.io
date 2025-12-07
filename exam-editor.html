@@ -547,14 +547,15 @@
         let pendingImageUploads = []; // Stores { id, originalPath, type }
         let currentBatchUploadId = null;
 
+        // Hàm tạo mã HTML cho khung chờ ảnh (Đã thêm sự kiện onclick chuẩn)
         function getPlaceholderHTML(id, note = "Vị trí ảnh") {
-            // Thêm onclick để bấm vào là mở upload ngay
-            return `<div class="image-placeholder my-3 p-4 bg-gray-50 border-2 border-dashed border-blue-300 rounded-xl text-center flex flex-col items-center justify-center select-none cursor-pointer hover:bg-blue-50 transition-colors" 
+            return `
+            <div class="image-placeholder my-3 p-4 bg-blue-50 border-2 border-dashed border-blue-400 rounded-xl text-center flex flex-col items-center justify-center select-none cursor-pointer hover:bg-blue-100 transition-colors group relative" 
                 data-id="${id}" 
                 onclick="triggerBatchUpload('${id}')">
-                <div class="text-blue-500 text-3xl mb-1"><i class="fa-regular fa-image"></i></div>
-                <div class="text-xs font-bold text-gray-500 uppercase">${note}</div>
-                <div class="text-[10px] text-gray-400">Bấm để tải ảnh hoặc Ctrl+V để dán</div>
+                <div class="text-blue-600 text-3xl mb-2 group-hover:scale-110 transition-transform"><i class="fa-solid fa-cloud-arrow-up"></i></div>
+                <div class="text-xs font-bold text-blue-700 uppercase mb-1">${note}</div>
+                <div class="text-[10px] text-blue-500">Bấm vào đây để tải ảnh lên</div>
             </div>`;
         }
 
@@ -593,54 +594,68 @@
             if (!text) return "";
             let processed = String(text);
             
-            // --- 1. Xử lý \immini[opt]{Text}{Image} ---
+            // --- 1. Xử lý \immini (Đã sửa lỗi nhận diện [thm]) ---
             while (processed.includes('\\immini')) {
-                const idx = processed.indexOf('\\immini');
-                let before = processed.substring(0, idx);
-                let tempAfter = processed.substring(idx + 7).trim(); 
+                const idx = processed.indexOf('\\immini'); 
+                let before = processed.substring(0, idx); 
+                
+                // Lấy phần sau lệnh \immini để kiểm tra
+                let tempAfter = processed.substring(idx + 7).trim();
 
-                if (tempAfter.startsWith('[')) {
-                    const closeBracket = tempAfter.indexOf(']');
-                    if (closeBracket !== -1) tempAfter = tempAfter.substring(closeBracket + 1).trim();
+                // Kiểm tra và bỏ qua tùy chọn [...] ví dụ [thm]
+                if (tempAfter.startsWith('[')) { 
+                    const closeBracket = tempAfter.indexOf(']'); 
+                    if (closeBracket !== -1) {
+                        tempAfter = tempAfter.substring(closeBracket + 1).trim(); 
+                    }
                 }
 
+                // Lấy Argument 1: Nội dung văn bản
                 const arg1 = extractNextBrace(tempAfter); 
                 if (!arg1) break; 
 
-                const arg2 = extractNextBrace(arg1.remaining);
-                if (!arg2) break; 
+                // Lấy Argument 2: Hình ảnh
+                const arg2 = extractNextBrace(arg1.remaining); 
+                if (!arg2) break;
 
+                // Tìm lệnh includegraphics trong Argument 2
                 const imgMatch = arg2.content.match(/\\includegraphics(?:\[.*?\])?\{(.*?)\}/);
-                let placeholder = "";
+                let placeholder = ""; 
                 
-                if (imgMatch) {
-                    const uniqueId = `img_${Date.now()}_${Math.random().toString(36).substr(2,9)}`;
-                    pendingImageUploads.push({ id: uniqueId, originalPath: imgMatch[1], questionIdx: questionIndex });
-                    placeholder = getPlaceholderHTML(uniqueId, "Ảnh từ \\immini");
-                } else {
-                     placeholder = getPlaceholderHTML("", "Vị trí hình");
+                if (imgMatch) { 
+                    const uniqueId = `img_${Date.now()}_${Math.random().toString(36).substr(2,9)}`; 
+                    // Lưu vào hàng đợi
+                    pendingImageUploads.push({
+                        id: uniqueId, 
+                        originalPath: imgMatch[1], 
+                        questionIdx: questionIndex
+                    }); 
+                    placeholder = getPlaceholderHTML(uniqueId, "Ảnh minh họa (immini)"); 
+                } else { 
+                    // Nếu immini nhưng dùng TikZ hoặc lệnh khác
+                    placeholder = getPlaceholderHTML("", "Vị trí hình (Không phải ảnh)"); 
                 }
 
+                // Ghép chuỗi: Văn bản + Khung ảnh + Phần còn lại
                 processed = before + arg1.content + '\n' + placeholder + arg2.remaining;
             }
 
-            // --- 2. Xử lý \begin{center} ... \includegraphics ... \end{center} ---
-            // Regex mới: Bắt chặt hơn cấu trúc center chứa includegraphics
-            // Sử dụng [\s\S]*? để bắt cả xuống dòng
+            // --- 2. Xử lý \begin{center} ... \end{center} ---
+            // Regex bắt trọn vẹn khối center chứa ảnh
             const centerRegex = /\\begin\{center\}\s*([\s\S]*?)\\includegraphics(?:\[.*?\])?\{(.*?)\}([\s\S]*?)\\end\{center\}/g;
             
-            processed = processed.replace(centerRegex, (match, preContent, path, postContent) => {
-                const uniqueId = `img_${Date.now()}_${Math.random().toString(36).substr(2,9)}`;
-                pendingImageUploads.push({ id: uniqueId, originalPath: path, questionIdx: questionIndex });
-                // Giữ lại nội dung text nếu có trong center (trước và sau ảnh)
-                return (preContent || "") + getPlaceholderHTML(uniqueId, "Ảnh canh giữa") + (postContent || "");
+            processed = processed.replace(centerRegex, (match, preText, imgPath, postText) => {
+                 const uid = `img_${Date.now()}_${Math.random().toString(36).substr(2,9)}`; 
+                 pendingImageUploads.push({id:uid, originalPath:imgPath, questionIdx:questionIndex}); 
+                 // Thay thế cả khối center bằng khung ảnh
+                 return getPlaceholderHTML(uid, "Ảnh canh giữa");
             });
-
+            
             // --- 3. Xử lý \includegraphics đứng lẻ ---
-             processed = processed.replace(/\\includegraphics(?:\[.*?\])?\{(.*?)\}/g, (match, path) => {
-                const uniqueId = `img_${Date.now()}_${Math.random().toString(36).substr(2,9)}`;
-                pendingImageUploads.push({ id: uniqueId, originalPath: path, questionIdx: questionIndex });
-                return getPlaceholderHTML(uniqueId, "Ảnh");
+            processed = processed.replace(/\\includegraphics(?:\[.*?\])?\{(.*?)\}/g, (m, path) => {
+                const uid = `img_${Date.now()}_${Math.random().toString(36).substr(2,9)}`; 
+                pendingImageUploads.push({id:uid, originalPath:path, questionIdx:questionIndex}); 
+                return getPlaceholderHTML(uid, "Ảnh");
             });
 
             return processed;
@@ -683,58 +698,71 @@
         };
 
         // Handle batch file selection
+        // Xử lý sự kiện khi chọn file ảnh từ máy tính
         document.getElementById('batchFileInput').addEventListener('change', async (e) => {
-            const file = e.target.files[0];
+            const file = e.target.files[0]; 
             if (!file || !currentBatchUploadId) return;
 
             try {
-                window.showToast("Đang tải ảnh lên...", "info");
-                // 1. Upload
-                const compressedBlob = await compressImage(file);
-                const fileName = `images/batch_${Date.now()}_${Math.floor(Math.random()*1000)}.jpg`;
-                const storageRef = ref(storage, fileName);
-                await uploadBytes(storageRef, compressedBlob);
+                window.showToast("Đang tải ảnh lên...", "info"); 
+                
+                // 1. Nén và Upload ảnh
+                const compressedBlob = await compressImage(file); 
+                const fileName = `images/batch_${Date.now()}_${Math.floor(Math.random()*1000)}.jpg`; 
+                const storageRef = ref(storage, fileName); 
+                await uploadBytes(storageRef, compressedBlob); 
                 const url = await getDownloadURL(storageRef);
+                
+                // 2. Tạo mã HTML thẻ ảnh để thay thế
+                const imgTag = `<div class="flex justify-center my-2"><img src="${url}" class="max-w-full h-auto rounded-lg shadow-md border border-gray-200" style="max-height:350px;"></div>`;
+                
+                // 3. Regex tìm thẻ DIV placeholder dựa trên ID
+                // [\s\S]*? cho phép tìm kiếm qua nhiều dòng
+                const placeholderRegex = new RegExp(`<div[^>]*data-id=["']${currentBatchUploadId}["'][^>]*>[\\s\\S]*?<\\/div>`, 'gi');
 
-                // 2. Replace placeholder in Data
-                // Find which question has this ID
                 let found = false;
+                // Quét qua toàn bộ câu hỏi để thay thế
                 for (let i = 0; i < window.questions.length; i++) {
                     const q = window.questions[i];
-                    // Check content
-                    if (q.content && q.content.includes(currentBatchUploadId)) {
-                        q.content = q.content.replace(getPlaceholderHTML(currentBatchUploadId, "Ảnh từ \\immini"), `<div class="flex justify-center"><img src="${url}" class="max-w-full h-auto rounded-lg shadow-sm" style="max-height:300px;"></div>`);
-                        q.content = q.content.replace(getPlaceholderHTML(currentBatchUploadId, "Ảnh canh giữa"), `<div class="flex justify-center"><img src="${url}" class="max-w-full h-auto rounded-lg shadow-sm" style="max-height:300px;"></div>`);
-                        q.content = q.content.replace(getPlaceholderHTML(currentBatchUploadId, "Ảnh"), `<div class="flex justify-center"><img src="${url}" class="max-w-full h-auto rounded-lg shadow-sm" style="max-height:300px;"></div>`);
-                        // Fallback Regex if exact string match fails due to variations
-                        const regex = new RegExp(`<div class="image-placeholder.*?data-id="${currentBatchUploadId}".*?<\/div>`, 's');
-                        q.content = q.content.replace(regex, `<div class="flex justify-center"><img src="${url}" class="max-w-full h-auto rounded-lg shadow-sm" style="max-height:300px;"></div>`);
-                        found = true;
+                    
+                    // Thay thế trong nội dung câu hỏi
+                    if (q.content && q.content.includes(currentBatchUploadId)) { 
+                        q.content = q.content.replace(placeholderRegex, imgTag); 
+                        found = true; 
                     }
-                    // Check solution
-                    if (q.solution && q.solution.includes(currentBatchUploadId)) {
-                         const regex = new RegExp(`<div class="image-placeholder.*?data-id="${currentBatchUploadId}".*?<\/div>`, 's');
-                         q.solution = q.solution.replace(regex, `<div class="flex justify-center"><img src="${url}" class="max-w-full h-auto rounded-lg shadow-sm" style="max-height:300px;"></div>`);
-                         found = true;
+                    // Thay thế trong lời giải
+                    if (q.solution && q.solution.includes(currentBatchUploadId)) { 
+                        q.solution = q.solution.replace(placeholderRegex, imgTag); 
+                        found = true; 
                     }
                 }
 
-                // 3. Remove from pending list
+                if (!found) {
+                    console.warn("Không tìm thấy placeholder ID:", currentBatchUploadId);
+                }
+
+                // 4. Cập nhật giao diện
+                // Xóa khỏi danh sách chờ (nếu có)
                 pendingImageUploads = pendingImageUploads.filter(item => item.id !== currentBatchUploadId);
                 
-                // 4. Update UI
-                renderBatchImageModal();
-                if (window.currentQIndex !== -1) loadQuestionToEditor(window.currentQIndex);
-                renderPreviewList();
-                window.showToast("Thay thế ảnh thành công!", "success");
-
+                renderBatchImageModal(); // Cập nhật lại list trong modal
+                
+                // Cập nhật vùng soạn thảo nếu đang mở câu hỏi đó
+                if (window.currentQIndex !== -1) {
+                    loadQuestionToEditor(window.currentQIndex); 
+                }
+                
+                renderPreviewList(); // Cập nhật danh sách bên trái
+                window.showToast("Đã tải ảnh lên thành công!", "success");
+                
+                // Nếu hết ảnh cần tải thì đóng modal
                 if (pendingImageUploads.length === 0) closeBatchImageModal();
 
-            } catch (err) {
-                console.error(err);
-                window.showToast("Lỗi tải ảnh: " + err.message, "error");
-            } finally {
-                e.target.value = ''; // Reset input
+            } catch (err) { 
+                console.error(err); 
+                window.showToast("Lỗi tải ảnh: " + err.message, "error"); 
+            } finally { 
+                e.target.value = ''; // Reset input để chọn lại file khác được
             }
         });
 
