@@ -15,14 +15,14 @@
         displayMath: [['$$', '$$'], ['\\[', '\\]']],
         processEscapes: true,
         macros: {
-          heva: ["\\left\\{\\begin{matrix} #1 \\end{matrix}\\right.", 1],
-          hoac: ["\\left[\\begin{matrix} #1 \\end{matrix}\\right.", 1],
+          // Dùng aligned để hỗ trợ ký tự & trong hệ phương trình cho học sinh
+          heva: ["\\left\\{\\begin{aligned}#1\\end{aligned}\\right.", 1],
+          hoac: ["\\left[\\begin{aligned}#1\\end{aligned}\\right.", 1],
           tich: "\\cdot",
           deg: "^\\circ"
         }
       },
       svg: { fontCache: 'global' },
-      // Tắt render tự động để JS kiểm soát
       startup: { typeset: false }
     };
     </script>
@@ -288,35 +288,78 @@
         window.customAlert = (msg, type='info') => { return new Promise(resolve => { modalTitle.innerText=type==='error'?'Lỗi':'Thông báo'; modalMsg.innerText=msg; btnCancel.classList.add('hidden'); btnConfirm.innerText="Đã hiểu"; modalEl.classList.remove('opacity-0','pointer-events-none'); modalBox.classList.add('scale-100'); btnConfirm.onclick=()=>{resolve(true);closeCustomModal();}; }); };
         window.customConfirm = (msg) => { return new Promise(resolve => { modalTitle.innerText="Xác nhận"; modalMsg.innerText=msg; btnCancel.classList.remove('hidden'); btnConfirm.innerText="Đồng ý"; modalEl.classList.remove('opacity-0','pointer-events-none'); modalBox.classList.add('scale-100'); btnConfirm.onclick=()=>{resolve(true);closeCustomModal();}; btnCancel.onclick=()=>{resolve(false);closeCustomModal();}; }); };
 
+        // Hàm làm sạch mã TikZ
+    function cleanTikzCode(code) { 
+        let c = code.replace(/\\resizebox\{[^}]+\}\{[^}]+\}\{\s*(\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\})\s*\}/g, "$1"); 
+        return c.replace(/\\begin\{center\}/g, "").replace(/\\end\{center\}/g, ""); 
+    }
+
+    // Hàm xử lý TikZ lồng nhau
+    function processNestedTikz(text) {
+        if (!text) return ""; 
+        let res = "", rem = String(text);
+        while (true) {
+            const start = rem.indexOf("\\begin{tikzpicture}"); 
+            if (start === -1) { res += rem; break; }
+            
+            res += rem.substring(0, start); 
+            rem = rem.substring(start);
+            
+            let d = 0, end = -1, pos = "\\begin{tikzpicture}".length; d = 1;
+            while (d > 0) { 
+                const no = rem.indexOf("\\begin{tikzpicture}", pos);
+                const nc = rem.indexOf("\\end{tikzpicture}", pos); 
+                if (nc === -1) { end = rem.length; d = 0; break; } 
+                if (no !== -1 && no < nc) { d++; pos = no + 19; } 
+                else { d--; pos = nc + 17; if (d === 0) end = pos; } 
+            }
+            
+            let raw = rem.substring(0, end);
+            let final = cleanTikzCode(raw); 
+            if (!final.includes("\\usetikzlibrary")) final = "\\usetikzlibrary{calc,intersections,arrows.meta}\n" + final;
+            
+            res += `<div class="flex justify-center my-4 overflow-x-auto"><script type="text/tikz">${final}<\/script></div>`; 
+            rem = rem.substring(end);
+        }
+        return res;
+    }
         // --- XỬ LÝ FORMAT VĂN BẢN THÔNG MINH (YÊU CẦU 2) ---
         // --- XỬ LÝ FORMAT VĂN BẢN THÔNG MINH (CẬP NHẬT TIKZ) ---
         function formatContent(text) {
-            if (!text) return "";
-            
-            // 1. Xử lý TikZ: Bao bọc mã tikz trong thẻ script đặc biệt
-            let processed = String(text).replace(/\\begin\{tikzpicture\}([\s\S]*?)\\end\{tikzpicture\}/g, (match) => {
-                return `<div class="flex justify-center my-4 overflow-x-auto"><script type="text/tikz">${match}<\/script></div>`;
-            });
+        if (text === null || text === undefined) return "";
+        
+        // 1. Xử lý TikZ
+        let processed = processNestedTikz(text);
+        
+        // 2. Dọn rác văn bản (nếu Editor còn sót)
+        processed = processed.replace(/^\s*\}\s*$/gm, ''); // Xóa dòng chỉ có dấu }
+        processed = processed.replace(/\}\s*$/g, '');      // Xóa dấu } ở cuối câu
 
-            // 2. Tách chuỗi: Toán học, TikZ Script, và Văn bản thường
-            // Regex này bắt: Block Math, Inline Math, và cả thẻ <script> ta vừa tạo ra ở bước 1
-            const regex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?:\$[^\n\r]*?\$)|<script type="text\/tikz">[\s\S]*?<\/script>)/g;
-            const parts = processed.split(regex);
-
-            return parts.map(part => {
-                // Kiểm tra xem phần này có phải là TikZ hoặc công thức toán không
-                const isTikZ = part.includes('<script type="text/tikz">');
-                const isMath = /^\$\$|^\\\[|^\\\(|^\$/.test(part.trim());
-                
-                if (isMath || isTikZ) {
-                    return part; // Giữ nguyên để thư viện xử lý
-                } else {
-                    // Nếu là văn bản thường: replace xuống dòng
-                    return part.replace(/\\\\/g, '<br>').replace(/\n/g, '<br>');
-                }
-            }).join('');
-        }
-
+        // 3. Phân tách để hiển thị: Công thức ($...$), Ảnh (<img>), hoặc Văn bản thường
+        // Regex [\s\S] trong $...$ giúp bắt được công thức nhiều dòng
+        const regex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?:\$[\s\S]*?\$)|<script type="text\/tikz">[\s\S]*?<\/script>|<img.*?>)/g;
+        
+        const parts = processed.split(regex);
+        
+        return parts.map(part => {
+            // Nếu là các thành phần đặc biệt (Toán, TikZ, Ảnh) thì giữ nguyên HTML
+            if (part.includes('<script type="text/tikz">') || 
+                part.includes('<img') || 
+                part.trim().startsWith('$') || 
+                part.trim().startsWith('\\(') || 
+                part.trim().startsWith('\\[')) {
+                return part;
+            }
+            else {
+                // Nếu là văn bản thường:
+                // - Xóa dấu } rác nằm lẫn trong chữ
+                // - Chuyển ký tự xuống dòng thành thẻ <br>
+                let cleanPart = part.replace(/\}/g, '');
+                return cleanPart.replace(/\\\\/g, '<br>').replace(/\n/g, '<br>');
+            }
+        }).join('');
+    }
+        
         // --- XỬ LÝ SCALE CÔNG THỨC TOÁN (YÊU CẦU 3) ---
         function autoScaleMath() {
             // Chỉ chạy sau khi MathJax đã render xong
