@@ -461,19 +461,24 @@
             
             let processed = processNestedTikz(text);
             
-            // Xóa các ký tự thừa phổ biến do quá trình parse
-            // Ví dụ: } dư thừa, hoặc chữ "Ảnh" trôi nổi
-            // Lưu ý: Chỉ xóa nếu chúng đứng một mình hoặc ở cuối dòng gây khó chịu
-            processed = processed.replace(/^[\s}]*$/gm, ''); // Xóa dòng chỉ chứa dấu }
-            
-            // Regex phân tách nội dung
+            // --- BƯỚC 1: DỌN RÁC VĂN BẢN (Mới thêm) ---
+            // Xóa các dòng chỉ chứa dấu } hoặc khoảng trắng
+            processed = processed.replace(/^\s*\}\s*$/gm, ''); 
+            // Xóa dấu } đứng lẻ loi ở cuối chuỗi hoặc cuối dòng
+            processed = processed.replace(/\}\s*$/g, '');
+            // Xóa các cụm từ thừa thường gặp nếu có (tùy chỉnh theo thực tế)
+            processed = processed.replace(/Ảnh minh họa \(immini\)/g, ''); 
+            processed = processed.replace(/Ảnh canh giữa/g, '');
+
+            // --- BƯỚC 2: XỬ LÝ MATHJAX & HTML ---
+            // Regex phân tách nội dung (giữ nguyên logic đã sửa trước đó)
             const regex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?:\$[\s\S]*?\$)|<script type="text\/tikz">[\s\S]*?<\/script>|<div[^>]*data-id=.*?>[\s\S]*?<\/div>|<img.*?>)/g;
             
             const parts = processed.split(regex);
             return parts.map(part => {
                 // Kiểm tra nếu là các thành phần đặc biệt thì giữ nguyên
                 if (part.includes('<script type="text/tikz">') || 
-                    part.includes('data-id=') || // Bắt cả Placeholder và Ảnh đã tải
+                    part.includes('data-id=') || 
                     part.includes('<img') || 
                     part.trim().startsWith('$') || 
                     part.trim().startsWith('\\(') || 
@@ -481,8 +486,11 @@
                     return part;
                 }
                 else {
-                    // Xử lý văn bản thường: thay xuống dòng bằng <br>
-                    return part.replace(/\\\\/g, '<br>').replace(/\n/g, '<br>');
+                    // Xử lý văn bản thường: 
+                    // 1. Xóa thêm dấu } nếu nó nằm lẫn trong văn bản
+                    let cleanPart = part.replace(/\}/g, '');
+                    // 2. Thay xuống dòng bằng <br>
+                    return cleanPart.replace(/\\\\/g, '<br>').replace(/\n/g, '<br>');
                 }
             }).join('');
         }
