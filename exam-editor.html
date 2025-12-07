@@ -18,8 +18,9 @@
         displayMath: [['$$', '$$'], ['\\[', '\\]']],
         processEscapes: true,
         macros: {
-          heva: ["\\left\\{\\begin{matrix} #1 \\end{matrix}\\right.", 1],
-          hoac: ["\\left[\\begin{matrix} #1 \\end{matrix}\\right.", 1],
+          // SỬA LỖI: Dùng aligned để hỗ trợ ký tự & trong hệ phương trình
+          heva: ["\\left\\{\\begin{aligned}#1\\end{aligned}\\right.", 1],
+          hoac: ["\\left[\\begin{aligned}#1\\end{aligned}\\right.", 1],
           tich: "\\cdot",
           deg: "^\\circ"
         }
@@ -541,11 +542,13 @@
         let currentBatchUploadId = null;
 
         function getPlaceholderHTML(id, note = "Vị trí ảnh") {
-            // Placeholder div that looks like a dashed box
-            return `<div class="image-placeholder my-3 p-4 bg-gray-50 border-2 border-dashed border-blue-300 rounded-xl text-center flex flex-col items-center justify-center select-none" data-id="${id}">
+            // Thêm onclick để bấm vào là mở upload ngay
+            return `<div class="image-placeholder my-3 p-4 bg-gray-50 border-2 border-dashed border-blue-300 rounded-xl text-center flex flex-col items-center justify-center select-none cursor-pointer hover:bg-blue-50 transition-colors" 
+                data-id="${id}" 
+                onclick="triggerBatchUpload('${id}')">
                 <div class="text-blue-500 text-3xl mb-1"><i class="fa-regular fa-image"></i></div>
                 <div class="text-xs font-bold text-gray-500 uppercase">${note}</div>
-                <div class="text-[10px] text-gray-400">Vị trí chờ ảnh tải lên</div>
+                <div class="text-[10px] text-gray-400">Bấm để tải ảnh hoặc Ctrl+V để dán</div>
             </div>`;
         }
 
@@ -588,56 +591,43 @@
             while (processed.includes('\\immini')) {
                 const idx = processed.indexOf('\\immini');
                 let before = processed.substring(0, idx);
-                let tempAfter = processed.substring(idx + 7).trim(); // Bỏ qua \immini và khoảng trắng thừa
+                let tempAfter = processed.substring(idx + 7).trim(); 
 
-                // Bỏ qua tùy chọn [...] ví dụ \immini[thm]
                 if (tempAfter.startsWith('[')) {
                     const closeBracket = tempAfter.indexOf(']');
-                    if (closeBracket !== -1) {
-                        tempAfter = tempAfter.substring(closeBracket + 1).trim();
-                    }
+                    if (closeBracket !== -1) tempAfter = tempAfter.substring(closeBracket + 1).trim();
                 }
 
-                // Lấy Argument 1: Nội dung văn bản
                 const arg1 = extractNextBrace(tempAfter); 
-                if (!arg1) break; // Lỗi cú pháp, thoát để tránh treo
+                if (!arg1) break; 
 
-                // Lấy Argument 2: Hình ảnh
                 const arg2 = extractNextBrace(arg1.remaining);
-                if (!arg2) break; // Lỗi cú pháp
+                if (!arg2) break; 
 
-                // Quét tìm đường dẫn ảnh trong Argument 2
                 const imgMatch = arg2.content.match(/\\includegraphics(?:\[.*?\])?\{(.*?)\}/);
                 let placeholder = "";
                 
                 if (imgMatch) {
                     const uniqueId = `img_${Date.now()}_${Math.random().toString(36).substr(2,9)}`;
-                    pendingImageUploads.push({
-                        id: uniqueId,
-                        originalPath: imgMatch[1],
-                        questionIdx: questionIndex
-                    });
+                    pendingImageUploads.push({ id: uniqueId, originalPath: imgMatch[1], questionIdx: questionIndex });
                     placeholder = getPlaceholderHTML(uniqueId, "Ảnh từ \\immini");
                 } else {
                      placeholder = getPlaceholderHTML("", "Vị trí hình");
                 }
 
-                // Thay thế: Giữ lại nội dung Text + Placeholder, bỏ cấu trúc \immini
                 processed = before + arg1.content + '\n' + placeholder + arg2.remaining;
             }
 
             // --- 2. Xử lý \begin{center} ... \includegraphics ... \end{center} ---
-            const centerRegex = /\\begin\{center\}([\s\S]*?)\\end\{center\}/g;
-            processed = processed.replace(centerRegex, (match, innerContent) => {
-                if (innerContent.includes('\\includegraphics')) {
-                    const imgMatch = innerContent.match(/\\includegraphics(?:\[.*?\])?\{(.*?)\}/);
-                     if (imgMatch) {
-                        const uniqueId = `img_${Date.now()}_${Math.random().toString(36).substr(2,9)}`;
-                        pendingImageUploads.push({ id: uniqueId, originalPath: imgMatch[1], questionIdx: questionIndex });
-                        return getPlaceholderHTML(uniqueId, "Ảnh canh giữa");
-                    }
-                }
-                return match; 
+            // Regex mới: Bắt chặt hơn cấu trúc center chứa includegraphics
+            // Sử dụng [\s\S]*? để bắt cả xuống dòng
+            const centerRegex = /\\begin\{center\}\s*([\s\S]*?)\\includegraphics(?:\[.*?\])?\{(.*?)\}([\s\S]*?)\\end\{center\}/g;
+            
+            processed = processed.replace(centerRegex, (match, preContent, path, postContent) => {
+                const uniqueId = `img_${Date.now()}_${Math.random().toString(36).substr(2,9)}`;
+                pendingImageUploads.push({ id: uniqueId, originalPath: path, questionIdx: questionIndex });
+                // Giữ lại nội dung text nếu có trong center (trước và sau ảnh)
+                return (preContent || "") + getPlaceholderHTML(uniqueId, "Ảnh canh giữa") + (postContent || "");
             });
 
             // --- 3. Xử lý \includegraphics đứng lẻ ---
