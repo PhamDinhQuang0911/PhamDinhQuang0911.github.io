@@ -15,7 +15,7 @@
         displayMath: [['$$', '$$'], ['\\[', '\\]']],
         processEscapes: true,
         macros: {
-          // Dùng aligned để hỗ trợ ký tự & trong hệ phương trình cho học sinh
+          // Đồng bộ fix lỗi \heva, \hoac cho học sinh
           heva: ["\\left\\{\\begin{aligned}#1\\end{aligned}\\right.", 1],
           hoac: ["\\left[\\begin{aligned}#1\\end{aligned}\\right.", 1],
           tich: "\\cdot",
@@ -328,22 +328,23 @@
         function formatContent(text) {
         if (text === null || text === undefined) return "";
         
-        // 1. Xử lý TikZ
-        let processed = processNestedTikz(text);
+        // 1. Xử lý TikZ (nếu có hàm processNestedTikz thì gọi, không thì bỏ qua dòng này)
+        let processed = (typeof processNestedTikz === 'function') ? processNestedTikz(text) : text;
         
-        // 2. Dọn rác văn bản (nếu Editor còn sót)
-        processed = processed.replace(/^\s*\}\s*$/gm, ''); // Xóa dòng chỉ có dấu }
-        processed = processed.replace(/\}\s*$/g, '');      // Xóa dấu } ở cuối câu
+        // 2. Dọn rác văn bản (đồng bộ với Editor để xóa dấu } thừa)
+        processed = processed.replace(/^\s*\}\s*$/gm, ''); 
+        processed = processed.replace(/\}\s*$/g, '');      
 
-        // 3. Phân tách để hiển thị: Công thức ($...$), Ảnh (<img>), hoặc Văn bản thường
-        // Regex [\s\S] trong $...$ giúp bắt được công thức nhiều dòng
-        const regex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?:\$[\s\S]*?\$)|<script type="text\/tikz">[\s\S]*?<\/script>|<img.*?>)/g;
+        // 3. REGEX MỚI: Bắt buộc phải bắt được thẻ <div> chứa class "group relative" 
+        // (Đây là class mà Editor V6 tạo ra cho ảnh)
+        const regex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?:\$[\s\S]*?\$)|<script type="text\/tikz">[\s\S]*?<\/script>|<div[^>]*class=["']group relative[^>]*>[\s\S]*?<\/div>|<img.*?>)/g;
         
         const parts = processed.split(regex);
         
         return parts.map(part => {
-            // Nếu là các thành phần đặc biệt (Toán, TikZ, Ảnh) thì giữ nguyên HTML
+            // Kiểm tra các thành phần đặc biệt để render HTML
             if (part.includes('<script type="text/tikz">') || 
+                part.includes('class="group relative') || // <- QUAN TRỌNG: Nhận diện khung ảnh từ Editor
                 part.includes('<img') || 
                 part.trim().startsWith('$') || 
                 part.trim().startsWith('\\(') || 
@@ -351,10 +352,8 @@
                 return part;
             }
             else {
-                // Nếu là văn bản thường:
-                // - Xóa dấu } rác nằm lẫn trong chữ
-                // - Chuyển ký tự xuống dòng thành thẻ <br>
-                let cleanPart = part.replace(/\}/g, '');
+                // Xử lý văn bản thường
+                let cleanPart = part.replace(/\}/g, ''); // Xóa nốt dấu } nếu lọt lưới
                 return cleanPart.replace(/\\\\/g, '<br>').replace(/\n/g, '<br>');
             }
         }).join('');
