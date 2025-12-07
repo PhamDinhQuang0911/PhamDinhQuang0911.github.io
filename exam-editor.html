@@ -192,7 +192,7 @@
                         <button onclick="addNewQuestion('tf')" class="p-1.5 bg-orange-50 text-orange-600 rounded hover:bg-orange-100 text-xs font-bold">+ĐS</button>
                         <button onclick="addNewQuestion('short')" class="p-1.5 bg-green-50 text-green-600 rounded hover:bg-green-100 text-xs font-bold">+Điền</button>
                         <button onclick="addNewQuestion('essay')" class="p-1.5 bg-purple-50 text-purple-600 rounded hover:bg-purple-100 text-xs font-bold">+TL</button>
-                        <div class="w-[1px] h-6 bg-gray-200 mx-1"></div
+                        <div class="w-[1px] h-6 bg-gray-200 mx-1"></div>
                          <button onclick="document.getElementById('imgUploadInput').click()" class="p-1.5 bg-gray-100 text-gray-600 rounded hover:bg-gray-200 text-xs font-bold" title="Chèn ảnh"><i class="fa-regular fa-image"></i> Ảnh</button>
                         <input type="file" id="imgUploadInput" accept="image/*" class="hidden">
                         <div class="w-[1px] h-6 bg-gray-200 mx-1"></div>                                             
@@ -387,26 +387,15 @@
         const btnCancel = document.getElementById('btnCancel');
 
         window.closeCustomModal = () => { modalEl.classList.add('opacity-0', 'pointer-events-none'); modalBox.classList.remove('scale-100'); modalBox.classList.add('scale-95'); if (modalResolve) { modalResolve(null); modalResolve = null; } };
-        window.customAlert = (message, type = 'info') => { return new Promise((resolve) => { modalTitle.innerText = type === 'error' ? 'Lỗi' : 'Thông báo'; modalMsg.innerText = message; modalIcon.innerHTML = type === 'error' ? '<i class="fa-solid fa-triangle-exclamation text-red-500"></i>' : '<i class="fa-solid fa-bell text-blue-500"></i>'; document.getElementById('modalInput').classList.add('hidden'); btnCancel.classList.add('hidden'); btnConfirm.innerText = "Đã hiểu"; modalEl.classList.remove('opacity-0', 'pointer-events-none'); modalBox.classList.remove('scale-95'); modalBox.classList.add('scale-100'); btnConfirm.onclick = () => { resolve(true); modalResolve = null; closeCustomModal(); }; modalResolve = resolve; }); };
+        window.customAlert = (message, type = 'info') => { return new Promise((resolve) => { modalTitle.innerText = type === 'error' ? 'Lỗi' : 'Thông báo'; modalMsg.innerText = message; modalIcon.innerHTML = type === 'error' ? '<i class="fa-solid fa-triangle-exclamation text-red-500"></i>' : '<i class="fa-solid fa-bell text-blue-500"></i>'; document.getElementById('modalInput').classList.add('hidden'); btnCancel.classList.add('hidden'); btnConfirm.innerText = "Đã hiểu"; modalEl.classList.remove('opacity-0', 'pointer-events-none'); modalBox.classList.remove('scale-100'); modalBox.classList.add('scale-100'); btnConfirm.onclick = () => { resolve(true); modalResolve = null; closeCustomModal(); }; modalResolve = resolve; }); };
         window.customConfirm = (message) => { return new Promise((resolve) => { modalTitle.innerText = "Xác nhận"; modalMsg.innerText = message; modalIcon.innerHTML = '<i class="fa-solid fa-circle-question text-orange-500"></i>'; document.getElementById('modalInput').classList.add('hidden'); btnCancel.classList.remove('hidden'); btnConfirm.innerText = "Đồng ý"; modalEl.classList.remove('opacity-0', 'pointer-events-none'); modalBox.classList.remove('scale-95'); modalBox.classList.add('scale-100'); btnConfirm.onclick = () => { resolve(true); modalResolve = null; closeCustomModal(); }; btnCancel.onclick = () => { resolve(false); modalResolve = null; closeCustomModal(); }; }); };
 
-        // Hàm hỗ trợ xử lý TikZ lồng nhau
-        // Hàm làm sạch mã TikZ: Loại bỏ các lệnh không hỗ trợ như \resizebox, \begin{center}
+        // --- HÀM XỬ LÝ TIKZ & LÀM SẠCH ---
         function cleanTikzCode(code) {
             let cleaned = code;
-
-            // 1. Xử lý \resizebox bao quanh tikzpicture con
-            // Mẫu: \resizebox{1cm}{!}{ \begin{tikzpicture}... \end{tikzpicture} }
-            // Logic: Thay thế toàn bộ cụm \resizebox bằng nội dung \begin{tikzpicture}...\end{tikzpicture} bên trong nó
             const resizeRegex = /\\resizebox\{[^}]+\}\{[^}]+\}\{\s*(\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\})\s*\}/g;
             cleaned = cleaned.replace(resizeRegex, "$1");
-
-            // 2. Xử lý trường hợp \resizebox dùng cho đối tượng khác (nếu có, xóa lệnh giữ nội dung - rủi ro hơn nên chỉ xử lý đơn giản)
-            // Nếu regex trên không bắt được (do ngoặc lồng nhau phức tạp), ta xóa tạm dòng chứa resizebox nếu nó nằm riêng lẻ
-            
-            // 3. Loại bỏ \begin{center} và \end{center} nếu lỡ bị dính vào trong chuỗi TikZ
             cleaned = cleaned.replace(/\\begin\{center\}/g, "").replace(/\\end\{center\}/g, "");
-
             return cleaned;
         }
 
@@ -417,51 +406,28 @@
             
             while (true) {
                 const startIdx = remaining.indexOf("\\begin{tikzpicture}");
-                if (startIdx === -1) {
-                    result += remaining;
-                    break;
-                }
+                if (startIdx === -1) { result += remaining; break; }
                 
-                // Thêm phần văn bản trước tikzpicture
                 result += remaining.substring(0, startIdx);
                 remaining = remaining.substring(startIdx);
                 
-                // Thuật toán tìm thẻ đóng tương ứng (Stack)
-                let depth = 0;
-                let endIdx = -1;
-                const openTag = "\\begin{tikzpicture}";
-                const closeTag = "\\end{tikzpicture}";
-                let searchPos = openTag.length; 
-                depth = 1;
+                let depth = 0; let endIdx = -1;
+                const openTag = "\\begin{tikzpicture}"; const closeTag = "\\end{tikzpicture}";
+                let searchPos = openTag.length; depth = 1;
 
                 while (depth > 0) {
                     const nextOpen = remaining.indexOf(openTag, searchPos);
                     const nextClose = remaining.indexOf(closeTag, searchPos);
-                    
                     if (nextClose === -1) { endIdx = remaining.length; depth = 0; break; }
-                    
-                    if (nextOpen !== -1 && nextOpen < nextClose) {
-                        depth++; searchPos = nextOpen + openTag.length;
-                    } else {
-                        depth--; searchPos = nextClose + closeTag.length;
-                        if (depth === 0) endIdx = searchPos;
-                    }
+                    if (nextOpen !== -1 && nextOpen < nextClose) { depth++; searchPos = nextOpen + openTag.length; } 
+                    else { depth--; searchPos = nextClose + closeTag.length; if (depth === 0) endIdx = searchPos; }
                 }
                 
-                // Lấy mã TikZ thô
                 let rawTikz = remaining.substring(0, endIdx);
-                
-                // BƯỚC QUAN TRỌNG: Làm sạch mã trước khi đưa vào thẻ script
                 let finalTikz = cleanTikzCode(rawTikz);
-
-                // Thêm một số thư viện thường dùng vào đầu mỗi hình để tránh lỗi thiếu thư viện
-                // Lưu ý: TikZJax hỗ trợ các thư viện chuẩn, ta thêm calc để tính toán tọa độ ($...$)
-                if (!finalTikz.includes("\\usetikzlibrary")) {
-                   finalTikz = "\\usetikzlibrary{calc,intersections,arrows.meta}\n" + finalTikz;
-                }
+                if (!finalTikz.includes("\\usetikzlibrary")) finalTikz = "\\usetikzlibrary{calc,intersections,arrows.meta}\n" + finalTikz;
 
                 result += `<div class="flex justify-center my-4 overflow-x-auto"><script type="text/tikz">${finalTikz}<\/script></div>`;
-                
                 remaining = remaining.substring(endIdx);
             }
             return result;
@@ -469,19 +435,11 @@
 
         function formatContent(text) {
             if (text === null || text === undefined) return "";
-            
-            // 1. Xử lý TikZ lồng nhau và làm sạch
             let processed = processNestedTikz(text);
-
-            // 2. Xử lý MathJax và xuống dòng
-            // Regex tách các thành phần
             const regex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?:\$[^\n\r]*?\$)|<script type="text\/tikz">[\s\S]*?<\/script>)/g;
             const parts = processed.split(regex);
-            
             return parts.map(part => {
-                if (part.includes('<script type="text/tikz">') || part.trim().startsWith('$') || part.trim().startsWith('\\(') || part.trim().startsWith('\\[')) {
-                    return part;
-                }
+                if (part.includes('<script type="text/tikz">') || part.trim().startsWith('$') || part.trim().startsWith('\\(') || part.trim().startsWith('\\[')) return part;
                 else return part.replace(/\\\\/g, '<br>').replace(/\n/g, '<br>');
             }).join('');
         }
@@ -495,12 +453,11 @@
                 if (examId) { currentExamId = examId; loadExamData(examId); }
             } else { window.location.href = 'index.html'; }
         });
+
         // --- LOGIC XỬ LÝ ẢNH (NÉN & UPLOAD) ---
-        
-        // 1. Hàm nén ảnh (Resize max 800px & Quality 0.7)
         function compressImage(file) {
             return new Promise((resolve, reject) => {
-                const maxWidth = 800; // Chiều rộng tối đa
+                const maxWidth = 800; 
                 const reader = new FileReader();
                 reader.readAsDataURL(file);
                 reader.onload = (event) => {
@@ -508,24 +465,11 @@
                     img.src = event.target.result;
                     img.onload = () => {
                         const canvas = document.createElement('canvas');
-                        let width = img.width;
-                        let height = img.height;
-
-                        // Tính toán tỷ lệ resize
-                        if (width > maxWidth) {
-                            height *= maxWidth / width;
-                            width = maxWidth;
-                        }
-
-                        canvas.width = width;
-                        canvas.height = height;
-                        const ctx = canvas.getContext('2d');
-                        ctx.drawImage(img, 0, 0, width, height);
-
-                        // Xuất ra Blob (JPEG, chất lượng 70%)
-                        canvas.toBlob((blob) => {
-                            resolve(blob);
-                        }, 'image/jpeg', 0.7);
+                        let width = img.width; let height = img.height;
+                        if (width > maxWidth) { height *= maxWidth / width; width = maxWidth; }
+                        canvas.width = width; canvas.height = height;
+                        const ctx = canvas.getContext('2d'); ctx.drawImage(img, 0, 0, width, height);
+                        canvas.toBlob((blob) => { resolve(blob); }, 'image/jpeg', 0.7);
                     };
                     img.onerror = (err) => reject(err);
                 };
@@ -533,77 +477,43 @@
             });
         }
 
-        // 2. Hàm upload lên Firebase Storage
         async function handleImageUpload(file) {
             if (!file) return;
-            
-            // Hiển thị thông báo đang tải
-            const oldToast = document.getElementById('toastContainer').innerHTML;
             window.showToast("Đang nén và tải ảnh...", "info");
-
             try {
-                // Nén ảnh
                 const compressedBlob = await compressImage(file);
-                
-                // Tạo tên file ngẫu nhiên
                 const fileName = `images/${Date.now()}_${Math.floor(Math.random()*1000)}.jpg`;
                 const storageRef = ref(storage, fileName);
-
-                // Upload
                 await uploadBytes(storageRef, compressedBlob);
                 const url = await getDownloadURL(storageRef);
-
-                // Chèn thẻ img vào vị trí con trỏ trong textarea
                 insertAtCursor(`\n<div class="flex justify-center"><img src="${url}" class="max-w-full h-auto rounded-lg shadow-sm" style="max-height:300px;"></div>\n`);
-                
-                // Trigger lưu auto save
-                autoSaveMemory();
-                window.showToast("Đã chèn ảnh thành công!", "success");
-
-            } catch (error) {
-                console.error("Upload error:", error);
-                window.showToast("Lỗi tải ảnh: " + error.message, "error");
-            }
+                autoSaveMemory(); window.showToast("Đã chèn ảnh thành công!", "success");
+            } catch (error) { console.error("Upload error:", error); window.showToast("Lỗi tải ảnh: " + error.message, "error"); }
         }
 
-        // 3. Hàm hỗ trợ chèn text vào vị trí con trỏ
         function insertAtCursor(text) {
             const textarea = document.getElementById('editContent');
             if (!textarea) return;
-
-            const start = textarea.selectionStart;
-            const end = textarea.selectionEnd;
-            const value = textarea.value;
-
+            const start = textarea.selectionStart; const end = textarea.selectionEnd; const value = textarea.value;
             textarea.value = value.substring(0, start) + text + value.substring(end);
-            textarea.selectionStart = textarea.selectionEnd = start + text.length;
-            textarea.focus();
+            textarea.selectionStart = textarea.selectionEnd = start + text.length; textarea.focus();
         }
 
-        // 4. Lắng nghe sự kiện PASTE và CHỌN FILE
         document.addEventListener('DOMContentLoaded', () => {
-            // Xử lý nút chọn file
-            document.getElementById('imgUploadInput').addEventListener('change', (e) => {
-                if(e.target.files.length > 0) handleImageUpload(e.target.files[0]);
-            });
-
-            // Xử lý sự kiện Paste (Ctrl+V) vào ô nội dung
-            // Sử dụng Event Delegation vì textarea có thể được render lại
+            document.getElementById('imgUploadInput').addEventListener('change', (e) => { if(e.target.files.length > 0) handleImageUpload(e.target.files[0]); });
             document.body.addEventListener('paste', (e) => {
                 if (e.target.id === 'editContent') {
                     const items = (e.clipboardData || e.originalEvent.clipboardData).items;
                     for (let index in items) {
                         const item = items[index];
                         if (item.kind === 'file' && item.type.includes('image/')) {
-                            e.preventDefault(); // Chặn paste mặc định
-                            const blob = item.getAsFile();
-                            handleImageUpload(blob);
-                            return; // Chỉ xử lý 1 ảnh đầu tiên tìm thấy
+                            e.preventDefault(); const blob = item.getAsFile(); handleImageUpload(blob); return;
                         }
                     }
                 }
             });
         });
+
         // --- CORE FUNCTIONS ---
         window.loadExamData = async (id) => {
             try {
@@ -626,28 +536,18 @@
                     if(data.showScore) document.querySelector(`input[name="settingShowScore"][value="${data.showScore}"]`).checked = true;
                     if(data.showResult) document.querySelector(`input[name="settingShowResult"][value="${data.showResult}"]`).checked = true;
                     
-                    // FIX CLASS TAB LOGIC
                     const filterBtn = document.getElementById('filterBtnClass');
                     if(data.accessType) {
                         document.querySelector(`input[name="settingAccess"][value="${data.accessType}"]`).checked = true;
                         window.togglePrivasySettings(data.accessType);
-                        if (data.accessType === 'class') {
-                            filterBtn.classList.remove('hidden');
-                        } else {
-                            filterBtn.classList.add('hidden');
-                        }
+                        if (data.accessType === 'class') filterBtn.classList.remove('hidden'); else filterBtn.classList.add('hidden');
                     }
                     
                     if(data.allowedClassId) {
                         setTimeout(async () => { 
                             document.getElementById('settingClassSelect').value = data.allowedClassId;
-                            // Update Button Text
                             const cls = await getDoc(doc(db, "classes", data.allowedClassId));
-                            if(cls.exists()) {
-                                filterBtn.textContent = cls.data().name; // Change "Theo lớp" to "Class Name"
-                                // Fetch full class list for stats
-                                classStudentList = cls.data().students || [];
-                            }
+                            if(cls.exists()) { filterBtn.textContent = cls.data().name; classStudentList = cls.data().students || []; }
                         }, 500);
                     }
                     
@@ -675,8 +575,7 @@
             const list = document.getElementById('previewList');
             const palette = document.getElementById('quickPalette');
             document.getElementById('totalQCount').textContent = window.questions.length;
-            list.innerHTML = '';
-            palette.innerHTML = '';
+            list.innerHTML = ''; palette.innerHTML = '';
             
             if (window.questions.length === 0) {
                 list.innerHTML = '<div class="text-center py-10 text-gray-400 text-sm">Chưa có câu hỏi nào.</div>';
@@ -811,9 +710,9 @@
 
         function cleanLatex(text) { if (!text) return ""; let cleaned = text.replace(/^%.*$/gm, '').replace(/(?<!\\)%.*/g, '').replace(/^\s*\[.*?\]/gm, ''); return cleaned.trim(); }
         function extractBracedContent(text) { let results = []; let braceCount = 0; let startIndex = -1; for (let i = 0; i < text.length; i++) { if (text[i] === '{') { if (braceCount === 0) startIndex = i + 1; braceCount++; } else if (text[i] === '}') { braceCount--; if (braceCount === 0 && startIndex !== -1) { results.push(text.substring(startIndex, i)); startIndex = -1; } } } return results; }
-        // --- CÁC HÀM XỬ LÝ ẢNH LATEX THÔNG MINH ---
-
-        // 1. Tạo mã HTML cho khung giữ chỗ (Placeholder)
+        
+        // --- CÁC HÀM XỬ LÝ ẢNH LATEX THÔNG MINH (ĐÃ SỬA LỖI DUPLICATE) ---
+        
         function getPlaceholderHTML(note = "Vị trí ảnh") {
             return `
 <div class="my-3 p-4 bg-gray-50 border-2 border-dashed border-blue-300 rounded-xl text-center cursor-pointer hover:bg-blue-50 transition-colors group relative" title="Click để dán ảnh">
@@ -824,95 +723,49 @@
 </div>\n`;
         }
 
-        // 2. Hàm tách nội dung trong ngoặc { } cân bằng (Stack)
         function extractNextBrace(text) {
             const start = text.indexOf('{');
             if (start === -1) return null;
-            
-            let depth = 1;
-            let end = -1;
+            let depth = 1; let end = -1;
             for (let i = start + 1; i < text.length; i++) {
-                if (text[i] === '{') depth++;
-                else if (text[i] === '}') depth--;
-                
-                if (depth === 0) {
-                    end = i;
-                    break;
-                }
+                if (text[i] === '{') depth++; else if (text[i] === '}') depth--;
+                if (depth === 0) { end = i; break; }
             }
-            
             if (end === -1) return null;
-            return {
-                content: text.substring(start + 1, end), // Nội dung bên trong {}
-                remaining: text.substring(end + 1),      // Phần còn lại sau }
-                fullMatch: text.substring(0, end + 1)    // Toàn bộ từ { đến }
-            };
+            return { content: text.substring(start + 1, end), remaining: text.substring(end + 1), fullMatch: text.substring(0, end + 1) };
         }
 
-        // 3. Hàm xử lý chính: Quét và thay thế các cấu trúc ảnh
         function processLatexImages(text) {
             if (!text) return "";
             let processed = String(text);
 
-            // A. Xử lý \immini[...]{Nội dung}{Hình}
-            // Logic: Lặp liên tục để tìm và thay thế
             while (processed.includes('\\immini')) {
                 const idx = processed.indexOf('\\immini');
                 let before = processed.substring(0, idx);
-                let after = processed.substring(idx + 7); // Bỏ qua chữ \immini
-
-                // Bỏ qua tùy chọn [...] nếu có
-                if (after.trim().startsWith('[')) {
-                    const closeBracket = after.indexOf(']');
-                    if (closeBracket !== -1) after = after.substring(closeBracket + 1);
-                }
-
-                // Lấy Argument 1 (Nội dung text)
-                const arg1 = extractNextBrace(after);
-                if (!arg1) break; // Lỗi cú pháp, thoát
-
-                // Lấy Argument 2 (Mã hình/TikZ)
-                const arg2 = extractNextBrace(arg1.remaining);
-                if (!arg2) break; // Lỗi cú pháp, thoát
-
-                // Ghép lại: Nội dung text + Placeholder
+                let after = processed.substring(idx + 7);
+                if (after.trim().startsWith('[')) { const closeBracket = after.indexOf(']'); if (closeBracket !== -1) after = after.substring(closeBracket + 1); }
+                const arg1 = extractNextBrace(after); if (!arg1) break;
+                const arg2 = extractNextBrace(arg1.remaining); if (!arg2) break;
                 processed = before + arg1.content + '\n' + getPlaceholderHTML("Ảnh từ \\immini") + arg2.remaining;
             }
 
-            // B. Xử lý \includegraphics[...]{path}
-            // Regex bắt: \includegraphics + [tùy chọn] + {đường dẫn}
-            processed = processed.replace(/\\includegraphics(?:\[.*?\])?\{.*?\}/g, () => {
-                return getPlaceholderHTML("Ảnh từ file gốc");
-            });
-
-            // C. Xử lý môi trường center chứa TikZ hoặc ảnh
-            // Regex bắt: \begin{center} ... (có chứa tikz hoặc includegraphics) ... \end{center}
+            processed = processed.replace(/\\includegraphics(?:\[.*?\])?\{.*?\}/g, () => getPlaceholderHTML("Ảnh từ file gốc"));
             const centerRegex = /\\begin\{center\}([\s\S]*?)\\end\{center\}/g;
             processed = processed.replace(centerRegex, (match, innerContent) => {
-                // Chỉ thay thế nếu bên trong center có dấu hiệu của ảnh
-                if (innerContent.includes('tikzpicture') || innerContent.includes('\\includegraphics') || innerContent.includes('\\image')) {
-                    return getPlaceholderHTML("Ảnh/TikZ canh giữa");
-                }
-                return match; // Giữ nguyên nếu là center văn bản thường
+                if (innerContent.includes('tikzpicture') || innerContent.includes('\\includegraphics') || innerContent.includes('\\image')) return getPlaceholderHTML("Ảnh/TikZ canh giữa");
+                return match;
             });
-
-            // D. Xử lý TikZpicture nằm trơ trọi (không trong center)
-            processed = processed.replace(/\\begin\{tikzpicture\}([\s\S]*?)\\end\{tikzpicture\}/g, () => {
-                return getPlaceholderHTML("Mã hình TikZ");
-            });
-
+            processed = processed.replace(/\\begin\{tikzpicture\}([\s\S]*?)\\end\{tikzpicture\}/g, () => getPlaceholderHTML("Mã hình TikZ"));
             return processed;
         }
+        
         window.handleTexUpload = (input) => {
             const file = input.files[0]; if (!file) return;
             const reader = new FileReader();
             
             reader.onload = function(e) { 
                 if (window.currentQIndex !== -1) saveCurrentQuestionToMemory();
-                
                 let content = e.target.result;
-                
-                // --- BƯỚC MỚI: Xóa các comment % trong LaTeX để tránh lỗi parse ---
                 content = content.replace(/(?<!\\)%.*/g, '');
 
                 const blockRegex = /\\begin\{(ex|bt|vd)\}([\s\S]*?)\\end\{\1\}/g;
@@ -920,79 +773,43 @@
                 
                 while ((match = blockRegex.exec(content)) !== null) {
                     let fullBody = match[2];
-                    
-                    // Xóa tùy chọn bài tập vd: [Mức 1]
                     fullBody = fullBody.replace(/^\s*\[.*?\]/, ''); 
-
                     let qType = 'essay'; 
                     let qData = { content: '', solution: '', options: [], statements: [], answer: '', point: 0 };
                     
-                    // Tách Lời giải (nếu có)
                     const loigiaiIndex = fullBody.lastIndexOf('\\loigiai');
                     let mainContent = fullBody;
-                    
                     if (loigiaiIndex !== -1) {
                         const afterLoigiai = fullBody.substring(loigiaiIndex);
-                        const braceContent = extractBracedContent(afterLoigiai); // Dùng hàm cũ của bạn
-                        if (braceContent.length > 0) {
-                            // --- XỬ LÝ ẢNH TRONG LỜI GIẢI ---
-                            qData.solution = processLatexImages(cleanLatex(braceContent[0]));
-                        }
+                        const braceContent = extractBracedContent(afterLoigiai);
+                        if (braceContent.length > 0) qData.solution = processLatexImages(cleanLatex(braceContent[0]));
                         mainContent = fullBody.substring(0, loigiaiIndex);
                     }
                     
-                    // Phân loại câu hỏi
                     if (mainContent.includes('\\choiceTF')) {
                         qType = 'tf'; 
                         const parts = mainContent.split('\\choiceTF'); 
-                        // --- XỬ LÝ ẢNH TRONG CÂU HỎI ---
                         qData.content = processLatexImages(cleanLatex(parts[0]));
-                        
                         const rawStatements = extractBracedContent(parts[1]);
-                        rawStatements.forEach(stmt => { 
-                            qData.statements.push({ 
-                                text: cleanLatex(stmt.replace('\\True', '').trim()), 
-                                isTrue: stmt.includes('\\True') 
-                            }); 
-                        });
-
+                        rawStatements.forEach(stmt => { qData.statements.push({ text: cleanLatex(stmt.replace('\\True', '').trim()), isTrue: stmt.includes('\\True') }); });
                     } else if (mainContent.includes('\\choice')) {
                         qType = 'mc'; 
                         const parts = mainContent.split('\\choice'); 
-                        // --- XỬ LÝ ẢNH TRONG CÂU HỎI ---
                         qData.content = processLatexImages(cleanLatex(parts[0]));
-                        
                         const rawOptions = extractBracedContent(parts[1]);
-                        rawOptions.forEach((opt, idx) => { 
-                            if (idx < 4) { 
-                                qData.options.push(cleanLatex(opt.replace('\\True', '').trim())); 
-                                if (opt.includes('\\True')) qData.correct = idx; 
-                            } 
-                        });
-
+                        rawOptions.forEach((opt, idx) => { if (idx < 4) { qData.options.push(cleanLatex(opt.replace('\\True', '').trim())); if (opt.includes('\\True')) qData.correct = idx; } });
                     } else if (mainContent.includes('\\shortans')) {
                         qType = 'short'; 
                         const parts = mainContent.split('\\shortans'); 
-                        // --- XỬ LÝ ẢNH TRONG CÂU HỎI ---
                         qData.content = processLatexImages(cleanLatex(parts[0]));
-                        
                         const ansContent = extractBracedContent(mainContent.substring(mainContent.indexOf('\\shortans')));
                         if(ansContent.length > 0) qData.answer = cleanLatex(ansContent[0]);
-
                     } else { 
-                        qType = 'essay'; 
-                        // --- XỬ LÝ ẢNH TRONG CÂU HỎI ---
-                        qData.content = processLatexImages(cleanLatex(mainContent));
+                        qType = 'essay'; qData.content = processLatexImages(cleanLatex(mainContent));
                     }
-                    
-                    window.questions.push({ type: qType, ...qData }); 
-                    count++;
+                    window.questions.push({ type: qType, ...qData }); count++;
                 }
-                
-                sortQuestionsByType();
-                renderPreviewList();
-                window.showToast(`Đã nhập ${count} câu hỏi!`);
-                input.value = ""; // Reset input
+                sortQuestionsByType(); renderPreviewList(); window.showToast(`Đã nhập ${count} câu hỏi!`); input.value = "";
             };
             reader.readAsText(file);
         }
@@ -1047,43 +864,21 @@
             if (!currentExamId) return;
             const qRes = query(collection(db, "results"), where("examId", "==", currentExamId));
             const snapRes = await getDocs(qRes);
-            
-            // Process raw results to group by student and find highest score
             statsMap = {}; 
             snapRes.forEach(doc => {
                 const r = doc.data();
-                // Use studentId (uid) as key. If unavailable, fallback to name (not recommended but fallback)
                 const key = r.studentId || r.studentName;
-                
-                if (!statsMap[key]) {
-                    statsMap[key] = { 
-                        ...r, 
-                        attempts: [r], 
-                        bestScore: r.score 
-                    };
-                } else {
-                    statsMap[key].attempts.push(r);
-                    if (r.score > statsMap[key].bestScore) {
-                        statsMap[key].bestScore = r.score; // Update best score
-                        // Update other display fields to match best attempt if desired, or keep latest?
-                        // Usually stats show Best Score but Last Attempt status. Let's show Best Score in table.
-                        statsMap[key].score = r.score; 
-                    }
-                }
+                if (!statsMap[key]) { statsMap[key] = { ...r, attempts: [r], bestScore: r.score }; } 
+                else { statsMap[key].attempts.push(r); if (r.score > statsMap[key].bestScore) { statsMap[key].bestScore = r.score; statsMap[key].score = r.score; } }
             });
-
             renderStatsDashboard();
         };
 
         window.renderStatsDashboard = () => {
-            // Use processed map
             const uniqueStudents = Object.values(statsMap);
             const totalSubs = uniqueStudents.length;
-            
-            let totalScore = 0;
-            uniqueStudents.forEach(r => totalScore += r.bestScore);
+            let totalScore = 0; uniqueStudents.forEach(r => totalScore += r.bestScore);
             const avg = totalSubs > 0 ? (totalScore / totalSubs).toFixed(2) : 0;
-
             const scores = uniqueStudents.map(r => r.bestScore);
             const maxScore = scores.length > 0 ? Math.max(...scores) : 0;
             const minScore = scores.length > 0 ? Math.min(...scores) : 0;
@@ -1093,25 +888,12 @@
             document.getElementById('statMaxScore').textContent = maxScore;
             document.getElementById('statMinScore').textContent = minScore;
 
-            // Chart
             const spectrum = Array(11).fill(0);
             scores.forEach(s => spectrum[Math.floor(s)]++);
-            
             const ctx = document.getElementById('scoreChart').getContext('2d');
             if(window.myChart) window.myChart.destroy();
-            window.myChart = new Chart(ctx, {
-                type: 'bar',
-                data: {
-                    labels: ['0-1', '1-2', '2-3', '3-4', '4-5', '5-6', '6-7', '7-8', '8-9', '9-10', '10'],
-                    datasets: [{ label: 'Số lượng', data: spectrum, backgroundColor: '#3B82F6', borderRadius: 4 }]
-                },
-                options: { responsive: true, maintainAspectRatio: false }
-            });
+            window.myChart = new Chart(ctx, { type: 'bar', data: { labels: ['0-1', '1-2', '2-3', '3-4', '4-5', '5-6', '6-7', '7-8', '8-9', '9-10', '10'], datasets: [{ label: 'Số lượng', data: spectrum, backgroundColor: '#3B82F6', borderRadius: 4 }] }, options: { responsive: true, maintainAspectRatio: false } });
 
-            // Question Analysis (Simple agg based on all attempts or best? Let's use ALL attempts for q-analysis as it reflects difficulty better)
-            // Re-fetch all raw results for this specific calc if needed, or just iterate statsMap.attempts
-            // For simplicity, we'll just use the main "best" entry or iterate all attempts if available in scope.
-            // Let's iterate ALL attempts stored in map
             const qStats = window.questions.map(() => ({ correct: 0, total: 0 }));
             Object.values(statsMap).forEach(student => {
                 student.attempts.forEach(attempt => {
@@ -1123,11 +905,7 @@
                                 let isCorrect = false;
                                 if (q.type === 'mc' && u === q.correct) isCorrect = true;
                                 else if (q.type === 'short' && q.answer && String(u).trim().toLowerCase() === String(q.answer).trim().toLowerCase()) isCorrect = true;
-                                else if (q.type === 'tf') {
-                                    let matches = 0;
-                                    if(Array.isArray(u)) q.statements.forEach((s, i) => { if(u[i]===s.isTrue) matches++; });
-                                    if(matches === 4) isCorrect = true;
-                                }
+                                else if (q.type === 'tf') { let matches = 0; if(Array.isArray(u)) q.statements.forEach((s, i) => { if(u[i]===s.isTrue) matches++; }); if(matches === 4) isCorrect = true; }
                                 if (isCorrect) qStats[idx].correct++;
                             }
                         });
@@ -1142,7 +920,6 @@
                 const colorClass = percent > 80 ? 'bg-green-500' : (percent > 50 ? 'bg-yellow-500' : 'bg-red-500');
                 qListDiv.innerHTML += `<div class="flex items-center gap-2 text-xs"><span class="w-10 font-bold text-gray-500">Câu ${idx+1}</span><div class="flex-1 progress-bar-bg"><div class="progress-bar-fill ${colorClass}" style="width: ${percent}%"></div></div><span class="w-8 text-right font-bold text-gray-700">${percent}%</span></div>`;
             });
-
             renderStatsTable();
         };
 
@@ -1153,20 +930,13 @@
         };
 
         window.renderStatsTable = (filterType = 'all') => {
-            const tbody = document.getElementById('statsTableBody');
-            tbody.innerHTML = '';
-            
+            const tbody = document.getElementById('statsTableBody'); tbody.innerHTML = '';
             let dataToShow = Object.values(statsMap);
             const allowedClassId = document.getElementById('settingClassSelect').value;
 
             if (filterType === 'class' && allowedClassId && classStudentList.length > 0) {
-                // Merge logic: Show all students in class. If they did exam, show stats. If not, show "Chưa làm".
                 dataToShow = classStudentList.map(st => {
-                    // Find by student ID if possible, or name match
-                    // Since classStudentList might not have UID if imported via excel without auth sync, we use loose match.
-                    // Ideally match by username/email.
                     const match = dataToShow.find(d => (d.studentName === st.name) || (st.username && d.studentName.includes(st.username)));
-                    
                     if (match) return { ...match, status: 'Đã làm' };
                     return { studentName: st.name, score: '--', submittedAt: null, status: 'Chưa làm', attempts: [] };
                 });
@@ -1174,70 +944,43 @@
 
             const sortType = document.getElementById('sortStats').value;
             dataToShow.sort((a, b) => {
-                const sA = parseFloat(a.score) || 0;
-                const sB = parseFloat(b.score) || 0;
-                if (sortType === 'score_desc') return sB - sA;
-                if (sortType === 'score_asc') return sA - sB;
-                if (sortType === 'time_desc') return new Date(b.submittedAt || 0) - new Date(a.submittedAt || 0);
+                const sA = parseFloat(a.score) || 0; const sB = parseFloat(b.score) || 0;
+                if (sortType === 'score_desc') return sB - sA; if (sortType === 'score_asc') return sA - sB; if (sortType === 'time_desc') return new Date(b.submittedAt || 0) - new Date(a.submittedAt || 0);
             });
 
             dataToShow.forEach(r => {
                 const dateStr = r.submittedAt ? new Date(r.submittedAt).toLocaleString('vi-VN') : '--';
                 const scoreClass = r.status === 'Chưa làm' ? 'text-gray-400' : (r.score >= 8 ? 'text-green-600' : (r.score >= 5 ? 'text-blue-600' : 'text-red-500'));
                 const attemptCount = r.attempts ? r.attempts.length : 0;
-                
-                // Name clickable if attempts > 0
-                const nameHtml = attemptCount > 0 
-                    ? `<button onclick="showStudentHistory('${r.studentName}')" class="font-bold text-blue-600 hover:underline">${r.studentName}</button>`
-                    : r.studentName;
-
-                const row = `<tr class="bg-white border-b hover:bg-gray-50">
-                    <td class="px-6 py-3 font-medium text-gray-900">${nameHtml} <span class="text-xs text-gray-400 ml-1">${r.status || ''}</span></td>
-                    <td class="px-6 py-3 text-center font-bold ${scoreClass}">${r.score}</td>
-                    <td class="px-6 py-3 text-center text-xs text-gray-500">${attemptCount}</td>
-                    <td class="px-6 py-3 text-right text-xs text-gray-500">${dateStr}</td>
-                </tr>`;
-                tbody.innerHTML += row;
+                const nameHtml = attemptCount > 0 ? `<button onclick="showStudentHistory('${r.studentName}')" class="font-bold text-blue-600 hover:underline">${r.studentName}</button>` : r.studentName;
+                tbody.innerHTML += `<tr class="bg-white border-b hover:bg-gray-50"><td class="px-6 py-3 font-medium text-gray-900">${nameHtml} <span class="text-xs text-gray-400 ml-1">${r.status || ''}</span></td><td class="px-6 py-3 text-center font-bold ${scoreClass}">${r.score}</td><td class="px-6 py-3 text-center text-xs text-gray-500">${attemptCount}</td><td class="px-6 py-3 text-right text-xs text-gray-500">${dateStr}</td></tr>`;
             });
         };
         
         window.showStudentHistory = (studentName) => {
             const studentData = Object.values(statsMap).find(s => s.studentName === studentName);
             if (!studentData || !studentData.attempts) return;
-
             const modal = document.getElementById('historyModal');
             const content = document.getElementById('histModalContent');
             const title = document.getElementById('histModalTitle');
-            
             title.textContent = `Lịch sử: ${studentName}`;
             content.innerHTML = `<table class="w-full text-sm text-left text-gray-600"><thead class="bg-gray-100"><tr><th class="p-2">Lần</th><th class="p-2 text-center">Điểm</th><th class="p-2 text-right">Ngày nộp</th></tr></thead><tbody class="divide-y divide-gray-100"></tbody></table>`;
-            
             const tbody = content.querySelector('tbody');
-            // Sort attempts by date desc
             const sortedAttempts = [...studentData.attempts].sort((a,b) => new Date(b.submittedAt) - new Date(a.submittedAt));
-            
-            sortedAttempts.forEach((att, idx) => {
-                const date = new Date(att.submittedAt).toLocaleString('vi-VN');
-                tbody.innerHTML += `<tr><td class="p-2">#${sortedAttempts.length - idx}</td><td class="p-2 text-center font-bold text-blue-600">${att.score}</td><td class="p-2 text-right text-xs">${date}</td></tr>`;
-            });
-
-            modal.classList.remove('opacity-0', 'pointer-events-none');
-            modal.querySelector('div').classList.add('scale-100');
+            sortedAttempts.forEach((att, idx) => { tbody.innerHTML += `<tr><td class="p-2">#${sortedAttempts.length - idx}</td><td class="p-2 text-center font-bold text-blue-600">${att.score}</td><td class="p-2 text-right text-xs">${new Date(att.submittedAt).toLocaleString('vi-VN')}</td></tr>`; });
+            modal.classList.remove('opacity-0', 'pointer-events-none'); modal.querySelector('div').classList.add('scale-100');
         };
         window.closeHistoryModal = () => { document.getElementById('historyModal').classList.add('opacity-0', 'pointer-events-none'); };
 
-        // --- NEW: EXPORT TO EXCEL ---
         window.exportToExcel = () => {
             if (Object.keys(statsMap).length === 0) return window.showToast("Chưa có dữ liệu để xuất!", "error");
             const wb = XLSX.utils.book_new();
             const dataSummary = Object.values(statsMap).map((r, i) => ({ "STT": i + 1, "Họ tên": r.studentName, "Điểm cao nhất": r.bestScore, "Số lần thi": r.attempts.length, "Ngày nộp cuối": new Date(r.submittedAt).toLocaleString('vi-VN') }));
             const wsSummary = XLSX.utils.json_to_sheet(dataSummary);
             XLSX.utils.book_append_sheet(wb, wsSummary, "Tong_Hop");
-            const fileName = `KetQua_${document.getElementById('settingTitle').value.replace(/\s/g, '_')}.xlsx`;
-            XLSX.writeFile(wb, fileName);
+            XLSX.writeFile(wb, `KetQua_${document.getElementById('settingTitle').value.replace(/\s/g, '_')}.xlsx`);
         };
 
-        // --- HELPERS ---
         window.switchView = (viewId) => {
             document.getElementById('view-settings').classList.add('hidden');
             document.getElementById('view-editor').classList.add('hidden');
