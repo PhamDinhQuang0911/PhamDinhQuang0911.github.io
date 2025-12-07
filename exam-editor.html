@@ -811,46 +811,188 @@
 
         function cleanLatex(text) { if (!text) return ""; let cleaned = text.replace(/^%.*$/gm, '').replace(/(?<!\\)%.*/g, '').replace(/^\s*\[.*?\]/gm, ''); return cleaned.trim(); }
         function extractBracedContent(text) { let results = []; let braceCount = 0; let startIndex = -1; for (let i = 0; i < text.length; i++) { if (text[i] === '{') { if (braceCount === 0) startIndex = i + 1; braceCount++; } else if (text[i] === '}') { braceCount--; if (braceCount === 0 && startIndex !== -1) { results.push(text.substring(startIndex, i)); startIndex = -1; } } } return results; }
+        // --- CÁC HÀM XỬ LÝ ẢNH LATEX THÔNG MINH ---
 
+        // 1. Tạo mã HTML cho khung giữ chỗ (Placeholder)
+        function getPlaceholderHTML(note = "Vị trí ảnh") {
+            return `
+<div class="my-3 p-4 bg-gray-50 border-2 border-dashed border-blue-300 rounded-xl text-center cursor-pointer hover:bg-blue-50 transition-colors group relative" title="Click để dán ảnh">
+    <div class="text-blue-500 text-3xl mb-2"><i class="fa-regular fa-image"></i></div>
+    <div class="text-xs font-bold text-gray-500 uppercase">${note}</div>
+    <div class="text-[10px] text-gray-400 mt-1">Click vào đây & nhấn Ctrl+V để dán ảnh</div>
+    <div class="absolute inset-0 z-10" onclick="this.parentElement.focus(); document.execCommand('selectAll', false, null);"></div>
+</div>\n`;
+        }
+
+        // 2. Hàm tách nội dung trong ngoặc { } cân bằng (Stack)
+        function extractNextBrace(text) {
+            const start = text.indexOf('{');
+            if (start === -1) return null;
+            
+            let depth = 1;
+            let end = -1;
+            for (let i = start + 1; i < text.length; i++) {
+                if (text[i] === '{') depth++;
+                else if (text[i] === '}') depth--;
+                
+                if (depth === 0) {
+                    end = i;
+                    break;
+                }
+            }
+            
+            if (end === -1) return null;
+            return {
+                content: text.substring(start + 1, end), // Nội dung bên trong {}
+                remaining: text.substring(end + 1),      // Phần còn lại sau }
+                fullMatch: text.substring(0, end + 1)    // Toàn bộ từ { đến }
+            };
+        }
+
+        // 3. Hàm xử lý chính: Quét và thay thế các cấu trúc ảnh
+        function processLatexImages(text) {
+            if (!text) return "";
+            let processed = String(text);
+
+            // A. Xử lý \immini[...]{Nội dung}{Hình}
+            // Logic: Lặp liên tục để tìm và thay thế
+            while (processed.includes('\\immini')) {
+                const idx = processed.indexOf('\\immini');
+                let before = processed.substring(0, idx);
+                let after = processed.substring(idx + 7); // Bỏ qua chữ \immini
+
+                // Bỏ qua tùy chọn [...] nếu có
+                if (after.trim().startsWith('[')) {
+                    const closeBracket = after.indexOf(']');
+                    if (closeBracket !== -1) after = after.substring(closeBracket + 1);
+                }
+
+                // Lấy Argument 1 (Nội dung text)
+                const arg1 = extractNextBrace(after);
+                if (!arg1) break; // Lỗi cú pháp, thoát
+
+                // Lấy Argument 2 (Mã hình/TikZ)
+                const arg2 = extractNextBrace(arg1.remaining);
+                if (!arg2) break; // Lỗi cú pháp, thoát
+
+                // Ghép lại: Nội dung text + Placeholder
+                processed = before + arg1.content + '\n' + getPlaceholderHTML("Ảnh từ \\immini") + arg2.remaining;
+            }
+
+            // B. Xử lý \includegraphics[...]{path}
+            // Regex bắt: \includegraphics + [tùy chọn] + {đường dẫn}
+            processed = processed.replace(/\\includegraphics(?:\[.*?\])?\{.*?\}/g, () => {
+                return getPlaceholderHTML("Ảnh từ file gốc");
+            });
+
+            // C. Xử lý môi trường center chứa TikZ hoặc ảnh
+            // Regex bắt: \begin{center} ... (có chứa tikz hoặc includegraphics) ... \end{center}
+            const centerRegex = /\\begin\{center\}([\s\S]*?)\\end\{center\}/g;
+            processed = processed.replace(centerRegex, (match, innerContent) => {
+                // Chỉ thay thế nếu bên trong center có dấu hiệu của ảnh
+                if (innerContent.includes('tikzpicture') || innerContent.includes('\\includegraphics') || innerContent.includes('\\image')) {
+                    return getPlaceholderHTML("Ảnh/TikZ canh giữa");
+                }
+                return match; // Giữ nguyên nếu là center văn bản thường
+            });
+
+            // D. Xử lý TikZpicture nằm trơ trọi (không trong center)
+            processed = processed.replace(/\\begin\{tikzpicture\}([\s\S]*?)\\end\{tikzpicture\}/g, () => {
+                return getPlaceholderHTML("Mã hình TikZ");
+            });
+
+            return processed;
+        }
         window.handleTexUpload = (input) => {
             const file = input.files[0]; if (!file) return;
             const reader = new FileReader();
+            
             reader.onload = function(e) { 
                 if (window.currentQIndex !== -1) saveCurrentQuestionToMemory();
-                const content = e.target.result;
+                
+                let content = e.target.result;
+                
+                // --- BƯỚC MỚI: Xóa các comment % trong LaTeX để tránh lỗi parse ---
+                content = content.replace(/(?<!\\)%.*/g, '');
+
                 const blockRegex = /\\begin\{(ex|bt|vd)\}([\s\S]*?)\\end\{\1\}/g;
                 let match, count = 0;
+                
                 while ((match = blockRegex.exec(content)) !== null) {
-                    let fullBody = match[2].replace(/^\s*\[.*?\]/, ''); 
+                    let fullBody = match[2];
+                    
+                    // Xóa tùy chọn bài tập vd: [Mức 1]
+                    fullBody = fullBody.replace(/^\s*\[.*?\]/, ''); 
+
                     let qType = 'essay'; 
                     let qData = { content: '', solution: '', options: [], statements: [], answer: '', point: 0 };
+                    
+                    // Tách Lời giải (nếu có)
                     const loigiaiIndex = fullBody.lastIndexOf('\\loigiai');
                     let mainContent = fullBody;
+                    
                     if (loigiaiIndex !== -1) {
                         const afterLoigiai = fullBody.substring(loigiaiIndex);
-                        const braceContent = extractBracedContent(afterLoigiai);
-                        if (braceContent.length > 0) qData.solution = cleanLatex(braceContent[0]);
+                        const braceContent = extractBracedContent(afterLoigiai); // Dùng hàm cũ của bạn
+                        if (braceContent.length > 0) {
+                            // --- XỬ LÝ ẢNH TRONG LỜI GIẢI ---
+                            qData.solution = processLatexImages(cleanLatex(braceContent[0]));
+                        }
                         mainContent = fullBody.substring(0, loigiaiIndex);
                     }
+                    
+                    // Phân loại câu hỏi
                     if (mainContent.includes('\\choiceTF')) {
-                        qType = 'tf'; const parts = mainContent.split('\\choiceTF'); qData.content = cleanLatex(parts[0]);
+                        qType = 'tf'; 
+                        const parts = mainContent.split('\\choiceTF'); 
+                        // --- XỬ LÝ ẢNH TRONG CÂU HỎI ---
+                        qData.content = processLatexImages(cleanLatex(parts[0]));
+                        
                         const rawStatements = extractBracedContent(parts[1]);
-                        rawStatements.forEach(stmt => { qData.statements.push({ text: cleanLatex(stmt.replace('\\True', '').trim()), isTrue: stmt.includes('\\True') }); });
+                        rawStatements.forEach(stmt => { 
+                            qData.statements.push({ 
+                                text: cleanLatex(stmt.replace('\\True', '').trim()), 
+                                isTrue: stmt.includes('\\True') 
+                            }); 
+                        });
+
                     } else if (mainContent.includes('\\choice')) {
-                        qType = 'mc'; const parts = mainContent.split('\\choice'); qData.content = cleanLatex(parts[0]);
+                        qType = 'mc'; 
+                        const parts = mainContent.split('\\choice'); 
+                        // --- XỬ LÝ ẢNH TRONG CÂU HỎI ---
+                        qData.content = processLatexImages(cleanLatex(parts[0]));
+                        
                         const rawOptions = extractBracedContent(parts[1]);
-                        rawOptions.forEach((opt, idx) => { if (idx < 4) { qData.options.push(cleanLatex(opt.replace('\\True', '').trim())); if (opt.includes('\\True')) qData.correct = idx; } });
+                        rawOptions.forEach((opt, idx) => { 
+                            if (idx < 4) { 
+                                qData.options.push(cleanLatex(opt.replace('\\True', '').trim())); 
+                                if (opt.includes('\\True')) qData.correct = idx; 
+                            } 
+                        });
+
                     } else if (mainContent.includes('\\shortans')) {
-                        qType = 'short'; const parts = mainContent.split('\\shortans'); qData.content = cleanLatex(parts[0]);
+                        qType = 'short'; 
+                        const parts = mainContent.split('\\shortans'); 
+                        // --- XỬ LÝ ẢNH TRONG CÂU HỎI ---
+                        qData.content = processLatexImages(cleanLatex(parts[0]));
+                        
                         const ansContent = extractBracedContent(mainContent.substring(mainContent.indexOf('\\shortans')));
-                        if(ansContent.length>0) qData.answer = cleanLatex(ansContent[0]);
-                    } else { qType = 'essay'; qData.content = cleanLatex(mainContent); }
-                    window.questions.push({ type: qType, ...qData }); count++;
+                        if(ansContent.length > 0) qData.answer = cleanLatex(ansContent[0]);
+
+                    } else { 
+                        qType = 'essay'; 
+                        // --- XỬ LÝ ẢNH TRONG CÂU HỎI ---
+                        qData.content = processLatexImages(cleanLatex(mainContent));
+                    }
+                    
+                    window.questions.push({ type: qType, ...qData }); 
+                    count++;
                 }
+                
                 sortQuestionsByType();
                 renderPreviewList();
                 window.showToast(`Đã nhập ${count} câu hỏi!`);
-                input.value = "";
+                input.value = ""; // Reset input
             };
             reader.readAsText(file);
         }
