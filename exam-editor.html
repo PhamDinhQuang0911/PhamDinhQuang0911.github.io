@@ -459,8 +459,9 @@
         function formatContent(text) {
             if (text === null || text === undefined) return "";
             let processed = processNestedTikz(text);
-            // Regex cho phép xuống dòng trong công thức toán
+            // SỬA LỖI: Regex [\s\S] cho phép bắt công thức toán có xuống dòng
             const regex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?:\$[\s\S]*?\$)|<script type="text\/tikz">[\s\S]*?<\/script>|<div class="image-placeholder".*?<\/div>|<img.*?>)/g;
+            
             const parts = processed.split(regex);
             return parts.map(part => {
                 if (part.includes('<script type="text/tikz">') || 
@@ -468,8 +469,12 @@
                     part.includes('<img') || 
                     part.trim().startsWith('$') || 
                     part.trim().startsWith('\\(') || 
-                    part.trim().startsWith('\\[')) return part;
-                else return part.replace(/\\\\/g, '<br>').replace(/\n/g, '<br>');
+                    part.trim().startsWith('\\[')) {
+                    return part;
+                }
+                else {
+                    return part.replace(/\\\\/g, '<br>').replace(/\n/g, '<br>');
+                }
             }).join('');
         }
 
@@ -594,64 +599,44 @@
             if (!text) return "";
             let processed = String(text);
             
-            // --- 1. Xử lý \immini (Đã sửa lỗi nhận diện [thm]) ---
+            // 1. Xử lý \immini
             while (processed.includes('\\immini')) {
                 const idx = processed.indexOf('\\immini'); 
                 let before = processed.substring(0, idx); 
-                
-                // Lấy phần sau lệnh \immini để kiểm tra
                 let tempAfter = processed.substring(idx + 7).trim();
 
-                // Kiểm tra và bỏ qua tùy chọn [...] ví dụ [thm]
                 if (tempAfter.startsWith('[')) { 
-                    const closeBracket = tempAfter.indexOf(']'); 
-                    if (closeBracket !== -1) {
-                        tempAfter = tempAfter.substring(closeBracket + 1).trim(); 
-                    }
+                    const cb = tempAfter.indexOf(']'); 
+                    if (cb !== -1) tempAfter = tempAfter.substring(cb + 1).trim(); 
                 }
 
-                // Lấy Argument 1: Nội dung văn bản
-                const arg1 = extractNextBrace(tempAfter); 
-                if (!arg1) break; 
+                const arg1 = extractNextBrace(tempAfter); if (!arg1) break; 
+                const arg2 = extractNextBrace(arg1.remaining); if (!arg2) break;
 
-                // Lấy Argument 2: Hình ảnh
-                const arg2 = extractNextBrace(arg1.remaining); 
-                if (!arg2) break;
-
-                // Tìm lệnh includegraphics trong Argument 2
                 const imgMatch = arg2.content.match(/\\includegraphics(?:\[.*?\])?\{(.*?)\}/);
-                let placeholder = ""; 
-                
+                let ph = ""; 
                 if (imgMatch) { 
-                    const uniqueId = `img_${Date.now()}_${Math.random().toString(36).substr(2,9)}`; 
-                    // Lưu vào hàng đợi
-                    pendingImageUploads.push({
-                        id: uniqueId, 
-                        originalPath: imgMatch[1], 
-                        questionIdx: questionIndex
-                    }); 
-                    placeholder = getPlaceholderHTML(uniqueId, "Ảnh minh họa (immini)"); 
+                    const uid = `img_${Date.now()}_${Math.random().toString(36).substr(2,9)}`; 
+                    pendingImageUploads.push({id:uid, originalPath:imgMatch[1], questionIdx:questionIndex}); 
+                    ph = getPlaceholderHTML(uid, "Ảnh từ \\immini"); 
                 } else { 
-                    // Nếu immini nhưng dùng TikZ hoặc lệnh khác
-                    placeholder = getPlaceholderHTML("", "Vị trí hình (Không phải ảnh)"); 
+                    ph = getPlaceholderHTML("", "Vị trí hình"); 
                 }
-
-                // Ghép chuỗi: Văn bản + Khung ảnh + Phần còn lại
-                processed = before + arg1.content + '\n' + placeholder + arg2.remaining;
+                processed = before + arg1.content + '\n' + ph + arg2.remaining;
             }
 
-            // --- 2. Xử lý \begin{center} ... \end{center} ---
-            // Regex bắt trọn vẹn khối center chứa ảnh
+            // 2. Xử lý \begin{center} (SỬA LỖI THỪA KÝ TỰ)
+            // Regex này tìm từ begin đến end, bất chấp xuống dòng
             const centerRegex = /\\begin\{center\}\s*([\s\S]*?)\\includegraphics(?:\[.*?\])?\{(.*?)\}([\s\S]*?)\\end\{center\}/g;
             
             processed = processed.replace(centerRegex, (match, preText, imgPath, postText) => {
                  const uid = `img_${Date.now()}_${Math.random().toString(36).substr(2,9)}`; 
                  pendingImageUploads.push({id:uid, originalPath:imgPath, questionIdx:questionIndex}); 
-                 // Thay thế cả khối center bằng khung ảnh
+                 // Thay thế TOÀN BỘ bằng placeholder, KHÔNG giữ lại preText/postText để tránh rác
                  return getPlaceholderHTML(uid, "Ảnh canh giữa");
             });
             
-            // --- 3. Xử lý \includegraphics đứng lẻ ---
+            // 3. Xử lý \includegraphics đứng lẻ
             processed = processed.replace(/\\includegraphics(?:\[.*?\])?\{(.*?)\}/g, (m, path) => {
                 const uid = `img_${Date.now()}_${Math.random().toString(36).substr(2,9)}`; 
                 pendingImageUploads.push({id:uid, originalPath:path, questionIdx:questionIndex}); 
@@ -699,70 +684,51 @@
 
         // Handle batch file selection
         // Xử lý sự kiện khi chọn file ảnh từ máy tính
+        // SỬA LỖI: Dùng Regex linh hoạt để tìm và thay thế placeholder bằng ảnh thật
         document.getElementById('batchFileInput').addEventListener('change', async (e) => {
             const file = e.target.files[0]; 
             if (!file || !currentBatchUploadId) return;
 
             try {
                 window.showToast("Đang tải ảnh lên...", "info"); 
+                const b = await compressImage(file); 
+                const n = `images/batch_${Date.now()}_${Math.floor(Math.random()*1000)}.jpg`; 
+                const r = ref(storage, n); 
+                await uploadBytes(r, b); 
+                const url = await getDownloadURL(r);
                 
-                // 1. Nén và Upload ảnh
-                const compressedBlob = await compressImage(file); 
-                const fileName = `images/batch_${Date.now()}_${Math.floor(Math.random()*1000)}.jpg`; 
-                const storageRef = ref(storage, fileName); 
-                await uploadBytes(storageRef, compressedBlob); 
-                const url = await getDownloadURL(storageRef);
+                // Mã HTML ảnh mới
+                const imgTag = `<div class="flex justify-center my-2"><img src="${url}" class="max-w-full h-auto rounded-lg shadow-md" style="max-height:300px;"></div>`;
                 
-                // 2. Tạo mã HTML thẻ ảnh để thay thế
-                const imgTag = `<div class="flex justify-center my-2"><img src="${url}" class="max-w-full h-auto rounded-lg shadow-md border border-gray-200" style="max-height:350px;"></div>`;
-                
-                // 3. Regex tìm thẻ DIV placeholder dựa trên ID
-                // [\s\S]*? cho phép tìm kiếm qua nhiều dòng
+                // REGEX MỚI: Tìm div placeholder dựa trên data-id, chấp nhận mọi ký tự xung quanh
                 const placeholderRegex = new RegExp(`<div[^>]*data-id=["']${currentBatchUploadId}["'][^>]*>[\\s\\S]*?<\\/div>`, 'gi');
 
                 let found = false;
-                // Quét qua toàn bộ câu hỏi để thay thế
                 for (let i = 0; i < window.questions.length; i++) {
                     const q = window.questions[i];
-                    
-                    // Thay thế trong nội dung câu hỏi
                     if (q.content && q.content.includes(currentBatchUploadId)) { 
                         q.content = q.content.replace(placeholderRegex, imgTag); 
                         found = true; 
                     }
-                    // Thay thế trong lời giải
                     if (q.solution && q.solution.includes(currentBatchUploadId)) { 
                         q.solution = q.solution.replace(placeholderRegex, imgTag); 
                         found = true; 
                     }
                 }
 
-                if (!found) {
-                    console.warn("Không tìm thấy placeholder ID:", currentBatchUploadId);
-                }
-
-                // 4. Cập nhật giao diện
-                // Xóa khỏi danh sách chờ (nếu có)
                 pendingImageUploads = pendingImageUploads.filter(item => item.id !== currentBatchUploadId);
                 
-                renderBatchImageModal(); // Cập nhật lại list trong modal
+                renderBatchImageModal(); 
+                if (window.currentQIndex !== -1) loadQuestionToEditor(window.currentQIndex); 
+                renderPreviewList(); 
+                window.showToast("Thay thế ảnh thành công!", "success");
                 
-                // Cập nhật vùng soạn thảo nếu đang mở câu hỏi đó
-                if (window.currentQIndex !== -1) {
-                    loadQuestionToEditor(window.currentQIndex); 
-                }
-                
-                renderPreviewList(); // Cập nhật danh sách bên trái
-                window.showToast("Đã tải ảnh lên thành công!", "success");
-                
-                // Nếu hết ảnh cần tải thì đóng modal
                 if (pendingImageUploads.length === 0) closeBatchImageModal();
-
             } catch (err) { 
                 console.error(err); 
-                window.showToast("Lỗi tải ảnh: " + err.message, "error"); 
+                window.showToast("Lỗi: " + err.message, "error"); 
             } finally { 
-                e.target.value = ''; // Reset input để chọn lại file khác được
+                e.target.value = ''; 
             }
         });
 
