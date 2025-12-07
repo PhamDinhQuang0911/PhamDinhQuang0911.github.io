@@ -294,59 +294,68 @@
         }
 
         function processNestedTikz(text) {
-            if (!text) return ""; 
-            let res = "", rem = String(text);
-            while (true) {
-                const start = rem.indexOf("\\begin{tikzpicture}"); 
-                if (start === -1) { res += rem; break; }
-                res += rem.substring(0, start); rem = rem.substring(start);
-                let d = 0, end = -1, pos = "\\begin{tikzpicture}".length; d = 1;
-                while (d > 0) { 
-                    const no = rem.indexOf("\\begin{tikzpicture}", pos);
-                    const nc = rem.indexOf("\\end{tikzpicture}", pos); 
-                    if (nc === -1) { end = rem.length; d = 0; break; } 
-                    if (no !== -1 && no < nc) { d++; pos = no + 19; } 
-                    else { d--; pos = nc + 17; if (d === 0) end = pos; } 
-                }
-                let raw = rem.substring(0, end);
-                let final = cleanTikzCode(raw); 
-                if (!final.includes("\\usetikzlibrary")) final = "\\usetikzlibrary{calc,intersections,arrows.meta}\n" + final;
-                res += `<div class="flex justify-center my-4 overflow-x-auto"><script type="text/tikz">${final}<\/script></div>`; 
-                rem = rem.substring(end);
+        if (!text) return ""; 
+        let res = "", rem = String(text);
+        while (true) {
+            const start = rem.indexOf("\\begin{tikzpicture}"); 
+            if (start === -1) { res += rem; break; }
+            
+            res += rem.substring(0, start); 
+            rem = rem.substring(start);
+            
+            let d = 0, end = -1, pos = "\\begin{tikzpicture}".length; d = 1;
+            while (d > 0) { 
+                const no = rem.indexOf("\\begin{tikzpicture}", pos);
+                const nc = rem.indexOf("\\end{tikzpicture}", pos); 
+                if (nc === -1) { end = rem.length; d = 0; break; } 
+                if (no !== -1 && no < nc) { d++; pos = no + 19; } 
+                else { d--; pos = nc + 17; if (d === 0) end = pos; } 
             }
-            return res;
+            
+            let raw = rem.substring(0, end);
+            let final = cleanTikzCode(raw); 
+            if (!final.includes("\\usetikzlibrary")) final = "\\usetikzlibrary{calc,intersections,arrows.meta}\n" + final;
+            
+            res += `<div class="flex justify-center my-4 overflow-x-auto"><script type="text/tikz">${final}<\/script></div>`; 
+            rem = rem.substring(end);
         }
+        return res;
+    }
 
         // HÀM HIỂN THỊ NỘI DUNG MỚI (NHẬN DIỆN ẢNH & DỌN RÁC)
         window.formatContent = (text) => {
-            if (text === null || text === undefined) return "";
-            
-            let processed = processNestedTikz(text);
-            
-            // Xóa ký tự rác
-            processed = processed.replace(/^\s*\}\s*$/gm, ''); 
-            processed = processed.replace(/\}\s*$/g, '');
+        if (text === null || text === undefined) return "";
+        
+        // 1. Xử lý TikZ
+        let processed = processNestedTikz(text);
+        
+        // 2. Dọn rác văn bản (xóa các dấu } thừa)
+        processed = processed.replace(/^\s*\}\s*$/gm, ''); 
+        processed = processed.replace(/\}\s*$/g, '');
 
-            // Regex bao gồm cả các thẻ ảnh do Editor tạo ra
-            const regex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?:\$[\s\S]*?\$)|<script type="text\/tikz">[\s\S]*?<\/script>|<div[^>]*class=["']group relative[^>]*>[\s\S]*?<\/div>|<img.*?>)/g;
-            
-            const parts = processed.split(regex);
-            
-            return parts.map(part => {
-                if (part.includes('<script type="text/tikz">') || 
-                    part.includes('class="group relative') || // Bắt ảnh từ Editor
-                    part.includes('<img') || 
-                    part.trim().startsWith('$') || 
-                    part.trim().startsWith('\\(') || 
-                    part.trim().startsWith('\\[')) {
-                    return part;
-                }
-                else {
-                    let cleanPart = part.replace(/\}/g, '');
-                    return cleanPart.replace(/\\\\/g, '<br>').replace(/\n/g, '<br>');
-                }
-            }).join('');
-        };
+        // 3. Regex nhận diện: Công thức toán, TikZ, và ĐẶC BIỆT LÀ ẢNH TỪ EDITOR
+        // class="group relative" là dấu hiệu nhận biết khối ảnh được tạo từ Editor
+        const regex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?:\$[\s\S]*?\$)|<script type="text\/tikz">[\s\S]*?<\/script>|<div[^>]*class=["']group relative[^>]*>[\s\S]*?<\/div>|<img.*?>)/g;
+        
+        const parts = processed.split(regex);
+        
+        return parts.map(part => {
+            // Kiểm tra nếu là thành phần đặc biệt thì giữ nguyên HTML
+            if (part.includes('<script type="text/tikz">') || 
+                part.includes('class="group relative') || // <- Chỗ này giúp hiện ảnh
+                part.includes('<img') || 
+                part.trim().startsWith('$') || 
+                part.trim().startsWith('\\(') || 
+                part.trim().startsWith('\\[')) {
+                return part;
+            }
+            else {
+                // Xử lý văn bản thường: xóa dấu } rác và xuống dòng
+                let cleanPart = part.replace(/\}/g, '');
+                return cleanPart.replace(/\\\\/g, '<br>').replace(/\n/g, '<br>');
+            }
+        }).join('');
+    };
         
         // --- XỬ LÝ SCALE CÔNG THỨC TOÁN ---
         function autoScaleMath() {
