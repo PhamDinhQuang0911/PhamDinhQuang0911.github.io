@@ -586,53 +586,68 @@
             if (!text) return "";
             let processed = String(text);
             
-            while (processed.includes('\\immini')) {
-                const idx = processed.indexOf('\\immini'); 
-                let before = processed.substring(0, idx); 
-                let tempAfter = processed.substring(idx + 7).trim();
+            while (true) {
+                const idx = processed.indexOf('\\immini');
+                if (idx === -1) break;
 
-                if (tempAfter.startsWith('[')) { 
-                    const cb = tempAfter.indexOf(']'); 
-                    if (cb !== -1) tempAfter = tempAfter.substring(cb + 1).trim(); 
+                const before = processed.substring(0, idx); 
+                let remainder = processed.substring(idx + 7).trim(); // Skip \immini
+
+                // Skip optional arguments [thm], [etc]
+                if (remainder.startsWith('[')) { 
+                    const cb = remainder.indexOf(']'); 
+                    if (cb > -1) remainder = remainder.substring(cb + 1).trim(); 
                 }
 
-                const arg1 = extractNextBrace(tempAfter);
-                if (!arg1) {
-                    processed = before + tempAfter; 
-                    continue;
-                }
+                const arg1 = extractNextBrace(remainder);
+                if (!arg1) break; // Error parsing, stop to avoid inf loop
 
                 const arg2 = extractNextBrace(arg1.remaining);
-                if (!arg2) {
-                    processed = before + arg1.content + arg1.remaining;
-                    continue;
-                }
+                if (!arg2) break; // Error parsing
 
-                const imgBlock = arg2.content;
+                // Extract image path from arg2 (the image block)
                 let imgPath = "";
                 let hasImage = false;
-
-                if (imgBlock.includes('\\includegraphics')) {
-                     const graphIdx = imgBlock.indexOf('\\includegraphics');
-                     const afterGraph = imgBlock.substring(graphIdx);
-                     const pathBrace = extractNextBrace(afterGraph.substring(afterGraph.indexOf('{')));
-                     if (pathBrace) {
-                         imgPath = pathBrace.content;
+                if (arg2.content.includes('includegraphics')) {
+                     const igIdx = arg2.content.indexOf('\\includegraphics');
+                     const afterIg = arg2.content.substring(igIdx);
+                     // Find the first {...} after \includegraphics
+                     const pathBlock = extractNextBrace(afterIg.substring(afterIg.indexOf('{')));
+                     if (pathBlock) {
+                         imgPath = pathBlock.content;
                          hasImage = true;
                      }
                 }
 
-                let ph = ""; 
-                if (hasImage) { 
-                    const uid = `img_${Date.now()}_${Math.random().toString(36).substr(2,9)}`; 
-                    pendingImageUploads.push({id:uid, originalPath:imgPath, questionIdx:questionIndex}); 
-                    ph = getPlaceholderHTML(uid, "Ảnh từ immini"); 
-                } else { 
-                    ph = `<div class="p-2 border border-gray-200 bg-gray-50 text-xs">${arg2.content}</div>`;
+                let ph = "";
+                if (hasImage) {
+                    const uid = `img_${Date.now()}_${Math.random().toString(36).substr(2,9)}`;
+                    pendingImageUploads.push({id:uid, originalPath:imgPath, questionIdx:questionIndex});
+                    ph = getPlaceholderHTML(uid, "Ảnh từ immini");
+                } else {
+                    // Fallback if no image found in 2nd arg
+                    ph = `<div class="text-xs text-gray-400 italic">[Khối hình không xác định]</div>`;
                 }
 
-                // SỬA LỖI QUAN TRỌNG: Đặt Placeholder TRƯỚC nội dung (arg1) để không bị cắt mất khi tách \choice
-                processed = before + ph + '\n\n' + arg1.content + arg1.remaining;
+                // SMART INSERTION: Put placeholder INSIDE arg1.content
+                // Find where the choices start
+                const contentText = arg1.content;
+                const choiceRegex = /\\(choice|choiceTF|shortans)/;
+                const match = contentText.match(choiceRegex);
+                
+                let newContent = "";
+                if (match && match.index !== undefined) {
+                    // Insert BEFORE the choice command
+                    newContent = contentText.substring(0, match.index) + 
+                                 '\n\n' + ph + '\n\n' + 
+                                 contentText.substring(match.index);
+                } else {
+                    // No choices (Essay), append to end
+                    newContent = contentText + '\n\n' + ph;
+                }
+
+                // Reconstruct: Before + Modified Content + Everything AFTER the image block
+                processed = before + newContent + arg2.remaining;
             }
 
             const centerRegex = /\\begin\{center\}\s*([\s\S]*?)\\includegraphics\s*(?:\[.*?\])?\s*\{(.*?)\}([\s\S]*?)\\end\{center\}/g;
@@ -664,7 +679,7 @@
                 div.innerHTML = `
                     <div class="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 font-bold text-xs shrink-0">${index + 1}</div>
                     <div class="flex-1 overflow-hidden">
-                        <div class="text-xs font-bold text-blue-600 mb-0.5">Câu hỏi số ? (Đang cập nhật)</div>
+                        <div class="text-xs font-bold text-blue-600 mb-0.5">Câu hỏi số ${item.questionIdx + 1}</div>
                         <div class="text-xs text-gray-500 truncate" title="${item.originalPath}"><i class="fa-regular fa-folder-open mr-1"></i>.../${item.originalPath.split('/').pop()}</div>
                     </div>
                     <button onclick="triggerBatchUpload('${item.id}')" class="px-3 py-1.5 bg-blue-50 text-blue-600 font-bold text-xs rounded-lg hover:bg-blue-100 whitespace-nowrap">
