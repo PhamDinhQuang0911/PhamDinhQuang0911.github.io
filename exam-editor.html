@@ -582,81 +582,115 @@
         }
 
         // Hàm tách nội dung trong cặp ngoặc nhọn { } cân bằng (xử lý lồng nhau)
-        function extractNextBrace(text) {
-            if (!text) return null;
-            // Tìm dấu { đầu tiên
-            const start = text.indexOf('{');
-            if (start === -1) return null;
-            
-            let depth = 1;
-            let end = -1;
-            
-            // Duyệt từ ký tự ngay sau dấu {
-            for (let i = start + 1; i < text.length; i++) {
-                if (text[i] === '{') depth++;
-                else if (text[i] === '}') depth--;
-                
-                if (depth === 0) {
-                    end = i;
-                    break;
-                }
-            }
-            
-            if (end === -1) return null; // Không tìm thấy dấu đóng
-            
-            return {
-                content: text.substring(start + 1, end), // Nội dung bên trong
-                remaining: text.substring(end + 1),      // Phần còn lại sau dấu }
-                fullMatch: text.substring(start, end + 1) // Cả cụm {...}
-            };
+        // Hàm bổ trợ: Tách nội dung trong cặp ngoặc nhọn { } cân bằng
+function extractNextBrace(text) {
+    if (!text) return null;
+    const start = text.indexOf('{');
+    if (start === -1) return null;
+    
+    let depth = 1;
+    let end = -1;
+    
+    for (let i = start + 1; i < text.length; i++) {
+        if (text[i] === '{') depth++;
+        else if (text[i] === '}') depth--;
+        
+        if (depth === 0) {
+            end = i;
+            break;
+        }
+    }
+    
+    if (end === -1) return null;
+    
+    return {
+        content: text.substring(start + 1, end),
+        remaining: text.substring(end + 1),
+        fullMatch: text.substring(start, end + 1)
+    };
+}
+
+// Hàm chính: Quét và tạo khung chờ ảnh (Đã sửa lỗi immini)
+function processLatexImagesWithDetection(text, questionIndex) {
+    if (!text) return "";
+    let processed = String(text);
+    
+    // 1. Xử lý \immini và \immini[thm]
+    // Sử dụng vòng lặp an toàn, nếu lỗi cú pháp sẽ bỏ qua tag đó để không treo vòng lặp
+    while (processed.includes('\\immini')) {
+        const idx = processed.indexOf('\\immini'); 
+        let before = processed.substring(0, idx); 
+        let tempAfter = processed.substring(idx + 7).trim(); // Bỏ qua chữ \immini
+
+        // Xử lý tùy chọn [thm] hoặc [...]
+        if (tempAfter.startsWith('[')) { 
+            const cb = tempAfter.indexOf(']'); 
+            if (cb !== -1) tempAfter = tempAfter.substring(cb + 1).trim(); 
         }
 
-        // IMPORTANT: SCAN AND REPLACE IMAGES IN LATEX
-        function processLatexImagesWithDetection(text, questionIndex) {
-            if (!text) return "";
-            let processed = String(text);
-            
-            while (processed.includes('\\immini')) {
-                const idx = processed.indexOf('\\immini'); 
-                let before = processed.substring(0, idx); 
-                let tempAfter = processed.substring(idx + 7).trim();
-
-                if (tempAfter.startsWith('[')) { 
-                    const cb = tempAfter.indexOf(']'); 
-                    if (cb !== -1) tempAfter = tempAfter.substring(cb + 1).trim(); 
-                }
-
-                const arg1 = extractNextBrace(tempAfter); if (!arg1) break; 
-                const arg2 = extractNextBrace(arg1.remaining); if (!arg2) break;
-
-                const imgMatch = arg2.content.match(/\\includegraphics\s*(?:\[.*?\])?\s*\{(.*?)\}/);
-                let ph = ""; 
-                if (imgMatch) { 
-                    const uid = `img_${Date.now()}_${Math.random().toString(36).substr(2,9)}`; 
-                    pendingImageUploads.push({id:uid, originalPath:imgMatch[1], questionIdx:questionIndex}); 
-                    ph = getPlaceholderHTML(uid, "Ảnh từ immini"); 
-                } else { 
-                    ph = getPlaceholderHTML("", "Vị trí hình"); 
-                }
-                processed = before + arg1.content + '\n\n' + ph + '\n\n' + arg2.remaining;
-            }
-
-            const centerRegex = /\\begin\{center\}\s*([\s\S]*?)\\includegraphics\s*(?:\[.*?\])?\s*\{(.*?)\}([\s\S]*?)\\end\{center\}/g;
-            processed = processed.replace(centerRegex, (match, preText, imgPath, postText) => {
-                 const uid = `img_${Date.now()}_${Math.random().toString(36).substr(2,9)}`; 
-                 pendingImageUploads.push({id:uid, originalPath:imgPath, questionIdx:questionIndex}); 
-                 return getPlaceholderHTML(uid, "Ảnh canh giữa");
-            });
-            
-            processed = processed.replace(/\\includegraphics\s*(?:\[.*?\])?\s*\{(.*?)\}/g, (m, path) => {
-                const uid = `img_${Date.now()}_${Math.random().toString(36).substr(2,9)}`; 
-                pendingImageUploads.push({id:uid, originalPath:path, questionIdx:questionIndex}); 
-                return getPlaceholderHTML(uid, "Ảnh");
-            });
-
-            return processed;
+        const arg1 = extractNextBrace(tempAfter);
+        // Nếu không tìm thấy arg1 (nội dung), thay \immini bằng chuỗi rỗng để thoát loop
+        if (!arg1) {
+            processed = before + tempAfter; 
+            continue;
         }
 
+        const arg2 = extractNextBrace(arg1.remaining);
+        // Nếu không tìm thấy arg2 (ảnh), giữ lại nội dung arg1 và thoát loop
+        if (!arg2) {
+            processed = before + arg1.content + arg1.remaining;
+            continue;
+        }
+
+        // Regex tìm \includegraphics, hỗ trợ cả đường dẫn có ngoặc nhọn lồng nhau
+        // Tìm từ \includegraphics đến dấu } cuối cùng của nó
+        const imgBlock = arg2.content;
+        let imgPath = "";
+        let hasImage = false;
+
+        if (imgBlock.includes('\\includegraphics')) {
+             const graphIdx = imgBlock.indexOf('\\includegraphics');
+             const afterGraph = imgBlock.substring(graphIdx);
+             // Tìm ngoặc nhọn chứa path
+             const pathBrace = extractNextBrace(afterGraph.substring(afterGraph.indexOf('{')));
+             if (pathBrace) {
+                 imgPath = pathBrace.content;
+                 hasImage = true;
+             }
+        }
+
+        let ph = ""; 
+        if (hasImage) { 
+            const uid = `img_${Date.now()}_${Math.random().toString(36).substr(2,9)}`; 
+            pendingImageUploads.push({id:uid, originalPath:imgPath, questionIdx:questionIndex}); 
+            ph = getPlaceholderHTML(uid, "Ảnh từ immini"); 
+        } else { 
+            // Nếu immini dùng cho text/text thì không tạo placeholder
+            ph = `<div class="p-2 border border-gray-200 bg-gray-50 text-xs">${arg2.content}</div>`;
+        }
+
+        // Tái tạo chuỗi: Nội dung + Placeholder + Phần còn lại
+        processed = before + arg1.content + '\n\n' + ph + '\n\n' + arg2.remaining;
+    }
+
+    // 2. Xử lý \begin{center}...\includegraphics...\end{center}
+    const centerRegex = /\\begin\{center\}\s*([\s\S]*?)\\includegraphics\s*(?:\[.*?\])?\s*\{(.*?)\}([\s\S]*?)\\end\{center\}/g;
+    processed = processed.replace(centerRegex, (match, preText, imgPath, postText) => {
+            const uid = `img_${Date.now()}_${Math.random().toString(36).substr(2,9)}`; 
+            pendingImageUploads.push({id:uid, originalPath:imgPath, questionIdx:questionIndex}); 
+            return getPlaceholderHTML(uid, "Ảnh canh giữa");
+    });
+    
+    // 3. Xử lý \includegraphics đứng lẻ (ngoài 2 trường hợp trên)
+    // Regex này lỏng hơn để bắt được mọi trường hợp sót lại
+    processed = processed.replace(/\\includegraphics\s*(?:\[.*?\])?\s*\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}/g, (m, path) => {
+        const uid = `img_${Date.now()}_${Math.random().toString(36).substr(2,9)}`; 
+        pendingImageUploads.push({id:uid, originalPath:path, questionIdx:questionIndex}); 
+        return getPlaceholderHTML(uid, "Ảnh");
+    });
+
+    return processed;
+}
         window.renderBatchImageModal = () => {
             const list = document.getElementById('batchImageList');
             const modal = document.getElementById('batchImageModal');
