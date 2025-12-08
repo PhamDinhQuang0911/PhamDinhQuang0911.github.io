@@ -9,7 +9,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     
     <script>
-    // --- CẤU HÌNH MATHJAX ---
+    // --- CẤU HÌNH MATHJAX (ĐỒNG BỘ VỚI EDITOR) ---
     window.MathJax = {
       tex: {
         inlineMath: [['$', '$'], ['\\(', '\\)']],
@@ -34,6 +34,7 @@
         .text-orange-custom { color: #FF6A00; }
         .bg-orange-custom { background-color: #FF6A00; }
         
+        /* CSS SIDEBAR MOBILE */
         .mobile-sidebar {
             position: fixed; top: 0; right: 0; bottom: 0; width: 280px;
             background: white; z-index: 50;
@@ -48,14 +49,17 @@
         }
         .sidebar-backdrop.show { opacity: 1; pointer-events: auto; }
 
+        /* CSS NÚT CÂU HỎI */
         .q-btn { width: 100%; aspect-ratio: 1; display: flex; align-items: center; justify-content: center; border-radius: 8px; font-weight: 700; font-size: 0.85rem; border: 1px solid #E5E7EB; background-color: white; color: #4B5563; transition: all 0.2s; position: relative; cursor: pointer; }
         .q-btn.active { background-color: #FF6A00 !important; color: white !important; border-color: #FF6A00 !important; transform: scale(1.1); box-shadow: 0 4px 6px -1px rgba(255, 106, 0, 0.3); z-index: 10; }
         .q-btn.answered { background-color: #EFF6FF; color: #2563EB; border-color: #BFDBFE; }
         .q-btn.flagged::after { content: "\f024"; font-family: "Font Awesome 6 Free"; font-weight: 900; position: absolute; top: -4px; right: -4px; font-size: 10px; color: #EF4444; background: #FEF2F2; border-radius: 50%; padding: 2px; border: 1px solid #FECACA; }
+        
         .q-btn.correct { background-color: #10B981 !important; color: white !important; border-color: #059669 !important; }
         .q-btn.wrong { background-color: #EF4444 !important; color: white !important; border-color: #DC2626 !important; }
         .q-btn.partial { background-color: #F59E0B !important; color: white !important; border-color: #D97706 !important; }
 
+        /* CSS ẢNH & MATHJAX */
         #questionContent img, #answerOptions img, .solution-box img { max-width: 100% !important; height: auto !important; display: block; margin: 10px auto; border-radius: 8px; }
         mjx-container { display: inline-block !important; overflow: visible !important; }
         
@@ -308,27 +312,31 @@
             return res;
         }
 
-        // --- HÀM FORMAT THÔNG MINH: CHUYỂN MÃ PHỨC TẠP THÀNH THẺ IMG ĐƠN GIẢN ---
+        // --- HÀM FORMAT THÔNG MINH: BIẾN MÃ EDITOR THÀNH MÃ HỌC SINH ---
         window.formatContent = (text) => {
             if (text === null || text === undefined) return "";
             
-            // 1. Tìm và đơn giản hóa thẻ ảnh phức tạp từ Editor thành thẻ <img> đơn giản
-            // Editor tạo ra: <div ... data-id="X"><img src="Y"> ... </div>
-            // Chúng ta dùng Regex để bắt lấy URL ảnh (src) và viết lại thành thẻ ảnh sạch
+            // 1. TÌM VÀ CHUYỂN ĐỔI ẢNH TỪ EDITOR SANG THẺ IMG ĐƠN GIẢN
+            // Editor tạo ra thẻ div phức tạp chứa ảnh và overlay. Học sinh chỉ cần thẻ img.
+            // Regex này tìm src ảnh và viết lại thành thẻ <img> sạch
             let simpleText = text.replace(
-                /<div[^>]*data-id=["'][^"']*["'][^>]*>[\s\S]*?<img[^>]*src=["']([^"']+)["'][^>]*>[\s\S]*?<\/div>/gi,
-                '<div class="flex justify-center my-4"><img src="$1" class="max-w-full h-auto rounded-lg shadow-md border border-gray-200" style="max-height:400px;"></div>'
+                /<div[^>]*class=["'].*?group relative.*?["'][^>]*>[\s\S]*?<img[^>]*src=["']([^"']+)["'][^>]*>[\s\S]*?<\/div>/gi,
+                '<div class="flex justify-center my-3"><img src="$1" class="max-w-full h-auto rounded-lg shadow-sm border border-gray-200" style="max-height:400px;"></div>'
             );
 
-            // 2. Xử lý TikZ
+            // 2. ẨN KHUNG CHỜ (PLACEHOLDER) NẾU CHƯA CÓ ẢNH
+            // Nếu giáo viên quên upload ảnh, học sinh sẽ không thấy khung "Bấm vào đây..."
+            simpleText = simpleText.replace(/<div[^>]*class=["'].*?image-placeholder.*?["'][^>]*>[\s\S]*?<\/div>/gi, '');
+
+            // 3. Xử lý TikZ
             let processed = processNestedTikz(simpleText);
             
-            // 3. Dọn rác
+            // 4. Dọn rác
             processed = processed.replace(/^\s*\}\s*$/gm, ''); 
             processed = processed.replace(/\}\s*$/g, '');
 
-            // 4. Phân tách để hiển thị
-            const regex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?:\$[\s\S]*?\$)|<script type="text\/tikz">[\s\S]*?<\/script>|<div class="flex justify-center my-4"><img.*?>.*?<\/div>|<img.*?>)/g;
+            // 5. Phân tách để hiển thị
+            const regex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?:\$[\s\S]*?\$)|<script type="text\/tikz">[\s\S]*?<\/script>|<div class="flex justify-center my-3"><img.*?>.*?<\/div>|<img.*?>)/g;
             
             const parts = processed.split(regex);
             
@@ -504,9 +512,8 @@
             }
 
             if(window.MathJax) {
-                // Chạy MathJax
+                // Chạy MathJax -> sau đó chạy Scale
                 MathJax.typesetPromise([dom.content, dom.options]).then(() => {
-                    // Sau khi MathJax chạy xong thì mới chạy Scale
                     autoScaleMath();
                 }).catch(()=>{});
             }
