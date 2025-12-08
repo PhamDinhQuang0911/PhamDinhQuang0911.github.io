@@ -445,128 +445,21 @@
             }
             return result;
         }
-        // --- HÀM XỬ LÝ DANH SÁCH (LISTS) ---
-        function processLatexLists(text) {
-            let processed = text;
 
-            // 1. Xử lý itemchoice (Lời giải ý True/False)
-            // Cấu trúc: \begin{itemchoice} \itemch Ý 1 \itemch Ý 2 ... \end{itemchoice}
-            processed = processed.replace(/\\begin\{itemchoice\}([\s\S]*?)\\end\{itemchoice\}/g, (match, body) => {
-                // Tách theo từ khóa \itemch
-                const items = body.split('\\itemch').filter(s => s.trim().length > 0);
-                const htmlItems = items.map(item => 
-                    `<li class="flex items-start gap-2 mb-1">
-                        <span class="text-blue-600 font-bold shrink-0">•</span> 
-                        <div>${item.trim()}</div>
-                    </li>`
-                ).join('');
-                return `<ul class="my-3 pl-2">${htmlItems}</ul>`;
-            });
-
-            // 2. Hàm hỗ trợ xử lý \item và \item[x]
-            const parseItems = (bodyStr) => {
-                // Tách theo \item, nhưng giữ lại nội dung
-                const rawItems = bodyStr.split(/\\item(?![a-zA-Z])/).filter(s => s.trim().length > 0);
-                return rawItems.map((item, idx) => {
-                    let content = item.trim();
-                    let label = null;
-
-                    // Xử lý tùy chọn \item[a)] hoặc \item[1)]
-                    if (content.startsWith('[')) {
-                        const closeBracket = content.indexOf(']');
-                        if (closeBracket > -1) {
-                            label = content.substring(1, closeBracket); // Lấy nội dung trong []
-                            content = content.substring(closeBracket + 1).trim();
-                        }
-                    }
-                    return { label, content };
-                });
-            };
-
-            // 3. Xử lý listEX và enumEX (Chia cột)
-            // Cấu trúc: \begin{listEX}[số cột] hoặc \begin{enumEX}{số cột}
-            const regexCols = /\\begin\{(?:listEX|enumEX)\}(?:\[(\d+)\]|\{(\d+)\}(?:\[(.*?)\])?)([\s\S]*?)\\end\{(?:listEX|enumEX)\}/g;
-            
-            processed = processed.replace(regexCols, (match, c1, c2, style, body) => {
-                const cols = c1 || c2 || 1; // Lấy số cột
-                const items = parseItems(body);
-                
-                let gridHtml = `<div class="grid grid-cols-1 md:grid-cols-${cols} gap-4 my-3">`;
-                items.forEach((it, idx) => {
-                    // Nếu không có nhãn tùy chỉnh, tự sinh nhãn a), b) nếu là enumEX
-                    let displayLabel = it.label;
-                    if (!displayLabel && match.includes('enumEX')) {
-                        displayLabel = String.fromCharCode(97 + idx) + ')'; // a), b), c)...
-                    }
-                    
-                    gridHtml += `<div class="flex gap-2">
-                        ${displayLabel ? `<span class="font-bold text-gray-700 shrink-0">${displayLabel}</span>` : `<span class="text-gray-400 shrink-0">•</span>`}
-                        <div>${it.content}</div>
-                    </div>`;
-                });
-                gridHtml += `</div>`;
-                return gridHtml;
-            });
-
-            // 4. Xử lý enumerate (Số thứ tự)
-            processed = processed.replace(/\\begin\{enumerate\}([\s\S]*?)\\end\{enumerate\}/g, (match, body) => {
-                const items = parseItems(body);
-                let html = `<ol class="list-decimal pl-6 space-y-1 my-2">`;
-                items.forEach(it => {
-                    if (it.label) {
-                        // Nếu có label tùy chỉnh (\item[Câu 1]), bỏ list-style mặc định
-                        html += `<li class="list-none -ml-4"><span class="font-bold mr-1">${it.label}</span>${it.content}</li>`;
-                    } else {
-                        html += `<li>${it.content}</li>`;
-                    }
-                });
-                html += `</ol>`;
-                return html;
-            });
-
-            // 5. Xử lý itemize (Dấu chấm)
-            processed = processed.replace(/\\begin\{itemize\}([\s\S]*?)\\end\{itemize\}/g, (match, body) => {
-                const items = parseItems(body);
-                let html = `<ul class="list-disc pl-6 space-y-1 my-2">`;
-                items.forEach(it => {
-                    if (it.label) {
-                        html += `<li class="list-none -ml-4"><span class="font-bold mr-1">${it.label}</span>${it.content}</li>`;
-                    } else {
-                        html += `<li>${it.content}</li>`;
-                    }
-                });
-                html += `</ul>`;
-                return html;
-            });
-
-            return processed;
-        }
         function formatContent(text) {
             if (text === null || text === undefined) return "";
-            
-            // 1. Xử lý hình vẽ TikZ trước
             let processed = processNestedTikz(text);
-
-            // 2. [MỚI] Xử lý các danh sách liệt kê (itemchoice, enumerate,...)
-            processed = processLatexLists(processed);
-
-            // 3. Dọn rác text
             processed = processed.replace(/^\s*\}\s*$/gm, ''); 
             processed = processed.replace(/\}\s*$/g, '');
             processed = processed.replace(/Ảnh minh họa \(immini\)/g, ''); 
             processed = processed.replace(/Ảnh canh giữa/g, '');
 
-            const regex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?:\$[\s\S]*?\$)|<script type="text\/tikz">[\s\S]*?<\/script>|<div[^>]*data-id=.*?>[\s\S]*?<\/div>|<img.*?>|<ul[\s\S]*?<\/ul>|<ol[\s\S]*?<\/ol>|<div class="grid[\s\S]*?<\/div>)/g;
-            
+            const regex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?:\$[\s\S]*?\$)|<script type="text\/tikz">[\s\S]*?<\/script>|<div[^>]*data-id=.*?>[\s\S]*?<\/div>|<img.*?>)/g;
             const parts = processed.split(regex);
             return parts.map(part => {
-                // Kiểm tra các thẻ HTML vừa tạo ra để không bị replace xuống dòng
                 if (part.includes('<script type="text/tikz">') || 
                     part.includes('data-id=') || 
                     part.includes('<img') || 
-                    part.includes('<ul') ||  // Bảo vệ thẻ list
-                    part.includes('<ol') ||  // Bảo vệ thẻ list
-                    part.includes('class="grid') || // Bảo vệ thẻ grid
                     part.trim().startsWith('$') || 
                     part.trim().startsWith('\\(') || 
                     part.trim().startsWith('\\[')) {
@@ -693,68 +586,52 @@
             if (!text) return "";
             let processed = String(text);
             
-            while (true) {
-                const idx = processed.indexOf('\\immini');
-                if (idx === -1) break;
+            while (processed.includes('\\immini')) {
+                const idx = processed.indexOf('\\immini'); 
+                let before = processed.substring(0, idx); 
+                let tempAfter = processed.substring(idx + 7).trim();
 
-                const before = processed.substring(0, idx); 
-                let remainder = processed.substring(idx + 7).trim(); // Skip \immini
-
-                // Skip optional arguments [thm], [etc]
-                if (remainder.startsWith('[')) { 
-                    const cb = remainder.indexOf(']'); 
-                    if (cb > -1) remainder = remainder.substring(cb + 1).trim(); 
+                if (tempAfter.startsWith('[')) { 
+                    const cb = tempAfter.indexOf(']'); 
+                    if (cb !== -1) tempAfter = tempAfter.substring(cb + 1).trim(); 
                 }
 
-                const arg1 = extractNextBrace(remainder);
-                if (!arg1) break; // Error parsing, stop to avoid inf loop
+                const arg1 = extractNextBrace(tempAfter);
+                if (!arg1) {
+                    processed = before + tempAfter; 
+                    continue;
+                }
 
                 const arg2 = extractNextBrace(arg1.remaining);
-                if (!arg2) break; // Error parsing
+                if (!arg2) {
+                    processed = before + arg1.content + arg1.remaining;
+                    continue;
+                }
 
-                // Extract image path from arg2 (the image block)
+                const imgBlock = arg2.content;
                 let imgPath = "";
                 let hasImage = false;
-                if (arg2.content.includes('includegraphics')) {
-                     const igIdx = arg2.content.indexOf('\\includegraphics');
-                     const afterIg = arg2.content.substring(igIdx);
-                     // Find the first {...} after \includegraphics
-                     const pathBlock = extractNextBrace(afterIg.substring(afterIg.indexOf('{')));
-                     if (pathBlock) {
-                         imgPath = pathBlock.content;
+
+                if (imgBlock.includes('\\includegraphics')) {
+                     const graphIdx = imgBlock.indexOf('\\includegraphics');
+                     const afterGraph = imgBlock.substring(graphIdx);
+                     const pathBrace = extractNextBrace(afterGraph.substring(afterGraph.indexOf('{')));
+                     if (pathBrace) {
+                         imgPath = pathBrace.content;
                          hasImage = true;
                      }
                 }
 
-                let ph = "";
-                if (hasImage) {
-                    const uid = `img_${Date.now()}_${Math.random().toString(36).substr(2,9)}`;
-                    pendingImageUploads.push({id:uid, originalPath:imgPath, questionIdx:questionIndex});
-                    ph = getPlaceholderHTML(uid, "Ảnh từ immini");
-                } else {
-                    // Fallback if no image found in 2nd arg
-                    ph = `<div class="text-xs text-gray-400 italic">[Khối hình không xác định]</div>`;
+                let ph = ""; 
+                if (hasImage) { 
+                    const uid = `img_${Date.now()}_${Math.random().toString(36).substr(2,9)}`; 
+                    pendingImageUploads.push({id:uid, originalPath:imgPath, questionIdx:questionIndex}); 
+                    ph = getPlaceholderHTML(uid, "Ảnh từ immini"); 
+                } else { 
+                    ph = `<div class="p-2 border border-gray-200 bg-gray-50 text-xs">${arg2.content}</div>`;
                 }
 
-                // SMART INSERTION: Put placeholder INSIDE arg1.content
-                // Find where the choices start
-                const contentText = arg1.content;
-                const choiceRegex = /\\(choice|choiceTF|shortans)/;
-                const match = contentText.match(choiceRegex);
-                
-                let newContent = "";
-                if (match && match.index !== undefined) {
-                    // Insert BEFORE the choice command
-                    newContent = contentText.substring(0, match.index) + 
-                                 '\n\n' + ph + '\n\n' + 
-                                 contentText.substring(match.index);
-                } else {
-                    // No choices (Essay), append to end
-                    newContent = contentText + '\n\n' + ph;
-                }
-
-                // Reconstruct: Before + Modified Content + Everything AFTER the image block
-                processed = before + newContent + arg2.remaining;
+                processed = before + arg1.content + '\n\n' + ph + '\n\n' + arg2.remaining;
             }
 
             const centerRegex = /\\begin\{center\}\s*([\s\S]*?)\\includegraphics\s*(?:\[.*?\])?\s*\{(.*?)\}([\s\S]*?)\\end\{center\}/g;
@@ -786,7 +663,7 @@
                 div.innerHTML = `
                     <div class="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 font-bold text-xs shrink-0">${index + 1}</div>
                     <div class="flex-1 overflow-hidden">
-                        <div class="text-xs font-bold text-blue-600 mb-0.5">Câu hỏi số ${item.questionIdx + 1}</div>
+                        <div class="text-xs font-bold text-blue-600 mb-0.5">Câu hỏi số ? (Đang cập nhật)</div>
                         <div class="text-xs text-gray-500 truncate" title="${item.originalPath}"><i class="fa-regular fa-folder-open mr-1"></i>.../${item.originalPath.split('/').pop()}</div>
                     </div>
                     <button onclick="triggerBatchUpload('${item.id}')" class="px-3 py-1.5 bg-blue-50 text-blue-600 font-bold text-xs rounded-lg hover:bg-blue-100 whitespace-nowrap">
@@ -1064,7 +941,7 @@
                     if (loigiaiIndex !== -1) {
                         mainContent = fullBody.substring(0, loigiaiIndex);
                         const solPart = fullBody.substring(loigiaiIndex);
-                        const solBrace = extractNextBrace(solPart);
+                        const solBrace = extractNextBrace(solPart.substring(solPart.indexOf('{') - 1)); // -1 để lấy cả {
                         if (solBrace) {
                             qData.solution = processLatexImagesWithDetection(cleanTikzCode(solBrace.content), count);
                         }
@@ -1232,3 +1109,5 @@
     </script>
 </body>
 </html>
+
+}
