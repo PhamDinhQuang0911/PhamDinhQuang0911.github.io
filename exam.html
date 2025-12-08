@@ -9,7 +9,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     
     <script>
-    // --- CẤU HÌNH MATHJAX (ĐỒNG BỘ VỚI EDITOR) ---
+    // --- CẤU HÌNH MATHJAX ---
     window.MathJax = {
       tex: {
         inlineMath: [['$', '$'], ['\\(', '\\)']],
@@ -34,7 +34,6 @@
         .text-orange-custom { color: #FF6A00; }
         .bg-orange-custom { background-color: #FF6A00; }
         
-        /* CSS SIDEBAR MOBILE */
         .mobile-sidebar {
             position: fixed; top: 0; right: 0; bottom: 0; width: 280px;
             background: white; z-index: 50;
@@ -49,17 +48,14 @@
         }
         .sidebar-backdrop.show { opacity: 1; pointer-events: auto; }
 
-        /* CSS NÚT CÂU HỎI */
         .q-btn { width: 100%; aspect-ratio: 1; display: flex; align-items: center; justify-content: center; border-radius: 8px; font-weight: 700; font-size: 0.85rem; border: 1px solid #E5E7EB; background-color: white; color: #4B5563; transition: all 0.2s; position: relative; cursor: pointer; }
         .q-btn.active { background-color: #FF6A00 !important; color: white !important; border-color: #FF6A00 !important; transform: scale(1.1); box-shadow: 0 4px 6px -1px rgba(255, 106, 0, 0.3); z-index: 10; }
         .q-btn.answered { background-color: #EFF6FF; color: #2563EB; border-color: #BFDBFE; }
         .q-btn.flagged::after { content: "\f024"; font-family: "Font Awesome 6 Free"; font-weight: 900; position: absolute; top: -4px; right: -4px; font-size: 10px; color: #EF4444; background: #FEF2F2; border-radius: 50%; padding: 2px; border: 1px solid #FECACA; }
-        
         .q-btn.correct { background-color: #10B981 !important; color: white !important; border-color: #059669 !important; }
         .q-btn.wrong { background-color: #EF4444 !important; color: white !important; border-color: #DC2626 !important; }
         .q-btn.partial { background-color: #F59E0B !important; color: white !important; border-color: #D97706 !important; }
 
-        /* CSS ẢNH & MATHJAX */
         #questionContent img, #answerOptions img, .solution-box img { max-width: 100% !important; height: auto !important; display: block; margin: 10px auto; border-radius: 8px; }
         mjx-container { display: inline-block !important; overflow: visible !important; }
         
@@ -282,7 +278,7 @@
         window.customAlert = (msg, type='info') => { return new Promise(resolve => { modalTitle.innerText=type==='error'?'Lỗi':'Thông báo'; modalMsg.innerText=msg; btnCancel.classList.add('hidden'); btnConfirm.innerText="Đã hiểu"; modalEl.classList.remove('opacity-0','pointer-events-none'); modalBox.classList.add('scale-100'); btnConfirm.onclick=()=>{resolve(true);closeCustomModal();}; }); };
         window.customConfirm = (msg) => { return new Promise(resolve => { modalTitle.innerText="Xác nhận"; modalMsg.innerText=msg; btnCancel.classList.remove('hidden'); btnConfirm.innerText="Đồng ý"; modalEl.classList.remove('opacity-0','pointer-events-none'); modalBox.classList.add('scale-100'); btnConfirm.onclick=()=>{resolve(true);closeCustomModal();}; btnCancel.onclick=()=>{resolve(false);closeCustomModal();}; }); };
 
-        // --- CÁC HÀM XỬ LÝ NỘI DUNG & ẢNH ---
+        // --- CÁC HÀM XỬ LÝ NỘI DUNG ---
         function cleanTikzCode(code) { 
             let c = code.replace(/\\resizebox\{[^}]+\}\{[^}]+\}\{\s*(\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\})\s*\}/g, "$1"); 
             return c.replace(/\\begin\{center\}/g, "").replace(/\\end\{center\}/g, ""); 
@@ -312,25 +308,32 @@
             return res;
         }
 
-        // --- HÀM HIỂN THỊ QUAN TRỌNG: NHẬN DIỆN ẢNH TỪ EDITOR ---
+        // --- HÀM FORMAT THÔNG MINH: CHUYỂN MÃ PHỨC TẠP THÀNH THẺ IMG ĐƠN GIẢN ---
         window.formatContent = (text) => {
             if (text === null || text === undefined) return "";
             
-            let processed = processNestedTikz(text);
+            // 1. Tìm và đơn giản hóa thẻ ảnh phức tạp từ Editor thành thẻ <img> đơn giản
+            // Editor tạo ra: <div ... data-id="X"><img src="Y"> ... </div>
+            // Chúng ta dùng Regex để bắt lấy URL ảnh (src) và viết lại thành thẻ ảnh sạch
+            let simpleText = text.replace(
+                /<div[^>]*data-id=["'][^"']*["'][^>]*>[\s\S]*?<img[^>]*src=["']([^"']+)["'][^>]*>[\s\S]*?<\/div>/gi,
+                '<div class="flex justify-center my-4"><img src="$1" class="max-w-full h-auto rounded-lg shadow-md border border-gray-200" style="max-height:400px;"></div>'
+            );
+
+            // 2. Xử lý TikZ
+            let processed = processNestedTikz(simpleText);
             
-            // Dọn rác văn bản
+            // 3. Dọn rác
             processed = processed.replace(/^\s*\}\s*$/gm, ''); 
             processed = processed.replace(/\}\s*$/g, '');
 
-            // Regex bao gồm: Công thức toán, TikZ, Ảnh trong group relative (từ Editor), thẻ img thường
-            const regex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?:\$[\s\S]*?\$)|<script type="text\/tikz">[\s\S]*?<\/script>|<div[^>]*class=["']group relative[^>]*>[\s\S]*?<\/div>|<img.*?>)/g;
+            // 4. Phân tách để hiển thị
+            const regex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?:\$[\s\S]*?\$)|<script type="text\/tikz">[\s\S]*?<\/script>|<div class="flex justify-center my-4"><img.*?>.*?<\/div>|<img.*?>)/g;
             
             const parts = processed.split(regex);
             
             return parts.map(part => {
-                // Kiểm tra các thành phần đặc biệt
                 if (part.includes('<script type="text/tikz">') || 
-                    part.includes('class="group relative') || // QUAN TRỌNG: Hiển thị khối ảnh từ Editor
                     part.includes('<img') || 
                     part.trim().startsWith('$') || 
                     part.trim().startsWith('\\(') || 
@@ -338,7 +341,6 @@
                     return part;
                 }
                 else {
-                    // Xử lý văn bản thường
                     let cleanPart = part.replace(/\}/g, '');
                     return cleanPart.replace(/\\\\/g, '<br>').replace(/\n/g, '<br>');
                 }
