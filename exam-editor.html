@@ -584,55 +584,49 @@
 
         function processLatexImagesWithDetection(text, questionIndex) {
             if (!text) return "";
-            let processed = String(text);
+            let processed = text;
             
-            while (processed.includes('\\immini')) {
-                const idx = processed.indexOf('\\immini'); 
-                let before = processed.substring(0, idx); 
-                let tempAfter = processed.substring(idx + 7).trim();
+            while (true) {
+                const idx = processed.indexOf('\\immini');
+                if (idx === -1) break;
 
-                if (tempAfter.startsWith('[')) { 
-                    const cb = tempAfter.indexOf(']'); 
-                    if (cb !== -1) tempAfter = tempAfter.substring(cb + 1).trim(); 
+                const before = processed.substring(0, idx); 
+                let remainder = processed.substring(idx + 7).trim();
+
+                if (remainder.startsWith('[')) { 
+                    const cb = remainder.indexOf(']'); 
+                    if (cb > -1) remainder = remainder.substring(cb + 1).trim(); 
                 }
 
-                const arg1 = extractNextBrace(tempAfter);
-                if (!arg1) {
-                    processed = before + tempAfter; 
-                    continue;
-                }
+                const arg1 = extractNextBrace(remainder);
+                if (!arg1) break;
 
                 const arg2 = extractNextBrace(arg1.remaining);
-                if (!arg2) {
-                    processed = before + arg1.content + arg1.remaining;
-                    continue;
-                }
+                if (!arg2) break;
 
-                const imgBlock = arg2.content;
                 let imgPath = "";
                 let hasImage = false;
 
-                if (imgBlock.includes('\\includegraphics')) {
-                     const graphIdx = imgBlock.indexOf('\\includegraphics');
-                     const afterGraph = imgBlock.substring(graphIdx);
-                     const pathBrace = extractNextBrace(afterGraph.substring(afterGraph.indexOf('{')));
-                     if (pathBrace) {
-                         imgPath = pathBrace.content;
+                if (arg2.content.includes('includegraphics')) {
+                     const igIdx = arg2.content.indexOf('\\includegraphics');
+                     const afterIg = arg2.content.substring(igIdx);
+                     const pathBlock = extractNextBrace(afterIg.substring(afterIg.indexOf('{')));
+                     if (pathBlock) {
+                         imgPath = pathBlock.content;
                          hasImage = true;
                      }
                 }
 
-                let ph = ""; 
+                let insertHTML = ""; 
                 if (hasImage) { 
                     const uid = `img_${Date.now()}_${Math.random().toString(36).substr(2,9)}`; 
                     pendingImageUploads.push({id:uid, originalPath:imgPath, questionIdx:questionIndex}); 
-                    ph = getPlaceholderHTML(uid, "Ảnh từ immini"); 
-                } else { 
-                    ph = `<div class="p-2 border border-gray-200 bg-gray-50 text-xs">${arg2.content}</div>`;
+                    insertHTML = getPlaceholderHTML(uid, "Ảnh từ immini"); 
+                } else {
+                    insertHTML = `<div class="p-2 border border-gray-200 bg-gray-50 text-xs text-gray-500 italic">${arg2.content}</div>`;
                 }
 
-                // SỬA LỖI QUAN TRỌNG: Đặt Placeholder TRƯỚC nội dung (arg1) để không bị cắt mất khi tách \choice
-                processed = before + ph + '\n\n' + arg1.content + arg1.remaining;
+                processed = before + arg1.content + '\n\n' + insertHTML + '\n\n' + arg2.remaining;
             }
 
             const centerRegex = /\\begin\{center\}\s*([\s\S]*?)\\includegraphics\s*(?:\[.*?\])?\s*\{(.*?)\}([\s\S]*?)\\end\{center\}/g;
