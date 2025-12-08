@@ -445,8 +445,7 @@
             }
             return result;
         }
-
-        // --- HÀM XỬ LÝ DANH SÁCH (LISTS) ---
+        // --- HÀM XỬ LÝ DANH SÁCH & LIỆT KÊ (MỚI) ---
         function processLatexLists(text) {
             let processed = text;
 
@@ -455,28 +454,33 @@
                 return str.replace(/\\\\/g, '<br>').trim();
             };
 
-            // 1. Xử lý itemchoice (Lời giải ý True/False)
+            // 1. Xử lý itemchoice (Lời giải ý True/False dùng \itemch)
             processed = processed.replace(/\\begin\{itemchoice\}([\s\S]*?)\\end\{itemchoice\}/g, (match, body) => {
-                const items = body.split('\\itemch').filter(s => s.trim().length > 0);
+                const items = body.split('\\itemch').slice(1); // Bỏ phần rỗng đầu tiên
                 const htmlItems = items.map(item => 
-                    `<li class="flex items-start gap-2 mb-1">
-                        <span class="text-blue-600 font-bold shrink-0">•</span> 
-                        <div>${formatItemContent(item)}</div>
+                    `<li class="flex items-start gap-2 mb-2">
+                        <span class="text-blue-600 font-bold shrink-0 mt-1">•</span> 
+                        <div class="leading-relaxed">${formatItemContent(item)}</div>
                     </li>`
                 ).join('');
-                return `<ul class="my-3 pl-2">${htmlItems}</ul>`;
+                return `<ul class="my-3 pl-2 bg-blue-50/50 p-2 rounded-lg border border-blue-100">${htmlItems}</ul>`;
             });
 
-            // 2. Hàm hỗ trợ xử lý \item và \item[x]
-            const parseItems = (bodyStr) => {
-                const rawItems = bodyStr.split(/\\item(?![a-zA-Z])/).filter(s => s.trim().length > 0);
-                return rawItems.map((item, idx) => {
-                    let content = item.trim();
+            // Hàm phân tích cú pháp \item và \item[label]
+            const parseStandardItems = (body) => {
+                // Tách dựa trên từ khóa \item (nhưng không match \itemch hay \itemize)
+                // Regex lookahead để đảm bảo là \item đứng lẻ hoặc \item[...]
+                const rawItems = body.split(/\\item(?![a-zA-Z])/).slice(1);
+                
+                return rawItems.map((itemStr, idx) => {
+                    let content = itemStr.trim();
                     let label = null;
+
+                    // Kiểm tra tùy chọn \item[a)]
                     if (content.startsWith('[')) {
                         const closeBracket = content.indexOf(']');
                         if (closeBracket > -1) {
-                            label = content.substring(1, closeBracket); 
+                            label = content.substring(1, closeBracket); // Lấy nội dung trong []
                             content = content.substring(closeBracket + 1).trim();
                         }
                     }
@@ -484,18 +488,23 @@
                 });
             };
 
-            // 3. Xử lý listEX và enumEX
+            // 2. Xử lý listEX và enumEX (Chia cột)
+            // Regex bắt: \begin{listEX}[số cột] hoặc \begin{enumEX}{số cột}[kiểu]
             const regexCols = /\\begin\{(?:listEX|enumEX)\}(?:\[(\d+)\]|\{(\d+)\}(?:\[(.*?)\])?)([\s\S]*?)\\end\{(?:listEX|enumEX)\}/g;
+            
             processed = processed.replace(regexCols, (match, c1, c2, style, body) => {
-                const cols = c1 || c2 || 1; 
-                const items = parseItems(body);
+                const cols = c1 || c2 || 2; // Mặc định 2 cột nếu không rõ
+                const items = parseStandardItems(body);
+                
                 let gridHtml = `<div class="grid grid-cols-1 md:grid-cols-${cols} gap-4 my-3">`;
                 items.forEach((it, idx) => {
+                    // Tự sinh nhãn a), b)... nếu là enumEX mà không có label riêng
                     let displayLabel = it.label;
                     if (!displayLabel && match.includes('enumEX')) {
-                        displayLabel = String.fromCharCode(97 + idx) + ')'; 
+                        displayLabel = String.fromCharCode(97 + idx) + ')';
                     }
-                    gridHtml += `<div class="flex gap-2">
+                    
+                    gridHtml += `<div class="flex items-start gap-2">
                         ${displayLabel ? `<span class="font-bold text-gray-700 shrink-0">${displayLabel}</span>` : `<span class="text-gray-400 shrink-0">•</span>`}
                         <div>${it.content}</div>
                     </div>`;
@@ -504,28 +513,29 @@
                 return gridHtml;
             });
 
-            // 4. Xử lý enumerate
+            // 3. Xử lý enumerate (Có thứ tự 1, 2, 3...)
             processed = processed.replace(/\\begin\{enumerate\}([\s\S]*?)\\end\{enumerate\}/g, (match, body) => {
-                const items = parseItems(body);
-                let html = `<ol class="list-decimal pl-6 space-y-1 my-2">`;
-                items.forEach(it => {
-                    if (it.label) {
-                        html += `<li class="list-none -ml-4"><span class="font-bold mr-1">${it.label}</span>${it.content}</li>`;
-                    } else {
-                        html += `<li>${it.content}</li>`;
-                    }
+                const items = parseStandardItems(body);
+                let html = `<div class="space-y-2 my-2">`;
+                items.forEach((it, idx) => {
+                    const label = it.label || `${idx + 1}.`;
+                    html += `<div class="flex items-start gap-2">
+                        <span class="font-bold text-gray-600 shrink-0">${label}</span>
+                        <div>${it.content}</div>
+                    </div>`;
                 });
-                html += `</ol>`;
+                html += `</div>`;
                 return html;
             });
 
-            // 5. Xử lý itemize
+            // 4. Xử lý itemize (Dấu chấm bullet)
             processed = processed.replace(/\\begin\{itemize\}([\s\S]*?)\\end\{itemize\}/g, (match, body) => {
-                const items = parseItems(body);
+                const items = parseStandardItems(body);
                 let html = `<ul class="list-disc pl-6 space-y-1 my-2">`;
                 items.forEach(it => {
+                    // Nếu có label tùy chỉnh (\item[+]), dùng label đó
                     if (it.label) {
-                        html += `<li class="list-none -ml-4"><span class="font-bold mr-1">${it.label}</span>${it.content}</li>`;
+                        html += `<li class="list-none -ml-4 flex gap-2"><span class="font-bold">${it.label}</span> <span>${it.content}</span></li>`;
                     } else {
                         html += `<li>${it.content}</li>`;
                     }
@@ -536,6 +546,125 @@
 
             return processed;
         }
+        function formatContent(text) {
+            if (text === null || text === undefined) return "";
+            
+            // 1. Xử lý hình vẽ TikZ và Immini trước (Giữ nguyên logic immini bạn đã OK)
+            let processed = processLatexImagesWithDetection(processNestedTikz(text));
+
+            // 2. [MỚI] Xử lý các danh sách liệt kê (quan trọng: xử lý trước khi replace \\)
+            processed = processLatexLists(processed);
+
+            // 3. Xử lý xuống dòng toàn cục (cho các đoạn văn bản thường nằm ngoài list)
+            // Thay thế \\ bằng <br>, nhưng KHÔNG thay thế bên trong các thẻ HTML đã tạo
+            // Cách đơn giản nhất: thay thế \\ thành <br> ở những chỗ không phải tag HTML
+            // Tuy nhiên, để an toàn và đơn giản, ta replace toàn bộ, vì trong HTML <br> vẫn hợp lệ.
+            processed = processed.replace(/\\\\/g, '<br>');
+            processed = processed.replace(/\n/g, '<br>');
+
+            // 4. Dọn rác text
+            processed = processed.replace(/^\s*\}\s*$/gm, ''); 
+            processed = processed.replace(/\}\s*$/g, '');
+            processed = processed.replace(/Ảnh minh họa \(immini\)/g, ''); 
+            processed = processed.replace(/Ảnh canh giữa/g, '');
+
+            // 5. Phân tách để MathJax không bị ảnh hưởng bởi HTML
+            // Thêm các thẻ div, ul, li vào danh sách "Bảo vệ" của Regex
+            const regex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?:\$[\s\S]*?\$)|<script type="text\/tikz">[\s\S]*?<\/script>|<div[^>]*data-id=.*?>[\s\S]*?<\/div>|<img.*?>|<ul[\s\S]*?<\/ul>|<div class="grid[\s\S]*?<\/div>|<div class="space-y[\s\S]*?<\/div>)/g;
+            
+            const parts = processed.split(regex);
+            
+            return parts.map(part => {
+                // Nếu là block đặc biệt (Math, Img, List HTML) -> Giữ nguyên
+                if (part.includes('<script type="text/tikz">') || 
+                    part.includes('data-id=') || 
+                    part.includes('<img') || 
+                    part.includes('<ul') || 
+                    part.includes('class="grid') ||
+                    part.includes('class="space-y') ||
+                    part.trim().startsWith('$') || 
+                    part.trim().startsWith('\\(') || 
+                    part.trim().startsWith('\\[')) {
+                    return part;
+                }
+                else {
+                    // Văn bản thường: Chỉ xóa dấu } thừa
+                    return part.replace(/\}/g, '');
+                }
+            }).join('');
+        }
+
+        onAuthStateChanged(auth, async (user) => {
+            if (user) {
+                currentUser = user;
+                loadTeacherClasses();
+                const urlParams = new URLSearchParams(window.location.search);
+                const examId = urlParams.get('id');
+                if (examId) { currentExamId = examId; loadExamData(examId); }
+            } else { window.location.href = 'index.html'; }
+        });
+
+        function compressImage(file) {
+            return new Promise((resolve, reject) => {
+                const maxWidth = 800; 
+                const reader = new FileReader();
+                reader.readAsDataURL(file);
+                reader.onload = (event) => {
+                    const img = new Image();
+                    img.src = event.target.result;
+                    img.onload = () => {
+                        const canvas = document.createElement('canvas');
+                        let width = img.width; let height = img.height;
+                        if (width > maxWidth) { height *= maxWidth / width; width = maxWidth; }
+                        canvas.width = width; canvas.height = height;
+                        const ctx = canvas.getContext('2d'); ctx.drawImage(img, 0, 0, width, height);
+                        canvas.toBlob((blob) => { resolve(blob); }, 'image/jpeg', 0.7);
+                    };
+                    img.onerror = (err) => reject(err);
+                };
+                reader.onerror = (err) => reject(err);
+            });
+        }
+
+        async function handleImageUpload(file) {
+            if (!file) return;
+            window.showToast("Đang nén và tải ảnh...", "info");
+            try {
+                const compressedBlob = await compressImage(file);
+                const fileName = `images/${Date.now()}_${Math.floor(Math.random()*1000)}.jpg`;
+                const storageRef = ref(storage, fileName);
+                await uploadBytes(storageRef, compressedBlob);
+                const url = await getDownloadURL(storageRef);
+                insertAtCursor(`\n<div class="flex justify-center"><img src="${url}" class="max-w-full h-auto rounded-lg shadow-sm" style="max-height:300px;"></div>\n`);
+                autoSaveMemory(); window.showToast("Đã chèn ảnh thành công!", "success");
+            } catch (error) { console.error("Upload error:", error); window.showToast("Lỗi tải ảnh: " + error.message, "error"); }
+        }
+
+        function insertAtCursor(text) {
+            const textarea = document.getElementById('editContent');
+            if (!textarea) return;
+            const start = textarea.selectionStart; const end = textarea.selectionEnd; const value = textarea.value;
+            textarea.value = value.substring(0, start) + text + value.substring(end);
+            textarea.selectionStart = textarea.selectionEnd = start + text.length; textarea.focus();
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('imgUploadInput').addEventListener('change', (e) => { if(e.target.files.length > 0) handleImageUpload(e.target.files[0]); });
+            document.body.addEventListener('paste', (e) => {
+                if (e.target.id === 'editContent') {
+                    const items = (e.clipboardData || e.originalEvent.clipboardData).items;
+                    for (let index in items) {
+                        const item = items[index];
+                        if (item.kind === 'file' && item.type.includes('image/')) {
+                            e.preventDefault(); const blob = item.getAsFile(); handleImageUpload(blob); return;
+                        }
+                    }
+                }
+            });
+        });
+
+        let pendingImageUploads = []; 
+        let currentBatchUploadId = null;
 
         function getPlaceholderHTML(id, note = "Vị trí ảnh") {
             return `
@@ -579,46 +708,70 @@
             if (!text) return "";
             let processed = String(text);
             
-            // Xử lý \immini
-            while (processed.includes('\\immini')) {
-                const idx = processed.indexOf('\\immini'); 
-                let before = processed.substring(0, idx); 
-                let tempAfter = processed.substring(idx + 7).trim();
+            while (true) {
+                const idx = processed.indexOf('\\immini');
+                if (idx === -1) break;
 
-                if (tempAfter.startsWith('[')) { 
-                    const cb = tempAfter.indexOf(']'); 
-                    if (cb !== -1) tempAfter = tempAfter.substring(cb + 1).trim(); 
+                const before = processed.substring(0, idx); 
+                let remainder = processed.substring(idx + 7).trim(); // Skip \immini
+
+                // Skip optional arguments [thm], [etc]
+                if (remainder.startsWith('[')) { 
+                    const cb = remainder.indexOf(']'); 
+                    if (cb > -1) remainder = remainder.substring(cb + 1).trim(); 
                 }
 
-                const arg1 = extractNextBrace(tempAfter);
-                if (!arg1) { processed = before + tempAfter; continue; }
+                const arg1 = extractNextBrace(remainder);
+                if (!arg1) break; // Error parsing, stop to avoid inf loop
 
                 const arg2 = extractNextBrace(arg1.remaining);
-                if (!arg2) { processed = before + arg1.content + arg1.remaining; continue; }
+                if (!arg2) break; // Error parsing
 
-                const imgBlock = arg2.content;
+                // Extract image path from arg2 (the image block)
                 let imgPath = "";
                 let hasImage = false;
-
-                if (imgBlock.includes('\\includegraphics')) {
-                     const graphIdx = imgBlock.indexOf('\\includegraphics');
-                     const afterGraph = imgBlock.substring(graphIdx);
-                     const pathBrace = extractNextBrace(afterGraph.substring(afterGraph.indexOf('{')));
-                     if (pathBrace) { imgPath = pathBrace.content; hasImage = true; }
+                if (arg2.content.includes('includegraphics')) {
+                     const igIdx = arg2.content.indexOf('\\includegraphics');
+                     const afterIg = arg2.content.substring(igIdx);
+                     // Find the first {...} after \includegraphics
+                     const pathBlock = extractNextBrace(afterIg.substring(afterIg.indexOf('{')));
+                     if (pathBlock) {
+                         imgPath = pathBlock.content;
+                         hasImage = true;
+                     }
                 }
 
-                let ph = ""; 
-                if (hasImage) { 
-                    const uid = `img_${Date.now()}_${Math.random().toString(36).substr(2,9)}`; 
-                    pendingImageUploads.push({id:uid, originalPath:imgPath, questionIdx:questionIndex}); 
-                    ph = getPlaceholderHTML(uid, "Ảnh từ immini"); 
-                } else { ph = `<div class="p-2 border border-gray-200 bg-gray-50 text-xs">${arg2.content}</div>`; }
+                let ph = "";
+                if (hasImage) {
+                    const uid = `img_${Date.now()}_${Math.random().toString(36).substr(2,9)}`;
+                    pendingImageUploads.push({id:uid, originalPath:imgPath, questionIdx:questionIndex});
+                    ph = getPlaceholderHTML(uid, "Ảnh từ immini");
+                } else {
+                    // Fallback if no image found in 2nd arg
+                    ph = `<div class="text-xs text-gray-400 italic">[Khối hình không xác định]</div>`;
+                }
 
-                // LOGIC SỬA LỖI: arg2.remaining đã loại bỏ khối ảnh, tránh lặp lại.
-                processed = before + arg1.content + '\n\n' + ph + '\n\n' + arg2.remaining;
+                // SMART INSERTION: Put placeholder INSIDE arg1.content
+                // Find where the choices start
+                const contentText = arg1.content;
+                const choiceRegex = /\\(choice|choiceTF|shortans)/;
+                const match = contentText.match(choiceRegex);
+                
+                let newContent = "";
+                if (match && match.index !== undefined) {
+                    // Insert BEFORE the choice command
+                    newContent = contentText.substring(0, match.index) + 
+                                 '\n\n' + ph + '\n\n' + 
+                                 contentText.substring(match.index);
+                } else {
+                    // No choices (Essay), append to end
+                    newContent = contentText + '\n\n' + ph;
+                }
+
+                // Reconstruct: Before + Modified Content + Everything AFTER the image block
+                processed = before + newContent + arg2.remaining;
             }
 
-            // Xử lý \begin{center}...\includegraphics...\end{center}
             const centerRegex = /\\begin\{center\}\s*([\s\S]*?)\\includegraphics\s*(?:\[.*?\])?\s*\{(.*?)\}([\s\S]*?)\\end\{center\}/g;
             processed = processed.replace(centerRegex, (match, preText, imgPath, postText) => {
                  const uid = `img_${Date.now()}_${Math.random().toString(36).substr(2,9)}`; 
@@ -626,8 +779,6 @@
                  return getPlaceholderHTML(uid, "Ảnh canh giữa");
             });
             
-            // Xử lý \includegraphics đứng lẻ (Sửa regex để bắt cả đường dẫn có ngoặc nhọn lồng nhau)
-            // Regex này bắt { ... } và nội dung bên trong không chứa { hoặc chứa cặp {} lồng nhau 1 cấp
             processed = processed.replace(/\\includegraphics\s*(?:\[.*?\])?\s*\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}/g, (m, path) => {
                 const uid = `img_${Date.now()}_${Math.random().toString(36).substr(2,9)}`; 
                 pendingImageUploads.push({id:uid, originalPath:path, questionIdx:questionIndex}); 
@@ -635,48 +786,6 @@
             });
 
             return processed;
-        }
-
-        function formatContent(text) {
-            if (text === null || text === undefined) return "";
-            
-            // 1. Xử lý hình vẽ TikZ và Immini trước
-            let processed = processLatexImagesWithDetection(processNestedTikz(text));
-
-            // 2. Xử lý các danh sách liệt kê (quan trọng: xử lý trước khi replace \\)
-            processed = processLatexLists(processed);
-
-            // 3. Xử lý xuống dòng toàn cục (cho các đoạn văn bản thường nằm ngoài list)
-            processed = processed.replace(/\\\\/g, '<br>');
-            processed = processed.replace(/\n/g, '<br>');
-
-            // 4. Dọn rác text
-            processed = processed.replace(/^\s*\}\s*$/gm, ''); 
-            processed = processed.replace(/\}\s*$/g, '');
-            processed = processed.replace(/Ảnh minh họa \(immini\)/g, ''); 
-            processed = processed.replace(/Ảnh canh giữa/g, '');
-
-            const regex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?:\$[\s\S]*?\$)|<script type="text\/tikz">[\s\S]*?<\/script>|<div[^>]*data-id=.*?>[\s\S]*?<\/div>|<img.*?>|<ul[\s\S]*?<\/ul>|<ol[\s\S]*?<\/ol>|<div class="grid[\s\S]*?<\/div>)/g;
-            
-            const parts = processed.split(regex);
-            
-            return parts.map(part => {
-                if (part.includes('<script type="text/tikz">') || 
-                    part.includes('data-id=') || 
-                    part.includes('<img') || 
-                    part.includes('<ul') || 
-                    part.includes('<ol') || 
-                    part.includes('class="grid') ||
-                    part.trim().startsWith('$') || 
-                    part.trim().startsWith('\\(') || 
-                    part.trim().startsWith('\\[')) {
-                    return part;
-                }
-                else {
-                    let cleanPart = part.replace(/\}/g, '');
-                    return cleanPart;
-                }
-            }).join('');
         }
 
         window.renderBatchImageModal = () => {
@@ -692,7 +801,7 @@
                 div.innerHTML = `
                     <div class="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 font-bold text-xs shrink-0">${index + 1}</div>
                     <div class="flex-1 overflow-hidden">
-                        <div class="text-xs font-bold text-blue-600 mb-0.5">Câu hỏi số ${item.questionIdx !== undefined ? item.questionIdx + 1 : '?'}</div>
+                        <div class="text-xs font-bold text-blue-600 mb-0.5">Câu hỏi số ${item.questionIdx + 1}</div>
                         <div class="text-xs text-gray-500 truncate" title="${item.originalPath}"><i class="fa-regular fa-folder-open mr-1"></i>.../${item.originalPath.split('/').pop()}</div>
                     </div>
                     <button onclick="triggerBatchUpload('${item.id}')" class="px-3 py-1.5 bg-blue-50 text-blue-600 font-bold text-xs rounded-lg hover:bg-blue-100 whitespace-nowrap">
@@ -964,30 +1073,26 @@
                     let qType = 'essay'; 
                     let qData = { content: '', solution: '', options: [], statements: [], answer: '', point: 0 };
                     
-                    // 1. Tách và xử lý Lời giải trước
                     const loigiaiIndex = fullBody.lastIndexOf('\\loigiai');
                     let mainContent = fullBody;
                     
                     if (loigiaiIndex !== -1) {
                         mainContent = fullBody.substring(0, loigiaiIndex);
                         const solPart = fullBody.substring(loigiaiIndex);
-                        const solBrace = extractNextBrace(solPart.substring(solPart.indexOf('{') - 1)); // -1 để lấy cả {
+                        const solBrace = extractNextBrace(solPart);
                         if (solBrace) {
                             qData.solution = processLatexImagesWithDetection(cleanTikzCode(solBrace.content), count);
                         }
                     }
                     
-                    // 2. Xử lý ảnh trong đề bài
                     let procBody = processLatexImagesWithDetection(cleanTikzCode(mainContent), count);
                     
-                    // 3. Phân loại và tách đáp án (SỬ DỤNG extractNextBrace THAY CHO REGEX CŨ)
                     if (procBody.includes('\\choiceTF')) {
                         qType = 'tf'; 
                         const parts = procBody.split('\\choiceTF'); 
                         qData.content = parts[0].trim();
                         
                         let remainingText = parts[1];
-                        // Vòng lặp bóc tách từng ngoặc {} cho câu Đúng/Sai
                         while(true) {
                             const brace = extractNextBrace(remainingText);
                             if (!brace) break;
@@ -1007,7 +1112,6 @@
                         
                         let remainingText = parts[1];
                         let optCount = 0;
-                        // Vòng lặp bóc tách 4 phương án trắc nghiệm
                         while(optCount < 4) {
                             const brace = extractNextBrace(remainingText);
                             if (!brace) break;
