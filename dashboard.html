@@ -395,6 +395,8 @@
         import { getAuth, onAuthStateChanged, signOut, createUserWithEmailAndPassword, updateProfile, updatePassword } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
         import { getFirestore, doc, getDoc, setDoc, collection, addDoc, query, where, onSnapshot, getDocs, updateDoc, deleteDoc, arrayUnion, limit } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
         import { getStorage, ref, deleteObject } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js";
+        // THÊM DÒNG NÀY:
+        import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-functions.js";
 
         // 1. CẤU HÌNH FIREBASE
 
@@ -411,7 +413,8 @@
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
         const db = getFirestore(app);
-        const storage = getStorage(app); // THÊM DÒNG NÀY
+        const storage = getStorage(app);
+        const functions = getFunctions(app); // THÊM DÒNG NÀY
 
         // 2. BIẾN TOÀN CỤC
 
@@ -1133,7 +1136,78 @@
         function renderStudentList(list) { const table = document.getElementById('studentListTable'); table.innerHTML = ''; document.getElementById('studentCountBadge').textContent = `${list.length} học sinh`; if (list.length === 0) document.getElementById('emptyStudentMsg').classList.remove('hidden'); else { document.getElementById('emptyStudentMsg').classList.add('hidden'); list.forEach((st, index) => { table.innerHTML += `<tr class="bg-white hover:bg-gray-50 border-b"><td class="px-6 py-3 font-medium text-gray-500">${index + 1}</td><td class="px-6 py-3 font-medium text-gray-900">${st.name}</td><td class="px-6 py-3 text-blue-600 font-medium">${st.username}</td><td class="px-6 py-3 font-mono text-gray-400">******</td><td class="px-6 py-3 text-center"><button onclick="window.openEditStudent(${index})" class="text-blue-500 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 p-2 rounded-lg transition-colors mr-1"><i class="fa-solid fa-pen-to-square"></i></button><button onclick="window.deleteStudent(${index})" class="text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 p-2 rounded-lg transition-colors"><i class="fa-solid fa-trash"></i></button></td></tr>`; }); } }
         window.openEditStudent = function(index) { editingStudentIndex = index; const st = currentClassStudents[index]; document.getElementById('editStuName').value = st.name || ''; document.getElementById('editStuSBD').value = st.sbd || ''; document.getElementById('editStuGender').value = st.gender || 'Nam'; document.getElementById('editStuPhone').value = st.phoneStudent || ''; document.getElementById('editStuParentPhone').value = st.phoneParent || ''; document.getElementById('editStuEmail').value = st.email || ''; document.getElementById('editStuUsername').value = st.username || ''; document.getElementById('editStuPassword').value = st.password || ''; document.getElementById('editStuPassword').type = "password"; window.toggleModal('editStudentModal', true); }
         window.deleteStudent = async function(index) { if(!await window.customConfirm("Bạn có chắc muốn xóa học sinh này khỏi lớp?")) return; try { currentClassStudents.splice(index, 1); await updateDoc(doc(db, "classes", currentViewingClassId), { students: currentClassStudents, studentCount: currentClassStudents.length }); renderStudentList(currentClassStudents); window.showNotification("Đã xóa học sinh.", "success"); } catch(e) { window.showNotification("Lỗi xóa: " + e.message, "error"); } }
-        document.getElementById('saveStudentBtn').addEventListener('click', async () => { if (editingStudentIndex === -1 || !currentViewingClassId) return; const updatedStudent = { ...currentClassStudents[editingStudentIndex], name: document.getElementById('editStuName').value, sbd: document.getElementById('editStuSBD').value, gender: document.getElementById('editStuGender').value, phoneStudent: document.getElementById('editStuPhone').value, phoneParent: document.getElementById('editStuParentPhone').value, email: document.getElementById('editStuEmail').value, username: document.getElementById('editStuUsername').value, password: document.getElementById('editStuPassword').value }; if(!updatedStudent.name || !updatedStudent.username || !updatedStudent.password) { window.showNotification("Thiếu thông tin!", "error"); return; } try { currentClassStudents[editingStudentIndex] = updatedStudent; await updateDoc(doc(db, "classes", currentViewingClassId), { students: currentClassStudents }); window.showNotification("Cập nhật thành công!", "success"); renderStudentList(currentClassStudents); window.toggleModal('editStudentModal', false); } catch (e) { window.showNotification("Lỗi: " + e.message, "error"); } });
+        document.getElementById('saveStudentBtn').addEventListener('click', async () => {
+            if (editingStudentIndex === -1 || !currentViewingClassId) return;
+            
+            const btn = document.getElementById('saveStudentBtn');
+            const originalText = btn.innerText;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang xử lý...';
+            btn.disabled = true;
+
+            const name = document.getElementById('editStuName').value;
+            const newPassword = document.getElementById('editStuPassword').value;
+            const username = document.getElementById('editStuUsername').value;
+            const studentEmail = document.getElementById('editStuEmail').value;
+
+            // 1. Lấy dữ liệu học sinh hiện tại từ mảng
+            let studentData = currentClassStudents[editingStudentIndex];
+
+            // Cập nhật object cục bộ
+            const updatedStudent = {
+                ...studentData,
+                name: name,
+                sbd: document.getElementById('editStuSBD').value,
+                gender: document.getElementById('editStuGender').value,
+                phoneStudent: document.getElementById('editStuPhone').value,
+                phoneParent: document.getElementById('editStuParentPhone').value,
+                email: studentEmail,
+                username: username,
+                password: newPassword // Lưu text để hiển thị (tùy chọn)
+            };
+
+            try {
+                // 2. TÌM UID CỦA HỌC SINH ĐỂ ĐỔI MẬT KHẨU
+                // (Vì đôi khi mảng students trong class không lưu UID, ta cần tìm trong collection users)
+                let targetUid = studentData.uid;
+
+                if (!targetUid) {
+                    // Nếu không có UID trong mảng, tìm theo email/username
+                    const qUser = query(collection(db, "users"), where("email", "==", studentEmail));
+                    const snapUser = await getDocs(qUser);
+                    if (!snapUser.empty) {
+                        targetUid = snapUser.docs[0].id;
+                        // Cập nhật luôn UID vào mảng để lần sau không phải tìm
+                        updatedStudent.uid = targetUid; 
+                    }
+                }
+
+                // 3. GỌI CLOUD FUNCTION ĐỂ ĐỔI MẬT KHẨU THẬT SỰ (QUAN TRỌNG)
+                if (targetUid && newPassword && newPassword !== studentData.password) {
+                    const resetFunc = httpsCallable(functions, 'resetStudentPassword');
+                    await resetFunc({ studentUid: targetUid, newPassword: newPassword });
+                    window.showNotification("Đã cập nhật mật khẩu đăng nhập thành công!", "success");
+                } else if (!targetUid) {
+                    console.warn("Không tìm thấy UID, chỉ cập nhật thông tin hiển thị.");
+                }
+
+                // 4. Lưu cập nhật thông tin vào Firestore
+                currentClassStudents[editingStudentIndex] = updatedStudent;
+                await updateDoc(doc(db, "classes", currentViewingClassId), {
+                    students: currentClassStudents
+                });
+
+                window.showNotification("Lưu thông tin thành công!", "success");
+                renderStudentList(currentClassStudents);
+                window.toggleModal('editStudentModal', false);
+
+            } catch (e) {
+                console.error(e);
+                window.showNotification("Lỗi: " + e.message, "error");
+            } finally {
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+            }
+        });
         document.getElementById('addStudentBtn').addEventListener('click', async () => { if (!currentViewingClassId) return; const name = document.getElementById('newStudentName').value; const user = document.getElementById('newStudentUser').value; const pass = document.getElementById('newStudentPass').value; if (!name || !user || !pass) { window.showNotification("Nhập đủ thông tin!", "error"); return; } const fakeEmail = `${user}@hocsinh.com`; try { await createStudentAuth(fakeEmail, pass, name); const newStudent = { name, username: user, password: pass, email: fakeEmail, createdAt: new Date().toISOString() }; await updateDoc(doc(db, "classes", currentViewingClassId), { students: arrayUnion(newStudent) }); currentClassStudents.push(newStudent); renderStudentList(currentClassStudents); await updateDoc(doc(db, "classes", currentViewingClassId), { studentCount: currentClassStudents.length }); document.getElementById('newStudentName').value = ''; document.getElementById('newStudentUser').value = ''; document.getElementById('newStudentPass').value = ''; window.showNotification("Thêm thành công và đã tạo tài khoản!", "success"); } catch (e) { console.error(e); if(e.code === 'auth/email-already-in-use') window.showNotification("Tên đăng nhập đã tồn tại!", "error"); else window.showNotification("Lỗi: " + e.message, "error"); } });
         async function createStudentAuth(email, password, displayName) { const secondaryApp = initializeApp(firebaseConfig, "Secondary"); const secondaryAuth = getAuth(secondaryApp); try { const userCredential = await createUserWithEmailAndPassword(secondaryAuth, email, password); await setDoc(doc(db, "users", userCredential.user.uid), { email: email, displayName: displayName, role: 'student', birthDate: '', authType: 'email', createdAt: new Date().toISOString(), password: password }); await signOut(secondaryAuth); return userCredential.user; } catch (error) { throw error; } finally { deleteApp(secondaryApp); } }
         window.downloadTemplate = () => { const data = [["Họ và tên", "Tên đăng nhập", "Mật khẩu", "SBD", "Giới tính", "SĐT HS", "SĐT PHHS"], ["Nguyễn Văn A", "nguyenvana", "123456", "001", "Nam", "098...", "091..."]]; const ws = XLSX.utils.aoa_to_sheet(data); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "DanhSach"); XLSX.writeFile(wb, "Mau_DS_Hoc_Sinh.xlsx"); }
