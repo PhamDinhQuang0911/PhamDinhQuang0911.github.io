@@ -82,7 +82,7 @@
             </ul>
         </nav>
         <div class="p-4 border-t border-gray-200">
-            <button onclick="window.location.href='dashboard.html?view=exambank'" class="w-full py-2 text-gray-500 hover:text-red-600 font-bold text-sm flex items-center justify-center gap-2 transition-colors"><i class="fa-solid fa-arrow-right-from-bracket"></i> Quay lại</button>
+            <button onclick="handleBackNavigation()" class="w-full py-2 text-gray-500 hover:text-red-600 font-bold text-sm flex items-center justify-center gap-2 transition-colors"><i class="fa-solid fa-arrow-right-from-bracket"></i> Quay lại</button>
         </div>
     </aside>
 
@@ -387,8 +387,11 @@
         
         let currentUser = null, currentExamId = null;
         window.questions = [];
-        window.originalQuestionsData = []; // BIẾN MỚI ĐỂ LƯU DỮ LIỆU GỐC
+        window.originalQuestionsData = []; 
         window.currentQIndex = -1;
+        
+        // MẢNG THEO DÕI ẢNH TẠM THỜI (Vấn đề 2)
+        let sessionUploadedFiles = [];
         
         let statsMap = {}; 
         let classStudentList = [];
@@ -621,6 +624,10 @@
                 const fileName = `images/${Date.now()}_${Math.floor(Math.random()*1000)}.jpg`;
                 const storageRef = ref(storage, fileName);
                 await uploadBytes(storageRef, compressedBlob);
+                
+                // [FIX 2] Ghi nhận file tạm
+                sessionUploadedFiles.push(storageRef.fullPath);
+
                 const url = await getDownloadURL(storageRef);
                 insertAtCursor(`\n<div class="flex justify-center"><img src="${url}" class="max-w-full h-auto rounded-lg shadow-sm" style="max-height:300px;"></div>\n`);
                 autoSaveMemory(); window.showToast("Đã chèn ảnh thành công!", "success");
@@ -823,9 +830,42 @@
                 const storageRef = ref(storage, fileName); 
                 await uploadBytes(storageRef, compressedBlob); 
                 const url = await getDownloadURL(storageRef);
+
+                // [FIX 2] Ghi nhận file này vào danh sách tạm
+                sessionUploadedFiles.push(storageRef.fullPath);
+                
+                // [FIX 1] TÌM VÀ XÓA ẢNH CŨ TRƯỚC KHI THAY THẾ
+                // Tìm nội dung cũ của câu hỏi
+                let targetQ = null;
+                for (let q of window.questions) {
+                    if ((q.content && q.content.includes(currentBatchUploadId)) || (q.solution && q.solution.includes(currentBatchUploadId))) {
+                        targetQ = q; break;
+                    }
+                }
+
+                if (targetQ) {
+                    // Regex tìm URL ảnh cũ trong khối div có data-id tương ứng
+                    // Tìm đoạn HTML cũ dựa trên data-id
+                    const oldContent = targetQ.content.includes(currentBatchUploadId) ? targetQ.content : targetQ.solution;
+                    // Regex này tìm src="..." nằm gần data-id
+                    const regexOldImg = new RegExp(`<div[^>]*data-id=['"]${currentBatchUploadId}['"][^>]*>[\\s\\S]*?<img[^>]+src=['"]([^'"]+)['"][^>]*>[\\s\\S]*?<\\/div>`, 'i');
+                    const match = oldContent.match(regexOldImg);
+                    
+                    if (match && match[1]) {
+                        const oldUrl = match[1];
+                        if (oldUrl.includes('firebasestorage')) {
+                            console.log("Phát hiện ảnh cũ cần thay thế, đang xóa:", oldUrl);
+                            try {
+                                const oldRef = ref(storage, oldUrl);
+                                // Xóa ảnh cũ đi để không tốn dung lượng
+                                deleteObject(oldRef).catch(err => console.log("Lỗi xóa ảnh cũ (có thể đã mất):", err));
+                            } catch(e) {}
+                        }
+                    }
+                }
                 
                 const imgTag = `
-                <div class="group relative flex justify-center my-2 cursor-pointer" 
+                <div class="group relative flex justify-center my-2 cursor-pointer"
                      onclick="triggerBatchUpload('${currentBatchUploadId}')" 
                      data-id="${currentBatchUploadId}"
                      title="Bấm để thay đổi ảnh">
@@ -1182,7 +1222,7 @@
                         }));
                     }
                 }
-                
+                sessionUploadedFiles = [];
                 // Cập nhật lại dữ liệu gốc sau khi lưu thành công
                 window.originalQuestionsData = JSON.parse(JSON.stringify(window.questions));
 
@@ -1263,6 +1303,42 @@
         window.openScoringModal = () => { document.getElementById('scoringModal').classList.remove('opacity-0', 'pointer-events-none'); document.getElementById('scoringModal').querySelector('div').classList.add('scale-100'); let cM=0, cTF=0, cE=0; let h=''; window.questions.forEach((q,i)=>{ if(q.type==='essay'){ cE++; h+=`<div class="flex items-center gap-2 text-sm"><span class="w-16 font-bold">Câu ${i+1}</span><input type="number" id="essay-score-${i}" class="form-input h-8 text-right w-20" value="${q.point||0}" step="0.1"></div>`; } else if(q.type==='tf') cTF++; else cM++; }); document.getElementById('countMcShort').textContent=cM; document.getElementById('countTF').textContent=cTF; document.getElementById('countEssay').textContent=cE; document.getElementById('essayScoreList').innerHTML = cE>0 ? h : '<p class="text-xs text-gray-400 italic">Không có câu tự luận.</p>'; };
         window.closeScoringModal = () => { document.getElementById('scoringModal').classList.add('opacity-0', 'pointer-events-none'); };
         window.applyScoring = () => { const tM = parseFloat(document.getElementById('scoreTotalMcShort').value)||0; const tTF = parseFloat(document.getElementById('scoreTotalTF').value)||0; let cM=0, cTF=0; window.questions.forEach(q=>{if(q.type==='mc'||q.type==='short')cM++; else if(q.type==='tf')cTF++;}); const pM=cM>0?(tM/cM):0; const pTF=cTF>0?(tTF/cTF):0; window.questions.forEach((q,i)=>{ if(q.type==='mc'||q.type==='short') q.point=parseFloat(pM.toFixed(2)); else if(q.type==='tf') q.point=parseFloat(pTF.toFixed(2)); else if(q.type==='essay'){ const inp=document.getElementById(`essay-score-${i}`); if(inp) q.point=parseFloat(inp.value)||0; } }); closeScoringModal(); renderPreviewList(); window.showToast("Đã chia điểm!"); };
+    // [FIX 2] HÀM XỬ LÝ KHI BẤM QUAY LẠI MÀ CHƯA LƯU
+        window.handleBackNavigation = async () => {
+            // Kiểm tra xem có thay đổi chưa lưu hoặc có ảnh tạm chưa được xác nhận không
+            const hasUnsavedChanges = JSON.stringify(window.questions) !== JSON.stringify(window.originalQuestionsData);
+            const hasPendingImages = sessionUploadedFiles.length > 0;
+
+            if (hasUnsavedChanges || hasPendingImages) {
+                const confirmLeave = await window.customConfirm(
+                    "Bạn chưa lưu thay đổi.\nNếu thoát bây giờ, các ảnh vừa tải lên sẽ bị XÓA BỎ để dọn dẹp bộ nhớ.\nBạn có chắc chắn muốn thoát?"
+                );
+
+                if (confirmLeave) {
+                    if (hasPendingImages) {
+                        window.showToast("Đang dọn dẹp ảnh rác...", "info");
+                        // Xóa các file trong sessionUploadedFiles
+                        await Promise.all(sessionUploadedFiles.map(path => {
+                            const trashRef = ref(storage, path);
+                            return deleteObject(trashRef).catch(e => console.log("Không xóa được file rác:", path));
+                        }));
+                    }
+                    window.location.href = 'dashboard.html?view=exambank';
+                }
+            } else {
+                // Không có thay đổi gì, thoát luôn
+                window.location.href = 'dashboard.html?view=exambank';
+            }
+        };
+
+        // Cảnh báo trình duyệt (khi đóng tab hoặc F5)
+        window.addEventListener('beforeunload', function (e) {
+            if (sessionUploadedFiles.length > 0) {
+                // Trình duyệt hiện đại không cho phép custom message, nhưng dòng này kích hoạt popup mặc định
+                e.preventDefault();
+                e.returnValue = '';
+            }
+        });
     </script>
 </body>
 </html>
