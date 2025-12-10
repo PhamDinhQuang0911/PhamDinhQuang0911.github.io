@@ -1209,7 +1209,74 @@
                 btn.disabled = false;
             }
         });
-        document.getElementById('addStudentBtn').addEventListener('click', async () => { if (!currentViewingClassId) return; const name = document.getElementById('newStudentName').value; const user = document.getElementById('newStudentUser').value; const pass = document.getElementById('newStudentPass').value; if (!name || !user || !pass) { window.showNotification("Nhập đủ thông tin!", "error"); return; } const fakeEmail = `${user}@hocsinh.com`; try { await createStudentAuth(fakeEmail, pass, name); const newStudent = { name, username: user, password: pass, email: fakeEmail, createdAt: new Date().toISOString() }; await updateDoc(doc(db, "classes", currentViewingClassId), { students: arrayUnion(newStudent) }); currentClassStudents.push(newStudent); renderStudentList(currentClassStudents); await updateDoc(doc(db, "classes", currentViewingClassId), { studentCount: currentClassStudents.length }); document.getElementById('newStudentName').value = ''; document.getElementById('newStudentUser').value = ''; document.getElementById('newStudentPass').value = ''; window.showNotification("Thêm thành công và đã tạo tài khoản!", "success"); } catch (e) { console.error(e); if(e.code === 'auth/email-already-in-use') window.showNotification("Tên đăng nhập đã tồn tại!", "error"); else window.showNotification("Lỗi: " + e.message, "error"); } });
+        document.getElementById('addStudentBtn').addEventListener('click', async () => {
+            if (!currentViewingClassId) return;
+            
+            const btn = document.getElementById('addStudentBtn');
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang xử lý...';
+            btn.disabled = true;
+
+            const name = document.getElementById('newStudentName').value;
+            const user = document.getElementById('newStudentUser').value;
+            const pass = document.getElementById('newStudentPass').value;
+
+            if (!name || !user || !pass) {
+                window.showNotification("Nhập đủ thông tin!", "error");
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+                return;
+            }
+
+            const fakeEmail = `${user}@hocsinh.com`;
+
+            try {
+                // Tạo tài khoản bên Auth
+                const newUser = await createStudentAuth(fakeEmail, pass, name);
+                
+                // Tạo object học sinh để lưu vào lớp
+                const newStudent = {
+                    uid: newUser.uid, // <--- [QUAN TRỌNG] BẮT BUỘC PHẢI LƯU DÒNG NÀY
+                    name: name,
+                    username: user,
+                    password: pass,
+                    email: fakeEmail,
+                    createdAt: new Date().toISOString()
+                };
+
+                // Lưu vào danh sách lớp
+                await updateDoc(doc(db, "classes", currentViewingClassId), {
+                    students: arrayUnion(newStudent)
+                });
+                
+                // Cập nhật giao diện ngay lập tức
+                currentClassStudents.push(newStudent);
+                renderStudentList(currentClassStudents);
+                
+                // Cập nhật số lượng
+                await updateDoc(doc(db, "classes", currentViewingClassId), {
+                    studentCount: currentClassStudents.length
+                });
+
+                // Reset form
+                document.getElementById('newStudentName').value = '';
+                document.getElementById('newStudentUser').value = '';
+                document.getElementById('newStudentPass').value = '';
+                
+                window.showNotification("Thêm thành công và đã tạo tài khoản!", "success");
+
+            } catch (e) {
+                console.error(e);
+                if(e.code === 'auth/email-already-in-use') {
+                    window.showNotification("Tên đăng nhập đã tồn tại!", "error");
+                } else {
+                    window.showNotification("Lỗi: " + e.message, "error");
+                }
+            } finally {
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+            }
+        });
         async function createStudentAuth(email, password, displayName) {
             // Tạo một app phụ để không làm đăng xuất tài khoản Giáo viên hiện tại
             const secondaryApp = initializeApp(firebaseConfig, "Secondary");
