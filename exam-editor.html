@@ -371,9 +371,10 @@
         </div>
     </div>
     
-    <input type="file" id="batchFileInput" accept="image/*" class="hidden">
-
     <div id="toastContainer" class="fixed top-5 right-5 z-[110] flex flex-col gap-3 pointer-events-none"></div>
+    
+    <input type="file" id="batchFileInput" accept="image/*" class="hidden">
+    <input type="file" id="folderInput" webkitdirectory directory multiple class="hidden">
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
@@ -789,6 +790,22 @@
             
             if (pendingImageUploads.length === 0) return;
 
+            // --- [MỚI] KHỐI CHỌN THƯ MỤC TỰ ĐỘNG (NẰM TRÊN CÙNG) ---
+            const folderDiv = document.createElement('div');
+            folderDiv.className = "mb-4 p-4 bg-blue-50 border border-blue-200 rounded-xl flex items-center justify-between shadow-sm";
+            folderDiv.innerHTML = `
+                <div>
+                    <h4 class="font-bold text-blue-800 text-sm"><i class="fa-solid fa-magic-wand-sparkles mr-1"></i> Tự động quét ảnh</h4>
+                    <p class="text-xs text-blue-600 mt-1">Chọn folder chứa ảnh để hệ thống tự ghép tên file.</p>
+                </div>
+                <button onclick="document.getElementById('folderInput').click()" class="px-4 py-2 bg-blue-600 text-white font-bold rounded-lg text-xs shadow-md hover:bg-blue-700 transition-colors whitespace-nowrap">
+                    <i class="fa-solid fa-folder-open mr-1"></i> Chọn thư mục
+                </button>
+            `;
+            list.appendChild(folderDiv);
+            // -----------------------------------------------------------
+
+            // [GIỮ NGUYÊN] DANH SÁCH CHỌN THỦ CÔNG BÊN DƯỚI
             pendingImageUploads.forEach((item, index) => {
                 const div = document.createElement('div');
                 div.className = "flex items-center gap-3 p-3 bg-white border border-gray-200 rounded-xl hover:shadow-sm transition-shadow";
@@ -798,8 +815,8 @@
                         <div class="text-xs font-bold text-blue-600 mb-0.5">Câu hỏi số ${item.questionIdx + 1}</div>
                         <div class="text-xs text-gray-500 truncate" title="${item.originalPath}"><i class="fa-regular fa-folder-open mr-1"></i>.../${item.originalPath.split('/').pop()}</div>
                     </div>
-                    <button onclick="triggerBatchUpload('${item.id}')" class="px-3 py-1.5 bg-blue-50 text-blue-600 font-bold text-xs rounded-lg hover:bg-blue-100 whitespace-nowrap">
-                        <i class="fa-solid fa-cloud-arrow-up mr-1"></i> Thêm ảnh
+                    <button onclick="triggerBatchUpload('${item.id}')" class="px-3 py-1.5 bg-white border border-gray-300 text-gray-600 font-bold text-xs rounded-lg hover:bg-gray-50 whitespace-nowrap">
+                        <i class="fa-solid fa-upload mr-1"></i> Chọn lẻ
                     </button>
                 `;
                 list.appendChild(div);
@@ -818,93 +835,119 @@
             document.getElementById('batchImageModal').classList.add('opacity-0', 'pointer-events-none');
         };
 
+        // 1. HÀM XỬ LÝ CHUNG (Dùng cho cả Thủ công và Tự động)
+        async function uploadAndReplaceImage(file, batchId) {
+            // Nén và Upload
+            const compressedBlob = await compressImage(file);
+            const fileName = `images/batch_${Date.now()}_${Math.random().toString(36).substr(2,6)}.jpg`;
+            const storageRef = ref(storage, fileName);
+            await uploadBytes(storageRef, compressedBlob);
+            const url = await getDownloadURL(storageRef);
+
+            // Ghi nhận file tạm để dọn dẹp nếu thoát
+            sessionUploadedFiles.push(storageRef.fullPath);
+            
+            // Xóa ảnh cũ (nếu có) để tiết kiệm
+            let targetQ = window.questions.find(q => (q.content && q.content.includes(batchId)) || (q.solution && q.solution.includes(batchId)));
+            if (targetQ) {
+                const oldContent = targetQ.content.includes(batchId) ? targetQ.content : targetQ.solution;
+                const regexOldImg = new RegExp(`<div[^>]*data-id=['"]${batchId}['"][^>]*>[\\s\\S]*?<img[^>]+src=['"]([^'"]+)['"][^>]*>[\\s\\S]*?<\\/div>`, 'i');
+                const match = oldContent.match(regexOldImg);
+                if (match && match[1] && match[1].includes('firebasestorage')) {
+                    try { deleteObject(ref(storage, match[1])).catch(()=>{}); } catch(e){}
+                }
+            }
+            
+            // Tạo thẻ ảnh mới
+            const imgTag = `
+            <div class="group relative flex justify-center my-2 cursor-pointer"
+                 onclick="triggerBatchUpload('${batchId}')" 
+                 data-id="${batchId}"
+                 title="Bấm để thay đổi ảnh">
+                <img src="${url}" class="max-w-full h-auto rounded-lg shadow-md border-2 border-transparent group-hover:border-blue-400 transition-all" style="max-height:350px;">
+                <div class="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 flex items-center justify-center rounded-lg transition-opacity">
+                    <span class="text-white font-bold text-sm"><i class="fa-solid fa-pen"></i> Thay ảnh</span>
+                </div>
+            </div>`;
+            
+            const targetRegex = new RegExp(`<div[^>]*data-id=['"]${batchId}['"][^>]*>[\\s\\S]*?<\\/div>`, 'gi');
+
+            // Cập nhật vào mảng câu hỏi
+            let found = false;
+            window.questions.forEach(q => {
+                if (q.content && q.content.includes(batchId)) { q.content = q.content.replace(targetRegex, imgTag); found = true; }
+                if (q.solution && q.solution.includes(batchId)) { q.solution = q.solution.replace(targetRegex, imgTag); found = true; }
+            });
+
+            // Xóa khỏi danh sách chờ
+            pendingImageUploads = pendingImageUploads.filter(item => item.id !== batchId);
+            
+            // Refresh giao diện
+            renderBatchImageModal(); 
+            if (window.currentQIndex !== -1) loadQuestionToEditor(window.currentQIndex); 
+            renderPreviewList(); 
+            
+            // Nếu hết ảnh thì đóng modal
+            if (pendingImageUploads.length === 0) closeBatchImageModal();
+            
+            return true;
+        }
+
+        // 2. SỰ KIỆN UPLOAD THỦ CÔNG (Lẻ từng file)
         document.getElementById('batchFileInput').addEventListener('change', async (e) => {
             const file = e.target.files[0]; 
             if (!file || !currentBatchUploadId) return;
 
             try {
-                window.showToast("Đang xử lý ảnh...", "info"); 
-                
-                const compressedBlob = await compressImage(file); 
-                const fileName = `images/batch_${Date.now()}_${Math.floor(Math.random()*1000)}.jpg`; 
-                const storageRef = ref(storage, fileName); 
-                await uploadBytes(storageRef, compressedBlob); 
-                const url = await getDownloadURL(storageRef);
-
-                // [FIX 2] Ghi nhận file này vào danh sách tạm
-                sessionUploadedFiles.push(storageRef.fullPath);
-                
-                // [FIX 1] TÌM VÀ XÓA ẢNH CŨ TRƯỚC KHI THAY THẾ
-                // Tìm nội dung cũ của câu hỏi
-                let targetQ = null;
-                for (let q of window.questions) {
-                    if ((q.content && q.content.includes(currentBatchUploadId)) || (q.solution && q.solution.includes(currentBatchUploadId))) {
-                        targetQ = q; break;
-                    }
-                }
-
-                if (targetQ) {
-                    // Regex tìm URL ảnh cũ trong khối div có data-id tương ứng
-                    // Tìm đoạn HTML cũ dựa trên data-id
-                    const oldContent = targetQ.content.includes(currentBatchUploadId) ? targetQ.content : targetQ.solution;
-                    // Regex này tìm src="..." nằm gần data-id
-                    const regexOldImg = new RegExp(`<div[^>]*data-id=['"]${currentBatchUploadId}['"][^>]*>[\\s\\S]*?<img[^>]+src=['"]([^'"]+)['"][^>]*>[\\s\\S]*?<\\/div>`, 'i');
-                    const match = oldContent.match(regexOldImg);
-                    
-                    if (match && match[1]) {
-                        const oldUrl = match[1];
-                        if (oldUrl.includes('firebasestorage')) {
-                            console.log("Phát hiện ảnh cũ cần thay thế, đang xóa:", oldUrl);
-                            try {
-                                const oldRef = ref(storage, oldUrl);
-                                // Xóa ảnh cũ đi để không tốn dung lượng
-                                deleteObject(oldRef).catch(err => console.log("Lỗi xóa ảnh cũ (có thể đã mất):", err));
-                            } catch(e) {}
-                        }
-                    }
-                }
-                
-                const imgTag = `
-                <div class="group relative flex justify-center my-2 cursor-pointer"
-                     onclick="triggerBatchUpload('${currentBatchUploadId}')" 
-                     data-id="${currentBatchUploadId}"
-                     title="Bấm để thay đổi ảnh">
-                    <img src="${url}" class="max-w-full h-auto rounded-lg shadow-md border-2 border-transparent group-hover:border-blue-400 transition-all" style="max-height:350px;">
-                    <div class="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 flex items-center justify-center rounded-lg transition-opacity">
-                        <span class="text-white font-bold text-sm"><i class="fa-solid fa-pen"></i> Thay ảnh</span>
-                    </div>
-                </div>`;
-                
-                const targetRegex = new RegExp(`<div[^>]*data-id=['"]${currentBatchUploadId}['"][^>]*>[\\s\\S]*?<\\/div>`, 'gi');
-
-                let found = false;
-                for (let i = 0; i < window.questions.length; i++) {
-                    const q = window.questions[i];
-                    if (q.content && q.content.includes(currentBatchUploadId)) { 
-                        q.content = q.content.replace(targetRegex, imgTag); 
-                        found = true; 
-                    }
-                    if (q.solution && q.solution.includes(currentBatchUploadId)) { 
-                        q.solution = q.solution.replace(targetRegex, imgTag); 
-                        found = true; 
-                    }
-                }
-
-                pendingImageUploads = pendingImageUploads.filter(item => item.id !== currentBatchUploadId);
-                
-                renderBatchImageModal(); 
-                if (window.currentQIndex !== -1) loadQuestionToEditor(window.currentQIndex); 
-                renderPreviewList(); 
+                window.showToast("Đang tải ảnh lên...", "info"); 
+                await uploadAndReplaceImage(file, currentBatchUploadId);
                 window.showToast("Cập nhật ảnh thành công!", "success");
-                
-                if (pendingImageUploads.length === 0) closeBatchImageModal();
-
             } catch (err) { 
                 console.error(err); 
                 window.showToast("Lỗi: " + err.message, "error"); 
             } finally { 
                 e.target.value = '';
             }
+        });
+
+        // 3. [MỚI] SỰ KIỆN QUÉT THƯ MỤC (Tự động)
+        document.getElementById('folderInput').addEventListener('change', async (e) => {
+            const files = Array.from(e.target.files);
+            if (files.length === 0) return;
+
+            window.showToast(`Đang phân tích ${files.length} file trong thư mục...`, "info");
+            
+            let matchCount = 0;
+            // Khóa nút đóng modal để tránh lỗi khi đang upload
+            const btnClose = document.querySelector('#batchImageModal button[onclick="closeBatchImageModal()"]');
+            if(btnClose) btnClose.disabled = true;
+
+            // Tạo bản sao danh sách để duyệt
+            const processList = [...pendingImageUploads];
+
+            for (const item of processList) {
+                // Lấy tên file gốc từ LaTeX (bỏ đường dẫn, bỏ đuôi mở rộng)
+                // Ví dụ: "C:/Users/Admin/Desktop/hinh1.png" -> "hinh1"
+                const rawName = item.originalPath.split('/').pop().split('\\').pop();
+                const nameKey = rawName.split('.')[0].toLowerCase();
+                
+                // Tìm file trong thư mục máy tính có tên chứa từ khóa
+                const matchedFile = files.find(f => f.name.toLowerCase().includes(nameKey));
+
+                if (matchedFile) {
+                    try {
+                        await uploadAndReplaceImage(matchedFile, item.id);
+                        matchCount++;
+                    } catch (err) { console.error("Lỗi auto upload:", err); }
+                }
+            }
+
+            if(btnClose) btnClose.disabled = false;
+            
+            if (matchCount > 0) window.showToast(`Đã tự động ghép và tải lên ${matchCount} ảnh!`, "success");
+            else window.showToast("Không tìm thấy ảnh nào khớp tên.", "warning");
+            
+            e.target.value = '';
         });
 
         window.loadExamData = async (id) => { 
