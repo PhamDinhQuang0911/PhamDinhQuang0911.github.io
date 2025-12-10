@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Quản lý đề thi - Smart LaTeX Import</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="utils.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
@@ -201,7 +200,7 @@
         </div>
 
         <div id="view-stats" class="hidden flex-1 overflow-y-auto p-4 md:p-8 bg-gray-50">
-            <div class="max-w-6xl mx-auto">
+           <div class="max-w-6xl mx-auto">
                 <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-3">
                     <h1 class="text-2xl font-bold text-gray-800"><i class="fa-solid fa-chart-pie mr-2 text-blue-600"></i>Thống kê kết quả</h1>
                     <button onclick="window.exportToExcel()" class="px-4 py-2 bg-green-600 text-white rounded-lg font-bold shadow-md hover:bg-green-700 text-sm flex items-center gap-2"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>
@@ -381,7 +380,6 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
         import { getFirestore, doc, getDoc, setDoc, collection, query, where, getDocs, addDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
-        // THÊM deleteObject VÀO DÒNG DƯỚI
         import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js";
 
         const firebaseConfig = { apiKey: "AIzaSyCqAX3x1MbJ3do7m3EaH9JA4kFuVhlAc78", authDomain: "lms-thitracnghiem.firebaseapp.com", projectId: "lms-thitracnghiem", storageBucket: "lms-thitracnghiem.firebasestorage.app", messagingSenderId: "760187217240", appId: "1:760187217240:web:d043cd5808c349f87a712d" };
@@ -392,7 +390,7 @@
         window.originalQuestionsData = []; 
         window.currentQIndex = -1;
         
-        // MẢNG THEO DÕI ẢNH TẠM THỜI (Vấn đề 2)
+        // MẢNG THEO DÕI ẢNH TẠM THỜI
         let sessionUploadedFiles = [];
         
         let statsMap = {}; 
@@ -452,31 +450,24 @@
             }
             return result;
         }
-        // --- HÀM XỬ LÝ DANH SÁCH (LISTS) ---
-        // --- 1. HÀM XỬ LÝ BẢNG BIỂU (MỚI) ---
+        
+        // --- HÀM XỬ LÝ BẢNG BIỂU ---
         function processTabular(text) {
             if (!text) return "";
-            // Regex tìm tabular: \begin{tabular}{...} ... \end{tabular}
-            // Hỗ trợ cả tùy chọn [c] hoặc {c}
             const regex = /\\begin\{tabular\}(\{|\[).*?(\}|\])([\s\S]*?)\\end\{tabular\}/g;
             
             return text.replace(regex, (match, open, close, body) => {
-                // Xử lý các dòng
                 const rows = body.split('\\\\').filter(r => r.trim().length > 0);
-                
                 let html = '<div class="overflow-x-auto my-3"><table class="min-w-full border-collapse border border-gray-300 bg-white text-sm">';
                 
                 rows.forEach((row, rIdx) => {
-                    // Xử lý các cột, chú ý loại bỏ \hline
                     let cleanRow = row.replace(/\\hline/g, '').trim();
                     if(cleanRow.length === 0) return;
 
                     const cols = cleanRow.split('&');
                     html += '<tr>';
                     cols.forEach(col => {
-                        // Xóa các ký tự đóng gói format thừa nếu có
                         let content = col.trim();
-                        // Nếu là hàng đầu tiên, coi như header (tùy chọn, ở đây để td cho an toàn)
                         html += `<td class="border border-gray-300 px-4 py-2">${content}</td>`;
                     });
                     html += '</tr>';
@@ -487,16 +478,13 @@
             });
         }
 
-        // --- 2. CẬP NHẬT HÀM XỬ LÝ LIST (FIX LỖI XUỐNG DÒNG ITEMCHOICE) ---
+        // --- HÀM XỬ LÝ LIST ---
         function processLatexLists(text) {
             let processed = text;
 
-            // 1. Xử lý itemchoice (Lời giải ý True/False)
-            // Fix lỗi: Thay thế \\ thành <br> bên trong nội dung item
             processed = processed.replace(/\\begin\{itemchoice\}([\s\S]*?)\\end\{itemchoice\}/g, (match, body) => {
                 const items = body.split('\\itemch').filter(s => s.trim().length > 0);
                 const htmlItems = items.map(item => {
-                    // [FIX] Xử lý xuống dòng trong từng ý lời giải
                     let content = item.trim().replace(/\\\\/g, '<br>').replace(/\n/g, ' ');
                     return `<li class="flex items-start gap-2 mb-1">
                         <span class="text-blue-600 font-bold shrink-0">•</span> 
@@ -506,7 +494,6 @@
                 return `<ul class="my-3 pl-2">${htmlItems}</ul>`;
             });
 
-            // 2. Hàm hỗ trợ xử lý \item
             const parseItems = (bodyStr) => {
                 const rawItems = bodyStr.split(/\\item(?![a-zA-Z])/).filter(s => s.trim().length > 0);
                 return rawItems.map((item) => {
@@ -519,13 +506,11 @@
                             content = content.substring(closeBracket + 1).trim();
                         }
                     }
-                    // [FIX] Xử lý bảng biểu bên trong item nếu có
                     content = processTabular(content);
                     return { label, content };
                 });
             };
 
-            // 3. Xử lý listEX/enumEX (Chia cột)
             const regexCols = /\\begin\{(?:listEX|enumEX)\}(?:\[(\d+)\]|\{(\d+)\}(?:\[(.*?)\])?)([\s\S]*?)\\end\{(?:listEX|enumEX)\}/g;
             processed = processed.replace(regexCols, (match, c1, c2, style, body) => {
                 const cols = c1 || c2 || 1;
@@ -540,7 +525,6 @@
                 return gridHtml;
             });
 
-            // 4. Xử lý enumerate
             processed = processed.replace(/\\begin\{enumerate\}([\s\S]*?)\\end\{enumerate\}/g, (match, body) => {
                 const items = parseItems(body);
                 let html = `<ol class="list-decimal pl-6 space-y-1 my-2">`;
@@ -551,7 +535,6 @@
                 return html;
             });
 
-            // 5. Xử lý itemize
             processed = processed.replace(/\\begin\{itemize\}([\s\S]*?)\\end\{itemize\}/g, (match, body) => {
                 const items = parseItems(body);
                 let html = `<ul class="list-disc pl-6 space-y-1 my-2">`;
@@ -564,16 +547,15 @@
 
             return processed;
         }
-        
-        // --- [MỚI] HÀM FIX LỖI HIỂN THỊ: Chuyển Array sang Matrix ---
-        // --- [FIX 2] HIỂN THỊ PREVIEW: CHỈ XỬ LÝ ARRAY, BỎ QUA HEVA ---
+
+        // --- [CẬP NHẬT] HÀM FIX LỖI HIỂN THỊ ARRAY ---
+        // Chỉ xử lý array, tuyệt đối không đụng vào \heva để tránh lỗi MathJax
         function convertArrayToMatrix(content) {
             if (!content) return "";
             
             let processed = content;
-
             // 1. Thay thế \begin{array}{...} thành \begin{matrix}
-            // Regex tìm: \begin{array}, khoảng trắng, {tham_số_cột}
+            // Regex tìm: \begin{array}, khoảng trắng, {tham_số_cột_bất_kỳ}
             processed = processed.replace(/\\begin\{array\}\s*\{[^{}]*?\}/g, '\\begin{matrix}');
             
             // 2. Fallback cho trường hợp array không tham số
@@ -582,37 +564,31 @@
             // 3. Thay thế thẻ đóng
             processed = processed.replace(/\\end\{array\}/g, '\\end{matrix}');
             
-            // TUYỆT ĐỐI KHÔNG XỬ LÝ \heva TẠI ĐÂY.
-            // MathJax Macro sẽ tự xử lý \heva -> \left\{...
-            
             return processed;
         }
 
         function formatContent(text) {
             if (text === null || text === undefined) return "";
             
-            // [BƯỚC 0 - QUAN TRỌNG] Fix lỗi Array -> Matrix trước khi xử lý HTML
-            // Giúp hệ phương trình hiển thị đẹp trong cột hẹp
+            // [BƯỚC 1] Fix lỗi Array -> Matrix trước tiên để hiển thị đẹp
             let processed = convertArrayToMatrix(text);
 
-            // 1. Xử lý hình vẽ TikZ (Lưu ý: Dùng biến processed thay vì text gốc)
+            // 2. Xử lý hình vẽ TikZ
             processed = processNestedTikz(processed);
 
-            // 2. [MỚI] Xử lý Bảng biểu (Tabular) trước khi xử lý list
+            // 3. Xử lý Bảng biểu (Tabular) trước khi xử lý list
             processed = processTabular(processed);
 
-            // 3. Xử lý các danh sách liệt kê (itemchoice, enumerate,...)
+            // 4. Xử lý các danh sách liệt kê (itemchoice, enumerate,...)
             processed = processLatexLists(processed);
 
-            // 4. Dọn rác text
-
-            // 4. Dọn rác text
+            // 5. Dọn rác text
             processed = processed.replace(/^\s*\}\s*$/gm, ''); 
             processed = processed.replace(/\}\s*$/g, '');
             processed = processed.replace(/Ảnh minh họa \(immini\)/g, ''); 
             processed = processed.replace(/Ảnh canh giữa/g, '');
 
-            // 5. Bảo vệ các thẻ HTML đã tạo
+            // 6. Bảo vệ các thẻ HTML đã tạo
             const regex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?:\$[\s\S]*?\$)|<script type="text\/tikz">[\s\S]*?<\/script>|<div[^>]*data-id=.*?>[\s\S]*?<\/div>|<img.*?>|<table[\s\S]*?<\/table>|<ul[\s\S]*?<\/ul>|<ol[\s\S]*?<\/ol>|<div class="grid[\s\S]*?<\/div>)/g;
             
             const parts = processed.split(regex);
@@ -622,7 +598,7 @@
                     part.includes('<img') || 
                     part.includes('<ul') ||  
                     part.includes('<ol') ||  
-                    part.includes('<table') || // Bảo vệ thẻ table
+                    part.includes('<table') || 
                     part.includes('class="grid') || 
                     part.trim().startsWith('$') || 
                     part.trim().startsWith('\\(') || 
@@ -677,7 +653,6 @@
                 const storageRef = ref(storage, fileName);
                 await uploadBytes(storageRef, compressedBlob);
                 
-                // [FIX 2] Ghi nhận file tạm
                 sessionUploadedFiles.push(storageRef.fullPath);
 
                 const url = await getDownloadURL(storageRef);
@@ -759,27 +734,24 @@
                 if (idx === -1) break;
 
                 const before = processed.substring(0, idx); 
-                let remainder = processed.substring(idx + 7).trim(); // Skip \immini
+                let remainder = processed.substring(idx + 7).trim();
 
-                // Skip optional arguments [thm], [etc]
                 if (remainder.startsWith('[')) { 
                     const cb = remainder.indexOf(']'); 
                     if (cb > -1) remainder = remainder.substring(cb + 1).trim(); 
                 }
 
                 const arg1 = extractNextBrace(remainder);
-                if (!arg1) break; // Error parsing, stop to avoid inf loop
+                if (!arg1) break; 
 
                 const arg2 = extractNextBrace(arg1.remaining);
-                if (!arg2) break; // Error parsing
+                if (!arg2) break; 
 
-                // Extract image path from arg2 (the image block)
                 let imgPath = "";
                 let hasImage = false;
                 if (arg2.content.includes('includegraphics')) {
                      const igIdx = arg2.content.indexOf('\\includegraphics');
                      const afterIg = arg2.content.substring(igIdx);
-                     // Find the first {...} after \includegraphics
                      const pathBlock = extractNextBrace(afterIg.substring(afterIg.indexOf('{')));
                      if (pathBlock) {
                          imgPath = pathBlock.content;
@@ -793,28 +765,22 @@
                     pendingImageUploads.push({id:uid, originalPath:imgPath, questionIdx:questionIndex});
                     ph = getPlaceholderHTML(uid, "Ảnh từ immini");
                 } else {
-                    // Fallback if no image found in 2nd arg
                     ph = `<div class="text-xs text-gray-400 italic">[Khối hình không xác định]</div>`;
                 }
 
-                // SMART INSERTION: Put placeholder INSIDE arg1.content
-                // Find where the choices start
                 const contentText = arg1.content;
                 const choiceRegex = /\\(choice|choiceTF|shortans)/;
                 const match = contentText.match(choiceRegex);
                 
                 let newContent = "";
                 if (match && match.index !== undefined) {
-                    // Insert BEFORE the choice command
                     newContent = contentText.substring(0, match.index) + 
                                  '\n\n' + ph + '\n\n' + 
                                  contentText.substring(match.index);
                 } else {
-                    // No choices (Essay), append to end
                     newContent = contentText + '\n\n' + ph;
                 }
 
-                // Reconstruct: Before + Modified Content + Everything AFTER the image block
                 processed = before + newContent + arg2.remaining;
             }
 
@@ -841,7 +807,6 @@
             
             if (pendingImageUploads.length === 0) return;
 
-            // --- [MỚI] KHỐI CHỌN THƯ MỤC TỰ ĐỘNG (NẰM TRÊN CÙNG) ---
             const folderDiv = document.createElement('div');
             folderDiv.className = "mb-4 p-4 bg-blue-50 border border-blue-200 rounded-xl flex items-center justify-between shadow-sm";
             folderDiv.innerHTML = `
@@ -854,9 +819,7 @@
                 </button>
             `;
             list.appendChild(folderDiv);
-            // -----------------------------------------------------------
 
-            // [GIỮ NGUYÊN] DANH SÁCH CHỌN THỦ CÔNG BÊN DƯỚI
             pendingImageUploads.forEach((item, index) => {
                 const div = document.createElement('div');
                 div.className = "flex items-center gap-3 p-3 bg-white border border-gray-200 rounded-xl hover:shadow-sm transition-shadow";
@@ -886,19 +849,15 @@
             document.getElementById('batchImageModal').classList.add('opacity-0', 'pointer-events-none');
         };
 
-        // 1. HÀM XỬ LÝ CHUNG (Dùng cho cả Thủ công và Tự động)
         async function uploadAndReplaceImage(file, batchId) {
-            // Nén và Upload
             const compressedBlob = await compressImage(file);
             const fileName = `images/batch_${Date.now()}_${Math.random().toString(36).substr(2,6)}.jpg`;
             const storageRef = ref(storage, fileName);
             await uploadBytes(storageRef, compressedBlob);
             const url = await getDownloadURL(storageRef);
 
-            // Ghi nhận file tạm để dọn dẹp nếu thoát
             sessionUploadedFiles.push(storageRef.fullPath);
             
-            // Xóa ảnh cũ (nếu có) để tiết kiệm
             let targetQ = window.questions.find(q => (q.content && q.content.includes(batchId)) || (q.solution && q.solution.includes(batchId)));
             if (targetQ) {
                 const oldContent = targetQ.content.includes(batchId) ? targetQ.content : targetQ.solution;
@@ -909,7 +868,6 @@
                 }
             }
             
-            // Tạo thẻ ảnh mới
             const imgTag = `
             <div class="group relative flex justify-center my-2 cursor-pointer"
                  onclick="triggerBatchUpload('${batchId}')" 
@@ -923,28 +881,23 @@
             
             const targetRegex = new RegExp(`<div[^>]*data-id=['"]${batchId}['"][^>]*>[\\s\\S]*?<\\/div>`, 'gi');
 
-            // Cập nhật vào mảng câu hỏi
             let found = false;
             window.questions.forEach(q => {
                 if (q.content && q.content.includes(batchId)) { q.content = q.content.replace(targetRegex, imgTag); found = true; }
                 if (q.solution && q.solution.includes(batchId)) { q.solution = q.solution.replace(targetRegex, imgTag); found = true; }
             });
 
-            // Xóa khỏi danh sách chờ
             pendingImageUploads = pendingImageUploads.filter(item => item.id !== batchId);
             
-            // Refresh giao diện
             renderBatchImageModal(); 
             if (window.currentQIndex !== -1) loadQuestionToEditor(window.currentQIndex); 
             renderPreviewList(); 
             
-            // Nếu hết ảnh thì đóng modal
             if (pendingImageUploads.length === 0) closeBatchImageModal();
             
             return true;
         }
 
-        // 2. SỰ KIỆN UPLOAD THỦ CÔNG (Lẻ từng file)
         document.getElementById('batchFileInput').addEventListener('change', async (e) => {
             const file = e.target.files[0]; 
             if (!file || !currentBatchUploadId) return;
@@ -961,7 +914,6 @@
             }
         });
 
-        // 3. [MỚI] SỰ KIỆN QUÉT THƯ MỤC (Tự động)
         document.getElementById('folderInput').addEventListener('change', async (e) => {
             const files = Array.from(e.target.files);
             if (files.length === 0) return;
@@ -969,20 +921,15 @@
             window.showToast(`Đang phân tích ${files.length} file trong thư mục...`, "info");
             
             let matchCount = 0;
-            // Khóa nút đóng modal để tránh lỗi khi đang upload
             const btnClose = document.querySelector('#batchImageModal button[onclick="closeBatchImageModal()"]');
             if(btnClose) btnClose.disabled = true;
 
-            // Tạo bản sao danh sách để duyệt
             const processList = [...pendingImageUploads];
 
             for (const item of processList) {
-                // Lấy tên file gốc từ LaTeX (bỏ đường dẫn, bỏ đuôi mở rộng)
-                // Ví dụ: "C:/Users/Admin/Desktop/hinh1.png" -> "hinh1"
                 const rawName = item.originalPath.split('/').pop().split('\\').pop();
                 const nameKey = rawName.split('.')[0].toLowerCase();
                 
-                // Tìm file trong thư mục máy tính có tên chứa từ khóa
                 const matchedFile = files.find(f => f.name.toLowerCase().includes(nameKey));
 
                 if (matchedFile) {
@@ -1033,7 +980,6 @@
                         }, 500);
                     }
                     window.questions = data.questions || [];
-                    // SAO CHÉP DEEP COPY DỮ LIỆU GỐC ĐỂ SO SÁNH SAU NÀY
                     window.originalQuestionsData = JSON.parse(JSON.stringify(window.questions));
                     
                     sortQuestionsByType();
@@ -1175,8 +1121,9 @@
         window.deleteCurrentQuestion = async () => { if (window.currentQIndex === -1) return; if(await window.customConfirm("Xóa câu hỏi này?")) { window.questions.splice(window.currentQIndex, 1); window.currentQIndex = -1; renderPreviewList(); document.getElementById('editorArea').innerHTML = ''; } };
 
         function cleanLatex(text) { if (!text) return ""; let cleaned = text.replace(/^%.*$/gm, '').replace(/(?<!\\)%.*/g, '').replace(/^\s*\[.*?\]/gm, ''); return cleaned.trim(); }
-        function extractBracedContent(text) { let results = []; let braceCount = 0; let startIndex = -1; for (let i = 0; i < text.length; i++) { if (text[i] === '{') { if (braceCount === 0) startIndex = i + 1; braceCount++; } else if (text[i] === '}') { braceCount--; if (braceCount === 0 && startIndex !== -1) { results.push(text.substring(startIndex, i)); startIndex = -1; } } } return results; }
         
+        // --- [FIX QUAN TRỌNG] HÀM XỬ LÝ UPLOAD FILE ---
+        // Sửa lỗi: Cắt cụt nội dung do array gây rối loạn đếm ngoặc
         window.handleTexUpload = (input) => {
             const file = input.files[0]; if (!file) return;
             const reader = new FileReader();
@@ -1186,24 +1133,21 @@
                 let content = e.target.result;
                 content = content.replace(/(?<!\\)%.*/g, ''); // Xóa comment
 
-                // --- [FIX 1] XỬ LÝ IMPORT: CHUYỂN ARRAY -> MATRIX AN TOÀN ---
-                // Mục đích: Loại bỏ tham số cột {cc}, {l} của array để làm phẳng cấu trúc ngoặc.
-                // Regex: Tìm \begin{array}, chấp nhận khoảng trắng \s*, sau đó là nhóm tham số {...}
+                // --- [START FIX] CHUYỂN ĐỔI ARRAY -> MATRIX NGAY LẬP TỨC ---
+                // Mục tiêu: Loại bỏ tham số cột {cc}, {l} để cấu trúc ngoặc phẳng hơn
                 
-                // Bước 1: Thay thế \begin{array}{...} thành \begin{matrix}
-                // Chỉ thay thế các tham số cột đơn giản (không chứa ngoặc nhọn lồng nhau) để an toàn
+                // 1. Thay thế \begin{array}{...} thành \begin{matrix}
+                // Regex: Tìm \begin{array} theo sau bởi {tham_số_cột} (non-greedy)
                 content = content.replace(/\\begin\{array\}\s*\{[^{}]*?\}/g, '\\begin{matrix}');
                 
-                // Bước 2: Xử lý các trường hợp array còn sót lại (ví dụ không có tham số hoặc tham số phức tạp)
-                // Ta thay thế thô \begin{array} thành \begin{matrix}
-                // Nếu còn sót lại {cc} thì nó sẽ hiện ra như text, nhưng không làm hỏng cấu trúc parser.
+                // 2. Fallback: Thay thế \begin{array} không tham số (nếu sót)
                 content = content.replace(/\\begin\{array\}/g, '\\begin{matrix}');
                 
-                // Bước 3: Thay thế thẻ đóng
+                // 3. Thay thế thẻ đóng
                 content = content.replace(/\\end\{array\}/g, '\\end{matrix}');
-
-                // LƯU Ý: KHÔNG XỬ LÝ \heva. Để nguyên \heva{...} cho MathJax render.
-                // -------------------------------------------------------------
+                
+                // LƯU Ý: Không đụng vào \heva để MathJax xử lý
+                // --- [END FIX] ---------------------------------------------
 
                 pendingImageUploads = [];
                 const blockRegex = /\\begin\{(ex|bt|vd)\}([\s\S]*?)\\end\{\1\}/g;
@@ -1211,12 +1155,11 @@
                 
                 while ((match = blockRegex.exec(content)) !== null) {
                     let fullBody = match[2];
-                    fullBody = fullBody.replace(/^\s*\[.*?\]/, ''); // Xóa option [2D1...]
+                    fullBody = fullBody.replace(/^\s*\[.*?\]/, ''); 
                     
                     let qType = 'essay'; 
                     let qData = { content: '', solution: '', options: [], statements: [], answer: '', point: 0 };
                     
-                    // Logic tách lời giải giữ nguyên như cũ
                     let mainContent = fullBody;
                     const loigiaiIndex = fullBody.lastIndexOf('\\loigiai');
                     
@@ -1231,7 +1174,6 @@
                     
                     let procBody = processLatexImagesWithDetection(cleanTikzCode(mainContent), count);
                     
-                    // NHẬN DIỆN LOẠI CÂU HỎI
                     if (procBody.includes('\\choiceTF')) {
                         qType = 'tf'; 
                         const parts = procBody.split('\\choiceTF'); 
@@ -1290,12 +1232,12 @@
                 input.value = "";
                 
                 if(window.MathJax) MathJax.typesetPromise();
+                
                 if (pendingImageUploads.length > 0) renderBatchImageModal();
             };
             reader.readAsText(file);
         }
 
-        // HÀM HỖ TRỢ TRÍCH XUẤT URL
         function getAllImageUrls(dataObj) {
             const str = JSON.stringify(dataObj);
             const regex = /https:\/\/firebasestorage\.googleapis\.com\/v0\/b\/[^"'\s\\]+/g;
@@ -1318,18 +1260,13 @@
                 accessType: document.querySelector('input[name="settingAccess"]:checked').value, allowedClassId: document.getElementById('settingClassSelect').value
             };
             try {
-                // LOGIC MỚI: TÌM VÀ XÓA ẢNH THỪA (ORPHANED IMAGES)
-                // Chỉ chạy khi đang sửa đề (đã có originalQuestionsData)
                 if (currentExamId && window.originalQuestionsData.length > 0) {
                     const oldImages = getAllImageUrls(window.originalQuestionsData);
                     const newImages = getAllImageUrls(window.questions);
                     
-                    // Tìm ảnh có trong cũ nhưng không có trong mới
                     const deletedImages = oldImages.filter(url => !newImages.includes(url));
                     
                     if (deletedImages.length > 0) {
-                        console.log("Phát hiện ảnh cần xóa:", deletedImages);
-                        // Không chặn UI, chạy ngầm
                         Promise.all(deletedImages.map(url => {
                             try { return deleteObject(ref(storage, url)).catch(e => console.log("Ignore delete err", e)); }
                             catch(e) { return Promise.resolve(); }
@@ -1337,7 +1274,6 @@
                     }
                 }
                 sessionUploadedFiles = [];
-                // Cập nhật lại dữ liệu gốc sau khi lưu thành công
                 window.originalQuestionsData = JSON.parse(JSON.stringify(window.questions));
 
                 const examRef = currentExamId ? doc(db, "exams", currentExamId) : doc(collection(db, "exams"));
@@ -1417,9 +1353,8 @@
         window.openScoringModal = () => { document.getElementById('scoringModal').classList.remove('opacity-0', 'pointer-events-none'); document.getElementById('scoringModal').querySelector('div').classList.add('scale-100'); let cM=0, cTF=0, cE=0; let h=''; window.questions.forEach((q,i)=>{ if(q.type==='essay'){ cE++; h+=`<div class="flex items-center gap-2 text-sm"><span class="w-16 font-bold">Câu ${i+1}</span><input type="number" id="essay-score-${i}" class="form-input h-8 text-right w-20" value="${q.point||0}" step="0.1"></div>`; } else if(q.type==='tf') cTF++; else cM++; }); document.getElementById('countMcShort').textContent=cM; document.getElementById('countTF').textContent=cTF; document.getElementById('countEssay').textContent=cE; document.getElementById('essayScoreList').innerHTML = cE>0 ? h : '<p class="text-xs text-gray-400 italic">Không có câu tự luận.</p>'; };
         window.closeScoringModal = () => { document.getElementById('scoringModal').classList.add('opacity-0', 'pointer-events-none'); };
         window.applyScoring = () => { const tM = parseFloat(document.getElementById('scoreTotalMcShort').value)||0; const tTF = parseFloat(document.getElementById('scoreTotalTF').value)||0; let cM=0, cTF=0; window.questions.forEach(q=>{if(q.type==='mc'||q.type==='short')cM++; else if(q.type==='tf')cTF++;}); const pM=cM>0?(tM/cM):0; const pTF=cTF>0?(tTF/cTF):0; window.questions.forEach((q,i)=>{ if(q.type==='mc'||q.type==='short') q.point=parseFloat(pM.toFixed(2)); else if(q.type==='tf') q.point=parseFloat(pTF.toFixed(2)); else if(q.type==='essay'){ const inp=document.getElementById(`essay-score-${i}`); if(inp) q.point=parseFloat(inp.value)||0; } }); closeScoringModal(); renderPreviewList(); window.showToast("Đã chia điểm!"); };
-    // [FIX 2] HÀM XỬ LÝ KHI BẤM QUAY LẠI MÀ CHƯA LƯU
+        
         window.handleBackNavigation = async () => {
-            // Kiểm tra xem có thay đổi chưa lưu hoặc có ảnh tạm chưa được xác nhận không
             const hasUnsavedChanges = JSON.stringify(window.questions) !== JSON.stringify(window.originalQuestionsData);
             const hasPendingImages = sessionUploadedFiles.length > 0;
 
@@ -1431,7 +1366,6 @@
                 if (confirmLeave) {
                     if (hasPendingImages) {
                         window.showToast("Đang dọn dẹp ảnh rác...", "info");
-                        // Xóa các file trong sessionUploadedFiles
                         await Promise.all(sessionUploadedFiles.map(path => {
                             const trashRef = ref(storage, path);
                             return deleteObject(trashRef).catch(e => console.log("Không xóa được file rác:", path));
@@ -1440,15 +1374,12 @@
                     window.location.href = 'dashboard.html?view=exambank';
                 }
             } else {
-                // Không có thay đổi gì, thoát luôn
                 window.location.href = 'dashboard.html?view=exambank';
             }
         };
 
-        // Cảnh báo trình duyệt (khi đóng tab hoặc F5)
         window.addEventListener('beforeunload', function (e) {
             if (sessionUploadedFiles.length > 0) {
-                // Trình duyệt hiện đại không cho phép custom message, nhưng dòng này kích hoạt popup mặc định
                 e.preventDefault();
                 e.returnValue = '';
             }
