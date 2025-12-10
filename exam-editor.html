@@ -417,7 +417,27 @@
             cleaned = cleaned.replace(/\\begin\{center\}/g, "").replace(/\\end\{center\}/g, "");
             return cleaned;
         }
+        // --- BẮT ĐẦU MÃ MỚI CẦN THÊM ---
+        // HÀM MỚI: Chuyển đổi hệ phương trình dùng array về heva
+        function normalizeArrayToHeva(text) {
+            if (!text) return "";
+            
+            // Regex tìm cấu trúc: \left\{ \begin{array}{...} NỘI DUNG \end{array} \right.
+            // Giải thích regex:
+            // \\left\\{              -> Tìm dấu mở ngoặc nhọn hệ pt
+            // \\s* -> Có thể có khoảng trắng
+            // \\begin\{array\}\{[^}]*\} -> Tìm mở môi trường array và định dạng cột
+            // ([\s\S]*?)             -> Lấy toàn bộ nội dung bên trong (Group 1)
+            // \\end\{array\}         -> Tìm đóng môi trường array
+            // \\s*\\right\.          -> Tìm đóng ngoặc hệ pt (thường là \right.)
+            
+            const regex = /\\left\\{\s*\\begin\{array\}\{[^}]*\}([\s\S]*?)\\end\{array\}\s*\\right\./g;
 
+            return text.replace(regex, (match, body) => {
+                // Trả về dạng \heva{ nội dung }
+                return `\\heva{${body.trim()}}`;
+            });
+        }
         function processNestedTikz(text) {
             if (!text) return "";
             let result = "";
@@ -1199,7 +1219,14 @@
             reader.onload = function(e) { 
                 if (window.currentQIndex !== -1) saveCurrentQuestionToMemory();
                 let content = e.target.result;
-                content = content.replace(/(?<!\\)%.*/g, ''); // Xóa comment
+                
+                // 1. Xóa comment
+                content = content.replace(/(?<!\\)%.*/g, ''); 
+
+                // 2. [MỚI] Chuyển đổi Array sang Heva ngay lập tức để tránh lỗi parsing
+                if (typeof normalizeArrayToHeva === 'function') {
+                    content = normalizeArrayToHeva(content);
+                }
 
                 pendingImageUploads = [];
                 const blockRegex = /\\begin\{(ex|bt|vd)\}([\s\S]*?)\\end\{\1\}/g;
@@ -1212,35 +1239,29 @@
                     let qType = 'essay'; 
                     let qData = { content: '', solution: '', options: [], statements: [], answer: '', point: 0 };
                     
-                    // [FIX] Tách lời giải an toàn hơn bằng cách tìm \loigiai từ cuối lên
-                    // và sử dụng extractBracedContent để lấy đúng khối ngoặc
+                    // Tách lời giải an toàn
                     let mainContent = fullBody;
                     const loigiaiIndex = fullBody.lastIndexOf('\\loigiai');
                     
                     if (loigiaiIndex !== -1) {
-                        // Tạm thời cắt phần trước loigiai làm nội dung chính
                         mainContent = fullBody.substring(0, loigiaiIndex);
-                        
-                        // Phần sau là lời giải, cần lấy đúng nội dung trong {}
                         const solPart = fullBody.substring(loigiaiIndex);
-                        const solBrace = extractNextBrace(solPart); // Hàm này có sẵn trong code cũ của bạn
+                        const solBrace = extractNextBrace(solPart); 
                         if (solBrace) {
-                            // Xử lý ảnh và tikz trong lời giải
                             qData.solution = processLatexImagesWithDetection(cleanTikzCode(solBrace.content), count);
                         }
                     }
                     
-                    // Xử lý nội dung câu hỏi (đã tách lời giải)
+                    // Xử lý nội dung câu hỏi
                     let procBody = processLatexImagesWithDetection(cleanTikzCode(mainContent), count);
                     
                     // NHẬN DIỆN LOẠI CÂU HỎI
                     if (procBody.includes('\\choiceTF')) {
                         qType = 'tf'; 
                         const parts = procBody.split('\\choiceTF'); 
-                        qData.content = parts[0].trim(); // Phần dẫn đề
+                        qData.content = parts[0].trim();
                         
                         let remainingText = parts[1];
-                        // Parse các ý đúng sai
                         while(true) {
                             const brace = extractNextBrace(remainingText);
                             if (!brace) break;
