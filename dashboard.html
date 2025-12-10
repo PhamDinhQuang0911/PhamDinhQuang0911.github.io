@@ -1136,7 +1136,47 @@
         
         function renderStudentList(list) { const table = document.getElementById('studentListTable'); table.innerHTML = ''; document.getElementById('studentCountBadge').textContent = `${list.length} học sinh`; if (list.length === 0) document.getElementById('emptyStudentMsg').classList.remove('hidden'); else { document.getElementById('emptyStudentMsg').classList.add('hidden'); list.forEach((st, index) => { table.innerHTML += `<tr class="bg-white hover:bg-gray-50 border-b"><td class="px-6 py-3 font-medium text-gray-500">${index + 1}</td><td class="px-6 py-3 font-medium text-gray-900">${st.name}</td><td class="px-6 py-3 text-blue-600 font-medium">${st.username}</td><td class="px-6 py-3 font-mono text-gray-400">******</td><td class="px-6 py-3 text-center"><button onclick="window.openEditStudent(${index})" class="text-blue-500 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 p-2 rounded-lg transition-colors mr-1"><i class="fa-solid fa-pen-to-square"></i></button><button onclick="window.deleteStudent(${index})" class="text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 p-2 rounded-lg transition-colors"><i class="fa-solid fa-trash"></i></button></td></tr>`; }); } }
         window.openEditStudent = function(index) { editingStudentIndex = index; const st = currentClassStudents[index]; document.getElementById('editStuName').value = st.name || ''; document.getElementById('editStuSBD').value = st.sbd || ''; document.getElementById('editStuGender').value = st.gender || 'Nam'; document.getElementById('editStuPhone').value = st.phoneStudent || ''; document.getElementById('editStuParentPhone').value = st.phoneParent || ''; document.getElementById('editStuEmail').value = st.email || ''; document.getElementById('editStuUsername').value = st.username || ''; document.getElementById('editStuPassword').value = st.password || ''; document.getElementById('editStuPassword').type = "password"; window.toggleModal('editStudentModal', true); }
-        window.deleteStudent = async function(index) { if(!await window.customConfirm("Bạn có chắc muốn xóa học sinh này khỏi lớp?")) return; try { currentClassStudents.splice(index, 1); await updateDoc(doc(db, "classes", currentViewingClassId), { students: currentClassStudents, studentCount: currentClassStudents.length }); renderStudentList(currentClassStudents); window.showNotification("Đã xóa học sinh.", "success"); } catch(e) { window.showNotification("Lỗi xóa: " + e.message, "error"); } }
+        window.deleteStudent = async function(index) {
+            if(!await window.customConfirm("CẢNH BÁO: Hành động này sẽ xóa vĩnh viễn tài khoản đăng nhập của học sinh và loại khỏi lớp học. Bạn có chắc chắn không?")) return;
+            
+            const student = currentClassStudents[index];
+            
+            // Hiển thị loading
+            window.showNotification("Đang xử lý xóa tài khoản...", "info");
+
+            try {
+                // 1. Tìm UID của học sinh
+                let targetUid = student.uid;
+                if (!targetUid && student.email) {
+                    // Fallback: Tìm UID qua email nếu trong mảng lớp học chưa lưu UID
+                    const qUser = query(collection(db, "users"), where("email", "==", student.email));
+                    const snapUser = await getDocs(qUser);
+                    if (!snapUser.empty) targetUid = snapUser.docs[0].id;
+                }
+
+                // 2. Gọi Cloud Function để xóa Auth (nếu tìm thấy UID)
+                if (targetUid) {
+                    const deleteFunc = httpsCallable(functions, 'deleteStudentAccount');
+                    await deleteFunc({ studentUid: targetUid });
+                } else {
+                    console.warn("Không tìm thấy UID, chỉ xóa khỏi danh sách lớp.");
+                }
+
+                // 3. Xóa khỏi mảng dữ liệu của lớp (Firestore Class)
+                currentClassStudents.splice(index, 1);
+                await updateDoc(doc(db, "classes", currentViewingClassId), { 
+                    students: currentClassStudents, 
+                    studentCount: currentClassStudents.length 
+                });
+
+                renderStudentList(currentClassStudents);
+                window.showNotification("Đã xóa tài khoản và loại khỏi lớp thành công!", "success");
+
+            } catch(e) {
+                console.error(e);
+                window.showNotification("Lỗi xóa: " + e.message, "error");
+            }
+        }
         document.getElementById('saveStudentBtn').addEventListener('click', async () => {
             if (editingStudentIndex === -1 || !currentViewingClassId) return;
             
@@ -1150,54 +1190,54 @@
             const username = document.getElementById('editStuUsername').value;
             const studentEmail = document.getElementById('editStuEmail').value;
 
-            // 1. Lấy dữ liệu học sinh hiện tại từ mảng
+            // 1. Lấy dữ liệu học sinh hiện tại
             let studentData = currentClassStudents[editingStudentIndex];
 
-            // Cập nhật object cục bộ
-            const updatedStudent = {
-                ...studentData,
-                name: name,
-                sbd: document.getElementById('editStuSBD').value,
-                gender: document.getElementById('editStuGender').value,
-                phoneStudent: document.getElementById('editStuPhone').value,
-                phoneParent: document.getElementById('editStuParentPhone').value,
-                email: studentEmail,
-                username: username,
-                password: newPassword // Lưu text để hiển thị (tùy chọn)
-            };
-
             try {
-                // 2. TÌM UID CỦA HỌC SINH ĐỂ ĐỔI MẬT KHẨU
-                // (Vì đôi khi mảng students trong class không lưu UID, ta cần tìm trong collection users)
+                // 2. TÌM UID CỦA HỌC SINH (Logic quan trọng)
                 let targetUid = studentData.uid;
 
                 if (!targetUid) {
-                    // Nếu không có UID trong mảng, tìm theo email/username
+                    // Tìm fallback qua email nếu thiếu UID
                     const qUser = query(collection(db, "users"), where("email", "==", studentEmail));
                     const snapUser = await getDocs(qUser);
                     if (!snapUser.empty) {
                         targetUid = snapUser.docs[0].id;
-                        // Cập nhật luôn UID vào mảng để lần sau không phải tìm
-                        updatedStudent.uid = targetUid; 
                     }
                 }
 
-                // 3. GỌI CLOUD FUNCTION ĐỂ ĐỔI MẬT KHẨU THẬT SỰ (QUAN TRỌNG)
-                if (targetUid && newPassword && newPassword !== studentData.password) {
+                // 3. GỌI CLOUD FUNCTION ĐỂ ĐỔI MẬT KHẨU (Nếu có nhập mật khẩu mới)
+                if (newPassword && newPassword.trim() !== "") {
+                    if (!targetUid) {
+                        throw new Error("Không tìm thấy UID của học sinh này trong hệ thống. Không thể đổi mật khẩu.");
+                    }
+                    // Gọi Cloud Function
                     const resetFunc = httpsCallable(functions, 'resetStudentPassword');
                     await resetFunc({ studentUid: targetUid, newPassword: newPassword });
                     window.showNotification("Đã cập nhật mật khẩu đăng nhập thành công!", "success");
-                } else if (!targetUid) {
-                    console.warn("Không tìm thấy UID, chỉ cập nhật thông tin hiển thị.");
                 }
 
-                // 4. Lưu cập nhật thông tin vào Firestore
+                // 4. Cập nhật thông tin khác vào Firestore (Class)
+                const updatedStudent = {
+                    ...studentData,
+                    uid: targetUid || studentData.uid, // Cập nhật luôn UID vào lớp để lần sau dùng
+                    name: name,
+                    sbd: document.getElementById('editStuSBD').value,
+                    gender: document.getElementById('editStuGender').value,
+                    phoneStudent: document.getElementById('editStuPhone').value,
+                    phoneParent: document.getElementById('editStuParentPhone').value,
+                    email: studentEmail,
+                    username: username,
+                    password: newPassword || studentData.password 
+                };
+
                 currentClassStudents[editingStudentIndex] = updatedStudent;
+                
                 await updateDoc(doc(db, "classes", currentViewingClassId), {
                     students: currentClassStudents
                 });
 
-                window.showNotification("Lưu thông tin thành công!", "success");
+                window.showNotification("Lưu thông tin hồ sơ thành công!", "success");
                 renderStudentList(currentClassStudents);
                 window.toggleModal('editStudentModal', false);
 
