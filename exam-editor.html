@@ -563,67 +563,46 @@
 
             return processed;
         }
-        // --- HÀM TÁCH TOÁN VÀ VĂN BẢN (QUAN TRỌNG ĐỂ FIX LỖI 1) ---
-        function splitByMath(text) {
-            if (!text) return [{type: 'text', content: ''}];
-            
-            // Regex tìm các khối toán: $$...$$, \[...\], \(...\), $...$
-            // Chú ý: Cần xử lý cẩn thận để không bắt nhầm $ trong text nếu có (tuy nhiên latex chuẩn ít khi lỗi này)
-            const regex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?:\$[^\$]*?\$))/g;
-            
-            const parts = text.split(regex);
-            const result = [];
-            
-            parts.forEach((part, index) => {
-                if (!part) return;
-                // Nếu khớp regex (là toán) hoặc là các khối TikZ/Image đặc biệt
-                if (part.startsWith('$') || part.startsWith('\\') || part.includes('<script') || part.includes('<img')) {
-                    result.push({ type: 'math', content: part });
-                } else {
-                    result.push({ type: 'text', content: part });
-                }
-            });
-            return result;
-        }
         function formatContent(text) {
             if (text === null || text === undefined) return "";
             
-            // 1. Xử lý hình vẽ TikZ và các khối đặc biệt trước
+            // 1. Xử lý hình vẽ TikZ
             let processed = processNestedTikz(text);
 
-            // 2. Tách Toán và Text để xử lý an toàn
-            const segments = splitByMath(processed);
+            // 2. [MỚI] Xử lý Bảng biểu (Tabular) trước khi xử lý list
+            processed = processTabular(processed);
+
+            // 3. Xử lý các danh sách liệt kê (itemchoice, enumerate,...)
+            processed = processLatexLists(processed);
+
+            // 4. Dọn rác text
+            processed = processed.replace(/^\s*\}\s*$/gm, ''); 
+            processed = processed.replace(/\}\s*$/g, '');
+            processed = processed.replace(/Ảnh minh họa \(immini\)/g, ''); 
+            processed = processed.replace(/Ảnh canh giữa/g, '');
+
+            // 5. Bảo vệ các thẻ HTML đã tạo
+            const regex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?:\$[\s\S]*?\$)|<script type="text\/tikz">[\s\S]*?<\/script>|<div[^>]*data-id=.*?>[\s\S]*?<\/div>|<img.*?>|<table[\s\S]*?<\/table>|<ul[\s\S]*?<\/ul>|<ol[\s\S]*?<\/ol>|<div class="grid[\s\S]*?<\/div>)/g;
             
-            let finalHtml = "";
-            
-            segments.forEach(seg => {
-                if (seg.type === 'math') {
-                    // Nếu là Toán: Giữ nguyên hoàn toàn để MathJax xử lý
-                    finalHtml += seg.content;
-                } else {
-                    // Nếu là Text: Xử lý Bảng biểu, List, Xuống dòng
-                    let txt = seg.content;
-                    
-                    // a. Xử lý Bảng biểu (Tabular)
-                    txt = processTabular(txt);
-
-                    // b. Xử lý các danh sách liệt kê (itemchoice, enumerate,...)
-                    txt = processLatexLists(txt);
-
-                    // c. Dọn rác
-                    txt = txt.replace(/^\s*\}\s*$/gm, '')
-                             .replace(/\}\s*$/g, '')
-                             .replace(/Ảnh minh họa \(immini\)/g, '')
-                             .replace(/Ảnh canh giữa/g, '');
-
-                    // d. [QUAN TRỌNG] Thay thế xuống dòng, NHƯNG KHÔNG ẢNH HƯỞNG TOÁN
-                    txt = txt.replace(/\\\\/g, '<br>').replace(/\n/g, '<br>');
-                    
-                    finalHtml += txt;
+            const parts = processed.split(regex);
+            return parts.map(part => {
+                if (part.includes('<script type="text/tikz">') || 
+                    part.includes('data-id=') || 
+                    part.includes('<img') || 
+                    part.includes('<ul') ||  
+                    part.includes('<ol') ||  
+                    part.includes('<table') || // Bảo vệ thẻ table
+                    part.includes('class="grid') || 
+                    part.trim().startsWith('$') || 
+                    part.trim().startsWith('\\(') || 
+                    part.trim().startsWith('\\[')) {
+                    return part;
                 }
-            });
-
-            return finalHtml;
+                else {
+                    let cleanPart = part.replace(/\}/g, '');
+                    return cleanPart.replace(/\\\\/g, '<br>').replace(/\n/g, '<br>');
+                }
+            }).join('');
         }
 
         onAuthStateChanged(auth, async (user) => {
@@ -713,18 +692,15 @@
             </div>`;
         }
 
-        // Hàm trích xuất nội dung trong ngoặc {} thông minh (Hỗ trợ lồng nhau)
         function extractNextBrace(text) {
             if (!text) return null;
-            // Tìm dấu mở ngoặc đầu tiên
             const start = text.indexOf('{');
             if (start === -1) return null;
             
-            let depth = 0;
+            let depth = 1;
             let end = -1;
             
-            // Duyệt từ dấu mở ngoặc để tìm dấu đóng tương ứng
-            for (let i = start; i < text.length; i++) {
+            for (let i = start + 1; i < text.length; i++) {
                 if (text[i] === '{') depth++;
                 else if (text[i] === '}') depth--;
                 
@@ -734,11 +710,11 @@
                 }
             }
             
-            if (end === -1) return null; // Không tìm thấy ngoặc đóng
+            if (end === -1) return null;
             
             return {
-                content: text.substring(start + 1, end), // Nội dung bên trong
-                remaining: text.substring(end + 1),      // Phần còn lại sau ngoặc đóng
+                content: text.substring(start + 1, end),
+                remaining: text.substring(end + 1),
                 fullMatch: text.substring(start, end + 1)
             };
         }
@@ -1177,12 +1153,7 @@
             reader.onload = function(e) { 
                 if (window.currentQIndex !== -1) saveCurrentQuestionToMemory();
                 let content = e.target.result;
-                
-                // [FIX LỖI 2] Xóa comment % và cả dòng trống đi kèm
-                // 1. Xóa nội dung từ % đến hết dòng
-                content = content.replace(/(?<!\\)%.*$/gm, '');
-                // 2. Xóa các dòng trống dư thừa tạo ra do việc xóa comment
-                content = content.replace(/^\s*[\r\n]/gm, '');
+                content = content.replace(/(?<!\\)%.*/g, ''); // Xóa comment
 
                 pendingImageUploads = [];
                 const blockRegex = /\\begin\{(ex|bt|vd)\}([\s\S]*?)\\end\{\1\}/g;
@@ -1190,39 +1161,40 @@
                 
                 while ((match = blockRegex.exec(content)) !== null) {
                     let fullBody = match[2];
-                    fullBody = fullBody.replace(/^\s*\[.*?\]/, ''); 
+                    fullBody = fullBody.replace(/^\s*\[.*?\]/, ''); // Xóa option [2D1...]
                     
                     let qType = 'essay'; 
                     let qData = { content: '', solution: '', options: [], statements: [], answer: '', point: 0 };
                     
-                    // Tách lời giải
+                    // [FIX] Tách lời giải an toàn hơn bằng cách tìm \loigiai từ cuối lên
+                    // và sử dụng extractBracedContent để lấy đúng khối ngoặc
                     let mainContent = fullBody;
                     const loigiaiIndex = fullBody.lastIndexOf('\\loigiai');
                     
                     if (loigiaiIndex !== -1) {
+                        // Tạm thời cắt phần trước loigiai làm nội dung chính
                         mainContent = fullBody.substring(0, loigiaiIndex);
+                        
+                        // Phần sau là lời giải, cần lấy đúng nội dung trong {}
                         const solPart = fullBody.substring(loigiaiIndex);
-                        // extractNextBrace mới sẽ xử lý tốt array trong lời giải
-                        const solBrace = extractNextBrace(solPart); 
+                        const solBrace = extractNextBrace(solPart); // Hàm này có sẵn trong code cũ của bạn
                         if (solBrace) {
+                            // Xử lý ảnh và tikz trong lời giải
                             qData.solution = processLatexImagesWithDetection(cleanTikzCode(solBrace.content), count);
                         }
                     }
                     
+                    // Xử lý nội dung câu hỏi (đã tách lời giải)
                     let procBody = processLatexImagesWithDetection(cleanTikzCode(mainContent), count);
                     
                     // NHẬN DIỆN LOẠI CÂU HỎI
                     if (procBody.includes('\\choiceTF')) {
                         qType = 'tf'; 
-                        // Tách phần dẫn và phần các mệnh đề
-                        // [FIX LỖI 3] Cẩn thận khi split, chỉ lấy phần trước \choiceTF đầu tiên làm đề
-                        const splitIdx = procBody.indexOf('\\choiceTF');
-                        qData.content = procBody.substring(0, splitIdx).trim();
+                        const parts = procBody.split('\\choiceTF'); 
+                        qData.content = parts[0].trim(); // Phần dẫn đề
                         
-                        let remainingText = procBody.substring(splitIdx + 9); // Bỏ qua chữ \choiceTF
-                        
-                        // Parse 4 mệnh đề
-                        // Nhờ extractNextBrace mới, nó sẽ không bị gãy khi gặp array bên trong
+                        let remainingText = parts[1];
+                        // Parse các ý đúng sai
                         while(true) {
                             const brace = extractNextBrace(remainingText);
                             if (!brace) break;
@@ -1237,10 +1209,10 @@
 
                     } else if (procBody.includes('\\choice')) {
                         qType = 'mc'; 
-                        const splitIdx = procBody.indexOf('\\choice');
-                        qData.content = procBody.substring(0, splitIdx).trim();
+                        const parts = procBody.split('\\choice'); 
+                        qData.content = parts[0].trim();
                         
-                        let remainingText = procBody.substring(splitIdx + 7);
+                        let remainingText = parts[1];
                         let optCount = 0;
                         while(optCount < 4) {
                             const brace = extractNextBrace(remainingText);
@@ -1275,6 +1247,7 @@
                 input.value = "";
                 
                 if(window.MathJax) MathJax.typesetPromise();
+                
                 if (pendingImageUploads.length > 0) renderBatchImageModal();
             };
             reader.readAsText(file);
