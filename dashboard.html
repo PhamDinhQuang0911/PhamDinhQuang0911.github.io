@@ -390,7 +390,8 @@
     </script>
 
     <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        // Thêm deleteApp vào trong dấu ngoặc nhọn
+        import { initializeApp, deleteApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         // IMPORT THÊM updateProfile và updatePassword
         import { getAuth, onAuthStateChanged, signOut, createUserWithEmailAndPassword, updateProfile, updatePassword } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
         import { getFirestore, doc, getDoc, setDoc, collection, addDoc, query, where, onSnapshot, getDocs, updateDoc, deleteDoc, arrayUnion, limit } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
@@ -1209,7 +1210,41 @@
             }
         });
         document.getElementById('addStudentBtn').addEventListener('click', async () => { if (!currentViewingClassId) return; const name = document.getElementById('newStudentName').value; const user = document.getElementById('newStudentUser').value; const pass = document.getElementById('newStudentPass').value; if (!name || !user || !pass) { window.showNotification("Nhập đủ thông tin!", "error"); return; } const fakeEmail = `${user}@hocsinh.com`; try { await createStudentAuth(fakeEmail, pass, name); const newStudent = { name, username: user, password: pass, email: fakeEmail, createdAt: new Date().toISOString() }; await updateDoc(doc(db, "classes", currentViewingClassId), { students: arrayUnion(newStudent) }); currentClassStudents.push(newStudent); renderStudentList(currentClassStudents); await updateDoc(doc(db, "classes", currentViewingClassId), { studentCount: currentClassStudents.length }); document.getElementById('newStudentName').value = ''; document.getElementById('newStudentUser').value = ''; document.getElementById('newStudentPass').value = ''; window.showNotification("Thêm thành công và đã tạo tài khoản!", "success"); } catch (e) { console.error(e); if(e.code === 'auth/email-already-in-use') window.showNotification("Tên đăng nhập đã tồn tại!", "error"); else window.showNotification("Lỗi: " + e.message, "error"); } });
-        async function createStudentAuth(email, password, displayName) { const secondaryApp = initializeApp(firebaseConfig, "Secondary"); const secondaryAuth = getAuth(secondaryApp); try { const userCredential = await createUserWithEmailAndPassword(secondaryAuth, email, password); await setDoc(doc(db, "users", userCredential.user.uid), { email: email, displayName: displayName, role: 'student', birthDate: '', authType: 'email', createdAt: new Date().toISOString(), password: password }); await signOut(secondaryAuth); return userCredential.user; } catch (error) { throw error; } finally { deleteApp(secondaryApp); } }
+        async function createStudentAuth(email, password, displayName) {
+            // Tạo một app phụ để không làm đăng xuất tài khoản Giáo viên hiện tại
+            const secondaryApp = initializeApp(firebaseConfig, "Secondary");
+            const secondaryAuth = getAuth(secondaryApp);
+            
+            try {
+                const userCredential = await createUserWithEmailAndPassword(secondaryAuth, email, password);
+                const newUser = userCredential.user;
+                
+                // Cập nhật tên hiển thị ngay lập tức
+                await updateProfile(newUser, { displayName: displayName });
+                
+                // Lưu thông tin vào collection users để sau này tìm được UID
+                await setDoc(doc(db, "users", newUser.uid), {
+                    email: email,
+                    displayName: displayName,
+                    role: 'student',
+                    birthDate: '',
+                    authType: 'email',
+                    createdAt: new Date().toISOString(),
+                    // Lưu mật khẩu dạng text để hiển thị cho GV xem (Tùy chọn)
+                    password: password 
+                });
+
+                // Đăng xuất app phụ và xóa nó đi
+                await signOut(secondaryAuth);
+                await deleteApp(secondaryApp); // Dòng này lúc nãy bị lỗi do chưa import
+                
+                return newUser;
+            } catch (error) {
+                // Nếu lỗi cũng phải xóa app phụ
+                await deleteApp(secondaryApp);
+                throw error;
+            }
+        }
         window.downloadTemplate = () => { const data = [["Họ và tên", "Tên đăng nhập", "Mật khẩu", "SBD", "Giới tính", "SĐT HS", "SĐT PHHS"], ["Nguyễn Văn A", "nguyenvana", "123456", "001", "Nam", "098...", "091..."]]; const ws = XLSX.utils.aoa_to_sheet(data); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "DanhSach"); XLSX.writeFile(wb, "Mau_DS_Hoc_Sinh.xlsx"); }
         window.handleFileUpload = (input) => { const file = input.files[0]; if (!file) return; const reader = new FileReader(); reader.onload = async function(e) { const data = new Uint8Array(e.target.result); const workbook = XLSX.read(data, {type: 'array'}); const jsonData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], {header: 1}); let addedCount = 0; for(let i = 1; i < jsonData.length; i++) { const row = jsonData[i]; if(row[0] && row[1]) { try { const name = row[0]; const user = row[1]; const pass = String(row[2] || '123456'); const fakeEmail = `${user}@hocsinh.com`; try { await createStudentAuth(fakeEmail, pass, name); } catch(e) { console.log("User exists or error", e); } const newStudent = { name, username: user, password: pass, email: fakeEmail, sbd: row[3]||'', gender: row[4]||'Nam', phoneStudent: row[5]||'', phoneParent: row[6]||'', createdAt: new Date().toISOString() }; await updateDoc(doc(db, "classes", currentViewingClassId), { students: arrayUnion(newStudent) }); currentClassStudents.push(newStudent); addedCount++; } catch(e) { console.error(e); } } } if(addedCount > 0) { renderStudentList(currentClassStudents); await updateDoc(doc(db, "classes", currentViewingClassId), { studentCount: currentClassStudents.length }); window.showNotification(`Đã thêm ${addedCount} học sinh!`, "success"); } input.value = ""; }; reader.readAsArrayBuffer(file); }
         document.getElementById('logoutBtn').onclick = async () => { if(await window.customConfirm("Bạn có chắc muốn đăng xuất?")) signOut(auth).then(()=>window.location.href="index.html"); }
