@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Quản lý đề thi - Smart LaTeX Import</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="utils.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
@@ -563,17 +564,40 @@
 
             return processed;
         }
+        
+        // --- [MỚI] HÀM FIX LỖI HIỂN THỊ: Chuyển Array/Heva sang Matrix ---
+        function convertArrayToMatrix(content) {
+            if (!content) return "";
+            // Thay thế \begin{array}{...} (bất kể căn lề gì) thành \begin{matrix}
+            let processed = content.replace(/\\begin\{array\}(\{.*?\})?/g, '\\begin{matrix}');
+            // Thay thế thẻ đóng
+            processed = processed.replace(/\\end\{array\}/g, '\\end{matrix}');
+            
+            // Xử lý lệnh \heva (Hệ và) nếu có -> Chuyển thành matrix có ngoặc nhọn
+            if (processed.includes('\\heva')) {
+                 processed = processed.replace(/\\heva\s*\{/g, '\\left\\{\\begin{matrix}');
+                 // MathJax sẽ tự tìm ngoặc đóng } tương ứng của lệnh gốc để kết thúc matrix
+            }
+            return processed;
+        }
+
         function formatContent(text) {
             if (text === null || text === undefined) return "";
             
-            // 1. Xử lý hình vẽ TikZ
-            let processed = processNestedTikz(text);
+            // [BƯỚC 0 - QUAN TRỌNG] Fix lỗi Array -> Matrix trước khi xử lý HTML
+            // Giúp hệ phương trình hiển thị đẹp trong cột hẹp
+            let processed = convertArrayToMatrix(text);
+
+            // 1. Xử lý hình vẽ TikZ (Lưu ý: Dùng biến processed thay vì text gốc)
+            processed = processNestedTikz(processed);
 
             // 2. [MỚI] Xử lý Bảng biểu (Tabular) trước khi xử lý list
             processed = processTabular(processed);
 
             // 3. Xử lý các danh sách liệt kê (itemchoice, enumerate,...)
             processed = processLatexLists(processed);
+
+            // 4. Dọn rác text
 
             // 4. Dọn rác text
             processed = processed.replace(/^\s*\}\s*$/gm, ''); 
