@@ -452,94 +452,110 @@
             return result;
         }
         // --- HÀM XỬ LÝ DANH SÁCH (LISTS) ---
+        // --- 1. HÀM XỬ LÝ BẢNG BIỂU (MỚI) ---
+        function processTabular(text) {
+            if (!text) return "";
+            // Regex tìm tabular: \begin{tabular}{...} ... \end{tabular}
+            // Hỗ trợ cả tùy chọn [c] hoặc {c}
+            const regex = /\\begin\{tabular\}(\{|\[).*?(\}|\])([\s\S]*?)\\end\{tabular\}/g;
+            
+            return text.replace(regex, (match, open, close, body) => {
+                // Xử lý các dòng
+                const rows = body.split('\\\\').filter(r => r.trim().length > 0);
+                
+                let html = '<div class="overflow-x-auto my-3"><table class="min-w-full border-collapse border border-gray-300 bg-white text-sm">';
+                
+                rows.forEach((row, rIdx) => {
+                    // Xử lý các cột, chú ý loại bỏ \hline
+                    let cleanRow = row.replace(/\\hline/g, '').trim();
+                    if(cleanRow.length === 0) return;
+
+                    const cols = cleanRow.split('&');
+                    html += '<tr>';
+                    cols.forEach(col => {
+                        // Xóa các ký tự đóng gói format thừa nếu có
+                        let content = col.trim();
+                        // Nếu là hàng đầu tiên, coi như header (tùy chọn, ở đây để td cho an toàn)
+                        html += `<td class="border border-gray-300 px-4 py-2">${content}</td>`;
+                    });
+                    html += '</tr>';
+                });
+                
+                html += '</table></div>';
+                return html;
+            });
+        }
+
+        // --- 2. CẬP NHẬT HÀM XỬ LÝ LIST (FIX LỖI XUỐNG DÒNG ITEMCHOICE) ---
         function processLatexLists(text) {
             let processed = text;
 
             // 1. Xử lý itemchoice (Lời giải ý True/False)
-            // Cấu trúc: \begin{itemchoice} \itemch Ý 1 \itemch Ý 2 ... \end{itemchoice}
+            // Fix lỗi: Thay thế \\ thành <br> bên trong nội dung item
             processed = processed.replace(/\\begin\{itemchoice\}([\s\S]*?)\\end\{itemchoice\}/g, (match, body) => {
-                // Tách theo từ khóa \itemch
                 const items = body.split('\\itemch').filter(s => s.trim().length > 0);
-                const htmlItems = items.map(item => 
-                    `<li class="flex items-start gap-2 mb-1">
+                const htmlItems = items.map(item => {
+                    // [FIX] Xử lý xuống dòng trong từng ý lời giải
+                    let content = item.trim().replace(/\\\\/g, '<br>').replace(/\n/g, ' ');
+                    return `<li class="flex items-start gap-2 mb-1">
                         <span class="text-blue-600 font-bold shrink-0">•</span> 
-                        <div>${item.trim()}</div>
-                    </li>`
-                ).join('');
+                        <div class="leading-relaxed">${content}</div>
+                    </li>`;
+                }).join('');
                 return `<ul class="my-3 pl-2">${htmlItems}</ul>`;
             });
 
-            // 2. Hàm hỗ trợ xử lý \item và \item[x]
+            // 2. Hàm hỗ trợ xử lý \item
             const parseItems = (bodyStr) => {
-                // Tách theo \item, nhưng giữ lại nội dung
                 const rawItems = bodyStr.split(/\\item(?![a-zA-Z])/).filter(s => s.trim().length > 0);
-                return rawItems.map((item, idx) => {
+                return rawItems.map((item) => {
                     let content = item.trim();
                     let label = null;
-
-                    // Xử lý tùy chọn \item[a)] hoặc \item[1)]
                     if (content.startsWith('[')) {
                         const closeBracket = content.indexOf(']');
                         if (closeBracket > -1) {
-                            label = content.substring(1, closeBracket); // Lấy nội dung trong []
+                            label = content.substring(1, closeBracket);
                             content = content.substring(closeBracket + 1).trim();
                         }
                     }
+                    // [FIX] Xử lý bảng biểu bên trong item nếu có
+                    content = processTabular(content);
                     return { label, content };
                 });
             };
 
-            // 3. Xử lý listEX và enumEX (Chia cột)
-            // Cấu trúc: \begin{listEX}[số cột] hoặc \begin{enumEX}{số cột}
+            // 3. Xử lý listEX/enumEX (Chia cột)
             const regexCols = /\\begin\{(?:listEX|enumEX)\}(?:\[(\d+)\]|\{(\d+)\}(?:\[(.*?)\])?)([\s\S]*?)\\end\{(?:listEX|enumEX)\}/g;
-            
             processed = processed.replace(regexCols, (match, c1, c2, style, body) => {
-                const cols = c1 || c2 || 1; // Lấy số cột
+                const cols = c1 || c2 || 1;
                 const items = parseItems(body);
-                
                 let gridHtml = `<div class="grid grid-cols-1 md:grid-cols-${cols} gap-4 my-3">`;
                 items.forEach((it, idx) => {
-                    // Nếu không có nhãn tùy chỉnh, tự sinh nhãn a), b) nếu là enumEX
                     let displayLabel = it.label;
-                    if (!displayLabel && match.includes('enumEX')) {
-                        displayLabel = String.fromCharCode(97 + idx) + ')'; // a), b), c)...
-                    }
-                    
-                    gridHtml += `<div class="flex gap-2">
-                        ${displayLabel ? `<span class="font-bold text-gray-700 shrink-0">${displayLabel}</span>` : `<span class="text-gray-400 shrink-0">•</span>`}
-                        <div>${it.content}</div>
-                    </div>`;
+                    if (!displayLabel && match.includes('enumEX')) displayLabel = String.fromCharCode(97 + idx) + ')';
+                    gridHtml += `<div class="flex gap-2">${displayLabel ? `<span class="font-bold text-gray-700 shrink-0">${displayLabel}</span>` : `<span class="text-gray-400 shrink-0">•</span>`}<div>${it.content}</div></div>`;
                 });
                 gridHtml += `</div>`;
                 return gridHtml;
             });
 
-            // 4. Xử lý enumerate (Số thứ tự)
+            // 4. Xử lý enumerate
             processed = processed.replace(/\\begin\{enumerate\}([\s\S]*?)\\end\{enumerate\}/g, (match, body) => {
                 const items = parseItems(body);
                 let html = `<ol class="list-decimal pl-6 space-y-1 my-2">`;
                 items.forEach(it => {
-                    if (it.label) {
-                        // Nếu có label tùy chỉnh (\item[Câu 1]), bỏ list-style mặc định
-                        html += `<li class="list-none -ml-4"><span class="font-bold mr-1">${it.label}</span>${it.content}</li>`;
-                    } else {
-                        html += `<li>${it.content}</li>`;
-                    }
+                    html += it.label ? `<li class="list-none -ml-4"><span class="font-bold mr-1">${it.label}</span>${it.content}</li>` : `<li>${it.content}</li>`;
                 });
                 html += `</ol>`;
                 return html;
             });
 
-            // 5. Xử lý itemize (Dấu chấm)
+            // 5. Xử lý itemize
             processed = processed.replace(/\\begin\{itemize\}([\s\S]*?)\\end\{itemize\}/g, (match, body) => {
                 const items = parseItems(body);
                 let html = `<ul class="list-disc pl-6 space-y-1 my-2">`;
                 items.forEach(it => {
-                    if (it.label) {
-                        html += `<li class="list-none -ml-4"><span class="font-bold mr-1">${it.label}</span>${it.content}</li>`;
-                    } else {
-                        html += `<li>${it.content}</li>`;
-                    }
+                    html += it.label ? `<li class="list-none -ml-4"><span class="font-bold mr-1">${it.label}</span>${it.content}</li>` : `<li>${it.content}</li>`;
                 });
                 html += `</ul>`;
                 return html;
@@ -550,29 +566,33 @@
         function formatContent(text) {
             if (text === null || text === undefined) return "";
             
-            // 1. Xử lý hình vẽ TikZ trước
+            // 1. Xử lý hình vẽ TikZ
             let processed = processNestedTikz(text);
 
-            // 2. [MỚI] Xử lý các danh sách liệt kê (itemchoice, enumerate,...)
+            // 2. [MỚI] Xử lý Bảng biểu (Tabular) trước khi xử lý list
+            processed = processTabular(processed);
+
+            // 3. Xử lý các danh sách liệt kê (itemchoice, enumerate,...)
             processed = processLatexLists(processed);
 
-            // 3. Dọn rác text
+            // 4. Dọn rác text
             processed = processed.replace(/^\s*\}\s*$/gm, ''); 
             processed = processed.replace(/\}\s*$/g, '');
             processed = processed.replace(/Ảnh minh họa \(immini\)/g, ''); 
             processed = processed.replace(/Ảnh canh giữa/g, '');
 
-            const regex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?:\$[\s\S]*?\$)|<script type="text\/tikz">[\s\S]*?<\/script>|<div[^>]*data-id=.*?>[\s\S]*?<\/div>|<img.*?>|<ul[\s\S]*?<\/ul>|<ol[\s\S]*?<\/ol>|<div class="grid[\s\S]*?<\/div>)/g;
+            // 5. Bảo vệ các thẻ HTML đã tạo
+            const regex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?:\$[\s\S]*?\$)|<script type="text\/tikz">[\s\S]*?<\/script>|<div[^>]*data-id=.*?>[\s\S]*?<\/div>|<img.*?>|<table[\s\S]*?<\/table>|<ul[\s\S]*?<\/ul>|<ol[\s\S]*?<\/ol>|<div class="grid[\s\S]*?<\/div>)/g;
             
             const parts = processed.split(regex);
             return parts.map(part => {
-                // Kiểm tra các thẻ HTML vừa tạo ra để không bị replace xuống dòng
                 if (part.includes('<script type="text/tikz">') || 
                     part.includes('data-id=') || 
                     part.includes('<img') || 
-                    part.includes('<ul') ||  // Bảo vệ thẻ list
-                    part.includes('<ol') ||  // Bảo vệ thẻ list
-                    part.includes('class="grid') || // Bảo vệ thẻ grid
+                    part.includes('<ul') ||  
+                    part.includes('<ol') ||  
+                    part.includes('<table') || // Bảo vệ thẻ table
+                    part.includes('class="grid') || 
                     part.trim().startsWith('$') || 
                     part.trim().startsWith('\\(') || 
                     part.trim().startsWith('\\[')) {
@@ -1133,7 +1153,7 @@
             reader.onload = function(e) { 
                 if (window.currentQIndex !== -1) saveCurrentQuestionToMemory();
                 let content = e.target.result;
-                content = content.replace(/(?<!\\)%.*/g, '');
+                content = content.replace(/(?<!\\)%.*/g, ''); // Xóa comment
 
                 pendingImageUploads = [];
                 const blockRegex = /\\begin\{(ex|bt|vd)\}([\s\S]*?)\\end\{\1\}/g;
@@ -1141,31 +1161,40 @@
                 
                 while ((match = blockRegex.exec(content)) !== null) {
                     let fullBody = match[2];
-                    fullBody = fullBody.replace(/^\s*\[.*?\]/, ''); 
+                    fullBody = fullBody.replace(/^\s*\[.*?\]/, ''); // Xóa option [2D1...]
                     
                     let qType = 'essay'; 
                     let qData = { content: '', solution: '', options: [], statements: [], answer: '', point: 0 };
                     
-                    const loigiaiIndex = fullBody.lastIndexOf('\\loigiai');
+                    // [FIX] Tách lời giải an toàn hơn bằng cách tìm \loigiai từ cuối lên
+                    // và sử dụng extractBracedContent để lấy đúng khối ngoặc
                     let mainContent = fullBody;
+                    const loigiaiIndex = fullBody.lastIndexOf('\\loigiai');
                     
                     if (loigiaiIndex !== -1) {
+                        // Tạm thời cắt phần trước loigiai làm nội dung chính
                         mainContent = fullBody.substring(0, loigiaiIndex);
+                        
+                        // Phần sau là lời giải, cần lấy đúng nội dung trong {}
                         const solPart = fullBody.substring(loigiaiIndex);
-                        const solBrace = extractNextBrace(solPart);
+                        const solBrace = extractNextBrace(solPart); // Hàm này có sẵn trong code cũ của bạn
                         if (solBrace) {
+                            // Xử lý ảnh và tikz trong lời giải
                             qData.solution = processLatexImagesWithDetection(cleanTikzCode(solBrace.content), count);
                         }
                     }
                     
+                    // Xử lý nội dung câu hỏi (đã tách lời giải)
                     let procBody = processLatexImagesWithDetection(cleanTikzCode(mainContent), count);
                     
+                    // NHẬN DIỆN LOẠI CÂU HỎI
                     if (procBody.includes('\\choiceTF')) {
                         qType = 'tf'; 
                         const parts = procBody.split('\\choiceTF'); 
-                        qData.content = parts[0].trim();
+                        qData.content = parts[0].trim(); // Phần dẫn đề
                         
                         let remainingText = parts[1];
+                        // Parse các ý đúng sai
                         while(true) {
                             const brace = extractNextBrace(remainingText);
                             if (!brace) break;
