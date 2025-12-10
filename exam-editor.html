@@ -566,19 +566,24 @@
         }
         
         // --- [MỚI] HÀM FIX LỖI HIỂN THỊ: Chuyển Array sang Matrix ---
+        // --- [FIX 2] HIỂN THỊ PREVIEW: CHỈ XỬ LÝ ARRAY, BỎ QUA HEVA ---
         function convertArrayToMatrix(content) {
             if (!content) return "";
             
-            // 1. Chỉ thay thế môi trường array (thường bị lỗi cột hẹp) sang matrix
-            // Regex: Tìm \begin{array} và các tham số {l}, {cc}... đi kèm
-            let processed = content.replace(/\\begin\{array\}(\{.*?\})?/g, '\\begin{matrix}');
+            let processed = content;
+
+            // 1. Thay thế \begin{array}{...} thành \begin{matrix}
+            // Regex tìm: \begin{array}, khoảng trắng, {tham_số_cột}
+            processed = processed.replace(/\\begin\{array\}\s*\{[^{}]*?\}/g, '\\begin{matrix}');
             
-            // 2. Thay thế thẻ đóng tương ứng
+            // 2. Fallback cho trường hợp array không tham số
+            processed = processed.replace(/\\begin\{array\}/g, '\\begin{matrix}');
+            
+            // 3. Thay thế thẻ đóng
             processed = processed.replace(/\\end\{array\}/g, '\\end{matrix}');
             
-            // LƯU Ý QUAN TRỌNG: 
-            // Đã xóa đoạn xử lý \heva tại đây vì file của bạn đã có config MathJax macro cho \heva.
-            // Việc thay thế string thủ công sẽ gây lỗi thiếu thẻ đóng \end{matrix}.
+            // TUYỆT ĐỐI KHÔNG XỬ LÝ \heva TẠI ĐÂY.
+            // MathJax Macro sẽ tự xử lý \heva -> \left\{...
             
             return processed;
         }
@@ -1181,23 +1186,26 @@
                 let content = e.target.result;
                 content = content.replace(/(?<!\\)%.*/g, ''); // Xóa comment
 
-                // --- [FIX QUAN TRỌNG] XỬ LÝ ARRAY TRƯỚC KHI TÁCH CÂU HỎI ---
-                // Mục đích: Loại bỏ tham số {l}, {cc}... của array để hàm đếm ngoặc không bị nhầm
+                // --- [FIX 1] XỬ LÝ IMPORT: CHUYỂN ARRAY -> MATRIX AN TOÀN ---
+                // Mục đích: Loại bỏ tham số cột {cc}, {l} của array để làm phẳng cấu trúc ngoặc.
+                // Regex: Tìm \begin{array}, chấp nhận khoảng trắng \s*, sau đó là nhóm tham số {...}
                 
-                // 1. Thay thế \begin{array}{...} thành \begin{matrix}
-                // Regex tìm: \begin{array} theo sau là dấu { và nội dung bên trong }
-                content = content.replace(/\\begin\{array\}\{.*?\}/g, '\\begin{matrix}');
-                // Fallback: Thay thế \begin{array} nếu không có tham số
+                // Bước 1: Thay thế \begin{array}{...} thành \begin{matrix}
+                // Chỉ thay thế các tham số cột đơn giản (không chứa ngoặc nhọn lồng nhau) để an toàn
+                content = content.replace(/\\begin\{array\}\s*\{[^{}]*?\}/g, '\\begin{matrix}');
+                
+                // Bước 2: Xử lý các trường hợp array còn sót lại (ví dụ không có tham số hoặc tham số phức tạp)
+                // Ta thay thế thô \begin{array} thành \begin{matrix}
+                // Nếu còn sót lại {cc} thì nó sẽ hiện ra như text, nhưng không làm hỏng cấu trúc parser.
                 content = content.replace(/\\begin\{array\}/g, '\\begin{matrix}');
                 
-                // 2. Thay thế thẻ đóng
+                // Bước 3: Thay thế thẻ đóng
                 content = content.replace(/\\end\{array\}/g, '\\end{matrix}');
-                
-                // LƯU Ý: Không đụng vào \heva theo yêu cầu của bạn.
-                // -----------------------------------------------------------
+
+                // LƯU Ý: KHÔNG XỬ LÝ \heva. Để nguyên \heva{...} cho MathJax render.
+                // -------------------------------------------------------------
 
                 pendingImageUploads = [];
-                // Code cũ bên dưới giữ nguyên
                 const blockRegex = /\\begin\{(ex|bt|vd)\}([\s\S]*?)\\end\{\1\}/g;
                 let match, count = 0;
                 
@@ -1208,35 +1216,28 @@
                     let qType = 'essay'; 
                     let qData = { content: '', solution: '', options: [], statements: [], answer: '', point: 0 };
                     
-                    // [FIX] Tách lời giải an toàn hơn bằng cách tìm \loigiai từ cuối lên
-                    // và sử dụng extractBracedContent để lấy đúng khối ngoặc
+                    // Logic tách lời giải giữ nguyên như cũ
                     let mainContent = fullBody;
                     const loigiaiIndex = fullBody.lastIndexOf('\\loigiai');
                     
                     if (loigiaiIndex !== -1) {
-                        // Tạm thời cắt phần trước loigiai làm nội dung chính
                         mainContent = fullBody.substring(0, loigiaiIndex);
-                        
-                        // Phần sau là lời giải, cần lấy đúng nội dung trong {}
                         const solPart = fullBody.substring(loigiaiIndex);
-                        const solBrace = extractNextBrace(solPart); // Hàm này có sẵn trong code cũ của bạn
+                        const solBrace = extractNextBrace(solPart);
                         if (solBrace) {
-                            // Xử lý ảnh và tikz trong lời giải
                             qData.solution = processLatexImagesWithDetection(cleanTikzCode(solBrace.content), count);
                         }
                     }
                     
-                    // Xử lý nội dung câu hỏi (đã tách lời giải)
                     let procBody = processLatexImagesWithDetection(cleanTikzCode(mainContent), count);
                     
                     // NHẬN DIỆN LOẠI CÂU HỎI
                     if (procBody.includes('\\choiceTF')) {
                         qType = 'tf'; 
                         const parts = procBody.split('\\choiceTF'); 
-                        qData.content = parts[0].trim(); // Phần dẫn đề
+                        qData.content = parts[0].trim();
                         
                         let remainingText = parts[1];
-                        // Parse các ý đúng sai
                         while(true) {
                             const brace = extractNextBrace(remainingText);
                             if (!brace) break;
@@ -1289,7 +1290,6 @@
                 input.value = "";
                 
                 if(window.MathJax) MathJax.typesetPromise();
-                
                 if (pendingImageUploads.length > 0) renderBatchImageModal();
             };
             reader.readAsText(file);
