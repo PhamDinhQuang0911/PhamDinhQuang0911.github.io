@@ -1181,24 +1181,23 @@
                 let content = e.target.result;
                 content = content.replace(/(?<!\\)%.*/g, ''); // Xóa comment
 
-                // --- [QUAN TRỌNG] FIX LỖI IMPORT BỊ MẤT NỘI DUNG ---
-                // Chuyển đổi array sang matrix NGAY LẬP TỨC để đơn giản hóa cấu trúc ngoặc {}.
-                // Điều này giúp hàm extractNextBrace không bị đếm sai ngoặc khi tách \loigiai và \choiceTF.
+                // --- [FIX QUAN TRỌNG] XỬ LÝ ARRAY TRƯỚC KHI TÁCH CÂU HỎI ---
+                // Mục đích: Loại bỏ tham số {l}, {cc}... của array để hàm đếm ngoặc không bị nhầm
                 
-                // 1. Chuyển array -> matrix
-                content = content.replace(/\\begin\{array\}(\{.*?\})?/g, '\\begin{matrix}');
+                // 1. Thay thế \begin{array}{...} thành \begin{matrix}
+                // Regex tìm: \begin{array} theo sau là dấu { và nội dung bên trong }
+                content = content.replace(/\\begin\{array\}\{.*?\}/g, '\\begin{matrix}');
+                // Fallback: Thay thế \begin{array} nếu không có tham số
+                content = content.replace(/\\begin\{array\}/g, '\\begin{matrix}');
+                
+                // 2. Thay thế thẻ đóng
                 content = content.replace(/\\end\{array\}/g, '\\end{matrix}');
                 
-                // 2. (Tuỳ chọn) Chuyển luôn \heva thủ công nếu cần, nhưng quan trọng nhất là array
-                // Vì \heva thường dùng trong \loigiai, nếu để nguyên cũng có thể gây lỗi đếm ngoặc nếu viết dạng \heva{
-                if (content.includes('\\heva')) {
-                     // Thay thế sơ bộ để tránh lỗi parser
-                     content = content.replace(/\\heva\s*\{/g, '\\left\\{\\begin{matrix}');
-                     // Lưu ý: Việc đóng ngoặc } sẽ do logic parser phía sau tự xử lý dựa trên độ sâu (depth)
-                }
-                // ----------------------------------------------------
+                // LƯU Ý: Không đụng vào \heva theo yêu cầu của bạn.
+                // -----------------------------------------------------------
 
                 pendingImageUploads = [];
+                // Code cũ bên dưới giữ nguyên
                 const blockRegex = /\\begin\{(ex|bt|vd)\}([\s\S]*?)\\end\{\1\}/g;
                 let match, count = 0;
                 
