@@ -650,12 +650,10 @@
             try {
                 const compressedBlob = await compressImage(file);
                 
-                // 1. Chuẩn bị dữ liệu gửi sang Worker
                 const formData = new FormData();
                 const fileName = `images/${Date.now()}_${Math.floor(Math.random()*1000)}.jpg`;
                 formData.append('file', compressedBlob, fileName);
 
-                // 2. Gọi Worker của bạn
                 const response = await fetch("https://upload-helper.phamngockhanh-942001.workers.dev/", {
                     method: 'PUT',
                     body: formData
@@ -665,8 +663,13 @@
                 
                 const data = await response.json();
                 const url = data.url;
+                const key = data.key; // Worker mới trả về thêm key
 
-                // 3. Chèn ảnh vào bài
+                // --- QUAN TRỌNG: LƯU VẾT ĐỂ XÓA NẾU KHÔNG LƯU BÀI ---
+                // sessionUploadedFiles giờ sẽ chứa tên key của R2
+                sessionUploadedFiles.push(key); 
+                // ----------------------------------------------------
+
                 insertAtCursor(`\n<div class="flex justify-center"><img src="${url}" class="max-w-full h-auto rounded-lg shadow-sm" style="max-height:300px;"></div>\n`);
                 autoSaveMemory(); 
                 window.showToast("Đã chèn ảnh thành công (R2)!", "success");
@@ -1385,16 +1388,14 @@
 
             if (hasUnsavedChanges || hasPendingImages) {
                 const confirmLeave = await window.customConfirm(
-                    "Bạn chưa lưu thay đổi.\nNếu thoát bây giờ, các ảnh vừa tải lên sẽ bị XÓA BỎ để dọn dẹp bộ nhớ.\nBạn có chắc chắn muốn thoát?"
+                    "Bạn chưa lưu thay đổi.\nNếu thoát bây giờ, các ảnh vừa tải lên sẽ bị XÓA BỎ.\nBạn có chắc chắn muốn thoát?"
                 );
 
                 if (confirmLeave) {
                     if (hasPendingImages) {
-                        window.showToast("Đang dọn dẹp ảnh rác...", "info");
-                        await Promise.all(sessionUploadedFiles.map(path => {
-                            const trashRef = ref(storage, path);
-                            return deleteObject(trashRef).catch(e => console.log("Không xóa được file rác:", path));
-                        }));
+                        window.showToast("Đang dọn dẹp ảnh thừa...", "info");
+                        // --- LOGIC MỚI: XÓA ẢNH TRÊN R2 ---
+                        await Promise.all(sessionUploadedFiles.map(key => deleteR2Image(key)));
                     }
                     window.location.href = 'dashboard.html?view=exambank';
                 }
@@ -1409,6 +1410,22 @@
                 e.returnValue = '';
             }
         });
+        // --- HÀM MỚI: Gửi lệnh xóa sang Cloudflare Worker ---
+        async function deleteR2Image(fileKey) {
+            if (!fileKey) return;
+            try {
+                // Tách lấy tên file nếu lỡ truyền vào là URL đầy đủ
+                // Ví dụ: https://pub.../img-123.jpg -> img-123.jpg
+                const keyName = fileKey.split('/').pop();
+                
+                await fetch(`https://upload-helper.phamngockhanh-942001.workers.dev/?key=${keyName}`, {
+                    method: 'DELETE'
+                });
+                console.log("Đã xóa R2:", keyName);
+            } catch (e) {
+                console.error("Lỗi xóa R2:", e);
+            }
+        }
     </script>
 </body>
 </html>
