@@ -232,12 +232,11 @@
         function toggleMobileMenu() { document.getElementById('mobile-menu').classList.toggle('open'); }
     </script>
 
-    <script src="courses.js"></script>
-
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, GoogleAuthProvider, signInWithPopup, updateProfile } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
-        import { getFirestore, doc, setDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        // ▼▼▼ ĐÃ CẬP NHẬT DÒNG DƯỚI ▼▼▼
+        import { getFirestore, doc, setDoc, collection, getDocs, query, orderBy } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
         // FIREBASE CONFIG
         const firebaseConfig = {
@@ -255,6 +254,61 @@
         const googleProvider = new GoogleAuthProvider();
 
         const loginForm = document.getElementById('loginForm');
+        // --- LOGIC HIỂN THỊ KHÓA HỌC TỪ DATABASE ---
+        async function renderCoursesFromDB() {
+            const container = document.getElementById('courseListContainer');
+            if (!container) return;
+            
+            // Hiển thị trạng thái đang tải
+            container.innerHTML = '<div class="col-span-full text-center text-gray-400 py-10"><i class="fa-solid fa-spinner fa-spin mr-2"></i> Đang tải khóa học mới nhất...</div>';
+
+            try {
+                // Lấy dữ liệu từ bảng public_courses
+                const q = query(collection(db, "public_courses"), orderBy("createdAt", "desc"));
+                const querySnapshot = await getDocs(q);
+                
+                if (querySnapshot.empty) {
+                    container.innerHTML = '<div class="col-span-full text-center text-gray-500">Chưa có khóa học nào được đăng.</div>';
+                    return;
+                }
+
+                let html = '';
+                querySnapshot.forEach((doc) => {
+                    const c = doc.data();
+                    const priceDisplay = c.price ? parseInt(c.price).toLocaleString('vi-VN') + 'đ' : 'Miễn phí';
+                    
+                    html += `
+                    <div class="course-card bg-white rounded-2xl overflow-hidden border border-gray-100 shadow-sm flex flex-col h-full group">
+                        <div class="relative h-48 overflow-hidden">
+                            <img src="${c.thumbnail || 'https://via.placeholder.com/400x200?text=No+Image'}" alt="${c.title}" class="w-full h-full object-cover transform group-hover:scale-110 transition-transform duration-500">
+                            <span class="absolute top-3 left-3 bg-accent text-white text-xs font-bold px-3 py-1 rounded-full shadow-md uppercase">${c.tag || 'Mới'}</span>
+                            <span class="absolute bottom-3 right-3 bg-white/90 backdrop-blur text-brand text-xs font-bold px-3 py-1 rounded-lg shadow-sm">${priceDisplay}</span>
+                        </div>
+                        <div class="p-6 flex-1 flex flex-col">
+                            <h3 class="text-xl font-extrabold text-gray-800 mb-2 line-clamp-2 hover:text-brand transition-colors cursor-pointer" onclick="toggleRegisterModal(true)">${c.title}</h3>
+                            <p class="text-gray-500 text-sm mb-4 line-clamp-3 flex-1">${c.shortDesc || 'Chưa có mô tả.'}</p>
+                            
+                            <div class="border-t border-gray-100 pt-4 flex items-center justify-between mt-auto">
+                                <div class="flex items-center gap-2 text-sm text-gray-500 font-bold">
+                                    <i class="fa-solid fa-users text-teal-500"></i> ${c.students || 0}
+                                </div>
+                                <button onclick="toggleRegisterModal(true)" class="text-brand font-bold text-sm hover:text-accent transition-colors flex items-center gap-1">
+                                    Chi tiết <i class="fa-solid fa-arrow-right"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>`;
+                });
+                
+                container.innerHTML = html;
+            } catch (error) {
+                console.error("Lỗi tải khóa học:", error);
+                container.innerHTML = '<div class="col-span-full text-center text-red-400">Không tải được khóa học. Vui lòng thử lại sau.</div>';
+            }
+        }
+
+        // Gọi hàm ngay khi trang web tải xong
+        renderCoursesFromDB();
         const emailInput = document.getElementById('emailInput');
         const passwordInput = document.getElementById('passwordInput');
         const submitBtn = document.getElementById('submitBtn');
