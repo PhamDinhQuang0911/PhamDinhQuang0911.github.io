@@ -925,7 +925,7 @@
                     try { 
                         const collName = currentActionItem.type === 'folder' ? 'folders' : 'exams';
                         
-                        // LOGIC MỚI: Xóa ảnh nếu là đề thi
+                        // --- LOGIC MỚI: Xóa ảnh (Cả Firebase lẫn R2) ---
                         if (currentActionItem.type === 'exam') {
                             const docSnap = await getDoc(doc(db, "exams", currentActionItem.id));
                             if (docSnap.exists()) {
@@ -933,17 +933,25 @@
                                 const images = extractImageUrls(examData);
                                 if (images.length > 0) {
                                     window.showNotification(`Đang xóa ${images.length} ảnh đi kèm...`, "info");
-                                    // Xóa song song các ảnh để nhanh hơn
+                                    
                                     await Promise.all(images.map(url => {
-                                        // Cần decode URI để xử lý các ký tự đặc biệt trong URL
-                                        try {
-                                            const fileRef = ref(storage, url);
-                                            return deleteObject(fileRef).catch(err => console.log("Lỗi xóa ảnh lẻ (có thể đã mất):", err));
-                                        } catch(e) { return Promise.resolve(); }
+                                        // Nếu là ảnh R2 (chứa r2.dev) -> Gọi hàm xóa R2
+                                        if (url.includes('r2.dev')) {
+                                            return deleteR2Image(url);
+                                        } 
+                                        // Nếu là ảnh Firebase cũ -> Xóa kiểu cũ
+                                        else if (url.includes('firebasestorage')) {
+                                            try {
+                                                const fileRef = ref(storage, url);
+                                                return deleteObject(fileRef).catch(() => {});
+                                            } catch(e) { return Promise.resolve(); }
+                                        }
+                                        return Promise.resolve();
                                     }));
                                 }
                             }
                         }
+                        // -----------------------------------------------
 
                         await deleteDoc(doc(db, collName, currentActionItem.id)); 
                         window.showNotification("Đã xóa dữ liệu thành công!"); 
@@ -1355,6 +1363,18 @@
         window.downloadTemplate = () => { const data = [["Họ và tên", "Tên đăng nhập", "Mật khẩu", "SBD", "Giới tính", "SĐT HS", "SĐT PHHS"], ["Nguyễn Văn A", "nguyenvana", "123456", "001", "Nam", "098...", "091..."]]; const ws = XLSX.utils.aoa_to_sheet(data); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "DanhSach"); XLSX.writeFile(wb, "Mau_DS_Hoc_Sinh.xlsx"); }
         window.handleFileUpload = (input) => { const file = input.files[0]; if (!file) return; const reader = new FileReader(); reader.onload = async function(e) { const data = new Uint8Array(e.target.result); const workbook = XLSX.read(data, {type: 'array'}); const jsonData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], {header: 1}); let addedCount = 0; for(let i = 1; i < jsonData.length; i++) { const row = jsonData[i]; if(row[0] && row[1]) { try { const name = row[0]; const user = row[1]; const pass = String(row[2] || '123456'); const fakeEmail = `${user}@hocsinh.com`; try { await createStudentAuth(fakeEmail, pass, name); } catch(e) { console.log("User exists or error", e); } const newStudent = { name, username: user, password: pass, email: fakeEmail, sbd: row[3]||'', gender: row[4]||'Nam', phoneStudent: row[5]||'', phoneParent: row[6]||'', createdAt: new Date().toISOString() }; await updateDoc(doc(db, "classes", currentViewingClassId), { students: arrayUnion(newStudent) }); currentClassStudents.push(newStudent); addedCount++; } catch(e) { console.error(e); } } } if(addedCount > 0) { renderStudentList(currentClassStudents); await updateDoc(doc(db, "classes", currentViewingClassId), { studentCount: currentClassStudents.length }); window.showNotification(`Đã thêm ${addedCount} học sinh!`, "success"); } input.value = ""; }; reader.readAsArrayBuffer(file); }
         document.getElementById('logoutBtn').onclick = async () => { if(await window.customConfirm("Bạn có chắc muốn đăng xuất?")) signOut(auth).then(()=>window.location.href="index.html"); }
+        // Hàm xóa ảnh trên R2 thông qua Worker
+        async function deleteR2Image(fileUrl) {
+            if (!fileUrl) return;
+            try {
+                // Tách lấy tên file từ URL
+                const keyName = fileUrl.split('/').pop();
+                // Gọi Worker để xóa
+                await fetch(`https://upload-helper.phamngockhanh-942001.workers.dev/?key=${keyName}`, {
+                    method: 'DELETE'
+                });
+            } catch (e) { console.error("Lỗi xóa R2:", e); }
+        }
     </script>
 </body>
 </html>
