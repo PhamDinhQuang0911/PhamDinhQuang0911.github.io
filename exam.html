@@ -436,19 +436,69 @@
         window.requestStart = () => { if(examData.password) document.getElementById('passwordModal').classList.remove('hidden'); else startExam(); }
         window.verifyPassword = () => { if(document.getElementById('examPasswordInput').value===examData.password) { document.getElementById('passwordModal').classList.add('hidden'); startExam(); } else window.customAlert("Sai mật khẩu","error"); }
 
+        // Hàm hỗ trợ trộn mảng ngẫu nhiên
+        function shuffleArray(array) {
+            for (let i = array.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [array[i], array[j]] = [array[j], array[i]];
+            }
+            return array;
+        }
+
         function startExam() {
             dom.lobby.classList.add('hidden');
             dom.header.classList.remove('hidden'); dom.main.classList.remove('hidden');
             
-            currentQuestions = [...(examData.questions || [])];
-            if(examData.shuffle) currentQuestions.sort(()=>Math.random()-0.5);
+            // 1. LOGIC TRỘN ĐỀ THÔNG MINH (THEO NHÓM + ĐẢO ĐÁP ÁN)
+            let rawQuestions = JSON.parse(JSON.stringify(examData.questions || [])); // Clone deep để không ảnh hưởng dữ liệu gốc
             
-            timeLeft = (examData.duration||45)*60;
-            if(timeLeft>0) runTimer(); else dom.timer.textContent="∞";
+            if(examData.shuffle) {
+                // Phân loại câu hỏi
+                const groups = { mc: [], tf: [], short: [], essay: [] };
+                rawQuestions.forEach(q => { if(groups[q.type]) groups[q.type].push(q); });
+
+                // Trộn thứ tự câu trong từng nhóm
+                shuffleArray(groups.mc);
+                shuffleArray(groups.tf);
+                shuffleArray(groups.short);
+                shuffleArray(groups.essay);
+
+                // Trộn đáp án A,B,C,D cho câu Trắc nghiệm
+                groups.mc.forEach(q => {
+                    if (q.options && q.options.length > 0) {
+                        // Tạo mảng tạm chứa nội dung và index cũ: [{txt: "Nội dung A", idx: 0}, ...]
+                        let mapped = q.options.map((opt, i) => ({ txt: opt, originalIdx: i }));
+                        shuffleArray(mapped); // Trộn mảng tạm
+                        
+                        // Cập nhật lại options mới
+                        q.options = mapped.map(m => m.txt);
+                        // Tìm xem đáp án đúng (correct) giờ chạy đi đâu rồi cập nhật lại index mới
+                        q.correct = mapped.findIndex(m => m.originalIdx === q.correct);
+                    }
+                });
+
+                // Gộp lại theo thứ tự cố định: TN -> ĐS -> Điền -> Tự luận
+                currentQuestions = [...groups.mc, ...groups.tf, ...groups.short, ...groups.essay];
+            } else {
+                currentQuestions = rawQuestions;
+            }
             
+            // 2. KHỞI TẠO TIMER (Logic mới ở bước sau)
+            const durationMinutes = examData.duration || 45;
+            timeLeft = durationMinutes * 60;
+            
+            if(timeLeft > 0) {
+                // Tính thời điểm kết thúc tuyệt đối (Timestamp) để chống việc browser ngủ đông
+                window.endTimeStamp = Date.now() + (timeLeft * 1000);
+                runTimer(); 
+            } else {
+                dom.timer.textContent = "∞";
+            }
+            
+            // 3. KHỞI TẠO GIÁM SÁT (Cheat Detection)
             if(examData.proctoring) {
                 document.getElementById('cheatWarning').classList.remove('hidden');
-                window.addEventListener('blur', () => { if(isExamActive) { cheatCount++; document.getElementById('cheatCount').textContent = cheatCount; } });
+                initProctoring(); // Gọi hàm giám sát riêng
             }
             
             isExamActive = true;
@@ -457,8 +507,45 @@
         }
 
         function runTimer() {
-            updateTimer();
-            timerInterval = setInterval(() => { timeLeft--; updateTimer(); if(timeLeft<=0) { clearInterval(timerInterval); submitReal(true); } }, 1000);
+            updateTimer(); // Cập nhật ngay lập tức
+            
+            timerInterval = setInterval(() => {
+                // Tính lại timeLeft dựa trên thời gian thực tế so với mốc đích
+                const now = Date.now();
+                const diff = Math.ceil((window.endTimeStamp - now) / 1000);
+                
+                timeLeft = diff;
+
+                if (timeLeft <= 0) {
+                    timeLeft = 0;
+                    updateTimer();
+                    clearInterval(timerInterval);
+                    submitReal(true); // Nộp bài tự động
+                } else {
+                    updateTimer();
+                }
+            }, 1000);
+        }
+        function initProctoring() {
+            const handleCheat = () => {
+                if (isExamActive) {
+                    cheatCount++;
+                    document.getElementById('cheatCount').textContent = cheatCount;
+                    // Có thể thêm logic: Nếu cheat > 5 lần thì tự nộp bài
+                }
+            };
+
+            // Bắt sự kiện rời tab hoặc ẩn trình duyệt
+            document.addEventListener("visibilitychange", () => {
+                if (document.visibilityState === 'hidden') {
+                    handleCheat();
+                }
+            });
+
+            // Bắt sự kiện mất tiêu điểm (Alt+Tab hoặc bấm sang ứng dụng khác)
+            window.addEventListener("blur", () => {
+                handleCheat();
+            });
         }
         function updateTimer() { const m=Math.floor(timeLeft/60), s=timeLeft%60; dom.timer.textContent=`${m<10?'0'+m:m}:${s<10?'0'+s:s}`; if(timeLeft<300) dom.timer.parentElement.classList.add('bg-red-50','text-red-600'); }
 
