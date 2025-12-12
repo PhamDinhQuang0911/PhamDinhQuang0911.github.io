@@ -649,7 +649,6 @@
             window.showToast("Đang tải ảnh lên Cloudflare...", "info");
             try {
                 const compressedBlob = await compressImage(file);
-                
                 const formData = new FormData();
                 const fileName = `images/${Date.now()}_${Math.floor(Math.random()*1000)}.jpg`;
                 formData.append('file', compressedBlob, fileName);
@@ -662,19 +661,16 @@
                 if (!response.ok) throw new Error("Lỗi kết nối Cloudflare");
                 
                 const data = await response.json();
-                const url = data.url;
-                const key = data.key; // Worker mới trả về thêm key
+                
+                // QUAN TRỌNG: Lưu tên file (key) vào danh sách tạm
+                // Để nếu thoát ra thì biết cái gì mà xóa
+                sessionUploadedFiles.push(data.key); 
 
-                // --- QUAN TRỌNG: LƯU VẾT ĐỂ XÓA NẾU KHÔNG LƯU BÀI ---
-                // sessionUploadedFiles giờ sẽ chứa tên key của R2
-                sessionUploadedFiles.push(key); 
-                // ----------------------------------------------------
-
-                insertAtCursor(`\n<div class="flex justify-center"><img src="${url}" class="max-w-full h-auto rounded-lg shadow-sm" style="max-height:300px;"></div>\n`);
+                insertAtCursor(`\n<div class="flex justify-center"><img src="${data.url}" class="max-w-full h-auto rounded-lg shadow-sm" style="max-height:300px;"></div>\n`);
                 autoSaveMemory(); 
-                window.showToast("Đã chèn ảnh thành công (R2)!", "success");
+                window.showToast("Đã chèn ảnh thành công!", "success");
             } catch (error) { 
-                console.error("Upload error:", error); 
+                console.error(error); 
                 window.showToast("Lỗi tải ảnh: " + error.message, "error"); 
             }
         }
@@ -1394,7 +1390,7 @@
                 if (confirmLeave) {
                     if (hasPendingImages) {
                         window.showToast("Đang dọn dẹp ảnh thừa...", "info");
-                        // --- LOGIC MỚI: XÓA ẢNH TRÊN R2 ---
+                        // Gọi lệnh xóa cho từng ảnh trong session
                         await Promise.all(sessionUploadedFiles.map(key => deleteR2Image(key)));
                     }
                     window.location.href = 'dashboard.html?view=exambank';
@@ -1411,20 +1407,18 @@
             }
         });
         // --- HÀM MỚI: Gửi lệnh xóa sang Cloudflare Worker ---
+        // Hàm gọi Worker để xóa ảnh
         async function deleteR2Image(fileKey) {
             if (!fileKey) return;
             try {
-                // Tách lấy tên file nếu lỡ truyền vào là URL đầy đủ
-                // Ví dụ: https://pub.../img-123.jpg -> img-123.jpg
-                const keyName = fileKey.split('/').pop();
+                // Tách lấy tên file nếu lỡ truyền vào là URL
+                const keyName = fileKey.includes('/') ? fileKey.split('/').pop() : fileKey;
                 
                 await fetch(`https://upload-helper.phamngockhanh-942001.workers.dev/?key=${keyName}`, {
                     method: 'DELETE'
                 });
-                console.log("Đã xóa R2:", keyName);
-            } catch (e) {
-                console.error("Lỗi xóa R2:", e);
-            }
+                console.log("Đã xóa ảnh R2:", keyName);
+            } catch (e) { console.error("Lỗi xóa R2:", e); }
         }
     </script>
 </body>
