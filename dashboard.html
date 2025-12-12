@@ -906,10 +906,11 @@
         function renderBreadcrumb() { const container = document.getElementById('breadcrumbContainer'); if (!currentFolderId) { container.innerHTML = '<span class="mx-2 text-gray-400">/</span><span>Tất cả</span>'; return; } let path = []; let curr = folderData.find(f => f.id === currentFolderId); while(curr) { path.unshift(curr); curr = folderData.find(f => f.id === curr.parentId); } let html = '<span class="mx-2 text-gray-400">/</span><button onclick="window.navigateFolder(\'root\')" class="hover:text-blue-600">...</button>'; path.forEach((p, idx) => { html += `<span class="mx-2 text-gray-400">/</span>`; if (idx === path.length - 1) html += `<span class="font-bold text-gray-800">${p.name}</span>`; else html += `<button onclick="window.navigateFolder('${p.id}')" class="hover:text-blue-600">${p.name}</button>`; }); container.innerHTML = html; }
         window.openContextMenu = (id, type, name) => { currentActionItem = {id, type, name}; document.getElementById('actionModalTitle').textContent = `Thao tác: ${name}`; const content = document.getElementById('dynamicContent'); content.innerHTML = `<div class="grid grid-cols-3 gap-3 mb-4"><button onclick="window.triggerAction('rename')" class="p-3 bg-blue-50 text-blue-600 rounded-lg font-bold hover:bg-blue-100 flex flex-col items-center"><i class="fa-solid fa-pen mb-1"></i> Đổi tên</button><button onclick="window.triggerAction('move')" class="p-3 bg-purple-50 text-purple-600 rounded-lg font-bold hover:bg-purple-100 flex flex-col items-center"><i class="fa-solid fa-arrow-right-to-bracket mb-1"></i> Di chuyển</button><button onclick="window.triggerAction('delete')" class="p-3 bg-red-50 text-red-600 rounded-lg font-bold hover:bg-red-100 flex flex-col items-center"><i class="fa-solid fa-trash mb-1"></i> Xóa</button></div><div id="subActionContent"></div>`; window.toggleModal('actionModal', true); }
         // HÀM HỖ TRỢ LẤY URL ẢNH TỪ DỮ LIỆU
+        // Hàm này tìm tất cả link ảnh (Cả Firebase và Cloudflare R2)
         function extractImageUrls(data) {
             const str = JSON.stringify(data);
-            // Regex tìm các link Firebase Storage
-            const regex = /https:\/\/firebasestorage\.googleapis\.com\/v0\/b\/[^"'\s\\]+/g;
+            // Regex mới: Tìm cả firebasestorage VÀ r2.dev
+            const regex = /(https:\/\/firebasestorage\.googleapis\.com\/v0\/b\/[^"'\s\\]+|https:\/\/pub-[a-zA-Z0-9]+\.r2\.dev\/[^"'\s\\]+)/g;
             return str.match(regex) || [];
         }
 
@@ -925,25 +926,27 @@
                     try { 
                         const collName = currentActionItem.type === 'folder' ? 'folders' : 'exams';
                         
-                        // --- LOGIC MỚI: Xóa ảnh (Cả Firebase lẫn R2) ---
+                        // --- ĐOẠN MỚI: XÓA ẢNH ---
                         if (currentActionItem.type === 'exam') {
                             const docSnap = await getDoc(doc(db, "exams", currentActionItem.id));
                             if (docSnap.exists()) {
                                 const examData = docSnap.data();
+                                // Tìm tất cả link ảnh
                                 const images = extractImageUrls(examData);
+                                
                                 if (images.length > 0) {
                                     window.showNotification(`Đang xóa ${images.length} ảnh đi kèm...`, "info");
                                     
                                     await Promise.all(images.map(url => {
-                                        // Nếu là ảnh R2 (chứa r2.dev) -> Gọi hàm xóa R2
+                                        // Nếu là link Cloudflare R2
                                         if (url.includes('r2.dev')) {
                                             return deleteR2Image(url);
                                         } 
-                                        // Nếu là ảnh Firebase cũ -> Xóa kiểu cũ
+                                        // Nếu là link Firebase cũ
                                         else if (url.includes('firebasestorage')) {
                                             try {
                                                 const fileRef = ref(storage, url);
-                                                return deleteObject(fileRef).catch(() => {});
+                                                return deleteObject(fileRef).catch(()=>{});
                                             } catch(e) { return Promise.resolve(); }
                                         }
                                         return Promise.resolve();
@@ -951,7 +954,7 @@
                                 }
                             }
                         }
-                        // -----------------------------------------------
+                        // ------------------------
 
                         await deleteDoc(doc(db, collName, currentActionItem.id)); 
                         window.showNotification("Đã xóa dữ liệu thành công!"); 
@@ -1367,9 +1370,8 @@
         async function deleteR2Image(fileUrl) {
             if (!fileUrl) return;
             try {
-                // Tách lấy tên file từ URL
+                // Lấy tên file từ URL (phần sau dấu / cuối cùng)
                 const keyName = fileUrl.split('/').pop();
-                // Gọi Worker để xóa
                 await fetch(`https://upload-helper.phamngockhanh-942001.workers.dev/?key=${keyName}`, {
                     method: 'DELETE'
                 });
