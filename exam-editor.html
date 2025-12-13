@@ -739,7 +739,7 @@
             };
         }
 
-        function processLatexImagesWithDetection(text, questionIndex) {
+       function processLatexImagesWithDetection(text, questionIndex) {
             if (!text) return "";
             let processed = String(text);
             
@@ -750,23 +750,22 @@
                 const before = processed.substring(0, idx); 
                 let remainder = processed.substring(idx + 7).trim();
 
-                // Xử lý tùy chọn [...] của immini nếu có
                 if (remainder.startsWith('[')) { 
                     const cb = remainder.indexOf(']'); 
                     if (cb > -1) remainder = remainder.substring(cb + 1).trim(); 
                 }
 
-                const arg1 = extractNextBrace(remainder); // Nội dung câu hỏi
+                const arg1 = extractNextBrace(remainder);
                 if (!arg1) break; 
 
-                const arg2 = extractNextBrace(arg1.remaining); // Phần hình ảnh (Image hoặc TikZ)
+                const arg2 = extractNextBrace(arg1.remaining);
                 if (!arg2) break; 
 
                 let imgPath = "";
                 let hasImageFile = false;
                 let hasTikz = false;
 
-                // 1. Kiểm tra xem có phải file ảnh upload không (\includegraphics)
+                // 1. Kiểm tra nếu là file ảnh
                 if (arg2.content.includes('includegraphics')) {
                      const igIdx = arg2.content.indexOf('\\includegraphics');
                      const afterIg = arg2.content.substring(igIdx);
@@ -776,47 +775,39 @@
                          hasImageFile = true;
                      }
                 } 
-                // 2. [MỚI THÊM] Kiểm tra xem có phải mã vẽ hình TikZ không
+                // 2. Kiểm tra nếu là mã TikZ (Sửa đổi quan trọng)
                 else if (arg2.content.includes('tikzpicture')) {
                     hasTikz = true;
                 }
 
                 let ph = "";
-                
                 if (hasImageFile) {
-                    // Nếu là file ảnh -> Tạo placeholder để upload
                     const uid = `img_${Date.now()}_${Math.random().toString(36).substr(2,9)}`;
                     pendingImageUploads.push({id:uid, originalPath:imgPath, questionIdx:questionIndex});
                     ph = getPlaceholderHTML(uid, "Ảnh từ immini");
                 } else if (hasTikz) {
-                    // [MỚI THÊM] Nếu là TikZ -> Giữ nguyên mã TikZ và căn giữa
-                    // TikZJax sẽ tự động tìm và render sau khi hàm này trả về kết quả
+                    // Giữ nguyên mã TikZ để TikZJax xử lý
                     ph = `<div class="flex justify-center items-center my-2">${arg2.content}</div>`;
                 } else {
-                    // Nếu không phải ảnh, cũng không phải TikZ -> Báo lỗi
-                    ph = `<div class="text-xs text-gray-400 italic border border-dashed p-2 text-center">[Khối hình không xác định hoặc lỗi cấu trúc]</div>`;
+                    ph = `<div class="text-xs text-gray-400 italic border border-dashed p-2 text-center">[Khối hình không xác định]</div>`;
                 }
 
-                // Tái tạo lại nội dung: Đưa hình (hoặc placeholder) xuống dưới nội dung câu hỏi
                 const contentText = arg1.content;
                 const choiceRegex = /\\(choice|choiceTF|shortans)/;
                 const match = contentText.match(choiceRegex);
                 
                 let newContent = "";
                 if (match && match.index !== undefined) {
-                    // Chèn hình vào trước phần đáp án trắc nghiệm
                     newContent = contentText.substring(0, match.index) + 
                                  '\n\n' + ph + '\n\n' + 
                                  contentText.substring(match.index);
                 } else {
-                    // Nếu không có trắc nghiệm, chèn xuống cuối
                     newContent = contentText + '\n\n' + ph;
                 }
 
                 processed = before + newContent + arg2.remaining;
             }
 
-            // Xử lý các ảnh canh giữa thông thường (\begin{center}...\includegraphics...\end{center})
             const centerRegex = /\\begin\{center\}\s*([\s\S]*?)\\includegraphics\s*(?:\[.*?\])?\s*\{(.*?)\}([\s\S]*?)\\end\{center\}/g;
             processed = processed.replace(centerRegex, (match, preText, imgPath, postText) => {
                  const uid = `img_${Date.now()}_${Math.random().toString(36).substr(2,9)}`; 
@@ -824,7 +815,6 @@
                  return getPlaceholderHTML(uid, "Ảnh canh giữa");
             });
             
-            // Xử lý các ảnh lẻ khác (\includegraphics)
             processed = processed.replace(/\\includegraphics\s*(?:\[.*?\])?\s*\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}/g, (m, path) => {
                 const uid = `img_${Date.now()}_${Math.random().toString(36).substr(2,9)}`; 
                 pendingImageUploads.push({id:uid, originalPath:path, questionIdx:questionIndex}); 
@@ -1044,6 +1034,19 @@
             window.questions.sort((a, b) => (order[a.type] || 99) - (order[b.type] || 99));
         }
 
+        // Hàm ép TikZJax chạy lại để vẽ hình
+        window.renderTikz = () => {
+            const scripts = document.querySelectorAll('script[type="text/tikz"]');
+            if (scripts.length === 0) return;
+
+            // Xóa thẻ script cũ và thêm lại để kích hoạt quét DOM
+            const oldScript = document.querySelector('script[src*="tikzjax.js"]');
+            if (oldScript) oldScript.remove();
+
+            const newScript = document.createElement('script');
+            newScript.src = "https://tikzjax.com/v1/tikzjax.js";
+            document.head.appendChild(newScript);
+        };
         window.renderPreviewList = () => { 
             const list = document.getElementById('previewList');
             const palette = document.getElementById('quickPalette');
@@ -1119,6 +1122,7 @@
                 list.appendChild(div);
             });
             if(window.MathJax) MathJax.typesetPromise([list]).catch(e=>{});
+            setTimeout(() => window.renderTikz(), 500);
         };
 
         window.saveCurrentQuestionToMemory = () => { 
@@ -1157,6 +1161,7 @@
             html += `<div class="mb-4"><label class="form-group-title">Lời giải</label><textarea id="editSolution" class="form-input min-h-[80px]" oninput="autoSaveMemory()">${q.solution || ''}</textarea></div>`;
             html += `<div class="mb-4 w-1/3"><label class="form-group-title">Điểm</label><input type="number" id="editPoint" class="form-input font-bold text-orange-600" value="${q.point || 0}" step="0.1" oninput="autoSaveMemory()"></div>`;
             editor.innerHTML = html;
+            setTimeout(() => window.renderTikz(), 200);
         };
 
         window.addNewQuestion = (type) => { if (window.currentQIndex !== -1) saveCurrentQuestionToMemory(); const newQ = { type: type, content: "", solution: "", point: 0 }; if (type === 'mc') { newQ.options = ["", "", "", ""]; newQ.correct = -1; } if (type === 'tf') { newQ.statements = [{text:"", isTrue:false}, {text:"", isTrue:false}, {text:"", isTrue:false}, {text:"", isTrue:false}]; } if (type === 'short') { newQ.answer = ""; } window.questions.push(newQ); sortQuestionsByType(); renderPreviewList(); loadQuestionToEditor(window.questions.length - 1); };
@@ -1276,7 +1281,7 @@
                 input.value = "";
                 
                 if(window.MathJax) MathJax.typesetPromise();
-                
+                setTimeout(() => window.renderTikz(), 500);
                 if (pendingImageUploads.length > 0) renderBatchImageModal();
             };
             reader.readAsText(file);
