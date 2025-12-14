@@ -359,6 +359,80 @@
             });
         };
         window.addEventListener('resize', window.autoScaleTables);
+        // 3. Hàm xử lý danh sách (itemchoice, enumerate, listEX...)
+        function processLatexLists(text) {
+            let processed = text;
+
+            // Xử lý itemchoice (Trắc nghiệm đúng sai)
+            processed = processed.replace(/\\begin\{itemchoice\}([\s\S]*?)\\end\{itemchoice\}/g, (match, body) => {
+                const items = body.split('\\itemch').filter(s => s.trim().length > 0);
+                const htmlItems = items.map(item => {
+                    let content = item.trim().replace(/\\\\/g, '<br>').replace(/\n/g, ' ');
+                    return `<li class="flex items-start gap-2 mb-1">
+                        <span class="text-blue-600 font-bold shrink-0">•</span> 
+                        <div class="leading-relaxed">${content}</div>
+                    </li>`;
+                }).join('');
+                return `<ul class="my-3 pl-2">${htmlItems}</ul>`;
+            });
+
+            // Hàm phụ tách item
+            const parseItems = (bodyStr) => {
+                const rawItems = bodyStr.split(/\\item(?![a-zA-Z])/).filter(s => s.trim().length > 0);
+                return rawItems.map((item) => {
+                    let content = item.trim();
+                    let label = null;
+                    if (content.startsWith('[')) {
+                        const closeBracket = content.indexOf(']');
+                        if (closeBracket > -1) {
+                            label = content.substring(1, closeBracket);
+                            content = content.substring(closeBracket + 1).trim();
+                        }
+                    }
+                    content = processTabular(content); // Xử lý nếu có bảng lồng bên trong
+                    return { label, content };
+                });
+            };
+
+            // Xử lý listEX, enumEX (Chia cột)
+            const regexCols = /\\begin\{(?:listEX|enumEX)\}(?:\[(\d+)\]|\{(\d+)\}(?:\[(.*?)\])?)([\s\S]*?)\\end\{(?:listEX|enumEX)\}/g;
+            processed = processed.replace(regexCols, (match, c1, c2, style, body) => {
+                const cols = c1 || c2 || 1;
+                const items = parseItems(body);
+                let gridHtml = `<div class="grid grid-cols-1 md:grid-cols-${cols} gap-4 my-3">`;
+                items.forEach((it, idx) => {
+                    let displayLabel = it.label;
+                    if (!displayLabel && match.includes('enumEX')) displayLabel = String.fromCharCode(97 + idx) + ')';
+                    gridHtml += `<div class="flex gap-2">${displayLabel ? `<span class="font-bold text-gray-700 shrink-0">${displayLabel}</span>` : `<span class="text-gray-400 shrink-0">•</span>`}<div>${it.content}</div></div>`;
+                });
+                gridHtml += `</div>`;
+                return gridHtml;
+            });
+
+            // Xử lý enumerate (Đánh số 1, 2, 3...)
+            processed = processed.replace(/\\begin\{enumerate\}([\s\S]*?)\\end\{enumerate\}/g, (match, body) => {
+                const items = parseItems(body);
+                let html = `<ol class="list-decimal pl-6 space-y-1 my-2">`;
+                items.forEach(it => {
+                    html += it.label ? `<li class="list-none -ml-4"><span class="font-bold mr-1">${it.label}</span>${it.content}</li>` : `<li>${it.content}</li>`;
+                });
+                html += `</ol>`;
+                return html;
+            });
+
+            // Xử lý itemize (Gạch đầu dòng)
+            processed = processed.replace(/\\begin\{itemize\}([\s\S]*?)\\end\{itemize\}/g, (match, body) => {
+                const items = parseItems(body);
+                let html = `<ul class="list-disc pl-6 space-y-1 my-2">`;
+                items.forEach(it => {
+                    html += it.label ? `<li class="list-none -ml-4"><span class="font-bold mr-1">${it.label}</span>${it.content}</li>` : `<li>${it.content}</li>`;
+                });
+                html += `</ul>`;
+                return html;
+            });
+
+            return processed;
+        }
         // --- HÀM FORMAT THÔNG MINH: BIẾN MÃ EDITOR THÀNH MÃ HỌC SINH ---
         window.formatContent = (text) => {
             if (text === null || text === undefined) return "";
@@ -368,24 +442,16 @@
             // 1. DỌN DẸP LATEX VÀ KÝ TỰ RÁC
             processed = processed.replace(/\\lq\\lq/g, '"').replace(/\\rq\\rq/g, '"');
             processed = processed.replace(/\\lq/g, '"').replace(/\\rq/g, '"');
-            processed = processed.replace(/\\(h|v)space\*?\{[^}]+\}/g, ''); // Xóa hspace, vspace
+            processed = processed.replace(/\\(h|v)space\*?\{[^}]+\}/g, ''); 
             processed = processed.replace(/\\(no)?indent/g, '');
             processed = processed.replace(/\\wideparen\{([^}]+)\}/g, '\\overset{\\frown}{$1}');
 
-            // 2. XỬ LÝ ẢNH & PLACEHOLDER (CỰC MẠNH)
-            
-            // a. Xóa các ô placeholder chưa có ảnh (Vị trí hình TikZ, Ảnh từ Immini...)
-            // Regex tìm thẻ div có class chứa 'image-placeholder' và xóa toàn bộ div đó
+            // 2. XỬ LÝ ẢNH & PLACEHOLDER
             processed = processed.replace(/<div[^>]*class="[^"]*image-placeholder[^"]*"[^>]*>[\s\S]*?<\/div>/g, '');
-
-            // b. Dọn dẹp ảnh đã upload (Lấy ảnh ra khỏi khung Editor)
-            // Tìm div 'group relative' (là khung chứa ảnh trong editor) -> Chỉ lấy thẻ <img> bên trong
             processed = processed.replace(
                 /<div[^>]*class="[^"]*group relative[^"]*"[^>]*>[\s\S]*?(<img[^>]+>)[\s\S]*?<\/div>/gi, 
                 '<div class="flex justify-center my-3">$1</div>'
             );
-
-            // c. Xóa sạch các dòng text rác nếu lỡ còn sót (như "Click đúp...", "Ảnh từ...")
             processed = processed.replace(/Click đúp để tải file|hoặc Ctrl \+ V để dán ảnh|ẢNH TỪ IMMINI|VỊ TRÍ HÌNH TIKZ/gi, '');
 
             // 3. Xử lý TikZ
@@ -394,12 +460,15 @@
             // 4. Xử lý Bảng biểu (Scale)
             processed = processTabular(processed);
 
-            // 5. Dọn rác cuối cùng
+            // 5. Xử lý danh sách (itemchoice, enumerate...) - [MỚI THÊM]
+            processed = processLatexLists(processed);
+
+            // 6. Dọn rác cuối cùng
             processed = processed.replace(/^\s*\}\s*$/gm, ''); 
             processed = processed.replace(/\}\s*$/g, '');
 
-            // 6. Phân tách HTML/LaTeX để hiển thị
-            const regex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?:\$[\s\S]*?\$)|<script type="text\/tikz">[\s\S]*?<\/script>|<div[^>]*class="js-scale-wrapper"[\s\S]*?<\/div>|<div class="flex justify-center my-3"><img[\s\S]*?<\/div>|<img.*?>)/g;
+            // 7. Phân tách HTML/LaTeX để hiển thị
+            const regex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?:\$[\s\S]*?\$)|<script type="text\/tikz">[\s\S]*?<\/script>|<div[^>]*class="js-scale-wrapper"[\s\S]*?<\/div>|<div class="flex justify-center my-3"><img[\s\S]*?<\/div>|<img.*?>|<ul[\s\S]*?<\/ul>|<ol[\s\S]*?<\/ol>|<div class="grid[\s\S]*?<\/div>)/g;
             
             const parts = processed.split(regex);
             
@@ -407,6 +476,9 @@
                 if (part.includes('<script type="text/tikz">') || 
                     part.includes('<img') || 
                     part.includes('js-scale-wrapper') || 
+                    part.includes('<ul') || // Bảo vệ danh sách
+                    part.includes('<ol') || 
+                    part.includes('class="grid') ||
                     part.trim().startsWith('$') || 
                     part.trim().startsWith('\\(') || 
                     part.trim().startsWith('\\[')) {
