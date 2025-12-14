@@ -1550,8 +1550,10 @@
                     if (hasPendingImages) {
                         window.showToast("Đang dọn dẹp dữ liệu rác trên Cloud...", "warning");
                         try {
-                            // QUAN TRỌNG: Phải có await để trình duyệt dừng lại chờ xóa xong
+                            // Đợi xóa xong
                             await Promise.all(sessionUploadedFiles.map(key => deleteR2Image(key)));
+                            // QUAN TRỌNG: Xóa danh sách để sự kiện pagehide không chạy lại nữa
+                            sessionUploadedFiles = []; 
                         } catch(e) { console.log("Lỗi dọn dẹp:", e); }
                     }
                     window.location.href = 'dashboard.html?view=exambank';
@@ -1567,34 +1569,35 @@
                 e.returnValue = '';
             }
         });
-        // --- HÀM MỚI: Gửi lệnh xóa sang Cloudflare Worker ---
-        // Hàm gọi Worker để xóa ảnh
-        // Hàm xóa ảnh trên R2 thông qua Worker (Có Keepalive và Return)
-        // Hàm xóa ảnh trên R2 (ĐÃ SỬA LỖI ĐƯỜNG DẪN)
+        // --- XỬ LÝ KHI F5 HOẶC TẮT TAB (BẮT BUỘC) ---
+        window.addEventListener('pagehide', (event) => {
+            // Nếu còn ảnh trong session mà người dùng tải lại trang hoặc tắt tab
+            if (sessionUploadedFiles.length > 0) {
+                sessionUploadedFiles.forEach(key => {
+                    // Gọi hàm xóa với keepalive (không cần await vì trang sắp đóng)
+                    deleteR2Image(key);
+                });
+            }
+        });        
         async function deleteR2Image(fileKeyOrUrl) {
             if (!fileKeyOrUrl) return;
             try {
                 let keyName = fileKeyOrUrl;
                 
-                // Logic mới: Xử lý thông minh để lấy đúng Key (bao gồm cả thư mục images/)
+                // Nếu là URL đầy đủ (https://...), tách lấy phần path sau domain
                 if (fileKeyOrUrl.startsWith('http')) {
-                    // Nếu là URL (https://...), trích xuất phần đường dẫn sau domain
                     try {
                         const urlObj = new URL(fileKeyOrUrl);
-                        // pathname sẽ là "/images/ten_file.jpg" -> Cắt bỏ dấu "/" ở đầu
+                        // pathname ví dụ: "/images/abc.jpg" -> cắt bỏ dấu "/" đầu tiên
                         keyName = urlObj.pathname.substring(1); 
-                        keyName = decodeURIComponent(keyName); // Giải mã ký tự đặc biệt (dấu cách, tiếng Việt...)
-                    } catch(e) { 
-                        console.warn("Không parse được URL, thử dùng nguyên gốc:", fileKeyOrUrl);
-                    }
-                } 
-                // Nếu không phải URL (là key lưu trong session), giữ nguyên vì nó đã chuẩn (vd: "images/abc.jpg")
+                        keyName = decodeURIComponent(keyName);
+                    } catch(e) { console.warn("Lỗi parse URL:", e); }
+                }
                 
-                console.log("Đang gửi lệnh xóa Key:", keyName); // F12 để kiểm tra
-
+                // Gửi lệnh xóa với keepalive: true (quan trọng để sống sót khi đóng tab)
                 return fetch(`https://upload-helper.phamngockhanh-942001.workers.dev/?key=${encodeURIComponent(keyName)}`, {
                     method: 'DELETE',
-                    keepalive: true // Giữ kết nối mạng sống kể cả khi trang đóng lại
+                    keepalive: true
                 });
             } catch (e) { console.error("Lỗi xóa R2:", e); }
         }
