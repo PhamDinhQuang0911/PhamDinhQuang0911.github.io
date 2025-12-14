@@ -734,6 +734,7 @@
             <div class="image-placeholder my-3 p-4 bg-gray-50 border-2 border-dashed border-gray-300 rounded-xl text-center flex flex-col items-center justify-center select-none cursor-pointer hover:bg-gray-100 transition-all group relative outline-none" 
                 data-id="${id}" 
                 tabindex="0"
+                onclick="event.stopPropagation(); this.focus();" 
                 ondblclick="triggerBatchUpload('${id}')"
                 title="Click để chọn (rồi bấm Ctrl+V), Click đúp để tải file">
                 
@@ -969,11 +970,17 @@
 
             pendingImageUploads = pendingImageUploads.filter(item => item.id !== batchId);
             
-            renderBatchImageModal(); 
+            // 2. Cập nhật lại Panel (số lượng sẽ giảm, nút bấm sẽ mất)
+            window.renderMissingImagesPanel();
+            
+            // 3. Nếu đang sửa đúng câu hỏi đó thì reload lại editor để thấy ảnh mới ngay lập tức
             if (window.currentQIndex !== -1) loadQuestionToEditor(window.currentQIndex); 
+            
+            // 4. Cập nhật danh sách bên trái
             renderPreviewList(); 
             
-            if (pendingImageUploads.length === 0) closeBatchImageModal();
+            // 5. [QUAN TRỌNG] Xóa các dòng gọi Modal cũ đi nếu còn sót lại
+            // if (pendingImageUploads.length === 0) closeBatchImageModal();  <-- Xóa dòng kiểu này
             
             return true;
         }
@@ -1267,6 +1274,56 @@
         
         // --- [FIX QUAN TRỌNG] HÀM XỬ LÝ UPLOAD FILE ---
         // Sửa lỗi: Cắt cụt nội dung do array gây rối loạn đếm ngoặc
+        // --- HÀM MỚI: HIỂN THỊ PANEL ẢNH CÒN THIẾU ---
+        window.renderMissingImagesPanel = () => {
+            const panel = document.getElementById('missingImagesPanel');
+            const grid = document.getElementById('missingImagesGrid');
+            const countDisplay = document.getElementById('missingCountDisplay');
+            
+            // Nếu không tìm thấy panel (do chưa làm Bước 2) thì dừng
+            if (!panel || !grid) return;
+
+            // 1. Nếu danh sách rỗng -> Ẩn panel
+            if (pendingImageUploads.length === 0) {
+                panel.classList.add('hidden');
+                return;
+            }
+
+            // 2. Nếu có ảnh -> Hiển thị panel và cập nhật số lượng
+            panel.classList.remove('hidden');
+            countDisplay.textContent = pendingImageUploads.length;
+            grid.innerHTML = '';
+
+            // 3. Tạo các nút bấm tương ứng với từng ảnh thiếu
+            pendingImageUploads.forEach(item => {
+                const btn = document.createElement('button');
+                // Hiển thị số câu hỏi (item.questionIdx bắt đầu từ 0 nên ta +1 cho dễ nhìn)
+                btn.textContent = item.questionIdx + 1; 
+                btn.className = "w-full aspect-square flex items-center justify-center bg-white border border-gray-300 rounded font-bold text-gray-600 hover:bg-orange-100 hover:border-orange-500 hover:text-orange-600 transition-all text-xs shadow-sm";
+                btn.title = `Ảnh gốc: ${item.originalPath}`;
+                
+                // Sự kiện khi bấm vào số câu hỏi trên panel
+                btn.onclick = () => {
+                    // a. Load câu hỏi đó vào khung soạn thảo
+                    loadQuestionToEditor(item.questionIdx);
+                    
+                    // b. Cuộn màn hình đến đúng vị trí ô dán ảnh (image-placeholder)
+                    setTimeout(() => {
+                        // Tìm ô placeholder có data-id khớp với ảnh này
+                        const placeholder = document.querySelector(`.image-placeholder[data-id="${item.id}"]`);
+                        if (placeholder) {
+                            placeholder.scrollIntoView({behavior: "smooth", block: "center"});
+                            placeholder.focus(); // Focus luôn để anh chỉ việc bấm Ctrl+V
+                            
+                            // Hiệu ứng nhấp nháy viền cam để dễ nhận biết
+                            placeholder.classList.add('ring-4', 'ring-orange-400');
+                            setTimeout(() => placeholder.classList.remove('ring-4', 'ring-orange-400'), 1000);
+                        }
+                    }, 300); // Delay nhẹ 0.3s chờ editor hiển thị xong
+                };
+                grid.appendChild(btn);
+            });
+        };
         window.handleTexUpload = (input) => {
             const file = input.files[0]; if (!file) return;
             const reader = new FileReader();
@@ -1374,13 +1431,18 @@
                 window.showToast(`Đã nhập ${count} câu hỏi!`); 
                 input.value = "";
                 
+                // Render công thức toán và hình TikZ
                 if(window.MathJax) MathJax.typesetPromise();
-                // Thay vì chỉ gọi mỗi renderTikz(), anh gọi cả hai:
-            setTimeout(() => {
-                window.renderTikz();
-                window.autoScaleTables(); // <--- Thêm dòng này
-            }, 500);
-                if (pendingImageUploads.length > 0) renderBatchImageModal();
+                setTimeout(() => {
+                    window.renderTikz();
+                    window.autoScaleTables();
+                }, 500);
+                
+                // --- THAY ĐỔI Ở ĐÂY ---
+                // Code cũ: if (pendingImageUploads.length > 0) renderBatchImageModal();
+                
+                // Code mới: Gọi Panel góc màn hình
+                window.renderMissingImagesPanel();
             };
             reader.readAsText(file);
         }
@@ -1585,5 +1647,17 @@
             }
         });
     </script>
+    <div id="missingImagesPanel" class="hidden fixed bottom-4 right-4 z-50 bg-white border-2 border-orange-500 shadow-2xl rounded-xl w-64 overflow-hidden flex flex-col max-h-[60vh]">
+        <div class="bg-orange-500 text-white p-3 flex justify-between items-center shadow-sm">
+            <h4 class="font-bold text-sm"><i class="fa-solid fa-images mr-2"></i>Ảnh cần chèn (<span id="missingCountDisplay">0</span>)</h4>
+            <button onclick="document.getElementById('missingImagesPanel').classList.add('hidden')" class="hover:text-gray-200"><i class="fa-solid fa-minus"></i></button>
+        </div>
+        <div class="p-3 bg-gray-50 overflow-y-auto flex-1">
+            <div id="missingImagesGrid" class="grid grid-cols-4 gap-2"></div>
+        </div>
+        <div class="p-2 bg-white text-[10px] text-center text-gray-400 border-t">
+            Bấm vào số để đến vị trí ảnh
+        </div>
+    </div>
 </body>
 </html>
