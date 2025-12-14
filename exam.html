@@ -73,15 +73,13 @@
         
         .pb-mobile-nav { padding-bottom: 80px; }
         .solution-box { border-left: 4px solid #10B981; background-color: #ECFDF5; padding: 1rem; border-radius: 0.5rem; margin-top: 1rem; }
-        /* Thêm vào trong thẻ <style> */
+        /* --- CSS MỚI: Hỗ trợ hiển thị sạch --- */
         .origin-top-left { transform-origin: top left; }
-        
-        /* Ẩn hoàn toàn các phần tử không cần thiết khi làm bài */
+        /* Ẩn triệt để các thành phần editor lọt sang */
         .image-placeholder, 
-        .upload-instruction,
-        .overlay-edit-text { 
-            display: none !important; 
-        }
+        .group.relative .absolute { display: none !important; }
+        /* Ẩn các dòng hướng dẫn text nhỏ */
+        .text-\[10px\], .text-xs.font-bold.text-blue-700 { display: none !important; }
     </style>
 </head>
 <body class="h-screen flex flex-col overflow-hidden text-gray-800 bg-gray-50">
@@ -321,66 +319,45 @@
             return res;
         }
         // 1. Hàm xử lý bảng biểu (Giống hệt Editor: hỗ trợ Scale)
+        // 1. Hàm xử lý bảng biểu (Tự động Scale)
         function processTabular(text) {
             if (!text) return "";
-            
-            // Loại bỏ môi trường table bao ngoài (chỉ giữ tabular)
+            // Loại bỏ môi trường table bao ngoài
             let processed = text.replace(/\\begin\{table\}(\[.*?\])?/g, '').replace(/\\end\{table\}/g, '');
-
             const regex = /\\begin\{tabular\}(\{|\[).*?(\}|\])([\s\S]*?)\\end\{tabular\}/g;
-            
             return processed.replace(regex, (match, open, close, body) => {
                 const rows = body.split('\\\\').filter(r => r.trim().length > 0);
-                
-                // Wrapper để tính toán kích thước
                 let html = '<div class="my-3 w-full js-scale-wrapper" style="position: relative; width: 100%;">';
-                
-                // Table có class js-scale-table để JS tìm và co nhỏ
                 html += '<table class="js-scale-table border-collapse border border-gray-300 bg-white text-sm origin-top-left" style="min-width: max-content;">';
-                
                 rows.forEach((row, rIdx) => {
                     let cleanRow = row.replace(/\\hline/g, '').trim();
                     if(cleanRow.length === 0) return;
-
                     const cols = cleanRow.split('&');
                     html += `<tr class="${rIdx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}">`;
-                    cols.forEach(col => {
-                        html += `<td class="border border-gray-300 px-3 py-2 align-middle">${col.trim()}</td>`;
-                    });
+                    cols.forEach(col => { html += `<td class="border border-gray-300 px-3 py-2 align-middle">${col.trim()}</td>`; });
                     html += '</tr>';
                 });
-                
                 html += '</table></div>';
                 return html;
             });
         }
 
-        // 2. Hàm tính toán Scale bảng (Chống vỡ giao diện mobile)
+        // 2. Hàm tính toán Scale bảng
         window.autoScaleTables = () => {
-            const wrappers = document.querySelectorAll('.js-scale-wrapper');
-            wrappers.forEach(wrap => {
+            document.querySelectorAll('.js-scale-wrapper').forEach(wrap => {
                 const table = wrap.querySelector('table');
                 if (!table) return;
-
-                // Reset trước khi tính
-                table.style.transform = 'none';
-                table.style.width = 'auto';
-                wrap.style.height = 'auto';
-
+                table.style.transform = 'none'; table.style.width = 'auto'; wrap.style.height = 'auto';
                 const containerWidth = wrap.offsetWidth;
                 const tableWidth = table.scrollWidth;
-
                 if (tableWidth > containerWidth) {
                     const scale = containerWidth / tableWidth;
                     table.style.transform = `scale(${scale})`;
-                    // Cập nhật chiều cao wrapper sau khi bảng co lại
                     wrap.style.height = `${table.scrollHeight * scale}px`;
                     wrap.style.overflow = 'hidden'; 
                 }
             });
         };
-        
-        // Tự động scale lại khi xoay màn hình
         window.addEventListener('resize', window.autoScaleTables);
         // --- HÀM FORMAT THÔNG MINH: BIẾN MÃ EDITOR THÀNH MÃ HỌC SINH ---
         window.formatContent = (text) => {
@@ -388,40 +365,48 @@
             
             let processed = text;
 
-            // 1. DỌN DẸP LATEX THỪA
-            // Đổi \lq\lq và \rq\rq thành ngoặc kép
+            // 1. DỌN DẸP LATEX VÀ KÝ TỰ RÁC
             processed = processed.replace(/\\lq\\lq/g, '"').replace(/\\rq\\rq/g, '"');
             processed = processed.replace(/\\lq/g, '"').replace(/\\rq/g, '"');
-            // Xóa \hspace, \vspace, \noindent, \indent
-            processed = processed.replace(/\\(h|v)space\*?\{[^}]+\}/g, '');
+            processed = processed.replace(/\\(h|v)space\*?\{[^}]+\}/g, ''); // Xóa hspace, vspace
             processed = processed.replace(/\\(no)?indent/g, '');
-            // Đổi \wideparen thành cung tròn
             processed = processed.replace(/\\wideparen\{([^}]+)\}/g, '\\overset{\\frown}{$1}');
 
-            // 2. XỬ LÝ ẢNH & PLACEHOLDER (QUAN TRỌNG)
-            // a. Xóa hoàn toàn các ô placeholder (chưa có ảnh)
-            // Tìm div có class "image-placeholder" và xóa nó đi
+            // 2. XỬ LÝ ẢNH & PLACEHOLDER (CỰC MẠNH)
+            
+            // a. Xóa các ô placeholder chưa có ảnh (Vị trí hình TikZ, Ảnh từ Immini...)
+            // Regex tìm thẻ div có class chứa 'image-placeholder' và xóa toàn bộ div đó
             processed = processed.replace(/<div[^>]*class="[^"]*image-placeholder[^"]*"[^>]*>[\s\S]*?<\/div>/g, '');
 
-            // b. Dọn dẹp ảnh đã upload (Xóa lớp phủ "Thay ảnh", giữ lại ảnh gốc)
-            // Logic: Tìm thẻ img trong thẻ div group, trích xuất mỗi thẻ img ra ngoài, bỏ các div thừa
-            processed = processed.replace(/<div[^>]*class="[^"]*group relative[^"]*"[^>]*>[\s\S]*?(<img[^>]+>)[\s\S]*?<\/div>/g, '<div class="flex justify-center my-3">$1</div>');
+            // b. Dọn dẹp ảnh đã upload (Lấy ảnh ra khỏi khung Editor)
+            // Tìm div 'group relative' (là khung chứa ảnh trong editor) -> Chỉ lấy thẻ <img> bên trong
+            processed = processed.replace(
+                /<div[^>]*class="[^"]*group relative[^"]*"[^>]*>[\s\S]*?(<img[^>]+>)[\s\S]*?<\/div>/gi, 
+                '<div class="flex justify-center my-3">$1</div>'
+            );
 
-            // 3. Xử lý TikZ (Nếu có)
+            // c. Xóa sạch các dòng text rác nếu lỡ còn sót (như "Click đúp...", "Ảnh từ...")
+            processed = processed.replace(/Click đúp để tải file|hoặc Ctrl \+ V để dán ảnh|ẢNH TỪ IMMINI|VỊ TRÍ HÌNH TIKZ/gi, '');
+
+            // 3. Xử lý TikZ
             processed = processNestedTikz(processed);
 
             // 4. Xử lý Bảng biểu (Scale)
             processed = processTabular(processed);
 
-            // 5. Bảo vệ HTML và xuống dòng
-            const regex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?:\$[\s\S]*?\$)|<script type="text\/tikz">[\s\S]*?<\/script>|<div[^>]*class="js-scale-wrapper"[\s\S]*?<\/div>|<img.*?>|<table[\s\S]*?<\/table>)/g;
+            // 5. Dọn rác cuối cùng
+            processed = processed.replace(/^\s*\}\s*$/gm, ''); 
+            processed = processed.replace(/\}\s*$/g, '');
+
+            // 6. Phân tách HTML/LaTeX để hiển thị
+            const regex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?:\$[\s\S]*?\$)|<script type="text\/tikz">[\s\S]*?<\/script>|<div[^>]*class="js-scale-wrapper"[\s\S]*?<\/div>|<div class="flex justify-center my-3"><img[\s\S]*?<\/div>|<img.*?>)/g;
             
             const parts = processed.split(regex);
             
             return parts.map(part => {
                 if (part.includes('<script type="text/tikz">') || 
                     part.includes('<img') || 
-                    part.includes('js-scale-wrapper') || // Bảo vệ bảng đã xử lý
+                    part.includes('js-scale-wrapper') || 
                     part.trim().startsWith('$') || 
                     part.trim().startsWith('\\(') || 
                     part.trim().startsWith('\\[')) {
@@ -680,7 +665,8 @@
             if(window.MathJax) {
                 MathJax.typesetPromise([dom.content, dom.options]).then(() => {
                     autoScaleMath();
-                    window.autoScaleTables(); // <--- THÊM DÒNG NÀY
+                    // THÊM DÒNG NÀY:
+                    window.autoScaleTables(); 
                 }).catch(()=>{});
             }
             updatePalette();
