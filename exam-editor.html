@@ -56,6 +56,14 @@
         .toggle-checkbox:checked + .toggle-label { background-color: #68D391; }
         .progress-bar-bg { background-color: #E5E7EB; border-radius: 9999px; height: 8px; overflow: hidden; }
         .progress-bar-fill { height: 100%; border-radius: 9999px; transition: width 0.5s ease; }
+        /* Thêm vào phần <style> */
+        .image-placeholder:focus {
+            border-color: #2563EB !important; /* Xanh đậm */
+            background-color: #EFF6FF !important; /* Nền xanh nhạt */
+            outline: 2px solid #3B82F6; /* Viền focus */
+            outline-offset: 2px;
+            box-shadow: 0 4px 6px -1px rgba(59, 130, 246, 0.5);
+        }
     </style>
 </head>
 <body class="h-screen flex overflow-hidden text-gray-800">
@@ -723,12 +731,19 @@
 
         function getPlaceholderHTML(id, note = "Vị trí ảnh") {
             return `
-            <div class="image-placeholder my-3 p-4 bg-blue-50 border-2 border-dashed border-blue-400 rounded-xl text-center flex flex-col items-center justify-center select-none cursor-pointer hover:bg-blue-100 transition-colors group relative" 
+            <div class="image-placeholder my-3 p-4 bg-gray-50 border-2 border-dashed border-gray-300 rounded-xl text-center flex flex-col items-center justify-center select-none cursor-pointer hover:bg-gray-100 transition-all group relative outline-none" 
                 data-id="${id}" 
-                onclick="triggerBatchUpload('${id}')">
-                <div class="text-blue-600 text-3xl mb-2 group-hover:scale-110 transition-transform"><i class="fa-solid fa-cloud-arrow-up"></i></div>
-                <div class="text-xs font-bold text-blue-700 uppercase mb-1">${note}</div>
-                <div class="text-[10px] text-blue-500">Bấm vào đây để tải ảnh lên</div>
+                tabindex="0"
+                ondblclick="triggerBatchUpload('${id}')"
+                title="Click để chọn (rồi bấm Ctrl+V), Click đúp để tải file">
+                
+                <div class="text-gray-400 group-focus:text-blue-600 text-3xl mb-2 transition-colors">
+                    <i class="fa-solid fa-cloud-arrow-up"></i>
+                </div>
+                <div class="text-xs font-bold text-gray-500 group-focus:text-blue-700 uppercase mb-1">${note}</div>
+                <div class="text-[10px] text-gray-400 group-focus:text-blue-500">
+                    Click đúp để tải file<br>hoặc <b>Ctrl + V</b> để dán ảnh
+                </div>
             </div>`;
         }
 
@@ -1531,6 +1546,43 @@
         // Tự động scale lại bảng khi xoay màn hình hoặc đổi kích thước cửa sổ
         window.addEventListener('resize', () => {
             window.autoScaleTables();
+        });
+        // --- XỬ LÝ DÁN ẢNH TRỰC TIẾP (CTRL + V) ---
+        document.addEventListener('paste', async (e) => {
+            // 1. Kiểm tra xem người dùng đang focus vào ô placeholder nào không
+            const activeEl = document.activeElement;
+            
+            // Nếu không phải là ô placeholder thì bỏ qua
+            if (!activeEl || !activeEl.classList.contains('image-placeholder')) return;
+
+            const id = activeEl.getAttribute('data-id');
+            if (!id) return;
+
+            // 2. Lấy dữ liệu từ clipboard
+            const items = (e.clipboardData || e.originalEvent.clipboardData).items;
+            
+            for (const item of items) {
+                if (item.type.indexOf('image') !== -1) {
+                    e.preventDefault(); // Chặn hành vi dán mặc định
+                    
+                    const file = item.getAsFile();
+                    
+                    // Hiệu ứng đang tải ngay tại ô đó
+                    const originalContent = activeEl.innerHTML;
+                    activeEl.innerHTML = '<div class="animate-bounce text-blue-600"><i class="fa-solid fa-spinner fa-spin text-2xl"></i><p class="text-xs mt-2 font-bold">Đang xử lý ảnh...</p></div>';
+                    
+                    try {
+                        window.showToast("Đang tải ảnh từ bộ nhớ tạm...", "info");
+                        await uploadAndReplaceImage(file, id);
+                        window.showToast("Dán ảnh thành công!", "success");
+                    } catch (err) {
+                        console.error(err);
+                        activeEl.innerHTML = originalContent; // Khôi phục nếu lỗi
+                        window.showToast("Lỗi dán ảnh: " + err.message, "error");
+                    }
+                    return; // Chỉ xử lý 1 ảnh đầu tiên tìm thấy
+                }
+            }
         });
     </script>
 </body>
