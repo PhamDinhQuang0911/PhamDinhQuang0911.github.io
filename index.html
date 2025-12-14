@@ -268,6 +268,7 @@
         const loginForm = document.getElementById('loginForm');
         // --- LOGIC HIỂN THỊ KHÓA HỌC TỪ DATABASE ---
         // --- HÀM HIỂN THỊ DANH SÁCH KHÓA HỌC (Đã nâng cấp hiển thị giá) ---
+        // --- 1. HÀM HIỂN THỊ GIAO DIỆN (Logic giá khuyến mãi) ---
         function renderCourses(courses) {
             const container = document.getElementById('courses-grid');
             if (!container) return;
@@ -275,24 +276,18 @@
             container.innerHTML = '';
 
             courses.forEach(c => {
-                // 1. TÍNH TOÁN GIÁ & PHẦN TRĂM GIẢM
+                // Tính toán giá
                 const price = parseInt(c.price) || 0;
                 const originalPrice = parseInt(c.originalPrice) || 0;
                 
                 let priceHtml = '';
                 let discountBadge = '';
 
-                // Nếu có giá gốc và giá gốc cao hơn giá bán -> Đang giảm giá
+                // Logic hiển thị giảm giá
                 if (originalPrice > price && price > 0) {
-                    // Tính % giảm
                     const percent = Math.round(((originalPrice - price) / originalPrice) * 100);
+                    discountBadge = `<div class="absolute top-2 right-2 bg-red-600 text-white text-[10px] font-bold px-2 py-1 rounded shadow-md z-10 animate-pulse">-${percent}%</div>`;
                     
-                    // Tạo huy hiệu giảm giá (Góc phải ảnh)
-                    discountBadge = `<div class="absolute top-2 right-2 bg-red-600 text-white text-[10px] font-bold px-2 py-1 rounded shadow-md z-10 animate-pulse">
-                        -${percent}%
-                    </div>`;
-
-                    // Hiển thị 2 dòng giá (Giá cũ gạch ngang)
                     priceHtml = `
                         <div class="flex flex-col items-end">
                             <span class="text-xs text-gray-400 line-through decoration-gray-400">${originalPrice.toLocaleString('vi-VN')}đ</span>
@@ -300,46 +295,64 @@
                         </div>
                     `;
                 } else {
-                    // Hiển thị bình thường (Chỉ 1 giá)
                     priceHtml = `<span class="text-base font-bold text-gray-900">${price > 0 ? price.toLocaleString('vi-VN') + 'đ' : 'Miễn phí'}</span>`;
                 }
 
-                // 2. TẠO HTML THẺ KHÓA HỌC
+                // Tạo thẻ HTML
                 const div = document.createElement('div');
                 div.className = "bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 group";
                 div.innerHTML = `
                     <div class="relative aspect-video overflow-hidden">
                         ${discountBadge}
-                        
                         ${c.tag ? `<div class="absolute top-2 left-2 bg-orange-500 text-white text-[10px] font-bold px-2 py-1 rounded shadow-md z-10">${c.tag}</div>` : ''}
-                        
                         <img src="${c.image}" class="w-full h-full object-cover transform group-hover:scale-110 transition-transform duration-700" alt="${c.title}">
-                        
                         <div class="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors"></div>
                     </div>
-                    
                     <div class="p-5">
                         <h3 class="font-bold text-gray-800 text-lg mb-2 line-clamp-2 group-hover:text-orange-600 transition-colors">${c.title}</h3>
                         <p class="text-gray-500 text-sm mb-4 line-clamp-2">${c.desc || 'Chưa có mô tả.'}</p>
-                        
                         <div class="flex items-center justify-between border-t border-gray-50 pt-4">
-                            <div class="flex items-center text-gray-500 text-xs font-medium">
-                                <i class="fa-solid fa-users mr-1.5 text-gray-400"></i> ${c.fakeStudents || 0}
-                            </div>
-                            
+                            <div class="flex items-center text-gray-500 text-xs font-medium"><i class="fa-solid fa-users mr-1.5 text-gray-400"></i> ${c.fakeStudents || 0}</div>
                             ${priceHtml}
                         </div>
-
                         <div class="mt-4 pt-2">
-                             <a href="#" onclick="alert('Tính năng đang phát triển')" class="block w-full text-center py-2 rounded-lg bg-orange-50 text-orange-600 font-bold text-sm hover:bg-orange-600 hover:text-white transition-all">
-                                Xem chi tiết <i class="fa-solid fa-arrow-right ml-1"></i>
-                            </a>
+                             <a href="#" class="block w-full text-center py-2 rounded-lg bg-orange-50 text-orange-600 font-bold text-sm hover:bg-orange-600 hover:text-white transition-all">Xem chi tiết <i class="fa-solid fa-arrow-right ml-1"></i></a>
                         </div>
                     </div>
                 `;
                 container.appendChild(div);
             });
         }
+
+        // --- 2. HÀM LẤY DỮ LIỆU TỪ DB (Khôi phục hàm bị thiếu) ---
+        window.renderCoursesFromDB = async () => {
+            try {
+                // Lấy danh sách từ bảng 'public_courses'
+                const q = query(collection(db, "public_courses"), orderBy("createdAt", "desc"));
+                const querySnapshot = await getDocs(q);
+                
+                const courses = [];
+                querySnapshot.forEach((doc) => {
+                    courses.push({ id: doc.id, ...doc.data() });
+                });
+                
+                // Gọi hàm vẽ giao diện sau khi có dữ liệu
+                renderCourses(courses);
+                
+                // Tắt hiệu ứng loading (nếu có)
+                const loading = document.getElementById('courses-loading');
+                if(loading) loading.style.display = 'none';
+                
+            } catch (error) {
+                console.error("Lỗi tải khóa học:", error);
+                // Fallback: Nếu lỗi (do chưa có index), thử lấy không cần sort
+                try {
+                    const snap = await getDocs(collection(db, "public_courses"));
+                    const courses = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+                    renderCourses(courses);
+                } catch(e) {}
+            }
+        };
 
         // Gọi hàm ngay khi trang web tải xong
         renderCoursesFromDB();
