@@ -1539,19 +1539,27 @@
         
         window.handleBackNavigation = async () => {
             const hasUnsavedChanges = JSON.stringify(window.questions) !== JSON.stringify(window.originalQuestionsData);
+            // Chỉ xóa ảnh nếu nó CHƯA được lưu vào database (tức là file mới tải lên trong phiên này)
             const hasPendingImages = sessionUploadedFiles.length > 0;
 
             if (hasUnsavedChanges || hasPendingImages) {
                 const confirmLeave = await window.customConfirm(
-                    "Bạn chưa lưu thay đổi.\nNếu thoát bây giờ, các ảnh vừa tải lên sẽ bị XÓA BỎ.\nBạn có chắc chắn muốn thoát?"
+                    "Bạn chưa lưu thay đổi.\nNếu thoát bây giờ, các ảnh vừa tải lên sẽ bị XÓA BỎ VĨNH VIỄN.\nBạn có chắc chắn muốn thoát?"
                 );
 
                 if (confirmLeave) {
                     if (hasPendingImages) {
-                        window.showToast("Đang dọn dẹp ảnh thừa...", "info");
-                        // Gọi lệnh xóa cho từng ảnh trong session
-                        await Promise.all(sessionUploadedFiles.map(key => deleteR2Image(key)));
+                        // Hiển thị thông báo và giữ màn hình lại 1 chút
+                        window.showToast("Đang dọn dẹp dữ liệu rác trên Cloud...", "warning");
+                        
+                        // QUAN TRỌNG: Đợi tất cả các lệnh xóa hoàn thành
+                        try {
+                            await Promise.all(sessionUploadedFiles.map(key => deleteR2Image(key)));
+                        } catch(e) {
+                            console.log("Lỗi xóa dọn dẹp nhưng vẫn sẽ thoát");
+                        }
                     }
+                    // Sau khi xóa xong mới chuyển trang
                     window.location.href = 'dashboard.html?view=exambank';
                 }
             } else {
@@ -1567,16 +1575,18 @@
         });
         // --- HÀM MỚI: Gửi lệnh xóa sang Cloudflare Worker ---
         // Hàm gọi Worker để xóa ảnh
+        // Hàm xóa ảnh trên R2 thông qua Worker (Có Keepalive và Return)
         async function deleteR2Image(fileKey) {
             if (!fileKey) return;
             try {
-                // Tách lấy tên file nếu lỡ truyền vào là URL
                 const keyName = fileKey.includes('/') ? fileKey.split('/').pop() : fileKey;
                 
-                await fetch(`https://upload-helper.phamngockhanh-942001.workers.dev/?key=${keyName}`, {
-                    method: 'DELETE'
+                // Thêm return để hàm bên ngoài biết khi nào xong
+                // Thêm keepalive: true để trình duyệt ưu tiên gửi kể cả khi đóng tab
+                return fetch(`https://upload-helper.phamngockhanh-942001.workers.dev/?key=${keyName}`, {
+                    method: 'DELETE',
+                    keepalive: true 
                 });
-                console.log("Đã xóa ảnh R2:", keyName);
             } catch (e) { console.error("Lỗi xóa R2:", e); }
         }
         // Tự động scale lại bảng khi xoay màn hình hoặc đổi kích thước cửa sổ
