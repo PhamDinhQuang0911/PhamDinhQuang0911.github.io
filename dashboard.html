@@ -1029,42 +1029,34 @@
                 container.innerHTML = `<label class="block text-sm font-bold text-gray-700 mb-2">Tên mới</label><div class="flex gap-2"><input type="text" id="renameInput" value="${currentActionItem.name}" class="flex-1 border rounded px-3 py-2"><button onclick="window.commitRename()" class="bg-blue-600 text-white px-4 rounded font-bold">Lưu</button></div>`; 
             } else if (action === 'delete') { 
                 window.toggleModal('actionModal', false); 
-                if(await window.customConfirm(`Bạn chắc chắn muốn xóa "${currentActionItem.name}"?`)) { 
+                if(await window.customConfirm(`CẢNH BÁO: Xóa đề thi "${currentActionItem.name}" sẽ xóa vĩnh viễn cả CÂU HỎI và HÌNH ẢNH đi kèm.\nBạn có chắc chắn không?`)) { 
                     try { 
                         const collName = currentActionItem.type === 'folder' ? 'folders' : 'exams';
                         
-                        // --- ĐOẠN MỚI: XÓA ẢNH ---
+                        // --- XỬ LÝ XÓA ẢNH ĐI KÈM (CẬP NHẬT) ---
                         if (currentActionItem.type === 'exam') {
                             const docSnap = await getDoc(doc(db, "exams", currentActionItem.id));
                             if (docSnap.exists()) {
                                 const examData = docSnap.data();
-                                // Tìm tất cả link ảnh
-                                const images = extractImageUrls(examData);
+                                const strData = JSON.stringify(examData);
+                                
+                                // Regex tìm tất cả link ảnh Cloudflare R2 hoặc Firebase
+                                const regex = /(https:\/\/[^"'\s\\]+\.r2\.dev\/[^"'\s\\]+|https:\/\/firebasestorage\.googleapis\.com\/v0\/b\/[^"'\s\\]+)/g;
+                                const images = strData.match(regex) || [];
                                 
                                 if (images.length > 0) {
-                                    window.showNotification(`Đang xóa ${images.length} ảnh đi kèm...`, "info");
+                                    window.showNotification(`Đang dọn dẹp ${images.length} file ảnh trên Cloud...`, "warning");
                                     
-                                    await Promise.all(images.map(url => {
-                                        // Nếu là link Cloudflare R2
-                                        if (url.includes('r2.dev')) {
-                                            return deleteR2Image(url);
-                                        } 
-                                        // Nếu là link Firebase cũ
-                                        else if (url.includes('firebasestorage')) {
-                                            try {
-                                                const fileRef = ref(storage, url);
-                                                return deleteObject(fileRef).catch(()=>{});
-                                            } catch(e) { return Promise.resolve(); }
-                                        }
-                                        return Promise.resolve();
-                                    }));
+                                    // Dùng Promise.all để đợi xóa xong hết
+                                    // Hàm deleteR2Image mới sẽ tự tách lấy key chuẩn (images/...)
+                                    await Promise.all(images.map(url => deleteR2Image(url)));
                                 }
                             }
                         }
-                        // ------------------------
+                        // ----------------------------------------
 
                         await deleteDoc(doc(db, collName, currentActionItem.id)); 
-                        window.showNotification("Đã xóa dữ liệu thành công!"); 
+                        window.showNotification("Đã xóa hoàn toàn đề thi và dữ liệu!", "success"); 
                         loadFileManager(); 
                     } catch(e) { 
                         console.error(e);
