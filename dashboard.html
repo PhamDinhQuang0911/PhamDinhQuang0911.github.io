@@ -463,7 +463,7 @@
                                 <i class="fa-solid fa-cloud-arrow-up"></i> Tải Logo mới
                             </button>
                             <input type="file" id="logoInput" class="hidden" accept="image/*" onchange="window.handleLogoUpload(this)">
-                            <p class="text-[10px] text-red-500 italic mt-1">* Kích thước chuẩn: Hình vuông (100x100px) hoặc Hình chữ nhật ngang (200x60px). Nền trong suốt (PNG).</p>
+                            <input type="hidden" id="hLogoUrl"> <p class="text-[10px] text-red-500 italic mt-1">* Nên dùng ảnh vuông (100x100px) hoặc ngang (200x60px), nền trong suốt (PNG).</p>
                         </div>
                     </div>
                 </div>
@@ -477,10 +477,6 @@
                         <option value="style4">Style 4: Poster (Ảnh nền full - Chữ trong khung)</option>
                         <option value="style5">Style 5: Phá cách (Chia đôi màn hình)</option>
                     </select>
-                    <div class="mt-2 text-[10px] text-gray-500 space-y-1 italic border-t border-blue-200 pt-2">
-                        <p><b>• Style 1, 3:</b> Dùng ảnh tách nền (PNG) hoặc ảnh vuông (600x600px).</p>
-                        <p><b>• Style 2, 4, 5:</b> Dùng ảnh chữ nhật ngang chất lượng cao (1920x1080px hoặc 1200x600px).</p>
-                    </div>
                 </div>
 
                 <div>
@@ -494,7 +490,7 @@
                                 <i class="fa-solid fa-image"></i> Tải ảnh Banner
                             </button>
                             <input type="file" id="heroImgInput" class="hidden" accept="image/*" onchange="window.handleHeroImageUpload(this)">
-                        </div>
+                            <input type="hidden" id="hImageUrl"> </div>
                     </div>
                 </div>
 
@@ -1701,6 +1697,9 @@
         // --- CÁC HÀM XỬ LÝ BANNER & LOGO MỚI ---
         
         // 1. Hàm Upload chung (Dùng cho cả Logo và Banner)
+        // --- CÁC HÀM XỬ LÝ BANNER & LOGO (ĐÃ KHẮC PHỤC LỖI ID NULL) ---
+        
+        // 1. Hàm Upload Chung
         async function uploadImageGeneric(input, callback) {
             const file = input.files[0];
             if (!file) return;
@@ -1724,60 +1723,70 @@
         // Wrapper cho Banner
         window.handleHeroImageUpload = (input) => uploadImageGeneric(input, (url) => {
             window.currentHeroImg = url;
-            document.getElementById('hImageUrl').value = url;
-            document.getElementById('heroImgPreview').src = url;
+            // Kiểm tra thẻ tồn tại trước khi gán để tránh lỗi
+            if(document.getElementById('hImageUrl')) document.getElementById('hImageUrl').value = url;
+            if(document.getElementById('heroImgPreview')) document.getElementById('heroImgPreview').src = url;
         });
 
-        // Wrapper cho Logo (Mới)
+        // Wrapper cho Logo
         window.handleLogoUpload = (input) => uploadImageGeneric(input, (url) => {
             window.currentLogoImg = url;
-            document.getElementById('hLogoUrl').value = url;
-            document.getElementById('logoPreview').src = url;
+            if(document.getElementById('hLogoUrl')) document.getElementById('hLogoUrl').value = url;
+            if(document.getElementById('logoPreview')) document.getElementById('logoPreview').src = url;
         });
 
-        // 2. Hàm mở Modal (Load cả Logo và Tags)
+        // 2. MỞ MODAL (Đã thêm kiểm tra null)
         window.openHeroModal = async () => {
             try {
                 const docSnap = await getDoc(doc(db, "site_settings", "homepage_hero"));
                 if (docSnap.exists()) {
                     const d = docSnap.data();
-                    document.getElementById('hStyle').value = d.style || "style1";
-                    document.getElementById('hTitle1').value = d.title1 || "";
-                    document.getElementById('hTitle2').value = d.title2 || "";
-                    // Tags: Nối mảng thành chuỗi để hiển thị
-                    document.getElementById('hTags').value = d.tags ? d.tags.join(', ') : (d.tag1 ? `${d.tag1}, ${d.tag2}` : ""); 
-                    document.getElementById('hDesc').value = d.desc || "";
-                    document.getElementById('hBtnText').value = d.btnText || "";
-                    document.getElementById('hBtnLink').value = d.btnLink || "";
+                    // Dùng dấu ? (Optional Chaining) hoặc kiểm tra getElementById để an toàn
+                    const setVal = (id, val) => { if(document.getElementById(id)) document.getElementById(id).value = val; };
+
+                    setVal('hStyle', d.style || "style1");
+                    setVal('hTitle1', d.title1 || "");
+                    setVal('hTitle2', d.title2 || "");
                     
+                    // Xử lý Tags (Tương thích cả dữ liệu cũ và mới)
+                    let tagStr = "";
+                    if(d.tags && Array.isArray(d.tags)) tagStr = d.tags.join(', ');
+                    else if (d.tag1) tagStr = `${d.tag1}, ${d.tag2 || ''}`; // Dữ liệu cũ
+                    setVal('hTags', tagStr);
+
+                    setVal('hDesc', d.desc || "");
+                    setVal('hBtnText', d.btnText || "");
+                    setVal('hBtnLink', d.btnLink || "");
+                    
+                    // Load ảnh
                     window.currentHeroImg = d.image || ""; 
-                    document.getElementById('hImageUrl').value = window.currentHeroImg;
-                    if(window.currentHeroImg) document.getElementById('heroImgPreview').src = window.currentHeroImg;
+                    setVal('hImageUrl', window.currentHeroImg);
+                    if(window.currentHeroImg && document.getElementById('heroImgPreview')) document.getElementById('heroImgPreview').src = window.currentHeroImg;
 
                     window.currentLogoImg = d.logo || "";
-                    document.getElementById('hLogoUrl').value = window.currentLogoImg;
-                    if(window.currentLogoImg) document.getElementById('logoPreview').src = window.currentLogoImg;
+                    setVal('hLogoUrl', window.currentLogoImg);
+                    if(window.currentLogoImg && document.getElementById('logoPreview')) document.getElementById('logoPreview').src = window.currentLogoImg;
                 }
                 window.toggleModal('heroModal', true);
             } catch(e) { console.error(e); }
         };
 
-        // 3. Hàm lưu cấu hình (Xử lý tách Tags)
+        // 3. LƯU CẤU HÌNH
         window.saveHeroSettings = async () => {
-            // Tách chuỗi tags thành mảng
-            const rawTags = document.getElementById('hTags').value;
+            // Lấy tags an toàn
+            const rawTags = document.getElementById('hTags') ? document.getElementById('hTags').value : "";
             const tagsArray = rawTags.split(',').map(t => t.trim()).filter(t => t !== "");
 
             const data = {
                 style: document.getElementById('hStyle').value,
                 title1: document.getElementById('hTitle1').value,
                 title2: document.getElementById('hTitle2').value,
-                tags: tagsArray, // Lưu dưới dạng mảng
+                tags: tagsArray,
                 desc: document.getElementById('hDesc').value,
                 btnText: document.getElementById('hBtnText').value,
                 btnLink: document.getElementById('hBtnLink').value,
                 image: window.currentHeroImg,
-                logo: window.currentLogoImg, // Lưu logo
+                logo: window.currentLogoImg,
                 updatedAt: new Date().toISOString()
             };
             try {
