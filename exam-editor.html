@@ -1539,7 +1539,6 @@
         
         window.handleBackNavigation = async () => {
             const hasUnsavedChanges = JSON.stringify(window.questions) !== JSON.stringify(window.originalQuestionsData);
-            // Chỉ xóa ảnh nếu nó CHƯA được lưu vào database (tức là file mới tải lên trong phiên này)
             const hasPendingImages = sessionUploadedFiles.length > 0;
 
             if (hasUnsavedChanges || hasPendingImages) {
@@ -1549,17 +1548,12 @@
 
                 if (confirmLeave) {
                     if (hasPendingImages) {
-                        // Hiển thị thông báo và giữ màn hình lại 1 chút
                         window.showToast("Đang dọn dẹp dữ liệu rác trên Cloud...", "warning");
-                        
-                        // QUAN TRỌNG: Đợi tất cả các lệnh xóa hoàn thành
                         try {
+                            // QUAN TRỌNG: Phải có await để trình duyệt dừng lại chờ xóa xong
                             await Promise.all(sessionUploadedFiles.map(key => deleteR2Image(key)));
-                        } catch(e) {
-                            console.log("Lỗi xóa dọn dẹp nhưng vẫn sẽ thoát");
-                        }
+                        } catch(e) { console.log("Lỗi dọn dẹp:", e); }
                     }
-                    // Sau khi xóa xong mới chuyển trang
                     window.location.href = 'dashboard.html?view=exambank';
                 }
             } else {
@@ -1576,16 +1570,31 @@
         // --- HÀM MỚI: Gửi lệnh xóa sang Cloudflare Worker ---
         // Hàm gọi Worker để xóa ảnh
         // Hàm xóa ảnh trên R2 thông qua Worker (Có Keepalive và Return)
-        async function deleteR2Image(fileKey) {
-            if (!fileKey) return;
+        // Hàm xóa ảnh trên R2 (ĐÃ SỬA LỖI ĐƯỜNG DẪN)
+        async function deleteR2Image(fileKeyOrUrl) {
+            if (!fileKeyOrUrl) return;
             try {
-                const keyName = fileKey.includes('/') ? fileKey.split('/').pop() : fileKey;
+                let keyName = fileKeyOrUrl;
                 
-                // Thêm return để hàm bên ngoài biết khi nào xong
-                // Thêm keepalive: true để trình duyệt ưu tiên gửi kể cả khi đóng tab
-                return fetch(`https://upload-helper.phamngockhanh-942001.workers.dev/?key=${keyName}`, {
+                // Logic mới: Xử lý thông minh để lấy đúng Key (bao gồm cả thư mục images/)
+                if (fileKeyOrUrl.startsWith('http')) {
+                    // Nếu là URL (https://...), trích xuất phần đường dẫn sau domain
+                    try {
+                        const urlObj = new URL(fileKeyOrUrl);
+                        // pathname sẽ là "/images/ten_file.jpg" -> Cắt bỏ dấu "/" ở đầu
+                        keyName = urlObj.pathname.substring(1); 
+                        keyName = decodeURIComponent(keyName); // Giải mã ký tự đặc biệt (dấu cách, tiếng Việt...)
+                    } catch(e) { 
+                        console.warn("Không parse được URL, thử dùng nguyên gốc:", fileKeyOrUrl);
+                    }
+                } 
+                // Nếu không phải URL (là key lưu trong session), giữ nguyên vì nó đã chuẩn (vd: "images/abc.jpg")
+                
+                console.log("Đang gửi lệnh xóa Key:", keyName); // F12 để kiểm tra
+
+                return fetch(`https://upload-helper.phamngockhanh-942001.workers.dev/?key=${encodeURIComponent(keyName)}`, {
                     method: 'DELETE',
-                    keepalive: true 
+                    keepalive: true // Giữ kết nối mạng sống kể cả khi trang đóng lại
                 });
             } catch (e) { console.error("Lỗi xóa R2:", e); }
         }
