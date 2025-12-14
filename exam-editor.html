@@ -1067,6 +1067,7 @@
 
         // Hàm ép TikZJax chạy lại để vẽ hình
         // Hàm ép TikZJax chạy lại (Phiên bản cache-busting)
+        
         window.renderTikz = () => {
             const scripts = document.querySelectorAll('script[type="text/tikz"]');
             if (scripts.length === 0) return;
@@ -1086,6 +1087,40 @@
             newScript.onerror = () => console.error("Lỗi tải TikZJax!");
             
             document.head.appendChild(newScript);
+        };
+        // --- HÀM MỚI: TỰ ĐỘNG SCALE BẢNG CHO VỪA MÀN HÌNH ---
+        window.autoScaleTables = () => {
+            const wrappers = document.querySelectorAll('.js-scale-wrapper');
+            
+            wrappers.forEach(wrap => {
+                const table = wrap.querySelector('table');
+                if (!table) return;
+
+                // 1. Reset để đo chính xác
+                table.style.transform = 'none';
+                table.style.width = 'auto';
+                wrap.style.height = 'auto';
+
+                // 2. Lấy kích thước thực tế
+                const containerWidth = wrap.offsetWidth;
+                const tableWidth = table.scrollWidth;
+
+                // 3. Nếu bảng to hơn màn hình -> Scale down
+                if (tableWidth > containerWidth) {
+                    const scale = containerWidth / tableWidth;
+                    
+                    // Ép nhỏ bảng lại
+                    table.style.transform = `scale(${scale})`;
+                    
+                    // 4. Cập nhật lại chiều cao cho wrapper (vì khi scale, bảng bé lại nhưng wrapper vẫn giữ chiều cao cũ)
+                    // Công thức: Chiều cao thực tế * tỷ lệ scale
+                    const newHeight = table.scrollHeight * scale;
+                    wrap.style.height = `${newHeight}px`;
+                    
+                    // Cắt bỏ khoảng trắng thừa bên phải do scale để lại
+                    wrap.style.overflow = 'hidden'; 
+                }
+            });
         };
         window.renderPreviewList = () => { 
             const list = document.getElementById('previewList');
@@ -1162,7 +1197,11 @@
                 list.appendChild(div);
             });
             if(window.MathJax) MathJax.typesetPromise([list]).catch(e=>{});
-            setTimeout(() => window.renderTikz(), 500);
+            // Thay vì chỉ gọi mỗi renderTikz(), anh gọi cả hai:
+            setTimeout(() => {
+                window.renderTikz();
+                window.autoScaleTables(); // <--- Thêm dòng này
+            }, 500);
         };
 
         window.saveCurrentQuestionToMemory = () => { 
@@ -1321,7 +1360,11 @@
                 input.value = "";
                 
                 if(window.MathJax) MathJax.typesetPromise();
-                setTimeout(() => window.renderTikz(), 500);
+                // Thay vì chỉ gọi mỗi renderTikz(), anh gọi cả hai:
+            setTimeout(() => {
+                window.renderTikz();
+                window.autoScaleTables(); // <--- Thêm dòng này
+            }, 500);
                 if (pendingImageUploads.length > 0) renderBatchImageModal();
             };
             reader.readAsText(file);
@@ -1485,6 +1528,10 @@
                 console.log("Đã xóa ảnh R2:", keyName);
             } catch (e) { console.error("Lỗi xóa R2:", e); }
         }
+        // Tự động scale lại bảng khi xoay màn hình hoặc đổi kích thước cửa sổ
+        window.addEventListener('resize', () => {
+            window.autoScaleTables();
+        });
     </script>
 </body>
 </html>
