@@ -465,7 +465,14 @@
             e.preventDefault();
             
             const name = document.getElementById('regName').value;
-            const username = document.getElementById('regUsername').value.trim();
+            // 1. LẤY TÊN ĐĂNG NHẬP VÀ XỬ LÝ SẠCH SẼ
+            let username = document.getElementById('regUsername').value.trim();
+            
+            // Tự động xóa chữ @ nếu học sinh lỡ nhập vào
+            username = username.replace(/@/g, ''); 
+            // Chuyển về chữ thường cho chuẩn
+            username = username.toLowerCase(); 
+
             const phone = document.getElementById('regPhone').value.trim();
             const parentPhone = document.getElementById('regParentPhone').value;
             const year = document.getElementById('regYear').value;
@@ -475,33 +482,42 @@
             const pass = document.getElementById('regPass').value;
             const rePass = document.getElementById('regRePass').value;
 
-            // --- VALIDATE CƠ BẢN ---
+            // --- 2. VALIDATE DỮ LIỆU ---
             const phoneRegex = /^(03|05|07|08|09)([0-9]{8})$/;
-            if (!phoneRegex.test(phone)) return showRegMessage("SĐT không hợp lệ! Phải là 10 số.", "error");
-            if (/\s/.test(username)) return showRegMessage("Tên đăng nhập không được chứa khoảng trắng!", "error");
+            if (!phoneRegex.test(phone)) return showRegMessage("SĐT không hợp lệ! Phải là 10 số và đúng đầu số VN.", "error");
+            
+            // Kiểm tra tên đăng nhập có ký tự lạ không (chỉ cho phép chữ, số, dấu chấm, gạch dưới)
+            const validUsernameRegex = /^[a-z0-9._]+$/;
+            if (!validUsernameRegex.test(username)) return showRegMessage("Tên đăng nhập không dấu, không khoảng trắng!", "error");
+
             if (pass !== rePass) return showRegMessage("Mật khẩu không khớp!", "error");
             if (pass.length < 6) return showRegMessage("Mật khẩu quá ngắn!", "error");
 
             regBtn.disabled = true;
-            regBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> ĐANG TẠO...';
+            regBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> ĐANG KIỂM TRA...';
 
             const fakeEmail = `${username}@hocsinh.com`;
 
             try {
-                // [THAY ĐỔI QUAN TRỌNG]: BỎ QUA BƯỚC KIỂM TRA SĐT TRÙNG TRONG FIRESTORE
-                // Lý do: Để bảo mật, khách chưa đăng nhập không được phép quét dữ liệu người khác.
-                // Chúng ta tin tưởng vào check trùng Tên đăng nhập của Firebase Auth.
+                // --- 3. KIỂM TRA TRÙNG SĐT (Đã hoạt động nhờ sửa Rules) ---
+                const qPhone = query(collection(db, "users"), where("phone", "==", phone));
+                const snapPhone = await getDocs(qPhone);
+                
+                if (!snapPhone.empty) {
+                    throw new Error("Số điện thoại này đã được đăng ký!");
+                }
 
-                // 1. Tạo tài khoản Auth ngay lập tức
+                // --- 4. TIẾN HÀNH ĐĂNG KÝ ---
+                regBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> ĐANG TẠO...';
+                
                 const userCredential = await createUserWithEmailAndPassword(auth, fakeEmail, pass);
                 const user = userCredential.user;
                 
                 await updateProfile(user, { displayName: name });
                 
-                // 2. Sau khi tạo xong (đã đăng nhập), mới được phép ghi vào Firestore
                 await setDoc(doc(db, "users", user.uid), {
                     displayName: name,
-                    username: username,
+                    username: username, // Lưu tên đã xử lý sạch
                     email: fakeEmail,
                     personalEmail: personalEmail,
                     phone: phone,
@@ -520,9 +536,10 @@
 
             } catch (error) {
                 console.error(error);
-                let msg = "Lỗi đăng ký: " + error.message;
-                // Firebase Auth tự động chặn nếu tên đăng nhập (email) đã tồn tại
+                let msg = error.message;
                 if (error.code === 'auth/email-already-in-use') msg = "Tên đăng nhập này đã có người dùng!";
+                if (error.code === 'auth/invalid-email') msg = "Tên đăng nhập chứa ký tự không hợp lệ!";
+                
                 showRegMessage(msg, "error");
                 regBtn.disabled = false; regBtn.innerHTML = 'ĐĂNG KÝ TÀI KHOẢN';
             }
