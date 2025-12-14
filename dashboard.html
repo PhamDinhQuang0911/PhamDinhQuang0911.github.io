@@ -1681,13 +1681,31 @@
         };
         document.getElementById('logoutBtn').onclick = async () => { if(await window.customConfirm("Bạn có chắc muốn đăng xuất?")) signOut(auth).then(()=>window.location.href="index.html"); }
         // Hàm xóa ảnh trên R2 thông qua Worker
-        async function deleteR2Image(fileUrl) {
-            if (!fileUrl) return;
+        // Hàm xóa ảnh trên R2 (ĐÃ SỬA LỖI ĐƯỜNG DẪN)
+        async function deleteR2Image(fileKeyOrUrl) {
+            if (!fileKeyOrUrl) return;
             try {
-                // Lấy tên file từ URL (phần sau dấu / cuối cùng)
-                const keyName = fileUrl.split('/').pop();
-                await fetch(`https://upload-helper.phamngockhanh-942001.workers.dev/?key=${keyName}`, {
-                    method: 'DELETE'
+                let keyName = fileKeyOrUrl;
+                
+                // Logic mới: Xử lý thông minh để lấy đúng Key (bao gồm cả thư mục images/)
+                if (fileKeyOrUrl.startsWith('http')) {
+                    // Nếu là URL (https://...), trích xuất phần đường dẫn sau domain
+                    try {
+                        const urlObj = new URL(fileKeyOrUrl);
+                        // pathname sẽ là "/images/ten_file.jpg" -> Cắt bỏ dấu "/" ở đầu
+                        keyName = urlObj.pathname.substring(1); 
+                        keyName = decodeURIComponent(keyName); // Giải mã ký tự đặc biệt (dấu cách, tiếng Việt...)
+                    } catch(e) { 
+                        console.warn("Không parse được URL, thử dùng nguyên gốc:", fileKeyOrUrl);
+                    }
+                } 
+                // Nếu không phải URL (là key lưu trong session), giữ nguyên vì nó đã chuẩn (vd: "images/abc.jpg")
+                
+                console.log("Đang gửi lệnh xóa Key:", keyName); // F12 để kiểm tra
+
+                return fetch(`https://upload-helper.phamngockhanh-942001.workers.dev/?key=${encodeURIComponent(keyName)}`, {
+                    method: 'DELETE',
+                    keepalive: true // Giữ kết nối mạng sống kể cả khi trang đóng lại
                 });
             } catch (e) { console.error("Lỗi xóa R2:", e); }
         }
