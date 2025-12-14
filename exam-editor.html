@@ -938,7 +938,13 @@
             const compressedBlob = await compressImage(file);
             
             const formData = new FormData();
+            // Tạo tên file (Key)
             const fileName = `images/batch_${Date.now()}_${Math.random().toString(36).substr(2,6)}.jpg`;
+            
+            // --- [QUAN TRỌNG] LƯU VÀO DANH SÁCH TẠM ĐỂ XÓA NẾU THOÁT ---
+            sessionUploadedFiles.push(fileName); 
+            // -----------------------------------------------------------
+
             formData.append('file', compressedBlob, fileName);
 
             const response = await fetch("https://upload-helper.phamngockhanh-942001.workers.dev/", {
@@ -950,6 +956,7 @@
             const data = await response.json();
             const url = data.url;
 
+            // Logic thay thế ảnh cũ (nếu là ảnh Firebase thì xóa)
             let targetQ = window.questions.find(q => (q.content && q.content.includes(batchId)) || (q.solution && q.solution.includes(batchId)));
             if (targetQ) {
                 const oldContent = targetQ.content.includes(batchId) ? targetQ.content : targetQ.solution;
@@ -978,10 +985,8 @@
                 if (q.solution && q.solution.includes(batchId)) { q.solution = q.solution.replace(targetRegex, imgTag); }
             });
 
-            // Xóa khỏi danh sách chờ
             pendingImageUploads = pendingImageUploads.filter(item => item.id !== batchId);
             
-            // --- CẬP NHẬT CẢ 2 GIAO DIỆN ---
             renderBatchImageModal();
             window.renderMissingImagesPanel();
             
@@ -1548,11 +1553,16 @@
 
                 if (confirmLeave) {
                     if (hasPendingImages) {
-                        window.showToast("Đang dọn dẹp dữ liệu rác trên Cloud...", "warning");
+                        // Hiển thị loading chặn màn hình
+                        const toast = document.createElement('div');
+                        toast.className = 'fixed inset-0 bg-black/50 z-[200] flex items-center justify-center';
+                        toast.innerHTML = '<div class="bg-white p-6 rounded-xl flex flex-col items-center"><i class="fa-solid fa-spinner fa-spin text-4xl text-blue-600 mb-3"></i><p class="font-bold">Đang dọn dẹp dữ liệu rác...</p></div>';
+                        document.body.appendChild(toast);
+                        
                         try {
-                            // Đợi xóa xong
+                            // Bắt buộc trình duyệt đợi xóa xong
                             await Promise.all(sessionUploadedFiles.map(key => deleteR2Image(key)));
-                            // QUAN TRỌNG: Xóa danh sách để sự kiện pagehide không chạy lại nữa
+                            // Xóa xong thì làm rỗng mảng để sự kiện pagehide không chạy trùng
                             sessionUploadedFiles = []; 
                         } catch(e) { console.log("Lỗi dọn dẹp:", e); }
                     }
@@ -1562,42 +1572,36 @@
                 window.location.href = 'dashboard.html?view=exambank';
             }
         };
-
-        window.addEventListener('beforeunload', function (e) {
+        
+        // Sự kiện dự phòng: Xử lý khi bấm F5 hoặc tắt Tab
+        window.addEventListener('pagehide', () => {
             if (sessionUploadedFiles.length > 0) {
-                e.preventDefault();
-                e.returnValue = '';
+                // Sử dụng sendBeacon hoặc fetch keepalive
+                sessionUploadedFiles.forEach(key => deleteR2Image(key));
             }
-        });
-        // --- XỬ LÝ KHI F5 HOẶC TẮT TAB (BẮT BUỘC) ---
-        window.addEventListener('pagehide', (event) => {
-            // Nếu còn ảnh trong session mà người dùng tải lại trang hoặc tắt tab
-            if (sessionUploadedFiles.length > 0) {
-                sessionUploadedFiles.forEach(key => {
-                    // Gọi hàm xóa với keepalive (không cần await vì trang sắp đóng)
-                    deleteR2Image(key);
-                });
-            }
-        });        
-        async function deleteR2Image(fileKeyOrUrl) {
-            if (!fileKeyOrUrl) return;
+        });      
+        // Hàm xóa ảnh trên R2 (Phiên bản chuẩn)
+        async function deleteR2Image(input) {
+            if (!input) return;
             try {
-                let keyName = fileKeyOrUrl;
+                let keyName = input;
                 
-                // Nếu là URL đầy đủ (https://...), tách lấy phần path sau domain
-                if (fileKeyOrUrl.startsWith('http')) {
+                // Nếu là URL đầy đủ, trích xuất phần Key
+                if (input.startsWith('http')) {
                     try {
-                        const urlObj = new URL(fileKeyOrUrl);
-                        // pathname ví dụ: "/images/abc.jpg" -> cắt bỏ dấu "/" đầu tiên
+                        const urlObj = new URL(input);
+                        // pathname sẽ là /images/file.jpg -> cắt bỏ dấu / ở đầu
                         keyName = urlObj.pathname.substring(1); 
                         keyName = decodeURIComponent(keyName);
-                    } catch(e) { console.warn("Lỗi parse URL:", e); }
+                    } catch(e) { console.warn("Lỗi parse URL:", input); }
                 }
                 
-                // Gửi lệnh xóa với keepalive: true (quan trọng để sống sót khi đóng tab)
+                console.log("Đang xóa Key:", keyName); // F12 để kiểm tra
+
+                // Gửi lệnh xóa với keepalive để sống sót qua sự kiện F5
                 return fetch(`https://upload-helper.phamngockhanh-942001.workers.dev/?key=${encodeURIComponent(keyName)}`, {
                     method: 'DELETE',
-                    keepalive: true
+                    keepalive: true 
                 });
             } catch (e) { console.error("Lỗi xóa R2:", e); }
         }
