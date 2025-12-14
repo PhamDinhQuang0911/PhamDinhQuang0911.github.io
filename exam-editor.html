@@ -570,16 +570,28 @@
         function formatContent(text) {
             if (text === null || text === undefined) return "";
             
-            // [BƯỚC 1] Fix lỗi Array -> Matrix trước tiên để hiển thị đẹp
-            let processed = convertArrayToMatrix(text);
+            let processed = text;
 
-            // 2. Xử lý hình vẽ TikZ
-            processed = processNestedTikz(processed);
+            // Yêu cầu 1: Đổi \lq\lq và \rq\rq thành dấu ngoặc kép "
+            processed = processed.replace(/\\lq\\lq/g, '"').replace(/\\rq\\rq/g, '"');
+            processed = processed.replace(/\\lq/g, '"').replace(/\\rq/g, '"'); // Xử lý cả ngoặc đơn nếu có
 
-            // 3. Xử lý Bảng biểu (Tabular) trước khi xử lý list
+            // Yêu cầu 2: Đổi \wideparen{...} thành cung tròn \overset{\frown}{...}
+            processed = processed.replace(/\\wideparen\{([^}]+)\}/g, '\\overset{\\frown}{$1}');
+
+            // Yêu cầu 3: Loại bỏ \hspace{...}, \vspace{...}, \hspace*{...}
+            processed = processed.replace(/\\(h|v)space\*?\{[^}]+\}/g, '');
+
+            // [BƯỚC 1] Fix lỗi Array -> Matrix
+            processed = convertArrayToMatrix(processed);
+
+            // [LƯU Ý]: Bỏ hàm processNestedTikz cũ đi vì giờ ta dùng placeholder ở trên rồi
+            // processed = processNestedTikz(processed); -> BỎ DÒNG NÀY
+
+            // 3. Xử lý Bảng biểu (Tabular)
             processed = processTabular(processed);
 
-            // 4. Xử lý các danh sách liệt kê (itemchoice, enumerate,...)
+            // 4. Xử lý các danh sách liệt kê
             processed = processLatexLists(processed);
 
             // 5. Dọn rác text
@@ -588,13 +600,12 @@
             processed = processed.replace(/Ảnh minh họa \(immini\)/g, ''); 
             processed = processed.replace(/Ảnh canh giữa/g, '');
 
-            // 6. Bảo vệ các thẻ HTML đã tạo
-            const regex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?:\$[\s\S]*?\$)|<script type="text\/tikz">[\s\S]*?<\/script>|<div[^>]*data-id=.*?>[\s\S]*?<\/div>|<img.*?>|<table[\s\S]*?<\/table>|<ul[\s\S]*?<\/ul>|<ol[\s\S]*?<\/ol>|<div class="grid[\s\S]*?<\/div>)/g;
+            // 6. Bảo vệ HTML
+            const regex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?:\$[\s\S]*?\$)|<div[^>]*data-id=.*?>[\s\S]*?<\/div>|<img.*?>|<table[\s\S]*?<\/table>|<ul[\s\S]*?<\/ul>|<ol[\s\S]*?<\/ol>|<div class="grid[\s\S]*?<\/div>)/g;
             
             const parts = processed.split(regex);
             return parts.map(part => {
-                if (part.includes('<script type="text/tikz">') || 
-                    part.includes('data-id=') || 
+                if (part.includes('data-id=') || 
                     part.includes('<img') || 
                     part.includes('<ul') ||  
                     part.includes('<ol') ||  
@@ -762,32 +773,32 @@
                 if (!arg2) break; 
 
                 let imgPath = "";
-                let hasImageFile = false;
-                let hasTikz = false;
+                let placeholderType = ""; 
+                let needsUpload = false;
 
-                // 1. Kiểm tra nếu là file ảnh
+                // 1. Nếu là file ảnh có sẵn
                 if (arg2.content.includes('includegraphics')) {
                      const igIdx = arg2.content.indexOf('\\includegraphics');
                      const afterIg = arg2.content.substring(igIdx);
                      const pathBlock = extractNextBrace(afterIg.substring(afterIg.indexOf('{')));
                      if (pathBlock) {
                          imgPath = pathBlock.content;
-                         hasImageFile = true;
+                         needsUpload = true;
+                         placeholderType = "Ảnh từ immini";
                      }
                 } 
-                // 2. Kiểm tra nếu là mã TikZ (Sửa đổi quan trọng)
+                // 2. Yêu cầu 6: Nếu là TikZ -> Chuyển thành Placeholder để paste ảnh
                 else if (arg2.content.includes('tikzpicture')) {
-                    hasTikz = true;
+                    needsUpload = true;
+                    placeholderType = "Vị trí hình TikZ (Bấm để chèn ảnh chụp)";
+                    imgPath = "tikz_diagram_placeholder"; // Tên giả
                 }
 
                 let ph = "";
-                if (hasImageFile) {
+                if (needsUpload) {
                     const uid = `img_${Date.now()}_${Math.random().toString(36).substr(2,9)}`;
                     pendingImageUploads.push({id:uid, originalPath:imgPath, questionIdx:questionIndex});
-                    ph = getPlaceholderHTML(uid, "Ảnh từ immini");
-                } else if (hasTikz) {
-                    // Giữ nguyên mã TikZ để TikZJax xử lý
-                    ph = `<div class="flex justify-center items-center my-2">${arg2.content}</div>`;
+                    ph = getPlaceholderHTML(uid, placeholderType);
                 } else {
                     ph = `<div class="text-xs text-gray-400 italic border border-dashed p-2 text-center">[Khối hình không xác định]</div>`;
                 }
@@ -808,6 +819,16 @@
                 processed = before + newContent + arg2.remaining;
             }
 
+            // Xử lý TikZ đứng độc lập (Canh giữa hoặc không)
+            // Thay thế toàn bộ khối tikzpicture thành ô upload
+            const tikzRegex = /\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\}/g;
+            processed = processed.replace(tikzRegex, (match) => {
+                 const uid = `img_${Date.now()}_${Math.random().toString(36).substr(2,9)}`; 
+                 pendingImageUploads.push({id:uid, originalPath:"standalone_tikz", questionIdx:questionIndex}); 
+                 return getPlaceholderHTML(uid, "Hình TikZ (Bấm để thay ảnh)");
+            });
+
+            // Xử lý ảnh canh giữa thông thường
             const centerRegex = /\\begin\{center\}\s*([\s\S]*?)\\includegraphics\s*(?:\[.*?\])?\s*\{(.*?)\}([\s\S]*?)\\end\{center\}/g;
             processed = processed.replace(centerRegex, (match, preText, imgPath, postText) => {
                  const uid = `img_${Date.now()}_${Math.random().toString(36).substr(2,9)}`; 
@@ -815,6 +836,7 @@
                  return getPlaceholderHTML(uid, "Ảnh canh giữa");
             });
             
+            // Xử lý ảnh lẻ
             processed = processed.replace(/\\includegraphics\s*(?:\[.*?\])?\s*\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}/g, (m, path) => {
                 const uid = `img_${Date.now()}_${Math.random().toString(36).substr(2,9)}`; 
                 pendingImageUploads.push({id:uid, originalPath:path, questionIdx:questionIndex}); 
