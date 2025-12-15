@@ -52,19 +52,26 @@
         /* Mobile Menu Animation */
         #mobile-menu { transition: max-height 0.3s ease-in-out; max-height: 0; overflow: hidden; }
         #mobile-menu.open { max-height: 400px; }
-        /* --- 1. HIỆU ỨNG RƠI TỰ ĐỘNG (HOA, CỜ, TUYẾT...) --- */
+        /* --- 1. HIỆU ỨNG RƠI TỰ ĐỘNG (ĐÃ TINH CHỈNH MỜ & NHẸ) --- */
         .falling-item {
             position: fixed;
             top: -10%;
-            z-index: 9999;
+            z-index: 9998; /* Giảm z-index một chút */
             user-select: none;
             pointer-events: none;
             animation-name: falling;
             animation-timing-function: linear;
             animation-iteration-count: infinite;
+            opacity: 0.7; /* Làm mờ đi, không quá nổi bật */
+            filter: blur(0.5px); /* Làm nhoè nhẹ tạo độ sâu */
+            text-shadow: 0 0 2px rgba(255,255,255,0.3); /* Viền sáng nhẹ */
         }
+        /* Hiệu ứng rung lắc nhẹ cho đồ trang trí tĩnh */
+        @keyframes wobble-slow { 0%, 100% { transform: rotate(-3deg); } 50% { transform: rotate(3deg); } }
+        .decoration-animate { animation: wobble-slow 4s ease-in-out infinite; }
+
         @keyframes falling {
-            0% { transform: translateY(0) rotate(0deg); opacity: 1; }
+            0% { transform: translateY(0) rotate(0deg); opacity: 0.7; }
             100% { transform: translateY(110vh) rotate(360deg); opacity: 0; }
         }
 
@@ -103,11 +110,15 @@
 
     <header class="bg-white/95 backdrop-blur-md sticky top-0 z-40 border-b border-teal-100 shadow-sm">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 md:h-20 flex items-center justify-between">
-<div id="siteLogoContainer" class="flex items-center gap-3 cursor-pointer" onclick="location.reload()">
-                <div class="w-10 h-10 bg-gradient-to-br from-orange-500 to-yellow-400 rounded-xl flex items-center justify-center text-white text-xl shadow-lg shadow-orange-200">
-                    <i class="fa-solid fa-graduation-cap"></i>
+            <div id="siteLogoContainer" class="relative flex items-center cursor-pointer group" onclick="location.reload()">
+                <div id="theme-decoration-container" class="absolute -bottom-3 -right-5 z-0 text-4xl filter drop-shadow-sm transition-all duration-500 opacity-90 group-hover:scale-110"></div>
+                
+                <div class="relative z-10 flex items-center gap-3">
+                    <div class="logo-placeholder w-10 h-10 bg-gradient-to-br from-orange-500 to-yellow-400 rounded-xl flex items-center justify-center text-white text-xl shadow-lg shadow-orange-200">
+                        <i class="fa-solid fa-graduation-cap"></i>
+                    </div>
+                    <span class="logo-text text-2xl font-black text-brand tracking-tight">Thầy Choang Choang</span>
                 </div>
-                <span class="text-2xl font-black text-brand tracking-tight">Thầy Choang</span>
             </div>
             <nav class="hidden md:flex items-center gap-8 font-bold text-gray-600 text-sm uppercase tracking-wide">
                 <a href="#" class="text-brand font-extrabold hover:text-orange-500 transition-colors">Trang chủ</a>
@@ -273,91 +284,87 @@
         import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, GoogleAuthProvider, signInWithPopup, updateProfile } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
         import { getFirestore, doc, getDoc, setDoc, collection, getDocs, query, where, orderBy } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
         // --- LOGIC TỰ ĐỘNG ĐỔI GIAO DIỆN THEO MÙA & SỰ KIỆN ---
+        // --- LOGIC TỰ ĐỘNG ĐỔI GIAO DIỆN & TRANG TRÍ LOGO (NÂNG CẤP) ---
         (function autoApplyTheme() {
-            const today = new Date();
-            const currentYear = today.getFullYear();
-            const month = today.getMonth() + 1; // 1-12
+            try {
+                const today = new Date();
+                const currentYear = today.getFullYear();
+                const month = today.getMonth() + 1;
 
-            // CẤU HÌNH CÁC NGÀY LỄ (Tháng, Ngày) - Cài sẵn cho năm 2025
-            const events = [
-                { 
-                    name: "Tết Dương Lịch", date: [1, 1], 
-                    rangeBefore: 10, rangeAfter: 3, theme: "theme-tet", icon: "✨", count: 20 
-                },
-                { 
-                    name: "Tết Nguyên Đán 2025", date: [1, 29], // Mùng 1 Âm 2025
-                    rangeBefore: 25, rangeAfter: 10, theme: "theme-tet", icon: "🌸", count: 25 // Hoa đào
-                },
-                { 
-                    name: "Giỗ Tổ Hùng Vương", date: [4, 7], // 10/3 Âm 2025
-                    rangeBefore: 10, rangeAfter: 2, theme: "theme-flag", icon: "💛", count: 15 
-                },
-                { 
-                    name: "30/4 & 1/5", date: [4, 30], 
-                    rangeBefore: 15, rangeAfter: 5, theme: "theme-flag", icon: "⭐", count: 20 // Sao vàng
-                },
-                { 
-                    name: "Quốc Khánh 2/9", date: [9, 2], 
-                    rangeBefore: 15, rangeAfter: 5, theme: "theme-flag", icon: "🇻🇳", count: 15 // Cờ VN
-                },
-                { 
-                    name: "Nhà giáo VN 20/11", date: [11, 20], 
-                    rangeBefore: 20, rangeAfter: 5, theme: "theme-teacher", icon: "🌹", count: 20 // Hoa hồng
-                }
-            ];
+                // CẤU HÌNH NGÀY LỄ (Thêm decoration: icon trang trí cạnh logo)
+                const events = [
+                    { name: "Tết Dương Lịch", date: [1, 1], rangeBefore: 10, rangeAfter: 3, theme: "theme-tet", icon: "✨", count: 15, decoration: "🎉" },
+                    { name: "Tết Nguyên Đán 2025", date: [1, 29], rangeBefore: 25, rangeAfter: 10, theme: "theme-tet", icon: "🌸", count: 20, decoration: "🧧<span class='text-sm absolute -left-2 top-4'>🌸</span>" },
+                    { name: "Giỗ Tổ Hùng Vương", date: [4, 7], rangeBefore: 10, rangeAfter: 2, theme: "theme-flag", icon: "💛", count: 10, decoration: "🥁" },
+                    { name: "30/4 & 1/5", date: [4, 30], rangeBefore: 15, rangeAfter: 5, theme: "theme-flag", icon: "⭐", count: 15, decoration: "🇻🇳" },
+                    { name: "Quốc Khánh 2/9", date: [9, 2], rangeBefore: 15, rangeAfter: 5, theme: "theme-flag", icon: "🇻🇳", count: 15, decoration: "⭐" },
+                    { name: "Nhà giáo VN 20/11", date: [11, 20], rangeBefore: 20, rangeAfter: 5, theme: "theme-teacher", icon: "🌹", count: 15, decoration: "💐" },
+                    // Giáng sinh: Thêm người tuyết cạnh logo
+                    { name: "Giáng Sinh", date: [12, 25], rangeBefore: 25, rangeAfter: 5, theme: "theme-winter", icon: "❄️", count: 25, decoration: "<span class='decoration-animate inline-block'>⛄</span>" }
+                ];
 
-            // Hàm kiểm tra ngày lễ
-            function checkEvent(ev) {
-                const eventDate = new Date(currentYear, ev.date[0] - 1, ev.date[1]);
-                const diffTime = eventDate - today;
-                const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
-                // Logic: Trước X ngày (diff > 0) HOẶC Sau Y ngày (diff < 0)
-                return (diffDays >= 0 && diffDays <= ev.rangeBefore) || (diffDays < 0 && Math.abs(diffDays) <= ev.rangeAfter);
-            }
+                function checkEvent(ev) {
+                    const eventDate = new Date(currentYear, ev.date[0] - 1, ev.date[1]);
+                    const diffTime = eventDate - today;
+                    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
+                    return (diffDays >= 0 && diffDays <= ev.rangeBefore) || (diffDays < 0 && Math.abs(diffDays) <= ev.rangeAfter);
+                }
 
-            // Hàm tạo hiệu ứng rơi
-            function createEffect(icon, count) {
-                for (let i = 0; i < count; i++) {
-                    const el = document.createElement('div');
-                    el.classList.add('falling-item');
-                    el.innerText = icon;
-                    el.style.left = Math.random() * 100 + 'vw';
-                    el.style.fontSize = (Math.random() * 20 + 10) + 'px';
-                    el.style.animationDuration = (Math.random() * 5 + 5) + 's';
-                    el.style.animationDelay = (Math.random() * 5) + 's';
-                    document.body.appendChild(el);
+                // Hàm tạo hiệu ứng rơi (Tập trung bên trái)
+                function createEffect(icon, count) {
+                    for (let i = 0; i < count; i++) {
+                        const el = document.createElement('div');
+                        el.classList.add('falling-item');
+                        el.innerHTML = icon;
+                        // Vị trí rơi: Tập trung 70% vào nửa trái màn hình (50vw), 30% rơi ngẫu nhiên toàn màn hình
+                        const randomPos = Math.random() > 0.3 ? Math.random() * 50 : Math.random() * 95;
+                        el.style.left = randomPos + 'vw';
+                        
+                        // Kích thước và tốc độ ngẫu nhiên để tự nhiên hơn
+                        const size = Math.random() * 15 + 10; // 10px - 25px
+                        el.style.fontSize = size + 'px';
+                        el.style.opacity = Math.random() * 0.5 + 0.3; // Độ mờ ngẫu nhiên (0.3 - 0.8)
+                        
+                        el.style.animationDuration = (Math.random() * 8 + 7) + 's'; // Rơi chậm (7s - 15s)
+                        el.style.animationDelay = (Math.random() * 5) + 's';
+                        document.body.appendChild(el);
+                    }
                 }
-            }
 
-            // 1. KIỂM TRA SỰ KIỆN TRƯỚC
-            let activeEvent = null;
-            for (let ev of events) {
-                if (checkEvent(ev)) {
-                    activeEvent = ev;
-                    break; 
+                // Hàm áp dụng decoration cạnh logo
+                function applyDecoration(html) {
+                    const container = document.getElementById('theme-decoration-container');
+                    if (container && html) {
+                        container.innerHTML = html;
+                    }
                 }
-            }
 
-            if (activeEvent) {
-                console.log("🔥 Đang diễn ra sự kiện: " + activeEvent.name);
-                document.body.classList.add(activeEvent.theme);
-                createEffect(activeEvent.icon, activeEvent.count);
-            } else {
-                // 2. NẾU KHÔNG CÓ LỄ -> KIỂM TRA MÙA
-                // Xuân (Tháng 2-4): Mặc định (Teal/Brand) - Không cần set class
-                // Hè (Tháng 5-7): Theme Summer
-                if (month >= 5 && month <= 7) {
-                    document.body.classList.add('theme-summer');
-                    console.log("☀️ Giao diện Mùa Hè");
+                // --- LOGIC CHÍNH ---
+                let activeEvent = null;
+                for (let ev of events) {
+                    if (checkEvent(ev)) {
+                        activeEvent = ev;
+                        break; 
+                    }
                 }
-                // Thu (Tháng 8-10): Mặc định (Teal hợp với thu)
-                // Đông (Tháng 11-1): Theme Winter
-                else if (month >= 11 || month === 1) {
-                    document.body.classList.add('theme-winter');
-                    createEffect("❄️", 10); // Rơi ít tuyết
-                    console.log("❄️ Giao diện Mùa Đông");
+
+                if (activeEvent) {
+                    console.log("🔥 Kích hoạt sự kiện: " + activeEvent.name);
+                    document.body.classList.add(activeEvent.theme);
+                    createEffect(activeEvent.icon, activeEvent.count);
+                    applyDecoration(activeEvent.decoration); // Thêm trang trí logo
+                } else {
+                    // CHECK MÙA
+                    if (month >= 5 && month <= 7) {
+                        document.body.classList.add('theme-summer');
+                        applyDecoration("<span>☀️</span>");
+                    } else if (month >= 11 || month === 1 || month === 12) { // Mùa Đông
+                        document.body.classList.add('theme-winter');
+                        createEffect("❄️", 15); // Rơi ít tuyết hơn
+                        applyDecoration("<span class='decoration-animate inline-block'>⛄</span>"); // Người tuyết mùa đông
+                    }
                 }
-            }
+            } catch (e) { console.warn("Lỗi Theme Manager:", e); }
         })();
         // --- DÁN CẤU HÌNH FIREBASE CỦA ANH VÀO ĐÂY ---
         const firebaseConfig = {
