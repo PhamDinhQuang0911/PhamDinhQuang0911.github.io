@@ -53,6 +53,50 @@
         #mobile-menu { transition: max-height 0.3s ease-in-out; max-height: 0; overflow: hidden; }
         #mobile-menu.open { max-height: 400px; }
     </style>
+    /* --- 1. HIỆU ỨNG RƠI TỰ ĐỘNG (HOA, CỜ, LÁ...) --- */
+        .falling-item {
+            position: fixed;
+            top: -10%;
+            z-index: 9999;
+            user-select: none;
+            pointer-events: none;
+            animation-name: falling;
+            animation-timing-function: linear;
+            animation-iteration-count: infinite;
+        }
+        @keyframes falling {
+            0% { transform: translateY(0) rotate(0deg); opacity: 1; }
+            100% { transform: translateY(110vh) rotate(360deg); opacity: 0; }
+        }
+
+        /* --- 2. CÁC THEME MÀU SẮC (Ghi đè màu gốc) --- */
+        
+        /* Theme: CỜ ĐỎ SAO VÀNG (2/9, 30/4, Giỗ Tổ) */
+        body.theme-flag { background-color: #FEF2F2; } /* Nền đỏ rất nhạt */
+        body.theme-flag .text-brand { color: #B91C1C !important; } /* Đỏ đậm */
+        body.theme-flag .bg-brand { background-color: #B91C1C !important; }
+        body.theme-flag .bg-accent { background-color: #F59E0B !important; } /* Vàng sao */
+        body.theme-flag .text-accent { color: #F59E0B !important; }
+
+        /* Theme: TẾT (Đỏ - Vàng tươi) */
+        body.theme-tet { background-color: #FFF7ED; } /* Cam nhạt */
+        body.theme-tet .text-brand { color: #DC2626 !important; } /* Đỏ tươi */
+        body.theme-tet .bg-brand { background-color: #DC2626 !important; }
+        body.theme-tet .bg-accent { background-color: #FCD34D !important; } /* Vàng mai */
+
+        /* Theme: 20/11 (Xanh phấn bảng - Hồng) */
+        body.theme-teacher { background-color: #F0FDF4; } 
+        body.theme-teacher .text-brand { color: #15803D !important; } 
+        body.theme-teacher .bg-accent { background-color: #DB2777 !important; } /* Hồng phấn */
+
+        /* Theme: MÙA HÈ (Xanh biển) */
+        body.theme-summer { background-color: #ECFEFF; } 
+        body.theme-summer .text-brand { color: #0284C7 !important; } /* Xanh biển */
+        body.theme-summer .bg-brand { background-color: #0284C7 !important; }
+
+        /* Theme: MÙA ĐÔNG (Xám lạnh) */
+        body.theme-winter { background-color: #F8FAFC; }
+        body.theme-winter .text-brand { color: #475569 !important; }
 </head>
 <body class="bg-page flex flex-col min-h-screen">
 
@@ -227,7 +271,93 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, GoogleAuthProvider, signInWithPopup, updateProfile } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
         import { getFirestore, doc, getDoc, setDoc, collection, getDocs, query, where, orderBy } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        // --- LOGIC TỰ ĐỘNG ĐỔI GIAO DIỆN THEO MÙA & SỰ KIỆN ---
+        (function autoApplyTheme() {
+            const today = new Date();
+            const currentYear = today.getFullYear();
+            const month = today.getMonth() + 1; // 1-12
 
+            // CẤU HÌNH CÁC NGÀY LỄ (Tháng, Ngày) - Cài sẵn cho năm 2025
+            const events = [
+                { 
+                    name: "Tết Dương Lịch", date: [1, 1], 
+                    rangeBefore: 10, rangeAfter: 3, theme: "theme-tet", icon: "✨", count: 20 
+                },
+                { 
+                    name: "Tết Nguyên Đán 2025", date: [1, 29], // Mùng 1 Âm 2025
+                    rangeBefore: 25, rangeAfter: 10, theme: "theme-tet", icon: "🌸", count: 25 // Hoa đào
+                },
+                { 
+                    name: "Giỗ Tổ Hùng Vương", date: [4, 7], // 10/3 Âm 2025
+                    rangeBefore: 10, rangeAfter: 2, theme: "theme-flag", icon: "💛", count: 15 
+                },
+                { 
+                    name: "30/4 & 1/5", date: [4, 30], 
+                    rangeBefore: 15, rangeAfter: 5, theme: "theme-flag", icon: "⭐", count: 20 // Sao vàng
+                },
+                { 
+                    name: "Quốc Khánh 2/9", date: [9, 2], 
+                    rangeBefore: 15, rangeAfter: 5, theme: "theme-flag", icon: "🇻🇳", count: 15 // Cờ VN
+                },
+                { 
+                    name: "Nhà giáo VN 20/11", date: [11, 20], 
+                    rangeBefore: 20, rangeAfter: 5, theme: "theme-teacher", icon: "🌹", count: 20 // Hoa hồng
+                }
+            ];
+
+            // Hàm kiểm tra ngày lễ
+            function checkEvent(ev) {
+                const eventDate = new Date(currentYear, ev.date[0] - 1, ev.date[1]);
+                const diffTime = eventDate - today;
+                const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
+                // Logic: Trước X ngày (diff > 0) HOẶC Sau Y ngày (diff < 0)
+                return (diffDays >= 0 && diffDays <= ev.rangeBefore) || (diffDays < 0 && Math.abs(diffDays) <= ev.rangeAfter);
+            }
+
+            // Hàm tạo hiệu ứng rơi
+            function createEffect(icon, count) {
+                for (let i = 0; i < count; i++) {
+                    const el = document.createElement('div');
+                    el.classList.add('falling-item');
+                    el.innerText = icon;
+                    el.style.left = Math.random() * 100 + 'vw';
+                    el.style.fontSize = (Math.random() * 20 + 10) + 'px';
+                    el.style.animationDuration = (Math.random() * 5 + 5) + 's';
+                    el.style.animationDelay = (Math.random() * 5) + 's';
+                    document.body.appendChild(el);
+                }
+            }
+
+            // 1. KIỂM TRA SỰ KIỆN TRƯỚC
+            let activeEvent = null;
+            for (let ev of events) {
+                if (checkEvent(ev)) {
+                    activeEvent = ev;
+                    break; 
+                }
+            }
+
+            if (activeEvent) {
+                console.log("🔥 Đang diễn ra sự kiện: " + activeEvent.name);
+                document.body.classList.add(activeEvent.theme);
+                createEffect(activeEvent.icon, activeEvent.count);
+            } else {
+                // 2. NẾU KHÔNG CÓ LỄ -> KIỂM TRA MÙA
+                // Xuân (Tháng 2-4): Mặc định (Teal/Brand) - Không cần set class
+                // Hè (Tháng 5-7): Theme Summer
+                if (month >= 5 && month <= 7) {
+                    document.body.classList.add('theme-summer');
+                    console.log("☀️ Giao diện Mùa Hè");
+                }
+                // Thu (Tháng 8-10): Mặc định (Teal hợp với thu)
+                // Đông (Tháng 11-1): Theme Winter
+                else if (month >= 11 || month === 1) {
+                    document.body.classList.add('theme-winter');
+                    createEffect("❄️", 10); // Rơi ít tuyết
+                    console.log("❄️ Giao diện Mùa Đông");
+                }
+            }
+        })();
         // --- DÁN CẤU HÌNH FIREBASE CỦA ANH VÀO ĐÂY ---
         const firebaseConfig = {
             apiKey: "AIzaSyCqAX3x1MbJ3do7m3EaH9JA4kFuVhlAc78",
