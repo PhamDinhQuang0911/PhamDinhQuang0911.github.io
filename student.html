@@ -21,7 +21,6 @@
         body { font-family: 'Be Vietnam Pro', sans-serif; background-color: #F3F4F6; }
         .sidebar-item.active { background-color: #ECFDF5; color: #0F766E; font-weight: 700; border-right: 3px solid #0F766E; }
         .sidebar-item:hover:not(.active) { background-color: #F9FAFB; color: #0F766E; }
-        /* Scrollbar ẩn */
         ::-webkit-scrollbar { width: 6px; }
         ::-webkit-scrollbar-track { background: #f1f1f1; }
         ::-webkit-scrollbar-thumb { background: #ccc; border-radius: 3px; }
@@ -99,20 +98,17 @@
 
             <div id="tab-classes" class="tab-content hidden animate-fade-in">
                 <h2 class="text-2xl font-black text-gray-800 mb-6">Lớp học của tôi</h2>
-                <div id="myClassesList" class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    </div>
+                <div id="myClassesList" class="grid grid-cols-1 md:grid-cols-3 gap-6"></div>
             </div>
 
             <div id="tab-my-courses" class="tab-content hidden animate-fade-in">
                 <h2 class="text-2xl font-black text-gray-800 mb-6">Khóa học đã sở hữu</h2>
-                <div id="myPurchasedList" class="grid grid-cols-1 md:grid-cols-4 gap-6">
-                    </div>
+                <div id="myPurchasedList" class="grid grid-cols-1 md:grid-cols-4 gap-6"></div>
             </div>
 
             <div id="tab-market" class="tab-content hidden animate-fade-in">
                 <h2 class="text-2xl font-black text-gray-800 mb-6">Cửa hàng khóa học</h2>
-                <div id="marketList" class="grid grid-cols-1 md:grid-cols-4 gap-6">
-                    </div>
+                <div id="marketList" class="grid grid-cols-1 md:grid-cols-4 gap-6"></div>
             </div>
 
         </div>
@@ -147,6 +143,7 @@
         import { getAuth, onAuthStateChanged, signOut, updateProfile, updatePassword } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
         import { getFirestore, doc, getDoc, updateDoc, collection, getDocs, query, where, addDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
+        // CẤU HÌNH FIREBASE
         const firebaseConfig = {
             apiKey: "AIzaSyCqAX3x1MbJ3do7m3EaH9JA4kFuVhlAc78",
             authDomain: "lms-thitracnghiem.firebaseapp.com",
@@ -165,13 +162,10 @@
 
         onAuthStateChanged(auth, async (user) => {
             if (user) {
-                // Nếu là Admin -> Đá về Dashboard
                 if (ADMIN_EMAILS.includes(user.email)) {
                     window.location.href = "dashboard.html";
                     return;
                 }
-                
-                // Load dữ liệu
                 loadUserProfile(user);
                 loadStudentClasses(user);
                 loadPendingTasks(user);
@@ -182,129 +176,75 @@
             }
         });
 
-        // 1. LOAD PROFILE
+        // 1. PROFILE
         async function loadUserProfile(user) {
             try {
                 const snap = await getDoc(doc(db, "users", user.uid));
                 const data = snap.exists() ? snap.data() : {};
                 const name = data.displayName || user.displayName || user.email.split('@')[0];
-                
                 document.getElementById('userName').innerText = name;
                 document.getElementById('welcomeName').innerText = name;
                 document.getElementById('userAvatar').src = user.photoURL || `https://ui-avatars.com/api/?name=${name}&background=0F766E&color=fff`;
-
-                // Fill Modal
                 document.getElementById('profName').value = name;
                 document.getElementById('profEmail').value = user.email;
                 document.getElementById('profPhone').value = data.phone || "";
             } catch(e) { console.error(e); }
         }
 
-        // 2. LOAD CLASS
+        // 2. CLASS LIST
         async function loadStudentClasses(user) {
             const container = document.getElementById('myClassesList');
             try {
-                // Logic: Tìm lớp mà trong mảng students có chứa user.uid hoặc email
-                // (Vì cấu trúc DB của anh lưu object học sinh trong mảng students)
                 const q = query(collection(db, "classes"));
                 const snap = await getDocs(q);
                 let html = '';
-                
                 snap.forEach(doc => {
                     const cl = doc.data();
                     const students = cl.students || [];
-                    // Kiểm tra xem user có trong lớp không (so sánh email hoặc username)
-                    const isMember = students.some(s => 
-                        (s.email && s.email.toLowerCase() === user.email.toLowerCase()) || 
-                        (s.uid === user.uid)
-                    );
-
+                    const isMember = students.some(s => (s.email && s.email.toLowerCase() === user.email.toLowerCase()) || (s.uid === user.uid));
                     if (isMember) {
-                        html += `
-                            <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-200 hover:border-brand transition">
-                                <div class="flex justify-between mb-2"><span class="bg-blue-100 text-blue-800 text-xs font-bold px-2 py-1 rounded">Lớp học</span></div>
-                                <h3 class="font-bold text-lg mb-1">${cl.name}</h3>
-                                <p class="text-xs text-gray-500 mb-4">GV: ${cl.teacherName || "Thầy Choang"}</p>
-                                <button class="w-full py-2 bg-gray-50 text-brand font-bold text-sm rounded hover:bg-brand hover:text-white pointer-events-none">Đã tham gia</button>
-                            </div>`;
+                        html += `<div class="bg-white p-6 rounded-xl shadow-sm border border-gray-200 hover:border-brand transition"><div class="flex justify-between mb-2"><span class="bg-blue-100 text-blue-800 text-xs font-bold px-2 py-1 rounded">Lớp học</span></div><h3 class="font-bold text-lg mb-1">${cl.name}</h3><p class="text-xs text-gray-500 mb-4">GV: ${cl.teacherName || "Thầy Choang"}</p><button class="w-full py-2 bg-gray-50 text-brand font-bold text-sm rounded hover:bg-brand hover:text-white pointer-events-none">Đã tham gia</button></div>`;
                     }
                 });
-
                 container.innerHTML = html || '<p class="col-span-full text-center text-gray-400 py-10">Bạn chưa tham gia lớp học nào.</p>';
             } catch(e) { console.error(e); }
         }
 
-        // 3. LOAD PENDING TASKS (BÀI TẬP)
+        // 3. PENDING TASKS
         async function loadPendingTasks(user) {
             const container = document.getElementById('pendingTasksList');
             try {
-                // 1. Lấy danh sách lớp của user trước
                 const qClasses = query(collection(db, "classes"));
                 const snapClasses = await getDocs(qClasses);
                 const myClassIds = [];
                 snapClasses.forEach(doc => {
                     const cl = doc.data();
-                    const students = cl.students || [];
-                    if (students.some(s => s.email === user.email || s.uid === user.uid)) {
-                        myClassIds.push(doc.id);
-                    }
+                    if ((cl.students || []).some(s => s.email === user.email || s.uid === user.uid)) myClassIds.push(doc.id);
                 });
 
-                if (myClassIds.length === 0) {
-                    container.innerHTML = '<div class="col-span-full text-center py-8 text-gray-400">Không có bài tập nào.</div>';
-                    return;
-                }
+                if (myClassIds.length === 0) { container.innerHTML = '<div class="col-span-full text-center py-8 text-gray-400">Không có bài tập nào.</div>'; return; }
 
-                // 2. Lấy bài tập được giao cho các lớp đó
-                // Firestore không hỗ trợ "in" quá 10 phần tử, nên nếu nhiều lớp phải xử lý khác
-                // Ở đây demo đơn giản:
-                const allExams = [];
+                let html = '';
                 for (const classId of myClassIds) {
                     const qExams = query(collection(db, "exams"), where("accessType", "==", "class"), where("allowedClassId", "==", classId), where("status", "==", "published"));
                     const snapExams = await getDocs(qExams);
-                    snapExams.forEach(d => allExams.push({id: d.id, ...d.data()}));
+                    snapExams.forEach(d => {
+                        const ex = d.data();
+                        html += `<div class="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex items-center gap-4 hover:shadow-md transition cursor-pointer" onclick="window.location.href='exam.html?id=${d.id}'"><div class="w-10 h-10 rounded bg-orange-100 flex items-center justify-center text-orange-600 shrink-0"><i class="fa-regular fa-file-lines"></i></div><div class="flex-1"><h4 class="font-bold text-sm line-clamp-1">${ex.title}</h4><p class="text-xs text-gray-400">${ex.duration} phút • ${ex.questionCount || 0} câu</p></div><button class="text-xs bg-brand text-white px-3 py-1.5 rounded font-bold">Làm bài</button></div>`;
+                    });
                 }
-
-                if (allExams.length === 0) {
-                    container.innerHTML = '<div class="col-span-full text-center py-8 text-gray-400">Không có bài tập nào.</div>';
-                    return;
-                }
-
-                let html = '';
-                allExams.forEach(ex => {
-                    html += `
-                        <div class="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex items-center gap-4 hover:shadow-md transition cursor-pointer" onclick="window.location.href='exam.html?id=${ex.id}'">
-                             <div class="w-10 h-10 rounded bg-orange-100 flex items-center justify-center text-orange-600 shrink-0"><i class="fa-regular fa-file-lines"></i></div>
-                             <div class="flex-1">
-                                 <h4 class="font-bold text-sm line-clamp-1">${ex.title}</h4>
-                                 <p class="text-xs text-gray-400">${ex.duration} phút • ${ex.questionCount || 0} câu</p>
-                             </div>
-                             <button class="text-xs bg-brand text-white px-3 py-1.5 rounded font-bold">Làm bài</button>
-                        </div>`;
-                });
-                container.innerHTML = html;
-
+                container.innerHTML = html || '<div class="col-span-full text-center py-8 text-gray-400">Không có bài tập nào.</div>';
             } catch(e) { console.error(e); }
         }
 
-        // 4. LOAD MARKET & COURSES
+        // 4. MARKET & COURSES
         async function loadMarket() {
              const container = document.getElementById('marketList');
              const snap = await getDocs(collection(db, "public_courses"));
              let html = '';
              snap.forEach(d => {
                  const c = d.data();
-                 html += `
-                    <div class="bg-white rounded-xl shadow-sm overflow-hidden border hover:shadow-md transition">
-                        <img src="${c.thumbnail || 'https://via.placeholder.com/150'}" class="h-32 w-full object-cover">
-                        <div class="p-3">
-                            <h4 class="font-bold text-sm line-clamp-1">${c.title}</h4>
-                            <div class="flex justify-between items-center mt-2">
-                                <span class="text-orange-600 font-bold text-sm">${parseInt(c.price).toLocaleString()}đ</span>
-                                <button onclick="openPaymentModal('${d.id}')" class="bg-brand text-white text-xs px-2 py-1 rounded font-bold">Mua</button>
-                            </div>
-                        </div>
-                    </div>`;
+                 html += `<div class="bg-white rounded-xl shadow-sm overflow-hidden border hover:shadow-md transition"><img src="${c.thumbnail || 'https://via.placeholder.com/150'}" class="h-32 w-full object-cover"><div class="p-3"><h4 class="font-bold text-sm line-clamp-1">${c.title}</h4><div class="flex justify-between items-center mt-2"><span class="text-orange-600 font-bold text-sm">${parseInt(c.price).toLocaleString()}đ</span><button onclick="openPaymentModal('${d.id}')" class="bg-brand text-white text-xs px-2 py-1 rounded font-bold">Mua</button></div></div></div>`;
              });
              container.innerHTML = html || '<p class="text-gray-400">Chưa có khóa học nào.</p>';
         }
@@ -314,14 +254,7 @@
              const q = query(collection(db, "orders"), where("userId", "==", user.uid), where("status", "==", "approved"));
              const snap = await getDocs(q);
              let html = '';
-             snap.forEach(d => {
-                 const o = d.data();
-                 html += `<div class="bg-white p-4 rounded border border-green-200">
-                    <h4 class="font-bold text-gray-800">${o.courseTitle}</h4>
-                    <span class="text-xs text-green-600 font-bold"><i class="fa-solid fa-check-circle"></i> Đã sở hữu</span>
-                    <button class="w-full mt-2 bg-green-600 text-white text-xs py-1 rounded">Vào học</button>
-                 </div>`;
-             });
+             snap.forEach(d => { const o = d.data(); html += `<div class="bg-white p-4 rounded border border-green-200"><h4 class="font-bold text-gray-800">${o.courseTitle}</h4><span class="text-xs text-green-600 font-bold"><i class="fa-solid fa-check-circle"></i> Đã sở hữu</span><button class="w-full mt-2 bg-green-600 text-white text-xs py-1 rounded">Vào học</button></div>`; });
              container.innerHTML = html || '<p class="col-span-full text-center text-gray-400 py-10">Bạn chưa mua khóa học nào.</p>';
         }
 
@@ -332,10 +265,8 @@
             document.getElementById(`tab-${tabId}`).classList.remove('hidden');
             document.getElementById(`nav-${tabId}`).classList.add('active');
         }
-
         window.openProfileModal = () => document.getElementById('profileModal').classList.remove('hidden');
         window.handleLogout = () => signOut(auth).then(() => window.location.href = "index.html");
-
         window.saveProfile = async () => {
             const user = auth.currentUser;
             const name = document.getElementById('profName').value;
@@ -348,62 +279,34 @@
             } catch(e) { alert("Lỗi: " + e.message); }
         }
 
-        // 6. THANH TOÁN (Inject Modal)
+        // 6. PAYMENT MODAL
         const paymentModalHTML = `
-            <div id="paymentModal" class="modal opacity-0 pointer-events-none fixed inset-0 z-[100] bg-gray-900/80 backdrop-blur-sm flex items-center justify-center p-4 transition-all duration-300">
-                <div class="bg-white w-full max-w-4xl rounded-2xl shadow-2xl overflow-hidden flex flex-col md:flex-row max-h-[90vh]">
-                    <div class="w-full md:w-5/12 bg-gray-50 p-6 border-r border-gray-100">
-                        <h3 class="font-black text-gray-800 mb-4 uppercase">Thông tin đơn hàng</h3>
-                        <div class="space-y-3 text-sm">
-                            <div class="flex justify-between"><span class="text-gray-500">Khóa học:</span> <b id="payCourseTitle" class="text-right">...</b></div>
-                            <div class="flex justify-between"><span class="text-gray-500">Giá tiền:</span> <b id="payFinalPrice" class="text-orange-600">...</b></div>
-                        </div>
-                    </div>
-                    <div class="w-full md:w-7/12 p-6 relative flex flex-col items-center justify-center">
-                        <button onclick="document.getElementById('paymentModal').classList.add('opacity-0', 'pointer-events-none')" class="absolute top-4 right-4 text-gray-400"><i class="fa-solid fa-times text-2xl"></i></button>
-                        <h3 class="font-black text-brand mb-2">QUÉT MÃ ĐỂ THANH TOÁN</h3>
-                        <div class="relative w-56 h-56 bg-white p-2 rounded shadow mb-4"><img id="vietQrImage" class="w-full h-full object-contain"></div>
-                        <div class="text-sm text-center mb-4">
-                            <div>NH: <b id="bankNameDisplay">...</b></div>
-                            <div>STK: <b id="accountNoDisplay">...</b></div>
-                            <div>ND: <b id="transferContentDisplay" class="text-brand">...</b></div>
-                        </div>
-                        <button onclick="confirmPayment()" class="w-full py-3 bg-brand text-white font-bold rounded-lg shadow">XÁC NHẬN ĐÃ CHUYỂN</button>
-                    </div>
-                </div>
-            </div>
-        `;
+            <div id="paymentModal" class="modal opacity-0 pointer-events-none fixed inset-0 z-[100] bg-gray-900/80 backdrop-blur-sm flex items-center justify-center p-4 transition-all duration-300"><div class="bg-white w-full max-w-4xl rounded-2xl shadow-2xl overflow-hidden flex flex-col md:flex-row max-h-[90vh]"><div class="w-full md:w-5/12 bg-gray-50 p-6 border-r border-gray-100"><h3 class="font-black text-gray-800 mb-4 uppercase">Thông tin đơn hàng</h3><div class="space-y-3 text-sm"><div class="flex justify-between"><span class="text-gray-500">Khóa học:</span> <b id="payCourseTitle" class="text-right">...</b></div><div class="flex justify-between"><span class="text-gray-500">Giá tiền:</span> <b id="payFinalPrice" class="text-orange-600">...</b></div></div></div><div class="w-full md:w-7/12 p-6 relative flex flex-col items-center justify-center"><button onclick="document.getElementById('paymentModal').classList.add('opacity-0', 'pointer-events-none')" class="absolute top-4 right-4 text-gray-400"><i class="fa-solid fa-times text-2xl"></i></button><h3 class="font-black text-brand mb-2">QUÉT MÃ ĐỂ THANH TOÁN</h3><div class="relative w-56 h-56 bg-white p-2 rounded shadow mb-4"><img id="vietQrImage" class="w-full h-full object-contain"></div><div class="text-sm text-center mb-4"><div>NH: <b id="bankNameDisplay">...</b></div><div>STK: <b id="accountNoDisplay">...</b></div><div>ND: <b id="transferContentDisplay" class="text-brand">...</b></div></div><button onclick="confirmPayment()" class="w-full py-3 bg-brand text-white font-bold rounded-lg shadow">XÁC NHẬN ĐÃ CHUYỂN</button></div></div></div>`;
         document.getElementById('paymentModalContainer').innerHTML = paymentModalHTML;
 
         let currentPayingCourse = null;
         let dynamicBankConfig = null;
 
         window.openPaymentModal = async (courseId) => {
-            // Tải cấu hình Bank
             if (!dynamicBankConfig) {
                 try {
                     const s = await getDoc(doc(db, "site_settings", "payment_config"));
                     dynamicBankConfig = s.exists() ? s.data() : { BANK_ID: "MB", ACCOUNT_NO: "0000", ACCOUNT_NAME: "ADMIN", TEMPLATE: "compact2" };
                 } catch (e) { dynamicBankConfig = { BANK_ID: "MB", ACCOUNT_NO: "0000", ACCOUNT_NAME: "ERROR", TEMPLATE: "compact2" }; }
             }
-
             document.getElementById('paymentModal').classList.remove('opacity-0', 'pointer-events-none');
-            
             try {
                 const snap = await getDoc(doc(db, "public_courses", courseId));
                 if(snap.exists()){
                     const c = snap.data();
                     currentPayingCourse = { id: snap.id, ...c };
                     const user = auth.currentUser;
-                    
                     document.getElementById('payCourseTitle').innerText = c.title;
                     document.getElementById('payFinalPrice').innerText = parseInt(c.price).toLocaleString('vi-VN') + 'đ';
-                    
                     const content = `TTOAN ${user.uid.substring(0,5)} ${c.id.substring(0,5).toUpperCase()}`.replace(/[^a-zA-Z0-9 ]/g, "");
                     document.getElementById('bankNameDisplay').innerText = dynamicBankConfig.BANK_ID;
                     document.getElementById('accountNoDisplay').innerText = dynamicBankConfig.ACCOUNT_NO;
                     document.getElementById('transferContentDisplay').innerText = content;
-                    
                     const qrUrl = `https://img.vietqr.io/image/${dynamicBankConfig.BANK_ID}-${dynamicBankConfig.ACCOUNT_NO}-${dynamicBankConfig.TEMPLATE}.png?amount=${c.price}&addInfo=${encodeURIComponent(content)}&accountName=${encodeURIComponent(dynamicBankConfig.ACCOUNT_NAME)}`;
                     document.getElementById('vietQrImage').src = qrUrl;
                 }
