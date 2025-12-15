@@ -271,11 +271,17 @@
                 <h2 class="text-xl font-bold text-gray-800"><i class="fa-solid fa-shapes text-orange-500 mr-2"></i>Quản lý Trang chủ & Khóa học</h2>
                 
                 <div class="flex gap-2">
-                    <button onclick="window.openHeroModal()" class="px-4 py-2 bg-orange-100 text-orange-600 hover:bg-orange-200 rounded-lg font-bold transition-all text-sm flex items-center gap-2">
-                        <i class="fa-solid fa-pen-nib"></i> Sửa Banner
+                    
+                    <button onclick="window.openHeroModal()" class="bg-orange-100 text-orange-600 px-4 py-2 rounded-lg font-bold hover:bg-orange-200 transition-colors text-sm">
+                        <i class="fa-solid fa-paintbrush mr-1"></i> Sửa Banner
                     </button>
-                    <button onclick="window.openCourseModal()" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold shadow-md transition-all text-sm flex items-center gap-2">
-                        <i class="fa-solid fa-plus"></i> Thêm khóa mới
+                    
+                    <button onclick="window.openPaymentConfigModal()" class="bg-blue-100 text-blue-600 px-4 py-2 rounded-lg font-bold hover:bg-blue-200 transition-colors text-sm">
+                        <i class="fa-solid fa-credit-card mr-1"></i> Cài đặt Thanh toán
+                    </button>
+
+                    <button onclick="window.toggleModal('courseModal', true)" class="bg-blue-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-blue-700 transition-colors text-sm shadow-lg shadow-blue-200">
+                        <i class="fa-solid fa-plus mr-1"></i> Thêm khóa mới
                     </button>
                 </div>
             </div>
@@ -1846,6 +1852,46 @@
                 window.toggleModal('heroModal', false);
             } catch(e) { window.showNotification("Lỗi lưu: " + e.message, "error"); }
         };
+        // --- LOGIC CẤU HÌNH THANH TOÁN ---
+        
+        // Mở Modal và tải cấu hình cũ
+        window.openPaymentConfigModal = async () => {
+            window.showNotification("Đang tải thông tin...", "info");
+            try {
+                const docSnap = await getDoc(doc(db, "site_settings", "payment_config"));
+                if (docSnap.exists()) {
+                    const d = docSnap.data();
+                    document.getElementById('confBankId').value = d.BANK_ID || "";
+                    document.getElementById('confAccountNo').value = d.ACCOUNT_NO || "";
+                    document.getElementById('confAccountName').value = d.ACCOUNT_NAME || "";
+                    document.getElementById('confTemplate').value = d.TEMPLATE || "compact2";
+                }
+                window.toggleModal('paymentConfigModal', true);
+            } catch(e) { 
+                console.error(e);
+                // Nếu chưa có file cấu hình thì vẫn mở modal trống
+                window.toggleModal('paymentConfigModal', true);
+            }
+        };
+
+        // Lưu cấu hình lên Firebase
+        window.savePaymentConfig = async () => {
+            const data = {
+                BANK_ID: document.getElementById('confBankId').value.trim().toUpperCase(),
+                ACCOUNT_NO: document.getElementById('confAccountNo').value.trim(),
+                ACCOUNT_NAME: document.getElementById('confAccountName').value.trim().toUpperCase(),
+                TEMPLATE: document.getElementById('confTemplate').value,
+                updatedAt: new Date().toISOString()
+            };
+
+            if(!data.BANK_ID || !data.ACCOUNT_NO) return window.showNotification("Vui lòng nhập Ngân hàng và Số TK!", "error");
+
+            try {
+                await setDoc(doc(db, "site_settings", "payment_config"), data);
+                window.showNotification("Đã lưu thông tin thanh toán!", "success");
+                window.toggleModal('paymentConfigModal', false);
+            } catch(e) { window.showNotification("Lỗi lưu: " + e.message, "error"); }
+        };
         document.getElementById('logoutBtn').onclick = async () => { if(await window.customConfirm("Bạn có chắc muốn đăng xuất?")) signOut(auth).then(()=>window.location.href="index.html"); }
         // Hàm xóa ảnh trên R2 thông qua Worker
         // Hàm xóa ảnh trên R2 (ĐÃ SỬA LỖI ĐƯỜNG DẪN)
@@ -1877,5 +1923,62 @@
             } catch (e) { console.error("Lỗi xóa R2:", e); }
         }
     </script>
+    <div id="paymentConfigModal" class="modal opacity-0 pointer-events-none fixed inset-0 z-[95] flex items-center justify-center bg-gray-900 bg-opacity-60 px-4 transition-opacity duration-300">
+        <div class="modal-content bg-white w-full max-w-lg rounded-2xl shadow-2xl transform scale-95 transition-transform duration-300">
+            <div class="p-5 border-b border-gray-100 flex justify-between items-center bg-blue-50 rounded-t-2xl">
+                <h3 class="font-bold text-blue-800 text-lg"><i class="fa-solid fa-university mr-2"></i>Cấu hình Tài khoản Nhận tiền</h3>
+                <button onclick="window.toggleModal('paymentConfigModal', false)" class="text-gray-400 hover:text-red-500"><i class="fa-solid fa-times text-xl"></i></button>
+            </div>
+            
+            <div class="p-6 space-y-4">
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Ngân hàng (Gõ để tìm)</label>
+                    <input list="bankList" id="confBankId" class="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-200 outline-none font-bold text-blue-700 placeholder-gray-300" placeholder="VD: MB, VCB...">
+                    <datalist id="bankList">
+                        <option value="MB">MB Bank (Quân Đội)</option>
+                        <option value="VCB">Vietcombank</option>
+                        <option value="TCB">Techcombank</option>
+                        <option value="ICB">VietinBank</option>
+                        <option value="BIDV">BIDV</option>
+                        <option value="ACB">ACB</option>
+                        <option value="VPB">VPBank</option>
+                        <option value="TPB">TPBank</option>
+                        <option value="STB">Sacombank</option>
+                        <option value="VIB">VIB</option>
+                        <option value="HDB">HDBank</option>
+                        <option value="MSB">MSB (Hàng Hải)</option>
+                        <option value="OCB">OCB (Phương Đông)</option>
+                    </datalist>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Số tài khoản</label>
+                    <input type="text" id="confAccountNo" class="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-200 outline-none font-bold text-xl tracking-wider" placeholder="VD: 03523...">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Tên chủ tài khoản (Viết hoa không dấu)</label>
+                    <input type="text" id="confAccountName" class="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-200 outline-none font-bold uppercase" placeholder="VD: PHAM DINH QUANG">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Giao diện mã QR</label>
+                    <select id="confTemplate" class="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-200 outline-none bg-white">
+                        <option value="compact">Gọn gàng (Compact)</option>
+                        <option value="compact2">Hiện đại (Compact 2 - Khuyên dùng)</option>
+                        <option value="qr_only">Chỉ mã QR</option>
+                        <option value="print">Bản in (Print)</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="p-5 border-t border-gray-100 bg-gray-50 rounded-b-2xl flex justify-end gap-3">
+                <button onclick="window.toggleModal('paymentConfigModal', false)" class="px-4 py-2 text-gray-500 font-bold hover:bg-gray-200 rounded-lg text-sm">Hủy</button>
+                <button onclick="window.savePaymentConfig()" class="px-6 py-2 bg-blue-600 text-white font-bold rounded-lg shadow hover:bg-blue-700 text-sm flex items-center gap-2">
+                    <i class="fa-solid fa-save"></i> Lưu cấu hình
+                </button>
+            </div>
+        </div>
+    </div>
 </body>
 </html>
