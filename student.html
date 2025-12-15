@@ -228,7 +228,8 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getAuth, onAuthStateChanged, signOut, updateProfile, updatePassword } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
-        import { getFirestore, doc, getDoc, updateDoc, collection, getDocs, query, where, addDoc, limit } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        // TÌM DÒNG NÀY VÀ THAY THẾ (Thêm orderBy)
+        import { getFirestore, doc, getDoc, updateDoc, collection, getDocs, query, where, addDoc, limit, orderBy } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";;
 
         const firebaseConfig = {
             apiKey: "AIzaSyCqAX3x1MbJ3do7m3EaH9JA4kFuVhlAc78",
@@ -560,7 +561,7 @@
             <div id="paymentModal" class="modal opacity-0 pointer-events-none fixed inset-0 z-[100] bg-gray-900/80 backdrop-blur-sm flex items-center justify-center p-4 transition-all duration-300">
                 <div class="bg-white w-full max-w-5xl rounded-3xl shadow-2xl overflow-hidden flex flex-col md:flex-row max-h-[90vh]">
                     <div class="w-full md:w-5/12 bg-gray-50 p-8 border-r border-gray-200 flex flex-col">
-                        <h3 class="font-black text-gray-800 text-xl mb-6 uppercase tracking-wider flex items-center gap-2"><i class="fa-solid fa-receipt text-teal-600"></i> Chi tiết đơn hàng</h3>
+                        <h3 class="font-black text-gray-800 text-xl mb-6 uppercase tracking-wider flex items-center gap-2"><i class="fa-solid fa-receipt text-brand"></i> Chi tiết đơn hàng</h3>
                         
                         <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 mb-6">
                             <div class="flex items-start gap-4 mb-4">
@@ -571,10 +572,6 @@
                                 </div>
                             </div>
                             <div class="border-t border-dashed border-gray-200 my-3"></div>
-                            <div class="flex justify-between items-center text-sm mb-2">
-                                <span class="text-gray-500">Giá gốc</span>
-                                <span id="payOriginalPrice" class="text-gray-400 line-through">--</span>
-                            </div>
                             <div class="flex justify-between items-center text-lg font-black text-orange-600">
                                 <span>Tổng thanh toán</span>
                                 <span id="payFinalPrice">...</span>
@@ -582,28 +579,21 @@
                         </div>
 
                         <div class="space-y-3 text-sm text-gray-600">
-                            <div class="flex justify-between p-3 bg-white rounded-lg border border-gray-200">
-                                <span><i class="fa-solid fa-user mr-2 text-teal-500"></i> Khách hàng</span>
-                                <span id="payUserName" class="font-bold">...</span>
-                            </div>
-                            <div class="flex justify-between p-3 bg-white rounded-lg border border-gray-200">
-                                <span><i class="fa-solid fa-envelope mr-2 text-teal-500"></i> Liên hệ</span>
-                                <span id="payUserContact" class="font-bold truncate max-w-[150px]">...</span>
-                            </div>
+                            <div class="flex justify-between p-3 bg-white rounded-lg border border-gray-200"><span>Khách hàng</span><span id="payUserName" class="font-bold">...</span></div>
                         </div>
                     </div>
 
-                    <div class="w-full md:w-7/12 p-8 relative flex flex-col items-center bg-white">
+                    <div class="w-full md:w-7/12 p-8 relative flex flex-col items-center bg-white justify-center">
                         <button onclick="document.getElementById('paymentModal').classList.add('opacity-0', 'pointer-events-none')" class="absolute top-4 right-4 w-10 h-10 rounded-full bg-gray-100 hover:bg-red-50 text-gray-400 hover:text-red-500 flex items-center justify-center transition-colors"><i class="fa-solid fa-xmark text-xl"></i></button>
                         
                         <div class="text-center mb-6">
-                            <h3 class="font-black text-2xl text-teal-700 mb-1">Thanh toán qua QR Code</h3>
-                            <p class="text-gray-500 text-sm">Mở ứng dụng ngân hàng để quét mã</p>
+                            <h3 class="font-black text-2xl text-teal-700 mb-1">Quét mã VietQR</h3>
+                            <p class="text-gray-500 text-sm">Tự động điền thông tin chuyển khoản</p>
                         </div>
 
                         <div class="relative w-72 h-72 bg-white p-4 rounded-3xl shadow-xl border-4 border-teal-50 mb-6 group">
                             <img id="vietQrImage" class="w-full h-full object-contain rounded-xl">
-                            <div id="qrLoading" class="absolute inset-0 bg-white/95 flex flex-col items-center justify-center rounded-xl z-10"><i class="fa-solid fa-circle-notch fa-spin text-4xl text-teal-500 mb-3"></i><span class="text-xs font-bold text-teal-600 animate-pulse">Đang tạo mã QR an toàn...</span></div>
+                            <div id="qrLoading" class="absolute inset-0 bg-white flex flex-col items-center justify-center rounded-xl z-10"><i class="fa-solid fa-circle-notch fa-spin text-4xl text-teal-500 mb-3"></i><span class="text-xs font-bold text-teal-600 animate-pulse">Đang tạo mã QR...</span></div>
                         </div>
 
                         <div class="w-full max-w-sm bg-blue-50/50 p-4 rounded-xl border border-blue-100 text-sm space-y-2 mb-6">
@@ -613,13 +603,10 @@
                             </div>
                             <div class="flex justify-between items-center">
                                 <span class="text-gray-500">Số tài khoản</span>
-                                <div class="flex items-center gap-2">
-                                    <b class="text-blue-700 font-mono text-lg" id="accountNoDisplay">...</b>
-                                    <i class="fa-regular fa-copy text-gray-400 cursor-pointer hover:text-blue-600" onclick="navigator.clipboard.writeText(document.getElementById('accountNoDisplay').innerText); window.showNotification('Đã sao chép STK!')"></i>
-                                </div>
+                                <b class="text-blue-700 font-mono text-lg" id="accountNoDisplay">...</b>
                             </div>
                             <div class="flex justify-between items-center pt-2 border-t border-blue-200/50">
-                                <span class="text-gray-500">Nội dung (Bắt buộc)</span>
+                                <span class="text-gray-500">Nội dung</span>
                                 <b class="text-orange-600 font-mono" id="transferContentDisplay">...</b>
                             </div>
                         </div>
@@ -637,11 +624,14 @@
         let dynamicBankConfig = null;
 
         window.openPaymentModal = async (courseId) => {
+            if (!auth.currentUser) return alert("Vui lòng đăng nhập!");
+            
+            // Tải cấu hình ngân hàng
             if (!dynamicBankConfig) {
                 try {
                     const s = await getDoc(doc(db, "site_settings", "payment_config"));
-                    dynamicBankConfig = s.exists() ? s.data() : { BANK_ID: "MB", ACCOUNT_NO: "0000", ACCOUNT_NAME: "ADMIN", TEMPLATE: "compact2" };
-                } catch (e) { dynamicBankConfig = { BANK_ID: "MB", ACCOUNT_NO: "0000", ACCOUNT_NAME: "ERROR", TEMPLATE: "compact2" }; }
+                    dynamicBankConfig = s.exists() ? s.data() : { BANK_ID: "970422", ACCOUNT_NO: "0000", ACCOUNT_NAME: "ADMIN", TEMPLATE: "compact2" };
+                } catch (e) { dynamicBankConfig = { BANK_ID: "970422", ACCOUNT_NO: "0000", ACCOUNT_NAME: "ERR", TEMPLATE: "compact2" }; }
             }
 
             document.getElementById('paymentModal').classList.remove('opacity-0', 'pointer-events-none');
@@ -656,25 +646,19 @@
                     
                     document.getElementById('payCourseTitle').innerText = c.title;
                     document.getElementById('payCourseImg').src = c.thumbnail || 'https://via.placeholder.com/150';
-                    
-                    const price = parseInt(c.price);
-                    const original = parseInt(c.originalPrice) || 0;
-                    document.getElementById('payFinalPrice').innerText = price.toLocaleString('vi-VN') + 'đ';
-                    document.getElementById('payOriginalPrice').innerText = original > 0 ? original.toLocaleString('vi-VN')+'đ' : '';
-                    
-                    document.getElementById('payUserName').innerText = user.displayName || "Học viên";
-                    document.getElementById('payUserContact').innerText = user.email;
+                    document.getElementById('payFinalPrice').innerText = parseInt(c.price).toLocaleString('vi-VN') + 'đ';
+                    document.getElementById('payUserName').innerText = user.displayName;
 
-                    // --- FIX LỖI QR: DÙNG HÀM getBankBin ĐỂ LẤY MÃ SỐ ---
-                    const binCode = getBankBin(dynamicBankConfig.BANK_ID);
-                    
+                    // Nội dung chuyển khoản
                     const content = `TTOAN ${user.uid.substring(0,5)} ${c.id.substring(0,5).toUpperCase()}`.replace(/[^a-zA-Z0-9 ]/g, "");
-                    document.getElementById('bankNameDisplay').innerText = dynamicBankConfig.BANK_ID;
+                    
+                    document.getElementById('bankNameDisplay').innerText = dynamicBankConfig.BANK_ID; // Hiển thị mã BIN hoặc tên (nếu sửa lại logic hiển thị tên sau)
                     document.getElementById('accountNoDisplay').innerText = dynamicBankConfig.ACCOUNT_NO;
                     document.getElementById('transferContentDisplay').innerText = content;
                     
-                    // URL VietQR chuẩn: https://img.vietqr.io/image/<BIN>-<ACC>-<TEMPLATE>.png
-                    const qrUrl = `https://img.vietqr.io/image/${binCode}-${dynamicBankConfig.ACCOUNT_NO}-${dynamicBankConfig.TEMPLATE}.png?amount=${c.price}&addInfo=${encodeURIComponent(content)}&accountName=${encodeURIComponent(dynamicBankConfig.ACCOUNT_NAME)}`;
+                    // TẠO QR VIETQR CHUẨN
+                    // Lưu ý: BANK_ID bây giờ là mã số (963388) do bước 1 đã sửa Dashboard
+                    const qrUrl = `https://img.vietqr.io/image/${dynamicBankConfig.BANK_ID}-${dynamicBankConfig.ACCOUNT_NO}-${dynamicBankConfig.TEMPLATE}.png?amount=${c.price}&addInfo=${encodeURIComponent(content)}&accountName=${encodeURIComponent(dynamicBankConfig.ACCOUNT_NAME)}`;
                     
                     const qrImg = document.getElementById('vietQrImage');
                     qrImg.onload = () => document.getElementById('qrLoading').classList.add('hidden');
