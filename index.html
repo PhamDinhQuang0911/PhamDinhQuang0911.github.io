@@ -491,7 +491,45 @@
         } catch(e) { console.error("Chưa cấu hình Firebase!", e); }
 
         const googleProvider = new GoogleAuthProvider();
+        
+        // --- [BẮT ĐẦU MÃ MỚI: TỰ ĐỘNG ĐIỀU HƯỚNG] ---
+import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js"; // Đảm bảo đã import hàm này ở đầu file
 
+onAuthStateChanged(auth, (user) => {
+    if (user) {
+        // DANH SÁCH ADMIN (Để phân quyền)
+        const ADMIN_EMAILS = ["phamngockhanh.942001@gmail.com", "phamngockhanh.942002@gmail.com", "admin@gmail.com", "phamdinhquang0911@gmail.com"];
+        
+        // 1. ƯU TIÊN CAO NHẤT: Kiểm tra xem có Link đề thi đang chờ không?
+        const pendingUrl = sessionStorage.getItem('pendingExamUrl');
+        
+        if (pendingUrl) {
+            console.log("Phát hiện đề thi đang chờ, đang chuyển hướng...");
+            // Xóa link khỏi bộ nhớ để không bị lặp lại
+            sessionStorage.removeItem('pendingExamUrl');
+            // Chuyển ngay lập tức đến trang đề thi
+            window.location.href = pendingUrl;
+            return; 
+        }
+
+        // 2. Nếu không có đề thi chờ -> Điều hướng bình thường
+        if (ADMIN_EMAILS.includes(user.email)) {
+            window.location.href = "dashboard.html"; // Giáo viên
+        } else {
+            window.location.href = "student.html";   // Học sinh
+        }
+    } else {
+        // 3. Nếu chưa đăng nhập: Kiểm tra xem có yêu cầu mở form Đăng ký không?
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('mode') === 'register') {
+            // Đợi 0.5s để giao diện tải xong rồi mở Modal
+            setTimeout(() => {
+                if(window.toggleRegisterModal) window.toggleRegisterModal(true);
+            }, 500);
+        }
+    }
+});
+// --- [KẾT THÚC MÃ MỚI] ---
         // 1. RENDER BANNER (STYLE 1, 2, 3)
         // --- 1. RENDER BANNER (5 STYLES + LOGO + TAGS MỚI) ---
         // --- RENDER BANNER (5 STYLES ĐÃ TINH CHỈNH) ---
@@ -1012,6 +1050,25 @@
                 btn.innerHTML = originText; btn.disabled = false; 
             }
         };
+        // [FILE: index.html] - Thêm vào cuối script
+
+// Kiểm tra nếu có yêu cầu mở form đăng ký từ trang exam
+const urlParams = new URLSearchParams(window.location.search);
+if (urlParams.get('mode') === 'register') {
+    // Giả sử bạn có hàm switchTab hoặc logic để ẩn hiện form
+    // Hãy gọi hàm đó ở đây. Ví dụ:
+    // toggleForm('register'); 
+    
+    // Nếu bạn dùng class hidden để switch, hãy viết code JS để thao tác DOM:
+    setTimeout(() => {
+        const loginForm = document.getElementById('loginForm'); // ID form đăng nhập
+        const registerForm = document.getElementById('registerForm'); // ID form đăng ký
+        if(loginForm && registerForm) {
+            loginForm.classList.add('hidden');
+            registerForm.classList.remove('hidden');
+        }
+    }, 100);
+}
     </script>
 </body>
 </html>
