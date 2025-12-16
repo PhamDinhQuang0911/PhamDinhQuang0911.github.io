@@ -882,16 +882,35 @@ async function loadExamHistory(user) {
 }
 
 // Hàm lọc và vẽ bảng
+// --- HÀM LỌC LỊCH SỬ (ĐÃ FIX LỖI TARGET) ---
 window.filterHistory = (filterType) => {
-    // Update UI nút bấm
-    document.querySelectorAll('.history-filter').forEach(b => {
-        if(b.dataset.type === filterType) {
-            b.className = "px-3 py-2 rounded-lg text-xs md:text-sm font-bold bg-teal-50 text-teal-700 history-filter active border border-teal-200";
-        } else {
-            b.className = "px-3 py-2 rounded-lg text-xs md:text-sm font-bold text-gray-500 hover:bg-gray-50 history-filter border border-transparent";
-        }
-    });
+    // 1. Xử lý UI nút bấm (Active State)
+    const buttons = document.querySelectorAll('.history-filter');
+    
+    // Nếu hàm được gọi từ sự kiện click (có event)
+    if (window.event && window.event.type === 'click') {
+        buttons.forEach(b => {
+            b.classList.remove('active', 'bg-teal-50', 'text-teal-700', 'border-teal-200');
+            b.classList.add('text-gray-500', 'border-transparent');
+        });
+        const target = window.event.target;
+        target.classList.add('active', 'bg-teal-50', 'text-teal-700', 'border-teal-200');
+        target.classList.remove('text-gray-500', 'border-transparent');
+    } 
+    // Nếu hàm được gọi tự động (lần đầu tải trang)
+    else {
+        buttons.forEach(b => {
+            if(b.dataset.type === filterType) {
+                b.classList.add('active', 'bg-teal-50', 'text-teal-700', 'border-teal-200');
+                b.classList.remove('text-gray-500', 'border-transparent');
+            } else {
+                b.classList.remove('active', 'bg-teal-50', 'text-teal-700', 'border-teal-200');
+                b.classList.add('text-gray-500', 'border-transparent');
+            }
+        });
+    }
 
+    // 2. Lọc dữ liệu
     if (!window.allHistoryData) return;
 
     let filtered = window.allHistoryData;
@@ -901,6 +920,7 @@ window.filterHistory = (filterType) => {
     renderHistoryRows(filtered);
 }
 
+// --- HÀM VẼ BẢNG LỊCH SỬ (ĐÃ FIX HIỂN THỊ) ---
 function renderHistoryRows(data) {
     const tbody = document.getElementById('historyListBody');
     if (data.length === 0) {
@@ -910,30 +930,42 @@ function renderHistoryRows(data) {
 
     let html = '';
     data.forEach(r => {
-        const date = new Date(r.submittedAt).toLocaleString('vi-VN');
-        const scoreColor = r.score >= 8 ? 'text-green-600' : (r.score >= 5 ? 'text-orange-500' : 'text-red-500');
+        // Format ngày giờ
+        let dateStr = '---';
+        if(r.submittedAt) {
+            try { dateStr = new Date(r.submittedAt).toLocaleString('vi-VN'); } catch(e){}
+        }
+
+        // Xử lý điểm số & Màu sắc
+        const score = r.score !== undefined ? r.score : 0;
+        const scoreColor = score >= 8 ? 'text-green-600' : (score >= 5 ? 'text-orange-500' : 'text-red-500');
         
-        // Sửa lỗi hiển thị undefined câu
-        const correct = r.correctAnswers !== undefined ? r.correctAnswers : r.correctCount || 0;
-        const total = r.totalQuestions || 0;
+        // [FIX] Xử lý hiển thị kết quả (câu đúng/tổng) an toàn hơn
+        let correct = r.correctAnswers; 
+        if (correct === undefined) correct = r.correctCount; // Fallback tên biến cũ
+        if (correct === undefined) correct = '?';
+
+        let total = r.totalQuestions;
+        if (total === undefined || total === 0) total = '?';
+        
         const detail = `${correct}/${total} câu`;
 
         // Chỉ hiện nút XÓA nếu là đề Tự do (Vãng lai)
         const deleteBtn = r.type === 'free' 
             ? `<button onclick="deleteHistoryItem('${r.id}')" class="w-8 h-8 rounded-lg bg-red-50 text-red-500 hover:bg-red-100 flex items-center justify-center transition-colors" title="Xóa lịch sử"><i class="fa-solid fa-trash"></i></button>` 
-            : `<span class="w-8 h-8 block"></span>`; // Placeholder để căn chỉnh
+            : `<span class="w-8 h-8 block"></span>`; 
 
         html += `
         <tr class="hover:bg-gray-50 transition-colors group border-b border-gray-50 last:border-0">
             <td class="p-4">
-                <div class="font-bold text-gray-800 line-clamp-1" title="${r.examTitle}">${r.examTitle}</div>
-                <div class="text-[10px] text-gray-400 font-mono mt-0.5">ID: ${r.examId.substring(0,6)}</div>
+                <div class="font-bold text-gray-800 line-clamp-1" title="${r.examTitle}">${r.examTitle || 'Bài thi không tên'}</div>
+                <div class="text-[10px] text-gray-400 font-mono mt-0.5">ID: ${r.examId ? r.examId.substring(0,6) : '---'}</div>
             </td>
             <td class="p-4">
-                <span class="${r.typeClass} px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider border border-white shadow-sm">${r.typeLabel}</span>
+                <span class="${r.typeClass || 'bg-gray-100'} px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider border border-white shadow-sm">${r.typeLabel || 'Khác'}</span>
             </td>
-            <td class="p-4 font-black ${scoreColor} text-lg">${r.score}</td>
-            <td class="p-4 hidden md:table-cell text-gray-500 text-xs">${date}</td>
+            <td class="p-4 font-black ${scoreColor} text-lg">${score}</td>
+            <td class="p-4 hidden md:table-cell text-gray-500 text-xs">${dateStr}</td>
             <td class="p-4 hidden md:table-cell">
                 <span class="bg-gray-100 text-gray-600 px-2 py-1 rounded text-xs font-bold">${detail}</span>
             </td>
