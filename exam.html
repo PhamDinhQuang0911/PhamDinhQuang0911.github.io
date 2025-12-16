@@ -503,16 +503,47 @@
             });
         }
 
-        onAuthStateChanged(auth, async (user) => {
-            if (user) {
-                currentUser = user;
-                const p = new URLSearchParams(window.location.search);
-                examId = p.get('id');
-                if(!examId) { window.location.href='dashboard.html'; return; }
-                document.getElementById('examIdDisplay').textContent = examId;
-                await loadLobby(examId);
-            } else window.location.href = 'index.html';
-        });
+        // [FILE: exam.html] - Tìm onAuthStateChanged và thay thế
+
+onAuthStateChanged(auth, async (user) => {
+    if (user) {
+        // --- LOGIC CŨ: Nếu đã đăng nhập thì tải đề thi bình thường ---
+        // (Giữ nguyên các hàm loadExam, loadUserInfo cũ của bạn ở đây)
+        // Ví dụ:
+        const urlParams = new URLSearchParams(window.location.search);
+        const examId = urlParams.get('id');
+        if (examId) loadExamData(examId);
+        
+    } else {
+        // --- LOGIC MỚI: CHƯA ĐĂNG NHẬP ---
+        
+        // 1. Lưu lại đường dẫn đề thi hiện tại vào bộ nhớ tạm
+        sessionStorage.setItem('pendingExamUrl', window.location.href);
+
+        // 2. Hiển thị thông báo yêu cầu đăng ký (Tạo Modal bằng JS để không phải sửa HTML nhiều)
+        const modalHtml = `
+            <div class="fixed inset-0 bg-gray-900/90 z-[100] flex items-center justify-center p-4 backdrop-blur-sm">
+                <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 text-center animate-bounce-in">
+                    <div class="w-16 h-16 bg-orange-100 text-orange-600 rounded-full flex items-center justify-center mx-auto mb-4 text-3xl">
+                        <i class="fa-solid fa-user-plus"></i>
+                    </div>
+                    <h3 class="text-xl font-black text-gray-800 mb-2">Em chưa có tài khoản?</h3>
+                    <p class="text-gray-500 mb-6">Để làm bài thi này và lưu lại kết quả, em cần đăng ký một tài khoản miễn phí.</p>
+                    
+                    <div class="space-y-3">
+                        <button onclick="window.location.href='index.html?mode=register'" class="w-full py-3 bg-brand text-white font-bold rounded-xl shadow-lg hover:bg-teal-700 transition-all">
+                            Đăng ký tài khoản ngay
+                        </button>
+                        <button onclick="window.location.href='index.html'" class="w-full py-3 bg-gray-100 text-gray-600 font-bold rounded-xl hover:bg-gray-200 transition-all">
+                            Đã có tài khoản? Đăng nhập
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+    }
+});
 
         async function loadLobby(id) {
             try {
