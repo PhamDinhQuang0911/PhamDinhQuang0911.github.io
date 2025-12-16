@@ -69,6 +69,9 @@
 
             <button onclick="switchTab('dashboard')" id="nav-dashboard" class="sidebar-item active w-full text-left px-4 py-3 text-gray-600 flex items-center gap-3 transition-all rounded-xl"><i class="fa-solid fa-home w-5"></i> Sảnh chính</button>
             <button onclick="switchTab('classes')" id="nav-classes" class="sidebar-item w-full text-left px-4 py-3 text-gray-600 flex items-center gap-3 transition-all rounded-xl"><i class="fa-solid fa-chalkboard-user w-5"></i> Lớp học của tôi</button>
+            <button onclick="switchTab('history')" id="nav-history" class="sidebar-item w-full text-left px-4 py-3 text-gray-600 flex items-center gap-3 transition-all rounded-xl">
+            <i class="fa-solid fa-clock-rotate-left w-5"></i> Lịch sử làm bài
+            </button>
             <div class="px-4 pt-4 pb-2 text-[10px] font-black text-gray-400 uppercase tracking-wider">Học liệu</div>
             <button onclick="switchTab('my-courses')" id="nav-my-courses" class="sidebar-item w-full text-left px-4 py-3 text-gray-600 flex items-center gap-3 transition-all rounded-xl"><i class="fa-solid fa-book-bookmark w-5"></i> Khóa học đã mua</button>
             <button onclick="switchTab('market')" id="nav-market" class="sidebar-item w-full text-left px-4 py-3 text-gray-600 flex items-center gap-3 transition-all rounded-xl"><i class="fa-solid fa-store w-5"></i> Đăng ký khóa mới</button>
@@ -124,6 +127,40 @@
                     </div>
                 </div>
             </div>
+            <div id="tab-history" class="tab-content hidden animate-fade-in">
+    <div class="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+            <h2 class="text-3xl font-black text-gray-800 mb-2">Lịch sử luyện thi</h2>
+            <p class="text-gray-500">Xem lại kết quả các đề thi tự do và bài tập trên lớp</p>
+        </div>
+        <div class="bg-white p-1 rounded-xl border border-gray-200 shadow-sm inline-flex">
+            <button onclick="filterHistory('all')" class="px-4 py-2 rounded-lg text-sm font-bold bg-teal-50 text-teal-700 history-filter active">Tất cả</button>
+            <button onclick="filterHistory('high')" class="px-4 py-2 rounded-lg text-sm font-bold text-gray-500 hover:bg-gray-50 history-filter">Điểm cao (>8)</button>
+        </div>
+    </div>
+
+    <div class="bg-white rounded-2xl shadow-sm border border-teal-50 overflow-hidden">
+        <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse">
+                <thead class="bg-gray-50 text-gray-500 text-xs uppercase font-bold sticky top-0">
+                    <tr>
+                        <th class="p-4 whitespace-nowrap">Tên đề thi</th>
+                        <th class="p-4 whitespace-nowrap">Điểm số</th>
+                        <th class="p-4 whitespace-nowrap hidden md:table-cell">Thời gian nộp</th>
+                        <th class="p-4 whitespace-nowrap hidden md:table-cell">Kết quả</th>
+                        <th class="p-4 whitespace-nowrap text-right">Hành động</th>
+                    </tr>
+                </thead>
+                <tbody id="historyListBody" class="divide-y divide-gray-100 text-sm text-gray-700">
+                    </tbody>
+            </table>
+        </div>
+        <div id="emptyHistoryMsg" class="hidden p-12 text-center text-gray-400">
+            <i class="fa-solid fa-clipboard-list text-4xl mb-3 text-gray-200"></i>
+            <p>Chưa có lịch sử làm bài nào.</p>
+        </div>
+    </div>
+</div>
 
             <div id="tab-class-detail" class="tab-content hidden animate-fade-in flex flex-col h-full">
                 <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8 bg-white p-4 rounded-2xl shadow-sm border border-teal-50">
@@ -253,7 +290,7 @@
         onAuthStateChanged(auth, async (user) => {
             if (user) {
                 if (ADMIN_EMAILS.includes(user.email)) { window.location.href = "dashboard.html"; return; }
-                loadSiteLogo(); loadUserProfile(user); loadStudentClasses(user); loadMarket(); loadMyPurchased(user); loadPendingTasks(user); 
+                loadSiteLogo(); loadUserProfile(user); loadStudentClasses(user); loadMarket(); loadMyPurchased(user); loadPendingTasks(user); loadExamHistory(user);
             } else { window.location.href = "index.html"; }
         });
 
@@ -765,7 +802,93 @@
         };
         window.openProfileModal = () => document.getElementById('profileModal').classList.remove('hidden');
         window.handleLogout = () => signOut(auth).then(() => window.location.href = "index.html");
+        // --- [NEW] LOGIC LỊCH SỬ LÀM BÀI ---
 
+// 1. Hàm tải dữ liệu lịch sử
+async function loadExamHistory(user) {
+    const tbody = document.getElementById('historyListBody');
+    const emptyMsg = document.getElementById('emptyHistoryMsg');
+    if(!tbody) return;
+
+    tbody.innerHTML = '<tr><td colspan="5" class="p-6 text-center text-gray-400"><i class="fa-solid fa-circle-notch fa-spin mr-2"></i> Đang tải lịch sử...</td></tr>';
+
+    try {
+        // Lấy tất cả kết quả của học sinh này
+        const q = query(collection(db, "results"), where("studentId", "==", user.uid));
+        const snap = await getDocs(q);
+        
+        if (snap.empty) {
+            tbody.innerHTML = '';
+            emptyMsg.classList.remove('hidden');
+            return;
+        }
+
+        emptyMsg.classList.add('hidden');
+        let results = [];
+        snap.forEach(doc => results.push({ id: doc.id, ...doc.data() }));
+
+        // Sắp xếp client-side (Mới nhất lên đầu) để tránh lỗi Index Firestore
+        results.sort((a, b) => new Date(b.submittedAt) - new Date(a.submittedAt));
+        window.allHistoryData = results; // Lưu lại để lọc
+
+        renderHistoryRows(results);
+
+    } catch (e) {
+        console.error(e);
+        tbody.innerHTML = `<tr><td colspan="5" class="p-4 text-center text-red-500">Lỗi tải dữ liệu: ${e.message}</td></tr>`;
+    }
+}
+
+// 2. Hàm vẽ các dòng bảng
+function renderHistoryRows(data) {
+    const tbody = document.getElementById('historyListBody');
+    let html = '';
+    
+    data.forEach(r => {
+        const date = new Date(r.submittedAt).toLocaleString('vi-VN');
+        const scoreColor = r.score >= 8 ? 'text-green-600' : (r.score >= 5 ? 'text-orange-500' : 'text-red-500');
+        const scoreBadge = r.score >= 8 ? 'Giỏi' : (r.score >= 5 ? 'Khá' : 'Cần cố gắng');
+        
+        // Tính số câu đúng/tổng
+        const detail = `${r.correctAnswers}/${r.totalQuestions} câu`;
+
+        html += `
+        <tr class="hover:bg-gray-50 transition-colors group">
+            <td class="p-4">
+                <div class="font-bold text-gray-800 line-clamp-1" title="${r.examTitle}">${r.examTitle || 'Bài thi không tên'}</div>
+                <div class="text-xs text-gray-400 font-mono mt-1">ID: ${r.examId.substring(0,6)}</div>
+            </td>
+            <td class="p-4 font-black ${scoreColor} text-lg">${r.score}</td>
+            <td class="p-4 hidden md:table-cell text-gray-500">${date}</td>
+            <td class="p-4 hidden md:table-cell">
+                <span class="bg-gray-100 text-gray-600 px-2 py-1 rounded text-xs font-bold">${detail}</span>
+            </td>
+            <td class="p-4 text-right">
+                <button onclick="window.location.href='exam.html?id=${r.examId}&mode=review'" class="px-4 py-2 bg-white border border-teal-200 text-teal-700 rounded-lg text-xs font-bold hover:bg-teal-50 transition-all shadow-sm">
+                    <i class="fa-solid fa-eye mr-1"></i> Xem lại
+                </button>
+            </td>
+        </tr>`;
+    });
+    tbody.innerHTML = html;
+}
+
+// 3. Hàm lọc (All / High Score)
+window.filterHistory = (type) => {
+    // Update UI nút bấm
+    document.querySelectorAll('.history-filter').forEach(b => {
+        b.className = "px-4 py-2 rounded-lg text-sm font-bold text-gray-500 hover:bg-gray-50 history-filter";
+    });
+    event.target.className = "px-4 py-2 rounded-lg text-sm font-bold bg-teal-50 text-teal-700 history-filter active";
+
+    if (!window.allHistoryData) return;
+
+    let filtered = window.allHistoryData;
+    if (type === 'high') {
+        filtered = window.allHistoryData.filter(r => r.score >= 8);
+    }
+    renderHistoryRows(filtered);
+}
     </script>
 </body>
 </html>
