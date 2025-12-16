@@ -129,37 +129,39 @@
             </div>
             <div id="tab-history" class="tab-content hidden animate-fade-in">
     <div class="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-            <h2 class="text-3xl font-black text-gray-800 mb-2">Lịch sử luyện thi</h2>
-            <p class="text-gray-500">Xem lại kết quả các đề thi tự do và bài tập trên lớp</p>
-        </div>
-        <div class="bg-white p-1 rounded-xl border border-gray-200 shadow-sm inline-flex">
-            <button onclick="filterHistory('all')" class="px-4 py-2 rounded-lg text-sm font-bold bg-teal-50 text-teal-700 history-filter active">Tất cả</button>
-            <button onclick="filterHistory('high')" class="px-4 py-2 rounded-lg text-sm font-bold text-gray-500 hover:bg-gray-50 history-filter">Điểm cao (>8)</button>
-        </div>
+    <div>
+        <h2 class="text-3xl font-black text-gray-800 mb-2">Lịch sử luyện thi</h2>
+        <p class="text-gray-500">Quản lý kết quả học tập của bạn</p>
     </div>
+    <div class="bg-white p-1.5 rounded-xl border border-gray-200 shadow-sm inline-flex flex-wrap gap-1">
+        <button onclick="filterHistory('all')" class="px-3 py-2 rounded-lg text-xs md:text-sm font-bold bg-teal-50 text-teal-700 history-filter active" data-type="all">Tất cả</button>
+        <button onclick="filterHistory('class')" class="px-3 py-2 rounded-lg text-xs md:text-sm font-bold text-gray-500 hover:bg-gray-50 history-filter" data-type="class">Lớp học</button>
+        <button onclick="filterHistory('course')" class="px-3 py-2 rounded-lg text-xs md:text-sm font-bold text-gray-500 hover:bg-gray-50 history-filter" data-type="course">Khóa học</button>
+        <button onclick="filterHistory('free')" class="px-3 py-2 rounded-lg text-xs md:text-sm font-bold text-gray-500 hover:bg-gray-50 history-filter" data-type="free">Vãng lai</button>
+    </div>
+</div>
 
-    <div class="bg-white rounded-2xl shadow-sm border border-teal-50 overflow-hidden">
-        <div class="overflow-x-auto">
-            <table class="w-full text-left border-collapse">
-                <thead class="bg-gray-50 text-gray-500 text-xs uppercase font-bold sticky top-0">
-                    <tr>
-                        <th class="p-4 whitespace-nowrap">Tên đề thi</th>
-                        <th class="p-4 whitespace-nowrap">Điểm số</th>
-                        <th class="p-4 whitespace-nowrap hidden md:table-cell">Thời gian nộp</th>
-                        <th class="p-4 whitespace-nowrap hidden md:table-cell">Kết quả</th>
-                        <th class="p-4 whitespace-nowrap text-right">Hành động</th>
-                    </tr>
-                </thead>
-                <tbody id="historyListBody" class="divide-y divide-gray-100 text-sm text-gray-700">
-                    </tbody>
-            </table>
-        </div>
-        <div id="emptyHistoryMsg" class="hidden p-12 text-center text-gray-400">
-            <i class="fa-solid fa-clipboard-list text-4xl mb-3 text-gray-200"></i>
-            <p>Chưa có lịch sử làm bài nào.</p>
-        </div>
+<div class="bg-white rounded-2xl shadow-sm border border-teal-50 overflow-hidden">
+    <div class="overflow-x-auto">
+        <table class="w-full text-left border-collapse">
+            <thead class="bg-gray-50 text-gray-500 text-xs uppercase font-bold sticky top-0">
+                <tr>
+                    <th class="p-4 whitespace-nowrap">Tên đề thi</th>
+                    <th class="p-4 whitespace-nowrap">Phân loại</th> <th class="p-4 whitespace-nowrap">Điểm số</th>
+                    <th class="p-4 whitespace-nowrap hidden md:table-cell">Thời gian nộp</th>
+                    <th class="p-4 whitespace-nowrap hidden md:table-cell">Kết quả</th>
+                    <th class="p-4 whitespace-nowrap text-right">Hành động</th>
+                </tr>
+            </thead>
+            <tbody id="historyListBody" class="divide-y divide-gray-100 text-sm text-gray-700">
+                </tbody>
+        </table>
     </div>
+    <div id="emptyHistoryMsg" class="hidden p-12 text-center text-gray-400">
+        <i class="fa-solid fa-clipboard-list text-4xl mb-3 text-gray-200"></i>
+        <p>Chưa có lịch sử làm bài nào.</p>
+    </div>
+</div>
 </div>
 
             <div id="tab-class-detail" class="tab-content hidden animate-fade-in flex flex-col h-full">
@@ -239,7 +241,8 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getAuth, onAuthStateChanged, signOut, updateProfile, updatePassword } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
-        import { getFirestore, doc, getDoc, updateDoc, collection, getDocs, query, where, addDoc, limit, orderBy } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { getFirestore, doc, getDoc, updateDoc, collection, getDocs, query, where, addDoc, limit, orderBy, deleteDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+// Thêm deleteDoc vào danh sách import ^^^
 
         // CẤU HÌNH FIREBASE
         const firebaseConfig = {
@@ -805,15 +808,17 @@
         // --- [NEW] LOGIC LỊCH SỬ LÀM BÀI ---
 
 // 1. Hàm tải dữ liệu lịch sử
+// --- [UPDATED] LOGIC LỊCH SỬ & PHÂN LOẠI ---
+
 async function loadExamHistory(user) {
     const tbody = document.getElementById('historyListBody');
     const emptyMsg = document.getElementById('emptyHistoryMsg');
     if(!tbody) return;
 
-    tbody.innerHTML = '<tr><td colspan="5" class="p-6 text-center text-gray-400"><i class="fa-solid fa-circle-notch fa-spin mr-2"></i> Đang tải lịch sử...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" class="p-6 text-center text-gray-400"><i class="fa-solid fa-circle-notch fa-spin mr-2"></i> Đang tải và phân loại...</td></tr>';
 
     try {
-        // Lấy tất cả kết quả của học sinh này
+        // 1. Lấy kết quả thi
         const q = query(collection(db, "results"), where("studentId", "==", user.uid));
         const snap = await getDocs(q);
         
@@ -824,53 +829,144 @@ async function loadExamHistory(user) {
         }
 
         emptyMsg.classList.add('hidden');
-        let results = [];
-        snap.forEach(doc => results.push({ id: doc.id, ...doc.data() }));
+        let rawResults = [];
+        snap.forEach(doc => rawResults.push({ id: doc.id, ...doc.data() }));
 
-        // Sắp xếp client-side (Mới nhất lên đầu) để tránh lỗi Index Firestore
-        results.sort((a, b) => new Date(b.submittedAt) - new Date(a.submittedAt));
-        window.allHistoryData = results; // Lưu lại để lọc
+        // 2. Lấy thông tin đề thi để phân loại (Map examId -> Exam Data)
+        // Cách tối ưu: Lấy danh sách ID đề thi duy nhất
+        const uniqueExamIds = [...new Set(rawResults.map(r => r.examId))];
+        const examMap = {};
 
-        renderHistoryRows(results);
+        // Fetch song song các đề thi (Promise.all)
+        await Promise.all(uniqueExamIds.map(async (eid) => {
+            try {
+                const eSnap = await getDoc(doc(db, "exams", eid));
+                if (eSnap.exists()) examMap[eid] = eSnap.data();
+            } catch (e) { console.warn("Không tìm thấy đề:", eid); }
+        }));
+
+        // 3. Gán phân loại cho từng kết quả
+        window.allHistoryData = rawResults.map(r => {
+            const exam = examMap[r.examId] || {}; // Lấy thông tin đề gốc
+            let type = 'free'; // Mặc định là vãng lai
+            let typeLabel = 'Vãng lai';
+            let typeClass = 'bg-gray-100 text-gray-600';
+
+            if (exam.allowedClassId) {
+                type = 'class';
+                typeLabel = 'Lớp học';
+                typeClass = 'bg-blue-100 text-blue-700';
+            } else if (exam.courseId || exam.accessType === 'course') {
+                type = 'course';
+                typeLabel = 'Khóa học';
+                typeClass = 'bg-orange-100 text-orange-700';
+            } else {
+                type = 'free';
+                typeLabel = 'Tự do';
+                typeClass = 'bg-purple-100 text-purple-700';
+            }
+
+            return { ...r, type, typeLabel, typeClass, examTitle: exam.title || r.examTitle || 'Đề không tên' };
+        });
+
+        // Sắp xếp: Mới nhất lên đầu
+        window.allHistoryData.sort((a, b) => new Date(b.submittedAt) - new Date(a.submittedAt));
+
+        // Render mặc định (Tất cả)
+        filterHistory('all');
 
     } catch (e) {
         console.error(e);
-        tbody.innerHTML = `<tr><td colspan="5" class="p-4 text-center text-red-500">Lỗi tải dữ liệu: ${e.message}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="6" class="p-4 text-center text-red-500">Lỗi: ${e.message}</td></tr>`;
     }
 }
 
-// 2. Hàm vẽ các dòng bảng
+// Hàm lọc và vẽ bảng
+window.filterHistory = (filterType) => {
+    // Update UI nút bấm
+    document.querySelectorAll('.history-filter').forEach(b => {
+        if(b.dataset.type === filterType) {
+            b.className = "px-3 py-2 rounded-lg text-xs md:text-sm font-bold bg-teal-50 text-teal-700 history-filter active border border-teal-200";
+        } else {
+            b.className = "px-3 py-2 rounded-lg text-xs md:text-sm font-bold text-gray-500 hover:bg-gray-50 history-filter border border-transparent";
+        }
+    });
+
+    if (!window.allHistoryData) return;
+
+    let filtered = window.allHistoryData;
+    if (filterType !== 'all') {
+        filtered = window.allHistoryData.filter(r => r.type === filterType);
+    }
+    renderHistoryRows(filtered);
+}
+
 function renderHistoryRows(data) {
     const tbody = document.getElementById('historyListBody');
+    if (data.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="p-8 text-center text-gray-400">Không tìm thấy kết quả nào.</td></tr>';
+        return;
+    }
+
     let html = '';
-    
     data.forEach(r => {
         const date = new Date(r.submittedAt).toLocaleString('vi-VN');
         const scoreColor = r.score >= 8 ? 'text-green-600' : (r.score >= 5 ? 'text-orange-500' : 'text-red-500');
-        const scoreBadge = r.score >= 8 ? 'Giỏi' : (r.score >= 5 ? 'Khá' : 'Cần cố gắng');
         
-        // Tính số câu đúng/tổng
-        const detail = `${r.correctAnswers}/${r.totalQuestions} câu`;
+        // Sửa lỗi hiển thị undefined câu
+        const correct = r.correctAnswers !== undefined ? r.correctAnswers : r.correctCount || 0;
+        const total = r.totalQuestions || 0;
+        const detail = `${correct}/${total} câu`;
+
+        // Chỉ hiện nút XÓA nếu là đề Tự do (Vãng lai)
+        const deleteBtn = r.type === 'free' 
+            ? `<button onclick="deleteHistoryItem('${r.id}')" class="w-8 h-8 rounded-lg bg-red-50 text-red-500 hover:bg-red-100 flex items-center justify-center transition-colors" title="Xóa lịch sử"><i class="fa-solid fa-trash"></i></button>` 
+            : `<span class="w-8 h-8 block"></span>`; // Placeholder để căn chỉnh
 
         html += `
-        <tr class="hover:bg-gray-50 transition-colors group">
+        <tr class="hover:bg-gray-50 transition-colors group border-b border-gray-50 last:border-0">
             <td class="p-4">
-                <div class="font-bold text-gray-800 line-clamp-1" title="${r.examTitle}">${r.examTitle || 'Bài thi không tên'}</div>
-                <div class="text-xs text-gray-400 font-mono mt-1">ID: ${r.examId.substring(0,6)}</div>
+                <div class="font-bold text-gray-800 line-clamp-1" title="${r.examTitle}">${r.examTitle}</div>
+                <div class="text-[10px] text-gray-400 font-mono mt-0.5">ID: ${r.examId.substring(0,6)}</div>
+            </td>
+            <td class="p-4">
+                <span class="${r.typeClass} px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider border border-white shadow-sm">${r.typeLabel}</span>
             </td>
             <td class="p-4 font-black ${scoreColor} text-lg">${r.score}</td>
-            <td class="p-4 hidden md:table-cell text-gray-500">${date}</td>
+            <td class="p-4 hidden md:table-cell text-gray-500 text-xs">${date}</td>
             <td class="p-4 hidden md:table-cell">
                 <span class="bg-gray-100 text-gray-600 px-2 py-1 rounded text-xs font-bold">${detail}</span>
             </td>
             <td class="p-4 text-right">
-                <button onclick="window.location.href='exam.html?id=${r.examId}&mode=review'" class="px-4 py-2 bg-white border border-teal-200 text-teal-700 rounded-lg text-xs font-bold hover:bg-teal-50 transition-all shadow-sm">
-                    <i class="fa-solid fa-eye mr-1"></i> Xem lại
-                </button>
+                <div class="flex items-center justify-end gap-2">
+                    <button onclick="window.location.href='exam.html?id=${r.examId}&mode=review'" class="px-3 py-1.5 bg-white border border-teal-200 text-teal-700 rounded-lg text-xs font-bold hover:bg-teal-50 transition-all shadow-sm">
+                        Xem lại
+                    </button>
+                    ${deleteBtn}
+                </div>
             </td>
         </tr>`;
     });
     tbody.innerHTML = html;
+}
+
+// 4. Hàm xóa lịch sử (Chỉ cho đề vãng lai)
+window.deleteHistoryItem = async (resultId) => {
+    if(confirm("Bạn có chắc chắn muốn xóa lịch sử làm bài này không? (Không thể khôi phục)")) {
+        try {
+            await deleteDoc(doc(db, "results", resultId));
+            window.showNotification("Đã xóa lịch sử làm bài!", "success");
+            
+            // Xóa khỏi mảng cục bộ và render lại để không cần tải lại trang
+            window.allHistoryData = window.allHistoryData.filter(r => r.id !== resultId);
+            // Re-render theo tab hiện tại (đang active)
+            const activeType = document.querySelector('.history-filter.active').dataset.type || 'all';
+            filterHistory(activeType);
+            
+        } catch(e) {
+            window.showNotification("Lỗi xóa: " + e.message, "error");
+        }
+    }
 }
 
 // 3. Hàm lọc (All / High Score)
