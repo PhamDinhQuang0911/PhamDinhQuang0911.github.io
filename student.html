@@ -623,49 +623,85 @@
         let currentPayingCourse = null;
         let dynamicBankConfig = null;
 
-        window.openPaymentModal = async (courseId) => {
-            if (!auth.currentUser) return alert("Vui lòng đăng nhập!");
+        // --- [STUDENT] CẬP NHẬT LOGIC TẠO MÃ QR THANH TOÁN ---
+
+window.openPaymentModal = async (courseId) => {
+    if (!auth.currentUser) {
+         // Logic hiển thị thông báo đăng nhập...
+         alert("Vui lòng đăng nhập!"); 
+         return;
+    }
+    
+    // Tải cấu hình ngân hàng (Cập nhật lấy thêm BANK_NAME)
+    if (!dynamicBankConfig) {
+        try {
+            const s = await getDoc(doc(db, "site_settings", "payment_config"));
+            // Fallback nếu chưa cấu hình
+            dynamicBankConfig = s.exists() ? s.data() : { BANK_ID: "970422", BANK_NAME: "MB Bank", ACCOUNT_NO: "0000", ACCOUNT_NAME: "ADMIN", TEMPLATE: "compact2" };
+        } catch (e) { dynamicBankConfig = { BANK_ID: "970422", BANK_NAME: "Lỗi Tải", ACCOUNT_NO: "0000", ACCOUNT_NAME: "ERR", TEMPLATE: "compact2" }; }
+    }
+
+    document.getElementById('paymentModal').classList.remove('opacity-0', 'pointer-events-none');
+    document.getElementById('qrLoading').classList.remove('hidden');
+
+    try {
+        const snap = await getDoc(doc(db, "public_courses", courseId));
+        if(snap.exists()){
+            const c = snap.data();
+            currentPayingCourse = { id: snap.id, ...c };
+            const user = auth.currentUser;
             
-            // Tải cấu hình ngân hàng
-            if (!dynamicBankConfig) {
-                try {
-                    const s = await getDoc(doc(db, "site_settings", "payment_config"));
-                    dynamicBankConfig = s.exists() ? s.data() : { BANK_ID: "970422", ACCOUNT_NO: "0000", ACCOUNT_NAME: "ADMIN", TEMPLATE: "compact2" };
-                } catch (e) { dynamicBankConfig = { BANK_ID: "970422", ACCOUNT_NO: "0000", ACCOUNT_NAME: "ERR", TEMPLATE: "compact2" }; }
+            // 1. Hiển thị thông tin cơ bản
+            document.getElementById('payCourseTitle').innerText = c.title;
+            document.getElementById('payCourseImg').src = c.thumbnail || 'https://via.placeholder.com/150';
+            
+            // Xử lý hiển thị giá (Format VND)
+            let rawPrice = c.price;
+            // Chuyển đổi giá về số nguyên sạch (loại bỏ dấu chấm, phẩy, chữ đ)
+            if (typeof rawPrice === 'string') {
+                rawPrice = parseInt(rawPrice.replace(/\D/g, '')) || 0;
             }
+            
+            document.getElementById('payFinalPrice').innerText = rawPrice.toLocaleString('vi-VN') + 'đ';
+            document.getElementById('payUserName').innerText = user.displayName;
 
-            document.getElementById('paymentModal').classList.remove('opacity-0', 'pointer-events-none');
-            document.getElementById('qrLoading').classList.remove('hidden');
+            // 2. Tạo nội dung chuyển khoản (Content)
+            // Cú pháp: TTOAN <UID_NGAN> <COURSE_ID_NGAN>
+            // Loại bỏ ký tự đặc biệt để tránh lỗi URL
+            const cleanUid = user.uid.substring(0,5).replace(/[^a-zA-Z0-9]/g, "");
+            const cleanCourseId = c.id.substring(0,5).toUpperCase().replace(/[^a-zA-Z0-9]/g, "");
+            const content = `TTOAN ${cleanUid} ${cleanCourseId}`;
+            
+            // 3. Điền thông tin ngân hàng lên giao diện
+            // Ưu tiên hiển thị Tên ngân hàng (MB Bank) thay vì mã BIN (970422)
+            document.getElementById('bankNameDisplay').innerText = dynamicBankConfig.BANK_NAME || dynamicBankConfig.BANK_ID;
+            document.getElementById('accountNoDisplay').innerText = dynamicBankConfig.ACCOUNT_NO;
+            document.getElementById('transferContentDisplay').innerText = content;
+            
+            // 4. TẠO URL QR CODE VIETQR (FIX QUAN TRỌNG)
+            // Cấu trúc: https://img.vietqr.io/image/<BANK_ID>-<ACCOUNT_NO>-<TEMPLATE>.png?amount=<AMOUNT>&addInfo=<CONTENT>&accountName=<NAME>
+            
+            const bankId = dynamicBankConfig.BANK_ID;       // Mã BIN (VD: 970422)
+            const accNo = dynamicBankConfig.ACCOUNT_NO;     // Số TK
+            const template = dynamicBankConfig.TEMPLATE;    // Template (compact2)
+            const amount = rawPrice;                        // Số tiền (Integer)
+            const addInfo = encodeURIComponent(content);    // Nội dung (URL Encoded)
+            const accName = encodeURIComponent(dynamicBankConfig.ACCOUNT_NAME); // Tên chủ TK (URL Encoded)
 
-            try {
-                const snap = await getDoc(doc(db, "public_courses", courseId));
-                if(snap.exists()){
-                    const c = snap.data();
-                    currentPayingCourse = { id: snap.id, ...c };
-                    const user = auth.currentUser;
-                    
-                    document.getElementById('payCourseTitle').innerText = c.title;
-                    document.getElementById('payCourseImg').src = c.thumbnail || 'https://via.placeholder.com/150';
-                    document.getElementById('payFinalPrice').innerText = parseInt(c.price).toLocaleString('vi-VN') + 'đ';
-                    document.getElementById('payUserName').innerText = user.displayName;
+            const qrUrl = `https://img.vietqr.io/image/${bankId}-${accNo}-${template}.png?amount=${amount}&addInfo=${addInfo}&accountName=${accName}`;
+            
+            // Debug link để kiểm tra
+            console.log("Generated QR Link:", qrUrl);
 
-                    // Nội dung chuyển khoản
-                    const content = `TTOAN ${user.uid.substring(0,5)} ${c.id.substring(0,5).toUpperCase()}`.replace(/[^a-zA-Z0-9 ]/g, "");
-                    
-                    document.getElementById('bankNameDisplay').innerText = dynamicBankConfig.BANK_ID; // Hiển thị mã BIN hoặc tên (nếu sửa lại logic hiển thị tên sau)
-                    document.getElementById('accountNoDisplay').innerText = dynamicBankConfig.ACCOUNT_NO;
-                    document.getElementById('transferContentDisplay').innerText = content;
-                    
-                    // TẠO QR VIETQR CHUẨN
-                    // Lưu ý: BANK_ID bây giờ là mã số (963388) do bước 1 đã sửa Dashboard
-                    const qrUrl = `https://img.vietqr.io/image/${dynamicBankConfig.BANK_ID}-${dynamicBankConfig.ACCOUNT_NO}-${dynamicBankConfig.TEMPLATE}.png?amount=${c.price}&addInfo=${encodeURIComponent(content)}&accountName=${encodeURIComponent(dynamicBankConfig.ACCOUNT_NAME)}`;
-                    
-                    const qrImg = document.getElementById('vietQrImage');
-                    qrImg.onload = () => document.getElementById('qrLoading').classList.add('hidden');
-                    qrImg.src = qrUrl;
-                }
-            } catch(e){ console.error(e); }
-        };
+            const qrImg = document.getElementById('vietQrImage');
+            qrImg.onload = () => document.getElementById('qrLoading').classList.add('hidden');
+            qrImg.onerror = () => {
+                document.getElementById('qrLoading').innerHTML = '<span class="text-red-500 font-bold">Lỗi tạo mã QR</span>';
+            };
+            qrImg.src = qrUrl;
+        }
+    } catch(e){ console.error(e); }
+};
 
         window.confirmPayment = async () => {
              const btn = document.querySelector('button[onclick="confirmPayment()"]');
