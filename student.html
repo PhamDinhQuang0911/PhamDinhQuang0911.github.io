@@ -24,9 +24,20 @@
         #sidebar { transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
         .sidebar-open { transform: translateX(0) !important; }
         .sidebar-closed { transform: translateX(-100%); }
+        
+        /* HIỆU ỨNG RƠI (FALLING) */
         #sidebar-container { position: relative; overflow: hidden; }
-        .falling-item { position: absolute; top: -20px; pointer-events: none; user-select: none; animation: falling linear infinite; opacity: 0.4; z-index: 1; color: #0F766E; }
+        .falling-item { position: absolute; top: -30px; pointer-events: none; user-select: none; animation: falling linear infinite; opacity: 0.6; z-index: 1; text-shadow: 0 2px 5px rgba(0,0,0,0.1); }
         @keyframes falling { to { transform: translateY(110vh) rotate(360deg); } }
+
+        /* TRANG TRÍ NOEL */
+        .santa-hat { position: absolute; top: -12px; left: -8px; font-size: 24px; transform: rotate(-15deg); filter: drop-shadow(2px 2px 0px rgba(0,0,0,0.1)); animation: hat-bounce 2s infinite; }
+        @keyframes hat-bounce { 0%, 100% { transform: rotate(-15deg); } 50% { transform: rotate(-5deg) translateY(-2px); } }
+        
+        /* CÂY THÔNG NOEL */
+        .xmas-tree-decor { position: absolute; bottom: 80px; right: 10px; font-size: 60px; opacity: 0.15; pointer-events: none; filter: blur(1px); animation: tree-glow 3s infinite alternate; }
+        @keyframes tree-glow { from { filter: drop-shadow(0 0 5px green); } to { filter: drop-shadow(0 0 15px gold); } }
+
         ::-webkit-scrollbar { width: 6px; }
         ::-webkit-scrollbar-track { background: #f1f1f1; }
         ::-webkit-scrollbar-thumb { background: #ccc; border-radius: 3px; }
@@ -45,19 +56,24 @@
 
     <aside id="sidebar" class="fixed inset-y-0 left-0 w-72 bg-white border-r border-teal-100 flex flex-col shadow-2xl z-[50] sidebar-closed md:translate-x-0 md:relative md:w-64 md:shadow-sm md:z-20">
         <div class="h-20 flex items-center justify-between px-6 border-b border-teal-100 relative z-10 bg-white/90 backdrop-blur-sm shrink-0">
-            <div class="flex items-center gap-3" id="sidebarHeaderContent">
+            <div class="flex items-center gap-3 relative" id="sidebarHeaderContent">
                 <div class="w-10 h-10 bg-teal-100 rounded-lg animate-pulse"></div>
                 <span class="font-black text-xl text-brand tracking-tight">Thầy Choang</span>
+                <div id="logoDecor"></div>
             </div>
             <button onclick="toggleMobileSidebar()" class="md:hidden text-gray-400 hover:text-red-500 transition-colors p-1"><i class="fa-solid fa-xmark text-2xl"></i></button>
         </div>
+        
         <nav class="flex-1 py-6 space-y-2 overflow-y-auto relative z-10 px-4" id="sidebar-container">
+            <div id="sidebarDecorTree"></div>
+
             <button onclick="switchTab('dashboard')" id="nav-dashboard" class="sidebar-item active w-full text-left px-4 py-3 text-gray-600 flex items-center gap-3 transition-all rounded-xl"><i class="fa-solid fa-home w-5"></i> Sảnh chính</button>
             <button onclick="switchTab('classes')" id="nav-classes" class="sidebar-item w-full text-left px-4 py-3 text-gray-600 flex items-center gap-3 transition-all rounded-xl"><i class="fa-solid fa-chalkboard-user w-5"></i> Lớp học của tôi</button>
             <div class="px-4 pt-4 pb-2 text-[10px] font-black text-gray-400 uppercase tracking-wider">Học liệu</div>
             <button onclick="switchTab('my-courses')" id="nav-my-courses" class="sidebar-item w-full text-left px-4 py-3 text-gray-600 flex items-center gap-3 transition-all rounded-xl"><i class="fa-solid fa-book-bookmark w-5"></i> Khóa học đã mua</button>
             <button onclick="switchTab('market')" id="nav-market" class="sidebar-item w-full text-left px-4 py-3 text-gray-600 flex items-center gap-3 transition-all rounded-xl"><i class="fa-solid fa-store w-5"></i> Đăng ký khóa mới</button>
         </nav>
+        
         <div class="p-4 border-t border-teal-100 bg-teal-50/30 relative z-10 space-y-3 shrink-0">
             <div class="flex items-center gap-3 cursor-pointer group bg-white p-3 rounded-xl border border-teal-50 shadow-sm hover:border-teal-200 transition-all" onclick="openProfileModal()">
                 <img id="userAvatar" src="https://via.placeholder.com/150" class="w-10 h-10 rounded-full border-2 border-white shadow-sm object-cover">
@@ -201,7 +217,6 @@
         let currentVoucherCode = null;
         let dynamicBankConfig = null;
 
-        // Mock Data Voucher (Dự phòng)
         const HARDCODED_VOUCHERS = {
             'CHAO2025': { type: 'percent', value: 10, scope: 'global', expiry: '2025-12-31' },
             'HOCGIOI': { type: 'fixed', value: 50000, scope: 'global', expiry: '2025-12-31' },
@@ -227,6 +242,59 @@
             } else { window.location.href = "index.html"; }
         });
 
+        // --- THEME ENGINE: TRANG TRÍ THEO MÙA ---
+        (function applySidebarEffect() {
+            const sidebar = document.getElementById('sidebar-container'); 
+            const logoDecor = document.getElementById('logoDecor');
+            const treeDecor = document.getElementById('sidebarDecorTree');
+            if(!sidebar) return;
+
+            const today = new Date(); 
+            const m = today.getMonth() + 1;
+            const d = today.getDate();
+
+            let items = "🍂"; // Mặc định thu
+            let count = 5;
+
+            // 1. Mùa Đông & Noel (Tháng 12 & Tháng 1)
+            if (m === 12 || m === 1) {
+                items = "❄️"; 
+                count = 10;
+                
+                // Đặc biệt dịp Noel (15/12 - 31/12)
+                if (m === 12 && d >= 15) {
+                    items = ["❄️", "⛄", "🎁"]; // Rơi hỗn hợp
+                    // Mũ ông già Noel
+                    if(logoDecor) logoDecor.innerHTML = '<div class="santa-hat">🎅</div>';
+                    // Cây thông
+                    if(treeDecor) treeDecor.innerHTML = '<div class="xmas-tree-decor">🎄</div>';
+                }
+            } 
+            // 2. Mùa Xuân & Tết (Tháng 2, 3)
+            else if (m === 2 || m === 3) {
+                items = ["🌸", "🧧"];
+                if(logoDecor) logoDecor.innerHTML = '<div class="absolute -top-3 -right-2 text-2xl animate-pulse">🌺</div>';
+            }
+            // 3. Mùa Hè (Tháng 5, 6, 7)
+            else if (m >= 5 && m <= 7) {
+                items = "☀️";
+            }
+
+            // Tạo hiệu ứng rơi
+            for(let i=0; i < count; i++){
+                const el = document.createElement('div'); 
+                el.classList.add('falling-item'); 
+                // Chọn ngẫu nhiên item nếu là mảng
+                el.innerHTML = Array.isArray(items) ? items[Math.floor(Math.random() * items.length)] : items;
+                
+                el.style.left = Math.random() * 80 + '%'; 
+                el.style.fontSize = (Math.random() * 10 + 10) + 'px';
+                el.style.animationDuration = (Math.random() * 5 + 5) + 's'; 
+                el.style.animationDelay = (Math.random() * 5) + 's';
+                sidebar.appendChild(el);
+            }
+        })();
+
         // --- 3. PROFILE ---
         async function loadUserProfile(user) {
             try {
@@ -247,7 +315,7 @@
             try {
                 const docSnap = await getDoc(doc(db, "site_settings", "homepage_hero"));
                 if (docSnap.exists() && docSnap.data().logo) {
-                    document.getElementById('sidebarHeaderContent').innerHTML = `<img src="${docSnap.data().logo}" class="w-10 h-10 object-contain drop-shadow-sm"><span class="font-black text-xl text-brand tracking-tight">Thầy Choang</span>`;
+                    document.getElementById('sidebarHeaderContent').innerHTML = `<img src="${docSnap.data().logo}" class="w-10 h-10 object-contain drop-shadow-sm"><span class="font-black text-xl text-brand tracking-tight">Thầy Choang</span><div id="logoDecor"></div>`;
                 }
             } catch(e){}
         }
@@ -490,11 +558,11 @@
                     return calculateDiscount(vData, originalPrice);
                 }
             } catch (e) {
-                if (e.message.includes("permission")) throw new Error("Lỗi quyền truy cập: Vui lòng báo Giáo viên mở quyền xem Voucher");
-                if (!e.message.includes("không tồn tại")) throw e;
+                if (e.message.includes("permission")) console.warn("Fallback to Mock Voucher due to permission error");
+                else if (!e.message.includes("không tồn tại")) throw e;
             }
 
-            // Fallback: Check Mock Data (Nếu DB không có)
+            // Fallback: Check Mock Data (Nếu DB không có hoặc lỗi quyền)
             if (HARDCODED_VOUCHERS[code]) {
                 return calculateDiscount(HARDCODED_VOUCHERS[code], originalPrice);
             }
@@ -636,7 +704,7 @@
             document.getElementById('stepReview').classList.remove('hidden');
         };
 
-        // UI Helpers
+        // Các hàm UI phụ
         window.toggleMobileSidebar = () => {
             const sb = document.getElementById('sidebar'); const ov = document.getElementById('mobileOverlay');
             if(sb.classList.contains('sidebar-closed')) { sb.classList.remove('sidebar-closed'); sb.classList.add('sidebar-open'); ov.classList.remove('hidden'); }
@@ -650,7 +718,7 @@
             if(window.innerWidth < 768) { document.getElementById('sidebar').classList.add('sidebar-closed'); document.getElementById('mobileOverlay').classList.add('hidden'); }
         };
         window.openProfileModal = () => document.getElementById('profileModal').classList.remove('hidden');
-        window.handleLogout = () => signOut(auth);
+        window.handleLogout = () => signOut(auth).then(() => window.location.href = "index.html");
 
     </script>
 </body>
