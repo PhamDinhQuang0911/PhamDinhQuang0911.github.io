@@ -506,26 +506,29 @@
         // [FILE: exam.html] - Tìm onAuthStateChanged và thay thế
 
 // --- 1. KIỂM TRA ĐĂNG NHẬP & TẢI ĐỀ ---
+        // --- 1. KIỂM TRA ĐĂNG NHẬP & TẢI ĐỀ ---
         onAuthStateChanged(auth, async (user) => {
-            // Lấy ID từ URL ngay lập tức
             const urlParams = new URLSearchParams(window.location.search);
             examId = urlParams.get('id');
 
             if (user) {
-                currentUser = user; // Lưu user vào biến toàn cục
-                loadSiteLogo();     // Tải Logo
+                // QUAN TRỌNG: Gán user vào biến toàn cục để các hàm khác dùng được
+                currentUser = user; 
                 
+                // Tải Logo thay cho mũ cử nhân
+                loadSiteLogo(); 
+
                 if (examId) {
-                    // QUAN TRỌNG: Gọi hàm tải dữ liệu màn hình chờ
-                    loadLobbyData(examId); 
+                    console.log("Đang tải đề thi ID:", examId); // Log để kiểm tra
+                    loadLobbyData(examId); // Gọi hàm tải dữ liệu
                 } else {
                     alert("Không tìm thấy ID đề thi trên đường dẫn!");
                     window.location.href = "student.html";
                 }
             } else {
-                // Nếu chưa đăng nhập: Lưu link và hiện thông báo
+                // Nếu chưa đăng nhập -> Lưu link và hiện Modal
                 if (examId) sessionStorage.setItem('pendingExamUrl', window.location.href);
-                showLoginRequestModal(); // Gọi hàm hiển thị modal (được tách ra ở Bước 2)
+                showLoginRequestModal();
             }
         });
 
@@ -557,61 +560,75 @@
             `;
             document.body.insertAdjacentHTML('beforeend', modalHtml);
         }
-        async function loadLobby(id) {
+        // --- 3. HÀM TẢI THÔNG TIN MÀN HÌNH CHỜ (LOBBY) ---
+        async function loadLobbyData(id) {
             try {
-                const s = await getDoc(doc(db, "exams", id));
-                if(!s.exists()) { document.getElementById('lobbyTitle').textContent = "Đề không tồn tại"; return; }
-                examData = s.data();
+                // 1. Tải thông tin đề thi
+                const docSnap = await getDoc(doc(db, "exams", id));
                 
-                const q = query(collection(db, "results"), where("examId","==",id), where("studentId","==",currentUser.uid));
-                const snap = await getDocs(q);
-                window.examHistory = [];
-                snap.forEach(d => window.examHistory.push(d.data()));
-                window.examHistory.sort((a,b)=>new Date(b.submittedAt)-new Date(a.submittedAt));
-                const att = window.examHistory.length;
+                if (!docSnap.exists()) {
+                    document.getElementById('lobbyTitle').innerText = "Đề thi không tồn tại hoặc đã bị xóa!";
+                    // Ẩn spinner loading
+                    document.getElementById('lobbySpinner').classList.add('hidden');
+                    return;
+                }
 
-                if (new URLSearchParams(window.location.search).get('mode') === 'review') {
-                    if (att > 0) {
-                        currentQuestions = examData.questions || [];
-                        userAnswers = window.examHistory[0].answers || {};
-                        document.getElementById('lobbyScreen').classList.add('hidden');
-                        viewDetailSolutions(); return;
+                // Lưu dữ liệu vào biến toàn cục
+                currentExam = { id: docSnap.id, ...docSnap.data() };
+                
+                // 2. Điền thông tin lên giao diện
+                document.getElementById('lobbyTitle').innerText = currentExam.title || "Bài thi trắc nghiệm";
+                document.getElementById('lobbyDuration').innerText = currentExam.duration || '--';
+                document.getElementById('lobbyQCount').innerText = currentExam.questions ? currentExam.questions.length : 0;
+                
+                // Hiển thị Mã đề (nếu có element này)
+                if(document.getElementById('examIdDisplay')) {
+                    document.getElementById('examIdDisplay').innerText = currentExam.id.substring(0, 6).toUpperCase();
+                }
+
+                // 3. Kích hoạt nút Bắt đầu (Quan trọng: Phải bỏ disabled)
+                const btnStart = document.getElementById('btnStartExam');
+                if(btnStart) {
+                    btnStart.disabled = false;
+                    // Đổi màu nút sang xanh (brand)
+                    btnStart.classList.remove('bg-gray-200', 'text-gray-400', 'cursor-not-allowed');
+                    btnStart.classList.add('bg-[#0F766E]', 'text-white', 'hover:bg-teal-700', 'shadow-lg');
+                    btnStart.innerHTML = '<i class="fa-solid fa-play"></i> Bắt đầu làm bài';
+                }
+
+            } catch (error) {
+                console.error("Lỗi tải đề:", error);
+                document.getElementById('lobbyTitle').innerText = "Lỗi tải dữ liệu. Vui lòng F5 thử lại!";
+                document.getElementById('lobbyTitle').classList.add('text-red-600');
+                alert("Chi tiết lỗi: " + error.message); // Hiện lỗi để dễ debug
+            }
+        }
+        // --- 2. HÀM TẢI LOGO (THAY THẾ ICON MŨ) ---
+        async function loadSiteLogo() {
+            try {
+                const docSnap = await getDoc(doc(db, "site_settings", "homepage_hero"));
+                if (docSnap.exists() && docSnap.data().logo) {
+                    const logoUrl = docSnap.data().logo;
+                    
+                    // 1. Thay logo ở Màn hình chờ (Lobby)
+                    const lobbyIconContainer = document.querySelector('#lobbyScreen .w-20.h-20');
+                    if (lobbyIconContainer) {
+                        // Thay thế toàn bộ khối icon mũ bằng ảnh logo
+                        lobbyIconContainer.className = "w-24 h-24 mx-auto mb-6 flex items-center justify-center";
+                        lobbyIconContainer.innerHTML = `<img src="${logoUrl}" class="w-full h-full object-contain drop-shadow-md">`;
+                    }
+
+                    // 2. Thay logo ở Header (Khi làm bài)
+                    const headerLogoContainer = document.getElementById('headerLogoContainer');
+                    if (headerLogoContainer) {
+                        headerLogoContainer.innerHTML = `
+                            <img src="${logoUrl}" class="h-10 w-10 object-contain rounded-lg bg-white shadow-sm border border-gray-100 p-0.5">
+                            <span class="font-black text-xl text-[#0F766E] tracking-tight hidden md:block">Thầy Choang</span>
+                        `;
                     }
                 }
-
-                document.getElementById('lobbyTitle').textContent = examData.title;
-                document.getElementById('lobbyDuration').textContent = examData.duration || '∞';
-                document.getElementById('lobbyAttempts').textContent = att;
-                document.getElementById('lobbyMaxAttempts').textContent = examData.attempts || '∞';
-
-                let ok = true, msg = "Sẵn sàng", color = "text-green-600";
-                
-                if (examData.accessType === 'class' && examData.allowedClassId) {
-                    const clSnap = await getDoc(doc(db, "classes", examData.allowedClassId));
-                    if(clSnap.exists()) {
-                        const sts = clSnap.data().students || [];
-                        const me = currentUser.email.toLowerCase();
-                        if(!sts.some(s => (s.email||s.username+'@hocsinh.com').toLowerCase()===me)) {
-                            ok=false; document.getElementById('accessDeniedMsg').classList.remove('hidden');
-                        }
-                    } else { ok=false; msg="Lớp bị xóa"; color="text-red-600"; }
-                }
-
-                const now = new Date();
-                if(examData.startTime && now < new Date(examData.startTime)) { ok=false; msg="Chưa đến giờ"; color="text-orange-500"; document.getElementById('lobbyTimeRange').classList.remove('hidden'); document.getElementById('lobbyTimeText').textContent=new Date(examData.startTime).toLocaleString('vi-VN'); }
-                if(examData.endTime && now > new Date(examData.endTime)) { ok=false; msg="Đã hết hạn"; color="text-red-500"; }
-                if(examData.attempts > 0 && att >= examData.attempts) { ok=false; msg="Hết lượt"; color="text-red-500"; }
-
-                const stat = document.getElementById('lobbyStatusBadge');
-                stat.textContent = msg; stat.className = `font-bold ${color}`;
-                
-                const btn = document.getElementById('btnStartExam');
-                if(ok) { btn.disabled=false; btn.classList.replace('bg-gray-300','bg-blue-600'); btn.classList.remove('cursor-not-allowed'); }
-                else { btn.disabled=true; btn.classList.replace('bg-blue-600','bg-gray-300'); btn.classList.add('cursor-not-allowed'); }
-
-            } catch(e) { console.error(e); window.customAlert("Lỗi tải: "+e.message); }
+            } catch (e) { console.warn("Không tải được logo:", e); }
         }
-
         window.requestStart = () => { if(examData.password) document.getElementById('passwordModal').classList.remove('hidden'); else startExam(); }
         window.verifyPassword = () => { if(document.getElementById('examPasswordInput').value===examData.password) { document.getElementById('passwordModal').classList.add('hidden'); startExam(); } else window.customAlert("Sai mật khẩu","error"); }
 
