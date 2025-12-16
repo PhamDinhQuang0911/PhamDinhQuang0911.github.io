@@ -101,7 +101,12 @@
 
             <div id="tab-classes" class="tab-content hidden animate-fade-in">
                 <div class="mb-8"><h2 class="text-3xl font-black text-gray-800 mb-2">Lớp học của tôi</h2><p class="text-gray-500">Danh sách các lớp bạn đang tham gia</p></div>
-                <div id="myClassesList" class="grid grid-cols-1 md:grid-cols-3 gap-6"></div>
+                <div id="myClassesList" class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div class="col-span-full text-center py-16 text-gray-400">
+                        <i class="fa-solid fa-spinner fa-spin text-2xl mb-2"></i>
+                        <p>Đang tải lớp học...</p>
+                    </div>
+                </div>
             </div>
 
             <div id="tab-class-detail" class="tab-content hidden animate-fade-in flex flex-col h-full">
@@ -196,10 +201,11 @@
         let currentVoucherCode = null;
         let dynamicBankConfig = null;
 
-        // Mock Data Voucher (Có thể chuyển sang Firestore Collection)
+        // Mock Data Voucher (Dự phòng)
         const HARDCODED_VOUCHERS = {
-            'TEST': { type: 'percent', value: 50, scope: 'global', expiry: '2025-12-31' }, // Giảm 50%
-            'CHAO2025': { type: 'fixed', value: 50000, scope: 'global', expiry: '2025-12-31' } // Giảm 50k
+            'CHAO2025': { type: 'percent', value: 10, scope: 'global', expiry: '2025-12-31' },
+            'HOCGIOI': { type: 'fixed', value: 50000, scope: 'global', expiry: '2025-12-31' },
+            'MIENPHI': { type: 'percent', value: 100, scope: 'global', expiry: '2025-12-31' }
         };
 
         // --- HỆ THỐNG TOAST ---
@@ -400,7 +406,7 @@
 
         // --- 5. LOGIC VOUCHER & THANH TOÁN (CORE FEATURE) ---
         
-        // HTML Modal (Được inject vào div#paymentModalContainer)
+        // HTML Modal
         const paymentModalHTML = `
             <div id="paymentModal" class="modal hidden fixed inset-0 z-[100] bg-gray-900/80 backdrop-blur-sm flex items-center justify-center p-4 transition-all duration-300">
                 <div class="bg-white w-full max-w-5xl rounded-3xl shadow-2xl overflow-hidden flex flex-col md:flex-row max-h-[90vh]">
@@ -468,48 +474,45 @@
         `;
         document.getElementById('paymentModalContainer').innerHTML = paymentModalHTML;
 
-        // --- CÁC HÀM XỬ LÝ ---
+        // --- 6. HÀM XỬ LÝ VOUCHER & QR ---
         
-        // 1. Kiểm tra Voucher (Hỗ trợ cả Mock & Firestore)
         async function validateVoucher(code, courseId, originalPrice) {
-            // Check Mock data trước (để test)
+            // Check Firestore TRƯỚC
+            try {
+                const q = query(collection(db, "vouchers"), where("code", "==", code));
+                const snap = await getDocs(q);
+                if (!snap.empty) {
+                    const vData = snap.docs[0].data();
+                    const now = new Date();
+                    if (vData.expiryDate && new Date(vData.expiryDate) < now) throw new Error("Mã giảm giá đã hết hạn sử dụng");
+                    if (vData.limit && vData.used >= vData.limit) throw new Error("Mã giảm giá đã hết lượt sử dụng");
+                    if (vData.scope === 'specific' && vData.courseIds && !vData.courseIds.includes(courseId)) throw new Error("Mã này không áp dụng cho khóa học này");
+                    return calculateDiscount(vData, originalPrice);
+                }
+            } catch (e) {
+                if (e.message.includes("permission")) throw new Error("Lỗi quyền truy cập: Vui lòng báo Giáo viên mở quyền xem Voucher");
+                if (!e.message.includes("không tồn tại")) throw e;
+            }
+
+            // Fallback: Check Mock Data (Nếu DB không có)
             if (HARDCODED_VOUCHERS[code]) {
                 return calculateDiscount(HARDCODED_VOUCHERS[code], originalPrice);
             }
 
-            // Check Firestore (Tương lai)
-            try {
-                const q = query(collection(db, "vouchers"), where("code", "==", code));
-                const snap = await getDocs(q);
-                if (snap.empty) throw new Error("Mã không tồn tại");
-                const vData = snap.docs[0].data();
-                
-                // Validate Logic
-                const now = new Date();
-                if (vData.expiryDate && new Date(vData.expiryDate) < now) throw new Error("Mã đã hết hạn");
-                if (vData.limit && vData.used >= vData.limit) throw new Error("Mã đã hết lượt dùng");
-                if (vData.scope === 'specific' && vData.courseIds && !vData.courseIds.includes(courseId)) throw new Error("Mã không áp dụng cho khóa này");
-
-                return calculateDiscount(vData, originalPrice);
-            } catch (e) {
-                throw e; // Ném lỗi ra ngoài để hiển thị
-            }
+            throw new Error("Mã giảm giá không tồn tại hoặc sai cú pháp");
         }
 
         function calculateDiscount(vData, price) {
             let discount = 0;
             if (vData.type === 'percent') discount = (price * vData.value) / 100;
             else discount = vData.value;
-            
-            if (discount > price) discount = price; // Không giảm quá giá gốc
+            if (discount > price) discount = price;
             return { discount: discount, finalPrice: price - discount };
         }
 
-        // 2. Mở Modal
         window.openPaymentModal = async (courseId) => {
             if (!auth.currentUser) return alert("Vui lòng đăng nhập!");
             
-            // Load Config
             if (!dynamicBankConfig) {
                 try {
                     const s = await getDoc(doc(db, "site_settings", "payment_config"));
@@ -517,7 +520,6 @@
                 } catch(e) { console.error(e); }
             }
 
-            // Reset UI
             document.getElementById('paymentModal').classList.remove('hidden');
             document.getElementById('stepReview').classList.remove('hidden');
             document.getElementById('stepQR').classList.add('hidden');
@@ -526,19 +528,17 @@
             document.getElementById('voucherMessage').className = 'hidden';
             currentVoucherCode = null;
 
-            // Load Course Info
             try {
                 const snap = await getDoc(doc(db, "public_courses", courseId));
                 if(snap.exists()){
                     const c = snap.data();
-                    currentPayingCourse = { id: snap.id, ...c }; // Quan trọng: snap.id
+                    currentPayingCourse = { id: snap.id, ...c };
                     
                     document.getElementById('payCourseTitle').innerText = c.title;
                     document.getElementById('payCourseImg').src = c.thumbnail || 'https://via.placeholder.com/150';
                     document.getElementById('payOrderId').innerText = `#${Date.now().toString().slice(-6)}`;
                     document.getElementById('payDate').innerText = new Date().toLocaleDateString('vi-VN');
 
-                    // Giá gốc
                     let raw = c.price;
                     if (typeof raw === 'string') raw = parseInt(raw.replace(/\D/g, '')) || 0;
                     currentFinalPrice = raw;
@@ -550,7 +550,6 @@
             } catch(e){ console.error(e); }
         };
 
-        // 3. Áp dụng Voucher
         window.applyVoucher = async () => {
             const code = document.getElementById('voucherInput').value.trim().toUpperCase();
             const msgEl = document.getElementById('voucherMessage');
@@ -580,7 +579,6 @@
             }
         };
 
-        // 4. Tạo QR (Step 2)
         window.generatePaymentQR = () => {
             document.getElementById('stepReview').classList.add('hidden');
             document.getElementById('stepQR').classList.remove('hidden');
@@ -595,11 +593,10 @@
             document.getElementById('accountNoDisplay').innerText = dynamicBankConfig.ACCOUNT_NO;
             document.getElementById('transferContentDisplay').innerText = content;
 
-            // URL QR
             const bankBin = dynamicBankConfig.BANK_ID;
             const accNo = dynamicBankConfig.ACCOUNT_NO;
             const template = dynamicBankConfig.TEMPLATE || 'compact2';
-            const amount = currentFinalPrice; // Giá ĐÃ GIẢM
+            const amount = currentFinalPrice; 
             const addInfo = encodeURIComponent(content);
             const accName = encodeURIComponent(dynamicBankConfig.ACCOUNT_NAME);
 
@@ -610,7 +607,6 @@
             img.src = qrUrl;
         };
 
-        // 5. Xác nhận
         window.confirmPayment = async () => {
             const btn = document.querySelector('#stepQR button');
             btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang xử lý...'; btn.disabled = true;
@@ -640,7 +636,7 @@
             document.getElementById('stepReview').classList.remove('hidden');
         };
 
-        // Các hàm UI phụ
+        // UI Helpers
         window.toggleMobileSidebar = () => {
             const sb = document.getElementById('sidebar'); const ov = document.getElementById('mobileOverlay');
             if(sb.classList.contains('sidebar-closed')) { sb.classList.remove('sidebar-closed'); sb.classList.add('sidebar-open'); ov.classList.remove('hidden'); }
@@ -654,7 +650,7 @@
             if(window.innerWidth < 768) { document.getElementById('sidebar').classList.add('sidebar-closed'); document.getElementById('mobileOverlay').classList.add('hidden'); }
         };
         window.openProfileModal = () => document.getElementById('profileModal').classList.remove('hidden');
-        window.handleLogout = () => signOut(auth).then(() => window.location.href = "index.html");
+        window.handleLogout = () => signOut(auth);
 
     </script>
 </body>
