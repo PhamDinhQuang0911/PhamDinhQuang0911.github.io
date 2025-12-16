@@ -664,108 +664,203 @@ const paymentModalHTML = `
     </div>
 `;
 document.getElementById('paymentModalContainer').innerHTML = paymentModalHTML;
+        
 
-        let currentPayingCourse = null;
-        let dynamicBankConfig = null;
+     // --- [BẮT ĐẦU DÁN MÃ MỚI TỪ ĐÂY] ---
 
-        // --- [STUDENT] CẬP NHẬT LOGIC TẠO MÃ QR THANH TOÁN ---
+// 1. Dữ liệu Voucher giả lập (Sau này có thể tải từ Firebase)
+const VOUCHERS = {
+    'CHAO2025': { type: 'percent', value: 10 }, // Giảm 10%
+    'HOCGIOI': { type: 'fixed', value: 50000 },  // Giảm 50k
+    'FREE': { type: 'percent', value: 100 }      // Miễn phí
+};
 
-// [FILE: student.html] - Thay thế toàn bộ hàm openPaymentModal cũ
+let currentPayingCourse = null;
+let currentFinalPrice = 0; // Giá sau khi giảm (dùng để thanh toán)
+let currentVoucherCode = null; // Lưu mã voucher đã dùng
+let dynamicBankConfig = null;
 
+// Hàm mở Modal (Bước 1: Review thông tin)
 window.openPaymentModal = async (courseId) => {
-    // 1. Kiểm tra đăng nhập
-    if (!auth.currentUser) {
-        alert("Vui lòng đăng nhập để thực hiện chức năng này!");
-        return;
-    }
+    if (!auth.currentUser) { alert("Vui lòng đăng nhập!"); return; }
 
-    // 2. Tải cấu hình ngân hàng
+    // Tải config ngân hàng
     if (!dynamicBankConfig) {
         try {
             const s = await getDoc(doc(db, "site_settings", "payment_config"));
-            if (s.exists()) dynamicBankConfig = s.data();
-            else dynamicBankConfig = { BANK_ID: "970422", BANK_NAME: "MB Bank", ACCOUNT_NO: "0000", ACCOUNT_NAME: "ADMIN", TEMPLATE: "compact2" };
+            dynamicBankConfig = s.exists() ? s.data() : { BANK_ID: "970422", BANK_NAME: "MB Bank", ACCOUNT_NO: "0000", ACCOUNT_NAME: "ADMIN" };
         } catch (e) { console.error(e); }
     }
 
-    // Hiển thị modal & loading
+    // Reset giao diện về bước 1
+    document.getElementById('preQrState').classList.remove('hidden');
+    document.getElementById('qrState').classList.add('hidden');
     document.getElementById('paymentModal').classList.remove('opacity-0', 'pointer-events-none');
-    const loadingEl = document.getElementById('qrLoading');
-    if(loadingEl) loadingEl.classList.remove('hidden');
+    
+    // Reset Form Voucher
+    document.getElementById('voucherInput').value = '';
+    document.getElementById('voucherMessage').classList.add('hidden');
+    document.getElementById('voucherInput').disabled = false;
+    currentVoucherCode = null;
 
     try {
         const snap = await getDoc(doc(db, "public_courses", courseId));
         if(snap.exists()){
             const c = snap.data();
-            // Lấy ID từ snap.id (SỬA LỖI SUBSTRING TẠI ĐÂY)
-            const courseRealId = snap.id; 
-            currentPayingCourse = { id: courseRealId, ...c };
-            
+            currentPayingCourse = { id: snap.id, ...c };
             const user = auth.currentUser;
-            
-            // --- ĐIỀN THÔNG TIN LÊN GIAO DIỆN ---
+
+            // Điền thông tin khóa học
             document.getElementById('payCourseTitle').innerText = c.title;
             const imgEl = document.getElementById('payCourseImg');
             if(imgEl) imgEl.src = c.thumbnail || 'https://via.placeholder.com/150';
             
-            // Xử lý giá tiền: Loại bỏ dấu chấm/phẩy, chỉ lấy số
-            // Ví dụ: "399.000" -> 399000
+            // Xử lý giá tiền gốc
             let rawPrice = c.price; 
-            let numericPrice = 0;
-            if (rawPrice) {
-                numericPrice = parseInt(String(rawPrice).replace(/\D/g, '')) || 0;
-            }
+            if (typeof rawPrice === 'string') rawPrice = parseInt(rawPrice.replace(/\D/g, '')) || 0;
+            currentFinalPrice = rawPrice; // Mặc định giá cuối = giá gốc
+
+            document.getElementById('payOriginalPrice').innerText = rawPrice.toLocaleString('vi-VN') + 'đ';
+            document.getElementById('payDiscountAmount').innerText = '-0đ';
+            document.getElementById('payFinalPrice').innerText = rawPrice.toLocaleString('vi-VN') + 'đ';
             
-            document.getElementById('payFinalPrice').innerText = numericPrice.toLocaleString('vi-VN') + 'đ';
+            // Điền thông tin bổ sung
             document.getElementById('payUserName').innerText = user.displayName || user.email;
-
-            // --- TẠO NỘI DUNG CHUYỂN KHOẢN ---
-            // Cú pháp: TTOAN [UID_5_so] [COURSE_ID_5_so]
-            // Loại bỏ ký tự đặc biệt để đảm bảo URL an toàn
-            const cleanUid = user.uid.substring(0,5).replace(/[^a-zA-Z0-9]/g, "");
-            const cleanCourseId = courseRealId.substring(0,5).toUpperCase().replace(/[^a-zA-Z0-9]/g, "");
-            const content = `TTOAN ${cleanUid} ${cleanCourseId}`;
-            
-            // Hiển thị thông tin ngân hàng
-            document.getElementById('bankNameDisplay').innerText = dynamicBankConfig.BANK_NAME || dynamicBankConfig.BANK_ID;
-            document.getElementById('accountNoDisplay').innerText = dynamicBankConfig.ACCOUNT_NO;
-            document.getElementById('transferContentDisplay').innerText = content;
-            if(document.getElementById('accountNameDisplay')) 
-                document.getElementById('accountNameDisplay').innerText = dynamicBankConfig.ACCOUNT_NAME;
-            
-            // --- TẠO LINK VIETQR CHUẨN ---
-            // Format: https://img.vietqr.io/image/<BANK_ID>-<ACCOUNT_NO>-<TEMPLATE>.png
-            
-            const bankBin = dynamicBankConfig.BANK_ID;      // Mã BIN (VD: 970423)
-            const accNo = dynamicBankConfig.ACCOUNT_NO;     
-            const template = dynamicBankConfig.TEMPLATE || 'compact2';
-            
-            // Encode các tham số để tránh lỗi ký tự đặc biệt
-            const addInfo = encodeURIComponent(content);
-            const accName = encodeURIComponent(dynamicBankConfig.ACCOUNT_NAME);
-
-            // Link cuối cùng
-            const qrUrl = `https://img.vietqr.io/image/${bankBin}-${accNo}-${template}.png?amount=${numericPrice}&addInfo=${addInfo}&accountName=${accName}`;
-            
-            console.log("🔥 QR Link được tạo:", qrUrl); // Kiểm tra link này trong Console nếu lỗi
-
-            const qrImg = document.getElementById('vietQrImage');
-            
-            qrImg.onload = () => {
-                if(loadingEl) loadingEl.classList.add('hidden');
-            };
-            
-            qrImg.onerror = () => {
-                if(loadingEl) loadingEl.innerHTML = '<span class="text-red-500 font-bold text-xs">Lỗi tải ảnh QR.<br>Kiểm tra mã Ngân hàng.</span>';
-                console.error("Lỗi tải ảnh từ link:", qrUrl);
-            };
-            
-            qrImg.src = qrUrl;
+            document.getElementById('payDate').innerText = new Date().toLocaleDateString('vi-VN');
+            // Tạo mã đơn hàng tạm thời (để hiển thị)
+            document.getElementById('payOrderId').innerText = `#${Date.now().toString().slice(-6)}`; 
         }
-    } catch(e){ 
-        console.error(e); 
-        alert("Có lỗi xảy ra: " + e.message);
+    } catch(e){ console.error(e); alert("Lỗi tải dữ liệu: " + e.message); }
+};
+
+// Hàm xử lý Voucher
+window.applyVoucher = () => {
+    const code = document.getElementById('voucherInput').value.trim().toUpperCase();
+    const msgEl = document.getElementById('voucherMessage');
+    
+    if (!VOUCHERS[code]) {
+        msgEl.textContent = "Mã giảm giá không hợp lệ!";
+        msgEl.className = "mb-2 text-xs font-bold text-red-500 block";
+        return;
     }
+
+    const voucher = VOUCHERS[code];
+    let originalPrice = 0;
+    if (currentPayingCourse) {
+        let raw = currentPayingCourse.price;
+        if (typeof raw === 'string') raw = parseInt(raw.replace(/\D/g, '')) || 0;
+        originalPrice = raw;
+    }
+
+    let discountAmount = 0;
+    if (voucher.type === 'percent') {
+        discountAmount = (originalPrice * voucher.value) / 100;
+    } else {
+        discountAmount = voucher.value;
+    }
+
+    // Đảm bảo không giảm quá giá gốc
+    if (discountAmount > originalPrice) discountAmount = originalPrice;
+    
+    currentFinalPrice = originalPrice - discountAmount;
+    currentVoucherCode = code; // Lưu lại mã đã dùng
+
+    // Cập nhật UI
+    document.getElementById('payDiscountAmount').innerText = `-${discountAmount.toLocaleString('vi-VN')}đ`;
+    document.getElementById('payFinalPrice').innerText = currentFinalPrice.toLocaleString('vi-VN') + 'đ';
+    
+    msgEl.textContent = `Áp dụng mã ${code} thành công!`;
+    msgEl.className = "mb-2 text-xs font-bold text-green-600 block";
+    document.getElementById('voucherInput').disabled = true; // Khóa không cho nhập lại
+};
+
+// Hàm tạo QR (Bước 2)
+window.generatePaymentQR = () => {
+    // Chuyển giao diện sang màn hình QR
+    document.getElementById('preQrState').classList.add('hidden');
+    document.getElementById('qrState').classList.remove('hidden');
+    document.getElementById('qrState').classList.add('flex');
+    document.getElementById('qrLoading').classList.remove('hidden');
+
+    const user = auth.currentUser;
+    const c = currentPayingCourse;
+
+    // Tạo nội dung chuyển khoản
+    const cleanUid = user.uid.substring(0,5).replace(/[^a-zA-Z0-9]/g, "");
+    const cleanCourseId = c.id.substring(0,5).toUpperCase().replace(/[^a-zA-Z0-9]/g, "");
+    const content = `TTOAN ${cleanUid} ${cleanCourseId}`;
+
+    // Hiển thị thông tin chuyển khoản bằng chữ
+    document.getElementById('bankNameDisplay').innerText = dynamicBankConfig.BANK_NAME || dynamicBankConfig.BANK_ID;
+    document.getElementById('accountNoDisplay').innerText = dynamicBankConfig.ACCOUNT_NO;
+    document.getElementById('transferContentDisplay').innerText = content;
+
+    // Tạo Link VietQR với giá ĐÃ GIẢM (currentFinalPrice)
+    const bankBin = dynamicBankConfig.BANK_ID;
+    const accNo = dynamicBankConfig.ACCOUNT_NO;
+    const template = dynamicBankConfig.TEMPLATE || 'compact2';
+    const amount = currentFinalPrice; // Dùng giá cuối cùng
+    const addInfo = encodeURIComponent(content);
+    const accName = encodeURIComponent(dynamicBankConfig.ACCOUNT_NAME);
+
+    const qrUrl = `https://img.vietqr.io/image/${bankBin}-${accNo}-${template}.png?amount=${amount}&addInfo=${addInfo}&accountName=${accName}`;
+    
+    console.log("QR Link:", qrUrl);
+
+    const qrImg = document.getElementById('vietQrImage');
+    qrImg.onload = () => document.getElementById('qrLoading').classList.add('hidden');
+    qrImg.onerror = () => document.getElementById('qrLoading').innerHTML = '<span class="text-red-500 text-xs">Lỗi QR</span>';
+    qrImg.src = qrUrl;
+};
+
+// Hàm xác nhận đã chuyển khoản (Lưu vào CSDL)
+window.confirmPayment = async () => {
+    if(!currentPayingCourse) return;
+    
+    // Tìm nút trong modal (nút xác nhận ở màn hình QR)
+    const btn = document.querySelector('#qrState button[onclick="confirmPayment()"]');
+    const originText = btn.innerHTML;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang xử lý...'; 
+    btn.disabled = true;
+
+    try {
+        await addDoc(collection(db, "orders"), {
+            userId: auth.currentUser.uid,
+            userName: auth.currentUser.displayName, // Lưu thêm tên để dễ đối soát
+            courseId: currentPayingCourse.id,
+            courseTitle: currentPayingCourse.title,
+            amount: currentFinalPrice, // Lưu giá thực tế phải trả
+            originalAmount: parseInt(currentPayingCourse.price) || 0, // Lưu giá gốc để tham chiếu
+            voucher: currentVoucherCode || null, // Lưu mã giảm giá nếu có
+            status: 'pending',
+            content: document.getElementById('transferContentDisplay').innerText,
+            createdAt: new Date().toISOString()
+        });
+        
+        // Đóng modal và thông báo
+        document.getElementById('paymentModal').classList.add('opacity-0', 'pointer-events-none');
+        window.showNotification("Gửi xác nhận thành công! Khóa học sẽ được kích hoạt sau 5-10 phút.", "success");
+    } catch(e) { 
+        window.showNotification("Lỗi: " + e.message, "error");
+    } finally { 
+        btn.innerHTML = originText; 
+        btn.disabled = false; 
+    }
+};
+
+// Hàm quay lại sửa thông tin (nếu muốn nhập voucher khác)
+window.resetQrState = () => {
+    document.getElementById('preQrState').classList.remove('hidden');
+    document.getElementById('qrState').classList.add('hidden');
+    document.getElementById('qrState').classList.remove('flex');
+};
+
+// Hàm copy nội dung chuyển khoản
+window.copyContent = () => {
+    const txt = document.getElementById('transferContentDisplay').innerText;
+    navigator.clipboard.writeText(txt);
+    window.showNotification("Đã sao chép nội dung chuyển khoản!", "success");
+}
 };
 
         window.confirmPayment = async () => {
@@ -849,98 +944,6 @@ window.openPaymentModal = async (courseId) => {
         }
     } catch(e){ console.error(e); alert("Lỗi tải dữ liệu: " + e.message); }
 };
-
-// Hàm xử lý Voucher
-window.applyVoucher = () => {
-    const code = document.getElementById('voucherInput').value.trim().toUpperCase();
-    const msgEl = document.getElementById('voucherMessage');
-    
-    if (!VOUCHERS[code]) {
-        msgEl.textContent = "Mã giảm giá không hợp lệ!";
-        msgEl.className = "mb-2 text-xs font-bold text-red-500 block";
-        return;
-    }
-
-    const voucher = VOUCHERS[code];
-    let originalPrice = 0;
-    if (currentPayingCourse) {
-        let raw = currentPayingCourse.price;
-        if (typeof raw === 'string') raw = parseInt(raw.replace(/\D/g, '')) || 0;
-        originalPrice = raw;
-    }
-
-    let discountAmount = 0;
-    if (voucher.type === 'percent') {
-        discountAmount = (originalPrice * voucher.value) / 100;
-    } else {
-        discountAmount = voucher.value;
-    }
-
-    // Đảm bảo không giảm quá giá gốc
-    if (discountAmount > originalPrice) discountAmount = originalPrice;
-    
-    currentFinalPrice = originalPrice - discountAmount;
-
-    // Cập nhật UI
-    document.getElementById('payDiscountAmount').innerText = `-${discountAmount.toLocaleString('vi-VN')}đ`;
-    document.getElementById('payFinalPrice').innerText = currentFinalPrice.toLocaleString('vi-VN') + 'đ';
-    
-    msgEl.textContent = `Áp dụng mã ${code} thành công!`;
-    msgEl.className = "mb-2 text-xs font-bold text-green-600 block";
-    document.getElementById('voucherInput').disabled = true; // Khóa không cho nhập lại
-};
-
-// Hàm tạo QR (Bước 2)
-window.generatePaymentQR = () => {
-    // Chuyển giao diện
-    document.getElementById('preQrState').classList.add('hidden');
-    document.getElementById('qrState').classList.remove('hidden');
-    document.getElementById('qrState').classList.add('flex');
-    document.getElementById('qrLoading').classList.remove('hidden');
-
-    const user = auth.currentUser;
-    const c = currentPayingCourse;
-
-    // Tạo nội dung chuyển khoản
-    const cleanUid = user.uid.substring(0,5).replace(/[^a-zA-Z0-9]/g, "");
-    const cleanCourseId = c.id.substring(0,5).toUpperCase().replace(/[^a-zA-Z0-9]/g, "");
-    const content = `TTOAN ${cleanUid} ${cleanCourseId}`;
-
-    // Hiển thị text
-    document.getElementById('bankNameDisplay').innerText = dynamicBankConfig.BANK_NAME || dynamicBankConfig.BANK_ID;
-    document.getElementById('accountNoDisplay').innerText = dynamicBankConfig.ACCOUNT_NO;
-    document.getElementById('transferContentDisplay').innerText = content;
-
-    // Tạo Link VietQR với giá ĐÃ GIẢM (currentFinalPrice)
-    const bankBin = dynamicBankConfig.BANK_ID;
-    const accNo = dynamicBankConfig.ACCOUNT_NO;
-    const template = dynamicBankConfig.TEMPLATE || 'compact2';
-    const amount = currentFinalPrice; // Dùng giá cuối cùng
-    const addInfo = encodeURIComponent(content);
-    const accName = encodeURIComponent(dynamicBankConfig.ACCOUNT_NAME);
-
-    const qrUrl = `https://img.vietqr.io/image/${bankBin}-${accNo}-${template}.png?amount=${amount}&addInfo=${addInfo}&accountName=${accName}`;
-    
-    console.log("QR Link:", qrUrl);
-
-    const qrImg = document.getElementById('vietQrImage');
-    qrImg.onload = () => document.getElementById('qrLoading').classList.add('hidden');
-    qrImg.onerror = () => document.getElementById('qrLoading').innerHTML = '<span class="text-red-500 text-xs">Lỗi QR</span>';
-    qrImg.src = qrUrl;
-};
-
-// Hàm quay lại sửa (nếu muốn nhập voucher khác)
-window.resetQrState = () => {
-    document.getElementById('preQrState').classList.remove('hidden');
-    document.getElementById('qrState').classList.add('hidden');
-    document.getElementById('qrState').classList.remove('flex');
-};
-
-window.copyContent = () => {
-    const txt = document.getElementById('transferContentDisplay').innerText;
-    navigator.clipboard.writeText(txt);
-    alert("Đã sao chép nội dung chuyển khoản!");
-}
     </script>
 </body>
 </html>
