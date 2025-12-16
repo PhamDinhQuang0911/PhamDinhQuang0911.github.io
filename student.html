@@ -952,24 +952,78 @@
             tbody.innerHTML = html;
         }
 
-        window.deleteHistoryItem = async (resultId) => {
-            if(confirm("Bạn có chắc chắn muốn xóa lịch sử làm bài này không? (Không thể khôi phục)")) {
-                try {
-                    await deleteDoc(doc(db, "results", resultId));
-                    window.showNotification("Đã xóa lịch sử làm bài!", "success");
+        // --- HÀM XÓA LỊCH SỬ (ĐÃ FIX QUYỀN & GIAO DIỆN ĐẸP) ---
+window.deleteHistoryItem = (resultId) => {
+    // 1. Hiển thị Modal xác nhận đẹp
+    const modal = document.getElementById('confirmDeleteModal');
+    const btnConfirm = document.getElementById('btnConfirmDelete');
+    
+    if(modal) {
+        modal.classList.remove('hidden');
+        
+        // Gán sự kiện cho nút Xóa trong Modal
+        btnConfirm.onclick = async () => {
+            // Hiệu ứng loading cho nút
+            const originalText = btnConfirm.innerHTML;
+            btnConfirm.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Đang xóa...';
+            btnConfirm.disabled = true;
+
+            try {
+                // Gọi lệnh xóa Firestore
+                await deleteDoc(doc(db, "results", resultId));
+                
+                // Thành công: Ẩn modal -> Thông báo -> Cập nhật giao diện
+                modal.classList.add('hidden');
+                window.showNotification("Đã xóa lịch sử làm bài thành công!", "success");
+                
+                // Xóa khỏi mảng dữ liệu cục bộ & Render lại bảng
+                if(window.allHistoryData) {
                     window.allHistoryData = window.allHistoryData.filter(r => r.id !== resultId);
                     
-                    // Re-render
+                    // Tìm tab đang active để render lại đúng loại
                     const activeBtn = document.querySelector('.history-filter.active');
                     const activeType = activeBtn ? activeBtn.dataset.type : 'all';
-                    
-                    let filtered = window.allHistoryData;
-                    if (activeType !== 'all') filtered = window.allHistoryData.filter(r => r.type === activeType);
-                    renderHistoryRows(filtered);
-                    
-                } catch(e) { window.showNotification("Lỗi xóa: " + e.message, "error"); }
+                    window.filterHistory(activeType); // Gọi hàm lọc để vẽ lại bảng
+                }
+
+            } catch(e) {
+                console.error(e);
+                modal.classList.add('hidden');
+                // Kiểm tra lỗi quyền truy cập
+                if(e.code === 'permission-denied') {
+                    window.showNotification("Lỗi: Bạn không có quyền xóa bài này (Chỉ xóa được bài của chính mình)!", "error");
+                } else {
+                    window.showNotification("Lỗi xóa: " + e.message, "error");
+                }
+            } finally {
+                // Reset nút bấm
+                btnConfirm.innerHTML = originalText;
+                btnConfirm.disabled = false;
             }
+        };
+    } else {
+        // Fallback nếu quên copy HTML Modal
+        if(confirm("Xóa lịch sử làm bài này?")) {
+            deleteDoc(doc(db, "results", resultId))
+                .then(() => { window.showNotification("Đã xóa!", "success"); })
+                .catch(e => window.showNotification("Lỗi: " + e.message, "error"));
         }
+    }
+}
+        <div id="confirmDeleteModal" class="fixed inset-0 z-[200] hidden flex items-center justify-center bg-gray-900/60 backdrop-blur-sm p-4 animate-fade-in">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 text-center transform scale-100 transition-all">
+        <div class="w-16 h-16 bg-red-100 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4 text-3xl">
+            <i class="fa-solid fa-trash-can"></i>
+        </div>
+        <h3 class="text-xl font-black text-gray-800 mb-2">Xóa lịch sử làm bài?</h3>
+        <p class="text-gray-500 text-sm mb-6">Hành động này không thể hoàn tác. Kết quả bài thi này sẽ bị xóa vĩnh viễn.</p>
+        
+        <div class="grid grid-cols-2 gap-3">
+            <button onclick="document.getElementById('confirmDeleteModal').classList.add('hidden')" class="py-3 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-all">Hủy bỏ</button>
+            <button id="btnConfirmDelete" class="py-3 bg-red-500 text-white font-bold rounded-xl hover:bg-red-600 shadow-lg shadow-red-200 transition-all">Xóa ngay</button>
+        </div>
+    </div>
+</div>
     </script>
 </body>
 </html>
