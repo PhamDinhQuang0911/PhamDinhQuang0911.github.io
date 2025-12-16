@@ -636,9 +636,9 @@ window.openPaymentModal = async (courseId) => {
     if (!dynamicBankConfig) {
         try {
             const s = await getDoc(doc(db, "site_settings", "payment_config"));
-            // Fallback nếu chưa cấu hình
-            dynamicBankConfig = s.exists() ? s.data() : { BANK_ID: "970454", BANK_NAME: "Timo", ACCOUNT_NO: "0337820847", ACCOUNT_NAME: "PHAM DINH QUANG", TEMPLATE: "compact2" };
-        } catch (e) { dynamicBankConfig = { BANK_ID: "970422", BANK_NAME: "Lỗi Tải", ACCOUNT_NO: "0000", ACCOUNT_NAME: "ERR", TEMPLATE: "compact2" }; }
+            // Fallback an toàn nếu chưa cấu hình
+            dynamicBankConfig = s.exists() ? s.data() : { BANK_ID: "970422", BANK_NAME: "MB Bank", ACCOUNT_NO: "0000", ACCOUNT_NAME: "ADMIN", TEMPLATE: "compact2" };
+        } catch (e) { console.error(e); }
     }
 
     document.getElementById('paymentModal').classList.remove('opacity-0', 'pointer-events-none');
@@ -653,54 +653,64 @@ window.openPaymentModal = async (courseId) => {
             
             // 1. Hiển thị thông tin cơ bản
             document.getElementById('payCourseTitle').innerText = c.title;
-            document.getElementById('payCourseImg').src = c.thumbnail || 'https://via.placeholder.com/150';
+            const imgEl = document.getElementById('payCourseImg');
+            if(imgEl) imgEl.src = c.thumbnail || 'https://via.placeholder.com/150';
             
-            // Xử lý hiển thị giá (Format VND)
-            let rawPrice = c.price;
+            // 2. XỬ LÝ GIÁ TIỀN (QUAN TRỌNG NHẤT)
             // Chuyển đổi giá về số nguyên sạch (loại bỏ dấu chấm, phẩy, chữ đ)
+            let rawPrice = c.price;
             if (typeof rawPrice === 'string') {
+                // Chỉ giữ lại số (0-9)
                 rawPrice = parseInt(rawPrice.replace(/\D/g, '')) || 0;
             }
-            
+            // Hiển thị lại có dấu phẩy cho đẹp
             document.getElementById('payFinalPrice').innerText = rawPrice.toLocaleString('vi-VN') + 'đ';
             document.getElementById('payUserName').innerText = user.displayName;
 
-            // 2. Tạo nội dung chuyển khoản (Content)
-            // Cú pháp: TTOAN <UID_NGAN> <COURSE_ID_NGAN>
-            // Loại bỏ ký tự đặc biệt để tránh lỗi URL
+            // 3. Tạo nội dung chuyển khoản (Content) an toàn URL
+            // Cú pháp: TTOAN <UID> <COURSE_ID> (Bỏ ký tự đặc biệt)
             const cleanUid = user.uid.substring(0,5).replace(/[^a-zA-Z0-9]/g, "");
             const cleanCourseId = c.id.substring(0,5).toUpperCase().replace(/[^a-zA-Z0-9]/g, "");
             const content = `TTOAN ${cleanUid} ${cleanCourseId}`;
             
-            // 3. Điền thông tin ngân hàng lên giao diện
-            // Ưu tiên hiển thị Tên ngân hàng (MB Bank) thay vì mã BIN (970422)
+            // 4. Điền thông tin ngân hàng lên giao diện
+            // Ưu tiên hiển thị Tên ngân hàng (MB Bank) thay vì mã BIN
             document.getElementById('bankNameDisplay').innerText = dynamicBankConfig.BANK_NAME || dynamicBankConfig.BANK_ID;
             document.getElementById('accountNoDisplay').innerText = dynamicBankConfig.ACCOUNT_NO;
             document.getElementById('transferContentDisplay').innerText = content;
+            document.getElementById('accountNameDisplay').innerText = dynamicBankConfig.ACCOUNT_NAME;
             
-            // 4. TẠO URL QR CODE VIETQR (FIX QUAN TRỌNG)
+            // 5. TẠO URL QR CODE VIETQR CHUẨN
             // Cấu trúc: https://img.vietqr.io/image/<BANK_ID>-<ACCOUNT_NO>-<TEMPLATE>.png?amount=<AMOUNT>&addInfo=<CONTENT>&accountName=<NAME>
             
-            const bankId = dynamicBankConfig.BANK_ID;       // Mã BIN (VD: 970422)
+            const bankBin = dynamicBankConfig.BANK_ID;      // Dùng Mã BIN (VD: 970423)
             const accNo = dynamicBankConfig.ACCOUNT_NO;     // Số TK
-            const template = dynamicBankConfig.TEMPLATE;    // Template (compact2)
+            const template = dynamicBankConfig.TEMPLATE || 'compact2';
             const amount = rawPrice;                        // Số tiền (Integer)
-            const addInfo = encodeURIComponent(content);    // Nội dung (URL Encoded)
-            const accName = encodeURIComponent(dynamicBankConfig.ACCOUNT_NAME); // Tên chủ TK (URL Encoded)
-
-            const qrUrl = `https://img.vietqr.io/image/${bankId}-${accNo}-${template}.png?amount=${amount}&addInfo=${addInfo}&accountName=${accName}`;
             
-            // Debug link để kiểm tra
-            console.log("Generated QR Link:", qrUrl);
+            // Encode URI Component để tránh lỗi ký tự tiếng Việt hoặc khoảng trắng
+            const addInfo = encodeURIComponent(content);
+            const accName = encodeURIComponent(dynamicBankConfig.ACCOUNT_NAME);
+
+            const qrUrl = `https://img.vietqr.io/image/${bankBin}-${accNo}-${template}.png?amount=${amount}&addInfo=${addInfo}&accountName=${accName}`;
+            
+            // Debug link vào Console để kiểm tra nếu lỗi
+            console.log("🔥 Generated QR Link:", qrUrl);
 
             const qrImg = document.getElementById('vietQrImage');
+            
+            // Xử lý khi ảnh tải xong hoặc lỗi
             qrImg.onload = () => document.getElementById('qrLoading').classList.add('hidden');
             qrImg.onerror = () => {
-                document.getElementById('qrLoading').innerHTML = '<span class="text-red-500 font-bold">Lỗi tạo mã QR</span>';
+                document.getElementById('qrLoading').innerHTML = '<span class="text-red-500 font-bold text-xs">Lỗi tạo QR.<br>Kiểm tra lại cấu hình Bank.</span>';
+                console.error("❌ Lỗi tải ảnh QR. Link:", qrUrl);
             };
             qrImg.src = qrUrl;
         }
-    } catch(e){ console.error(e); }
+    } catch(e){ 
+        console.error(e); 
+        alert("Có lỗi xảy ra: " + e.message);
+    }
 };
 
         window.confirmPayment = async () => {
