@@ -557,310 +557,170 @@
         
         // --- 8. PAYMENT LOGIC (CHUYÊN NGHIỆP & FIX LỖI QR) ---
         // Thiết kế mới: 2 cột, rộng rãi
-        // [FILE: student.html] - Tìm và thay thế biến paymentModalHTML
-
-const paymentModalHTML = `
-    <div id="paymentModal" class="modal opacity-0 pointer-events-none fixed inset-0 z-[100] bg-gray-900/80 backdrop-blur-sm flex items-center justify-center p-4 transition-all duration-300">
-        <div class="bg-white w-full max-w-5xl rounded-3xl shadow-2xl overflow-hidden flex flex-col md:flex-row max-h-[90vh]">
-            
-            <div class="w-full md:w-5/12 bg-gray-50 p-8 border-r border-gray-200 flex flex-col overflow-y-auto">
-                <h3 class="font-black text-gray-800 text-xl mb-6 uppercase tracking-wider flex items-center gap-2">
-                    <i class="fa-solid fa-receipt text-brand"></i> Chi tiết đơn hàng
-                </h3>
-                
-                <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 mb-4">
-                    <div class="flex items-start gap-4 mb-4">
-                        <div class="w-16 h-16 bg-gray-100 rounded-lg shrink-0 overflow-hidden">
-                            <img id="payCourseImg" class="w-full h-full object-cover">
-                        </div>
-                        <div>
-                            <span class="text-[10px] font-bold bg-teal-100 text-teal-700 px-2 py-0.5 rounded uppercase">Khóa học</span>
-                            <h4 id="payCourseTitle" class="font-bold text-gray-800 line-clamp-2 mt-1">...</h4>
-                        </div>
-                    </div>
-                    
-                    <div class="space-y-2 text-xs text-gray-500 border-t border-dashed border-gray-200 pt-3">
-                        <div class="flex justify-between"><span>Mã đơn:</span> <span id="payOrderId" class="font-mono font-bold text-gray-700">...</span></div>
-                        <div class="flex justify-between"><span>Ngày tạo:</span> <span id="payDate" class="font-bold text-gray-700">...</span></div>
-                        <div class="flex justify-between"><span>Thời hạn:</span> <span class="font-bold text-blue-600">Vĩnh viễn</span></div>
-                    </div>
-                </div>
-
-                <div class="space-y-3 text-sm text-gray-600 mb-6">
-                    <div class="flex justify-between p-3 bg-white rounded-lg border border-gray-200">
-                        <span>Khách hàng</span>
-                        <span id="payUserName" class="font-bold">...</span>
-                    </div>
-                </div>
-
-                <div class="mt-auto">
-                    <label class="block text-xs font-bold text-gray-500 uppercase mb-2">Mã giảm giá</label>
-                    <div class="flex gap-2 mb-4">
-                        <input type="text" id="voucherInput" placeholder="Nhập mã (VD: GIAM10)" class="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:border-teal-500 outline-none uppercase font-bold text-gray-700">
-                        <button onclick="applyVoucher()" class="px-4 py-2 bg-gray-800 text-white text-xs font-bold rounded-lg hover:bg-gray-700 transition-colors">Áp dụng</button>
-                    </div>
-                    <div id="voucherMessage" class="hidden mb-2 text-xs font-bold"></div>
-
-                    <div class="flex justify-between items-center text-sm text-gray-500 mb-1">
-                        <span>Tạm tính:</span>
-                        <span id="payOriginalPrice">0đ</span>
-                    </div>
-                    <div class="flex justify-between items-center text-sm text-green-600 mb-3 font-bold">
-                        <span>Giảm giá:</span>
-                        <span id="payDiscountAmount">-0đ</span>
-                    </div>
-                    <div class="border-t border-gray-200 pt-3 flex justify-between items-center">
-                        <span class="font-bold text-gray-800">TỔNG THANH TOÁN</span>
-                        <span id="payFinalPrice" class="text-2xl font-black text-orange-600">0đ</span>
-                    </div>
-                </div>
-            </div>
-
-            <div class="w-full md:w-7/12 p-8 relative flex flex-col items-center bg-white justify-center text-center">
-                <button onclick="document.getElementById('paymentModal').classList.add('opacity-0', 'pointer-events-none')" class="absolute top-4 right-4 w-10 h-10 rounded-full bg-gray-100 hover:bg-red-50 text-gray-400 hover:text-red-500 flex items-center justify-center transition-colors"><i class="fa-solid fa-xmark text-xl"></i></button>
-                
-                <div id="preQrState" class="flex flex-col items-center justify-center w-full h-full">
-                    <div class="w-20 h-20 bg-teal-50 rounded-full flex items-center justify-center mb-4 animate-bounce">
-                        <i class="fa-solid fa-qrcode text-4xl text-teal-600"></i>
-                    </div>
-                    <h3 class="font-bold text-xl text-gray-800 mb-2">Sẵn sàng thanh toán?</h3>
-                    <p class="text-gray-500 text-sm mb-6 max-w-xs">Vui lòng kiểm tra kỹ thông tin đơn hàng và mã giảm giá trước khi tạo mã QR.</p>
-                    <button onclick="generatePaymentQR()" class="px-8 py-3 bg-gradient-to-r from-teal-600 to-teal-500 text-white font-bold rounded-xl shadow-lg hover:shadow-teal-200 hover:-translate-y-0.5 transition-all flex items-center gap-2">
-                        Tạo mã QR thanh toán <i class="fa-solid fa-arrow-right"></i>
-                    </button>
-                </div>
-
-                <div id="qrState" class="hidden w-full flex-col items-center">
-                    <div class="text-center mb-4">
-                        <h3 class="font-black text-2xl text-teal-700 mb-1">Quét mã VietQR</h3>
-                        <p class="text-gray-500 text-sm">Sử dụng App ngân hàng để quét</p>
-                    </div>
-
-                    <div class="relative w-64 h-64 bg-white p-2 rounded-xl shadow-xl border-4 border-teal-50 mb-4 group mx-auto">
-                        <img id="vietQrImage" class="w-full h-full object-contain rounded-lg">
-                        <div id="qrLoading" class="absolute inset-0 bg-white flex flex-col items-center justify-center rounded-lg z-10"><i class="fa-solid fa-circle-notch fa-spin text-4xl text-teal-500 mb-3"></i><span class="text-xs font-bold text-teal-600 animate-pulse">Đang tạo mã QR...</span></div>
-                    </div>
-
-                    <div class="w-full max-w-sm bg-blue-50/50 p-3 rounded-xl border border-blue-100 text-sm space-y-2 mb-4 mx-auto text-left">
-                        <div class="flex justify-between"><span class="text-gray-500">Ngân hàng</span><b class="text-blue-700" id="bankNameDisplay">...</b></div>
-                        <div class="flex justify-between"><span class="text-gray-500">Số tài khoản</span><b class="text-blue-700 font-mono" id="accountNoDisplay">...</b></div>
-                        <div class="flex justify-between items-center pt-2 border-t border-blue-200/50">
-                            <span class="text-gray-500">Nội dung</span>
-                            <div class="flex items-center gap-2">
-                                <b class="text-orange-600 font-mono text-xs" id="transferContentDisplay">...</b>
-                                <button onclick="copyContent()" class="text-gray-400 hover:text-blue-600"><i class="fa-regular fa-copy"></i></button>
+        const paymentModalHTML = `
+            <div id="paymentModal" class="modal opacity-0 pointer-events-none fixed inset-0 z-[100] bg-gray-900/80 backdrop-blur-sm flex items-center justify-center p-4 transition-all duration-300">
+                <div class="bg-white w-full max-w-5xl rounded-3xl shadow-2xl overflow-hidden flex flex-col md:flex-row max-h-[90vh]">
+                    <div class="w-full md:w-5/12 bg-gray-50 p-8 border-r border-gray-200 flex flex-col">
+                        <h3 class="font-black text-gray-800 text-xl mb-6 uppercase tracking-wider flex items-center gap-2"><i class="fa-solid fa-receipt text-brand"></i> Chi tiết đơn hàng</h3>
+                        
+                        <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 mb-6">
+                            <div class="flex items-start gap-4 mb-4">
+                                <div class="w-16 h-16 bg-gray-100 rounded-lg shrink-0 overflow-hidden"><img id="payCourseImg" class="w-full h-full object-cover"></div>
+                                <div>
+                                    <span class="text-[10px] font-bold bg-teal-100 text-teal-700 px-2 py-0.5 rounded uppercase">Khóa học</span>
+                                    <h4 id="payCourseTitle" class="font-bold text-gray-800 line-clamp-2 mt-1">...</h4>
+                                </div>
+                            </div>
+                            <div class="border-t border-dashed border-gray-200 my-3"></div>
+                            <div class="flex justify-between items-center text-lg font-black text-orange-600">
+                                <span>Tổng thanh toán</span>
+                                <span id="payFinalPrice">...</span>
                             </div>
                         </div>
+
+                        <div class="space-y-3 text-sm text-gray-600">
+                            <div class="flex justify-between p-3 bg-white rounded-lg border border-gray-200"><span>Khách hàng</span><span id="payUserName" class="font-bold">...</span></div>
+                        </div>
                     </div>
 
-                    <button onclick="confirmPayment()" class="w-full max-w-sm py-3 bg-blue-600 text-white font-bold rounded-xl shadow-lg hover:bg-blue-700 transition-all flex items-center justify-center gap-2">
-                        <i class="fa-solid fa-check-circle"></i> XÁC NHẬN ĐÃ CHUYỂN KHOẢN
-                    </button>
-                    
-                    <button onclick="resetQrState()" class="mt-3 text-xs text-gray-400 font-bold hover:text-teal-600 underline">Quay lại sửa thông tin</button>
+                    <div class="w-full md:w-7/12 p-8 relative flex flex-col items-center bg-white justify-center">
+                        <button onclick="document.getElementById('paymentModal').classList.add('opacity-0', 'pointer-events-none')" class="absolute top-4 right-4 w-10 h-10 rounded-full bg-gray-100 hover:bg-red-50 text-gray-400 hover:text-red-500 flex items-center justify-center transition-colors"><i class="fa-solid fa-xmark text-xl"></i></button>
+                        
+                        <div class="text-center mb-6">
+                            <h3 class="font-black text-2xl text-teal-700 mb-1">Quét mã VietQR</h3>
+                            <p class="text-gray-500 text-sm">Tự động điền thông tin chuyển khoản</p>
+                        </div>
+
+                        <div class="relative w-72 h-72 bg-white p-4 rounded-3xl shadow-xl border-4 border-teal-50 mb-6 group">
+                            <img id="vietQrImage" class="w-full h-full object-contain rounded-xl">
+                            <div id="qrLoading" class="absolute inset-0 bg-white flex flex-col items-center justify-center rounded-xl z-10"><i class="fa-solid fa-circle-notch fa-spin text-4xl text-teal-500 mb-3"></i><span class="text-xs font-bold text-teal-600 animate-pulse">Đang tạo mã QR...</span></div>
+                        </div>
+
+                        <div class="w-full max-w-sm bg-blue-50/50 p-4 rounded-xl border border-blue-100 text-sm space-y-2 mb-6">
+                            <div class="flex justify-between">
+                                <span class="text-gray-500">Ngân hàng</span>
+                                <b class="text-blue-700" id="bankNameDisplay">...</b>
+                            </div>
+                            <div class="flex justify-between items-center">
+                                <span class="text-gray-500">Số tài khoản</span>
+                                <b class="text-blue-700 font-mono text-lg" id="accountNoDisplay">...</b>
+                            </div>
+                            <div class="flex justify-between items-center pt-2 border-t border-blue-200/50">
+                                <span class="text-gray-500">Nội dung</span>
+                                <b class="text-orange-600 font-mono" id="transferContentDisplay">...</b>
+                            </div>
+                        </div>
+
+                        <button onclick="confirmPayment()" class="w-full max-w-sm py-4 bg-gradient-to-r from-teal-600 to-teal-500 text-white font-bold rounded-xl shadow-lg hover:shadow-teal-200 hover:-translate-y-0.5 transition-all text-base flex items-center justify-center gap-2">
+                            <i class="fa-solid fa-check-circle text-lg"></i> XÁC NHẬN ĐÃ CHUYỂN KHOẢN
+                        </button>
+                    </div>
                 </div>
             </div>
-        </div>
-    </div>
-`;
-document.getElementById('paymentModalContainer').innerHTML = paymentModalHTML;
-        
+        `;
+        document.getElementById('paymentModalContainer').innerHTML = paymentModalHTML;
 
-     // --- [BẮT ĐẦU DÁN MÃ MỚI TỪ ĐÂY] ---
+        let currentPayingCourse = null;
+        let dynamicBankConfig = null;
 
-// 1. Dữ liệu Voucher giả lập (Sau này có thể tải từ Firebase)
-const VOUCHERS = {
-    'CHAO2025': { type: 'percent', value: 10 }, // Giảm 10%
-    'HOCGIOI': { type: 'fixed', value: 50000 },  // Giảm 50k
-    'FREE': { type: 'percent', value: 100 }      // Miễn phí
-};
+        // --- [STUDENT] CẬP NHẬT LOGIC TẠO MÃ QR THANH TOÁN ---
 
-let currentPayingCourse = null;
-let currentFinalPrice = 0; // Giá sau khi giảm (dùng để thanh toán)
-let currentVoucherCode = null; // Lưu mã voucher đã dùng
-let dynamicBankConfig = null;
+// [FILE: student.html] - Thay thế toàn bộ hàm openPaymentModal cũ
 
-// Hàm mở Modal (Bước 1: Review thông tin)
 window.openPaymentModal = async (courseId) => {
-    if (!auth.currentUser) { alert("Vui lòng đăng nhập!"); return; }
+    // 1. Kiểm tra đăng nhập
+    if (!auth.currentUser) {
+        alert("Vui lòng đăng nhập để thực hiện chức năng này!");
+        return;
+    }
 
-    // Tải config ngân hàng
+    // 2. Tải cấu hình ngân hàng
     if (!dynamicBankConfig) {
         try {
             const s = await getDoc(doc(db, "site_settings", "payment_config"));
-            dynamicBankConfig = s.exists() ? s.data() : { BANK_ID: "970422", BANK_NAME: "MB Bank", ACCOUNT_NO: "0000", ACCOUNT_NAME: "ADMIN" };
+            if (s.exists()) dynamicBankConfig = s.data();
+            else dynamicBankConfig = { BANK_ID: "970422", BANK_NAME: "MB Bank", ACCOUNT_NO: "0000", ACCOUNT_NAME: "ADMIN", TEMPLATE: "compact2" };
         } catch (e) { console.error(e); }
     }
 
-    // Reset giao diện về bước 1
-    document.getElementById('preQrState').classList.remove('hidden');
-    document.getElementById('qrState').classList.add('hidden');
+    // Hiển thị modal & loading
     document.getElementById('paymentModal').classList.remove('opacity-0', 'pointer-events-none');
-    
-    // Reset Form Voucher
-    document.getElementById('voucherInput').value = '';
-    document.getElementById('voucherMessage').classList.add('hidden');
-    document.getElementById('voucherInput').disabled = false;
-    currentVoucherCode = null;
+    const loadingEl = document.getElementById('qrLoading');
+    if(loadingEl) loadingEl.classList.remove('hidden');
 
     try {
         const snap = await getDoc(doc(db, "public_courses", courseId));
         if(snap.exists()){
             const c = snap.data();
-            currentPayingCourse = { id: snap.id, ...c };
+            // Lấy ID từ snap.id (SỬA LỖI SUBSTRING TẠI ĐÂY)
+            const courseRealId = snap.id; 
+            currentPayingCourse = { id: courseRealId, ...c };
+            
             const user = auth.currentUser;
-
-            // Điền thông tin khóa học
+            
+            // --- ĐIỀN THÔNG TIN LÊN GIAO DIỆN ---
             document.getElementById('payCourseTitle').innerText = c.title;
             const imgEl = document.getElementById('payCourseImg');
             if(imgEl) imgEl.src = c.thumbnail || 'https://via.placeholder.com/150';
             
-            // Xử lý giá tiền gốc
+            // Xử lý giá tiền: Loại bỏ dấu chấm/phẩy, chỉ lấy số
+            // Ví dụ: "399.000" -> 399000
             let rawPrice = c.price; 
-            if (typeof rawPrice === 'string') rawPrice = parseInt(rawPrice.replace(/\D/g, '')) || 0;
-            currentFinalPrice = rawPrice; // Mặc định giá cuối = giá gốc
-
-            document.getElementById('payOriginalPrice').innerText = rawPrice.toLocaleString('vi-VN') + 'đ';
-            document.getElementById('payDiscountAmount').innerText = '-0đ';
-            document.getElementById('payFinalPrice').innerText = rawPrice.toLocaleString('vi-VN') + 'đ';
+            let numericPrice = 0;
+            if (rawPrice) {
+                numericPrice = parseInt(String(rawPrice).replace(/\D/g, '')) || 0;
+            }
             
-            // Điền thông tin bổ sung
+            document.getElementById('payFinalPrice').innerText = numericPrice.toLocaleString('vi-VN') + 'đ';
             document.getElementById('payUserName').innerText = user.displayName || user.email;
-            document.getElementById('payDate').innerText = new Date().toLocaleDateString('vi-VN');
-            // Tạo mã đơn hàng tạm thời (để hiển thị)
-            document.getElementById('payOrderId').innerText = `#${Date.now().toString().slice(-6)}`; 
+
+            // --- TẠO NỘI DUNG CHUYỂN KHOẢN ---
+            // Cú pháp: TTOAN [UID_5_so] [COURSE_ID_5_so]
+            // Loại bỏ ký tự đặc biệt để đảm bảo URL an toàn
+            const cleanUid = user.uid.substring(0,5).replace(/[^a-zA-Z0-9]/g, "");
+            const cleanCourseId = courseRealId.substring(0,5).toUpperCase().replace(/[^a-zA-Z0-9]/g, "");
+            const content = `TTOAN ${cleanUid} ${cleanCourseId}`;
+            
+            // Hiển thị thông tin ngân hàng
+            document.getElementById('bankNameDisplay').innerText = dynamicBankConfig.BANK_NAME || dynamicBankConfig.BANK_ID;
+            document.getElementById('accountNoDisplay').innerText = dynamicBankConfig.ACCOUNT_NO;
+            document.getElementById('transferContentDisplay').innerText = content;
+            if(document.getElementById('accountNameDisplay')) 
+                document.getElementById('accountNameDisplay').innerText = dynamicBankConfig.ACCOUNT_NAME;
+            
+            // --- TẠO LINK VIETQR CHUẨN ---
+            // Format: https://img.vietqr.io/image/<BANK_ID>-<ACCOUNT_NO>-<TEMPLATE>.png
+            
+            const bankBin = dynamicBankConfig.BANK_ID;      // Mã BIN (VD: 970423)
+            const accNo = dynamicBankConfig.ACCOUNT_NO;     
+            const template = dynamicBankConfig.TEMPLATE || 'compact2';
+            
+            // Encode các tham số để tránh lỗi ký tự đặc biệt
+            const addInfo = encodeURIComponent(content);
+            const accName = encodeURIComponent(dynamicBankConfig.ACCOUNT_NAME);
+
+            // Link cuối cùng
+            const qrUrl = `https://img.vietqr.io/image/${bankBin}-${accNo}-${template}.png?amount=${numericPrice}&addInfo=${addInfo}&accountName=${accName}`;
+            
+            console.log("🔥 QR Link được tạo:", qrUrl); // Kiểm tra link này trong Console nếu lỗi
+
+            const qrImg = document.getElementById('vietQrImage');
+            
+            qrImg.onload = () => {
+                if(loadingEl) loadingEl.classList.add('hidden');
+            };
+            
+            qrImg.onerror = () => {
+                if(loadingEl) loadingEl.innerHTML = '<span class="text-red-500 font-bold text-xs">Lỗi tải ảnh QR.<br>Kiểm tra mã Ngân hàng.</span>';
+                console.error("Lỗi tải ảnh từ link:", qrUrl);
+            };
+            
+            qrImg.src = qrUrl;
         }
-    } catch(e){ console.error(e); alert("Lỗi tải dữ liệu: " + e.message); }
-};
-
-// Hàm xử lý Voucher
-window.applyVoucher = () => {
-    const code = document.getElementById('voucherInput').value.trim().toUpperCase();
-    const msgEl = document.getElementById('voucherMessage');
-    
-    if (!VOUCHERS[code]) {
-        msgEl.textContent = "Mã giảm giá không hợp lệ!";
-        msgEl.className = "mb-2 text-xs font-bold text-red-500 block";
-        return;
+    } catch(e){ 
+        console.error(e); 
+        alert("Có lỗi xảy ra: " + e.message);
     }
-
-    const voucher = VOUCHERS[code];
-    let originalPrice = 0;
-    if (currentPayingCourse) {
-        let raw = currentPayingCourse.price;
-        if (typeof raw === 'string') raw = parseInt(raw.replace(/\D/g, '')) || 0;
-        originalPrice = raw;
-    }
-
-    let discountAmount = 0;
-    if (voucher.type === 'percent') {
-        discountAmount = (originalPrice * voucher.value) / 100;
-    } else {
-        discountAmount = voucher.value;
-    }
-
-    // Đảm bảo không giảm quá giá gốc
-    if (discountAmount > originalPrice) discountAmount = originalPrice;
-    
-    currentFinalPrice = originalPrice - discountAmount;
-    currentVoucherCode = code; // Lưu lại mã đã dùng
-
-    // Cập nhật UI
-    document.getElementById('payDiscountAmount').innerText = `-${discountAmount.toLocaleString('vi-VN')}đ`;
-    document.getElementById('payFinalPrice').innerText = currentFinalPrice.toLocaleString('vi-VN') + 'đ';
-    
-    msgEl.textContent = `Áp dụng mã ${code} thành công!`;
-    msgEl.className = "mb-2 text-xs font-bold text-green-600 block";
-    document.getElementById('voucherInput').disabled = true; // Khóa không cho nhập lại
-};
-
-// Hàm tạo QR (Bước 2)
-window.generatePaymentQR = () => {
-    // Chuyển giao diện sang màn hình QR
-    document.getElementById('preQrState').classList.add('hidden');
-    document.getElementById('qrState').classList.remove('hidden');
-    document.getElementById('qrState').classList.add('flex');
-    document.getElementById('qrLoading').classList.remove('hidden');
-
-    const user = auth.currentUser;
-    const c = currentPayingCourse;
-
-    // Tạo nội dung chuyển khoản
-    const cleanUid = user.uid.substring(0,5).replace(/[^a-zA-Z0-9]/g, "");
-    const cleanCourseId = c.id.substring(0,5).toUpperCase().replace(/[^a-zA-Z0-9]/g, "");
-    const content = `TTOAN ${cleanUid} ${cleanCourseId}`;
-
-    // Hiển thị thông tin chuyển khoản bằng chữ
-    document.getElementById('bankNameDisplay').innerText = dynamicBankConfig.BANK_NAME || dynamicBankConfig.BANK_ID;
-    document.getElementById('accountNoDisplay').innerText = dynamicBankConfig.ACCOUNT_NO;
-    document.getElementById('transferContentDisplay').innerText = content;
-
-    // Tạo Link VietQR với giá ĐÃ GIẢM (currentFinalPrice)
-    const bankBin = dynamicBankConfig.BANK_ID;
-    const accNo = dynamicBankConfig.ACCOUNT_NO;
-    const template = dynamicBankConfig.TEMPLATE || 'compact2';
-    const amount = currentFinalPrice; // Dùng giá cuối cùng
-    const addInfo = encodeURIComponent(content);
-    const accName = encodeURIComponent(dynamicBankConfig.ACCOUNT_NAME);
-
-    const qrUrl = `https://img.vietqr.io/image/${bankBin}-${accNo}-${template}.png?amount=${amount}&addInfo=${addInfo}&accountName=${accName}`;
-    
-    console.log("QR Link:", qrUrl);
-
-    const qrImg = document.getElementById('vietQrImage');
-    qrImg.onload = () => document.getElementById('qrLoading').classList.add('hidden');
-    qrImg.onerror = () => document.getElementById('qrLoading').innerHTML = '<span class="text-red-500 text-xs">Lỗi QR</span>';
-    qrImg.src = qrUrl;
-};
-
-// Hàm xác nhận đã chuyển khoản (Lưu vào CSDL)
-window.confirmPayment = async () => {
-    if(!currentPayingCourse) return;
-    
-    // Tìm nút trong modal (nút xác nhận ở màn hình QR)
-    const btn = document.querySelector('#qrState button[onclick="confirmPayment()"]');
-    const originText = btn.innerHTML;
-    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang xử lý...'; 
-    btn.disabled = true;
-
-    try {
-        await addDoc(collection(db, "orders"), {
-            userId: auth.currentUser.uid,
-            userName: auth.currentUser.displayName, // Lưu thêm tên để dễ đối soát
-            courseId: currentPayingCourse.id,
-            courseTitle: currentPayingCourse.title,
-            amount: currentFinalPrice, // Lưu giá thực tế phải trả
-            originalAmount: parseInt(currentPayingCourse.price) || 0, // Lưu giá gốc để tham chiếu
-            voucher: currentVoucherCode || null, // Lưu mã giảm giá nếu có
-            status: 'pending',
-            content: document.getElementById('transferContentDisplay').innerText,
-            createdAt: new Date().toISOString()
-        });
-        
-        // Đóng modal và thông báo
-        document.getElementById('paymentModal').classList.add('opacity-0', 'pointer-events-none');
-        window.showNotification("Gửi xác nhận thành công! Khóa học sẽ được kích hoạt sau 5-10 phút.", "success");
-    } catch(e) { 
-        window.showNotification("Lỗi: " + e.message, "error");
-    } finally { 
-        btn.innerHTML = originText; 
-        btn.disabled = false; 
-    }
-};
-
-// Hàm quay lại sửa thông tin (nếu muốn nhập voucher khác)
-window.resetQrState = () => {
-    document.getElementById('preQrState').classList.remove('hidden');
-    document.getElementById('qrState').classList.add('hidden');
-    document.getElementById('qrState').classList.remove('flex');
-};
-
-// Hàm copy nội dung chuyển khoản
-window.copyContent = () => {
-    const txt = document.getElementById('transferContentDisplay').innerText;
-    navigator.clipboard.writeText(txt);
-    window.showNotification("Đã sao chép nội dung chuyển khoản!", "success");
-}
 };
 
         window.confirmPayment = async () => {
@@ -881,69 +741,6 @@ window.copyContent = () => {
              } catch(e) { window.showNotification("Lỗi: " + e.message, "error"); }
              finally { btn.innerHTML = '<i class="fa-solid fa-check-circle text-lg"></i> XÁC NHẬN ĐÃ CHUYỂN KHOẢN'; btn.disabled = false; }
         };
-        // --- LOGIC THANH TOÁN MỚI (CÓ VOUCHER & FLOW TỪNG BƯỚC) ---
-
-// 1. Dữ liệu Voucher giả lập (Bạn có thể đưa lên Firebase sau)
-const VOUCHERS = {
-    'CHAO2025': { type: 'percent', value: 10 }, // Giảm 10%
-    'HOCGIOI': { type: 'fixed', value: 50000 },  // Giảm 50k
-    'FREE': { type: 'percent', value: 100 }      // Miễn phí
-};
-
-let currentPayingCourse = null;
-let currentFinalPrice = 0; // Giá sau khi giảm
-let dynamicBankConfig = null;
-
-// Hàm mở Modal (Bước 1: Review)
-window.openPaymentModal = async (courseId) => {
-    if (!auth.currentUser) { alert("Vui lòng đăng nhập!"); return; }
-
-    // Tải config ngân hàng
-    if (!dynamicBankConfig) {
-        try {
-            const s = await getDoc(doc(db, "site_settings", "payment_config"));
-            dynamicBankConfig = s.exists() ? s.data() : { BANK_ID: "970422", BANK_NAME: "MB Bank", ACCOUNT_NO: "0000", ACCOUNT_NAME: "ADMIN" };
-        } catch (e) { console.error(e); }
-    }
-
-    // Reset giao diện về bước 1
-    document.getElementById('preQrState').classList.remove('hidden');
-    document.getElementById('qrState').classList.add('hidden');
-    document.getElementById('paymentModal').classList.remove('opacity-0', 'pointer-events-none');
-    
-    // Reset Voucher
-    document.getElementById('voucherInput').value = '';
-    document.getElementById('voucherMessage').classList.add('hidden');
-    document.getElementById('voucherInput').disabled = false;
-
-    try {
-        const snap = await getDoc(doc(db, "public_courses", courseId));
-        if(snap.exists()){
-            const c = snap.data();
-            currentPayingCourse = { id: snap.id, ...c };
-            const user = auth.currentUser;
-
-            // Điền thông tin
-            document.getElementById('payCourseTitle').innerText = c.title;
-            const imgEl = document.getElementById('payCourseImg');
-            if(imgEl) imgEl.src = c.thumbnail || 'https://via.placeholder.com/150';
-            
-            // Xử lý giá tiền gốc
-            let rawPrice = c.price; 
-            if (typeof rawPrice === 'string') rawPrice = parseInt(rawPrice.replace(/\D/g, '')) || 0;
-            currentFinalPrice = rawPrice; // Mặc định giá cuối = giá gốc
-
-            document.getElementById('payOriginalPrice').innerText = rawPrice.toLocaleString('vi-VN') + 'đ';
-            document.getElementById('payDiscountAmount').innerText = '-0đ';
-            document.getElementById('payFinalPrice').innerText = rawPrice.toLocaleString('vi-VN') + 'đ';
-            
-            // Điền thông tin bổ sung
-            document.getElementById('payUserName').innerText = user.displayName;
-            document.getElementById('payDate').innerText = new Date().toLocaleDateString('vi-VN');
-            document.getElementById('payOrderId').innerText = `#${Date.now().toString().slice(-6)}`; // Mã đơn tạm
-        }
-    } catch(e){ console.error(e); alert("Lỗi tải dữ liệu: " + e.message); }
-};
     </script>
 </body>
 </html>
