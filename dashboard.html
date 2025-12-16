@@ -265,8 +265,25 @@
                     </button>
                 </div>
             </div>
-            <div class="flex-1 overflow-y-auto p-6 bg-gray-50">
-                <div id="adminCourseList" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"></div>
+            <div class="flex-1 overflow-y-auto p-4 md:p-6 bg-gray-50">
+                <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left border-collapse">
+                            <thead class="bg-gray-50 text-gray-500 text-xs uppercase font-bold sticky top-0 z-10">
+                                <tr>
+                                    <th class="p-4 whitespace-nowrap">Khóa học</th>
+                                    <th class="p-4 whitespace-nowrap hidden md:table-cell">Học phí</th>
+                                    <th class="p-4 whitespace-nowrap hidden lg:table-cell">Học sinh</th>
+                                    <th class="p-4 whitespace-nowrap text-right">Hành động</th>
+                                </tr>
+                            </thead>
+                            <tbody id="adminCourseList" class="divide-y divide-gray-100 text-sm"></tbody>
+                        </table>
+                    </div>
+                    <div id="emptyCourseMsg" class="hidden p-8 text-center text-gray-400">
+                        <p>Chưa có khóa học nào.</p>
+                    </div>
+                </div>
             </div>
         </div>
     </main>
@@ -1318,38 +1335,79 @@
         };
 
         window.loadAdminCourses = async () => {
-            const container = document.getElementById('adminCourseList');
-            if(!container) return;
-            container.innerHTML = '<p class="text-gray-400">Đang tải...</p>';
+            const tbody = document.getElementById('adminCourseList');
+            if(!tbody) return;
+            
+            // Hiệu ứng Loading dạng bảng
+            tbody.innerHTML = '<tr><td colspan="4" class="p-4 text-center text-gray-400 italic">Đang tải dữ liệu...</td></tr>';
+
             try {
                 const q = query(collection(db, "public_courses")); 
                 const snap = await getDocs(q);
-                container.innerHTML = '';
+                
+                if(snap.empty) {
+                    tbody.innerHTML = '';
+                    document.getElementById('emptyCourseMsg')?.classList.remove('hidden');
+                    return;
+                }
+                
+                document.getElementById('emptyCourseMsg')?.classList.add('hidden');
+                let html = '';
                 
                 snap.forEach(docSnap => {
                     const c = docSnap.data();
-                    const div = document.createElement('div');
-                    div.className = "bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm hover:shadow-md transition-all group";
-                    div.innerHTML = `
-                        <div class="h-40 bg-gray-100 relative overflow-hidden">
-                            <img src="${c.thumbnail || 'https://via.placeholder.com/400x200'}" class="w-full h-full object-cover">
-                            <span class="absolute top-2 right-2 bg-black/50 text-white text-xs px-2 py-1 rounded backdrop-blur-sm">${c.tag}</span>
-                        </div>
-                        <div class="p-4">
-                            <h4 class="font-bold text-gray-800 text-lg mb-1 line-clamp-1">${c.title}</h4>
-                            <div class="flex justify-between items-center text-sm text-gray-500 mb-3">
-                                <span>${c.price ? parseInt(c.price).toLocaleString()+'đ' : 'Miễn phí'}</span>
-                                <span><i class="fa-solid fa-users"></i> ${c.students}</span>
+                    const priceVal = parseInt(c.price || 0);
+                    const priceText = priceVal === 0 ? "Miễn phí" : priceVal.toLocaleString('vi-VN') + 'đ';
+                    const priceClass = priceVal === 0 ? "text-green-600" : "text-gray-700";
+
+                    html += `
+                    <tr class="hover:bg-gray-50 group transition-colors border-b border-gray-100 last:border-0">
+                        <td class="p-3 md:p-4">
+                            <div class="flex items-center gap-3">
+                                <img src="${c.thumbnail || 'https://via.placeholder.com/100'}" class="w-10 h-10 md:w-12 md:h-12 rounded-lg object-cover border border-gray-200 shrink-0">
+                                <div class="min-w-0 max-w-[150px] md:max-w-xs">
+                                    <div class="font-bold text-gray-800 text-sm md:text-base truncate" title="${c.title}">${c.title}</div>
+                                    <div class="text-xs font-bold text-orange-600 md:hidden mt-0.5">${priceText}</div>
+                                    <div class="text-[10px] md:text-xs text-gray-400 truncate hidden sm:block mt-0.5">${c.desc || '...'}</div>
+                                </div>
                             </div>
-                            <div class="flex gap-2">
-                                <button onclick="window.editCourse('${docSnap.id}')" class="flex-1 py-2 bg-blue-50 text-blue-600 rounded font-bold hover:bg-blue-100">Sửa</button>
-                                <button onclick="window.deleteCourse('${docSnap.id}')" class="flex-1 py-2 bg-red-50 text-red-600 rounded font-bold hover:bg-red-100">Xóa</button>
+                        </td>
+
+                        <td class="p-4 font-mono text-sm font-bold ${priceClass} hidden md:table-cell">${priceText}</td>
+
+                        <td class="p-4 text-gray-600 hidden lg:table-cell">
+                            <span class="bg-teal-50 text-teal-700 px-2 py-1 rounded text-xs font-bold border border-teal-100">
+                                <i class="fa-solid fa-users mr-1"></i> ${c.students || 0}
+                            </span>
+                        </td>
+
+                        <td class="p-3 md:p-4 text-right">
+                            <div class="flex justify-end gap-1 md:gap-2">
+                                <button onclick="navigator.clipboard.writeText('${window.location.origin}/student.html?course=${docSnap.id}'); window.showNotification('Đã copy link!', 'success')" 
+                                    class="w-8 h-8 md:w-auto md:px-3 md:py-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 border border-blue-100 rounded-lg text-xs font-bold flex items-center justify-center transition-all" title="Copy Link">
+                                    <i class="fa-regular fa-copy"></i> <span class="hidden md:inline ml-1">Link</span>
+                                </button>
+
+                                <button onclick="window.editCourse('${docSnap.id}')" 
+                                    class="w-8 h-8 md:w-auto md:px-3 md:py-1.5 bg-gray-50 text-gray-600 hover:bg-gray-100 border border-gray-200 rounded-lg text-xs font-bold flex items-center justify-center transition-all" title="Sửa">
+                                    <i class="fa-solid fa-pen"></i> <span class="hidden md:inline ml-1">Sửa</span>
+                                </button>
+
+                                <button onclick="window.deleteCourse('${docSnap.id}')" 
+                                    class="w-8 h-8 md:w-auto md:px-3 md:py-1.5 bg-red-50 text-red-600 hover:bg-red-100 border border-red-100 rounded-lg text-xs font-bold flex items-center justify-center transition-all" title="Xóa">
+                                    <i class="fa-solid fa-trash"></i> <span class="hidden md:inline ml-1">Xóa</span>
+                                </button>
                             </div>
-                        </div>
-                    `;
-                    container.appendChild(div);
+                        </td>
+                    </tr>`;
                 });
-            } catch(e) { console.error(e); }
+                
+                tbody.innerHTML = html;
+
+            } catch(e) { 
+                console.error(e); 
+                tbody.innerHTML = '<tr><td colspan="4" class="p-4 text-center text-red-500">Lỗi tải dữ liệu. Vui lòng thử lại.</td></tr>';
+            }
         };
 
         window.openCourseModal = () => {
