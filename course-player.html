@@ -30,23 +30,25 @@
         ::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 3px; }
         ::-webkit-scrollbar-thumb:hover { background: #94A3B8; }
 
-        /* Sidebar Transition */
+        /* SIDEBAR TRANSITION & WIDTH CONTROL */
         #sidebar {
-            transition: width 0.3s ease, transform 0.3s ease;
+            transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1), transform 0.3s ease;
             flex-shrink: 0;
             white-space: nowrap;
             overflow: hidden;
         }
         
-        /* Desktop States */
-        .desktop-expanded { width: 22rem; } /* Tăng rộng hơn chút cho thoải mái */
-        .desktop-collapsed { width: 0; border: none; }
+        /* Desktop: Class mở rộng - Độ rộng cố định */
+        .desktop-expanded { width: 22rem; } 
+        
+        /* Desktop: Class thu gọn - Về 0 */
+        .desktop-collapsed { width: 0 !important; border: none !important; }
 
         /* Mobile States */
         .mobile-show { transform: translateX(0); }
         .mobile-hide { transform: translateX(-100%); }
 
-        /* Active Lesson */
+        /* Active Item */
         .lesson-item.active { 
             background-color: #F0FDFA; 
             border-left: 4px solid #0F766E;
@@ -61,7 +63,7 @@
     <aside id="sidebar" 
            class="fixed inset-y-0 left-0 z-50 flex flex-col h-full border-r border-gray-200 shadow-xl 
                   transform -translate-x-full transition-all duration-300 w-80
-                  md:relative md:translate-x-0 md:w-80 flex-shrink-0 desktop-expanded"
+                  md:relative md:translate-x-0 desktop-expanded"
            style="background-color: #ffffff;">
         
         <div class="h-20 px-5 flex items-center justify-between border-b border-gray-100 bg-white shrink-0">
@@ -109,7 +111,7 @@
         
         <header class="h-16 bg-dark border-b border-gray-800 flex items-center justify-between px-4 md:px-6 shrink-0 z-30 shadow-lg">
             <div class="flex items-center gap-4 overflow-hidden">
-                <button onclick="toggleSidebar()" class="text-gray-400 hover:text-white p-2 rounded-lg hover:bg-gray-800 transition-colors">
+                <button onclick="toggleSidebar()" class="text-gray-400 hover:text-white p-2 rounded-lg hover:bg-gray-800 transition-colors" title="Đóng/Mở Sidebar">
                     <i class="fa-solid fa-bars text-xl"></i>
                 </button>
                 <div class="w-[1px] h-6 bg-gray-700 hidden md:block"></div>
@@ -149,7 +151,7 @@
         import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
         import { getFirestore, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-        // CONFIG FIREBASE
+        // CẤU HÌNH FIREBASE
         const firebaseConfig = {
             apiKey: "AIzaSyCqAX3x1MbJ3do7m3EaH9JA4kFuVhlAc78",
             authDomain: "lms-thitracnghiem.firebaseapp.com",
@@ -181,7 +183,7 @@
             }
         });
 
-        // 1. TẢI LOGO (SỬA LẠI ĐỂ HIỆN CẢ LOGO VÀ CHỮ)
+        // 1. TẢI LOGO (Logo to + Tên)
         async function loadLogo() {
             try {
                 const docSnap = await getDoc(doc(db, "site_settings", "homepage_hero"));
@@ -189,7 +191,6 @@
                     const imgEl = document.getElementById('brandLogo');
                     imgEl.src = docSnap.data().logo;
                     imgEl.classList.remove('hidden');
-                    // Không ẩn text nữa, để hiện cả 2
                 }
             } catch(e) {}
         }
@@ -208,7 +209,7 @@
             } catch(e) { console.error(e); }
         }
 
-        // 2. RENDER CẤU TRÚC (CẬP NHẬT THU GỌN BÀI HỌC + MÀU ICON)
+        // 2. RENDER CẤU TRÚC (CẬP NHẬT MŨI TÊN THU GỌN Ở BÀI HỌC)
         function renderCurriculum(list) {
             const container = document.getElementById('curriculumList');
             container.innerHTML = '';
@@ -221,7 +222,7 @@
 
             list.forEach((chap, cIdx) => {
                 const chapId = `chap_${cIdx}`;
-                const isOpen = cIdx === 0; // Mặc định mở chương 1
+                const isOpen = cIdx === 0;
                 
                 // --- CHAPTER HEADER ---
                 const chapEl = document.createElement('div');
@@ -237,28 +238,29 @@
 
                 // --- LESSONS ---
                 (chap.lessons || []).forEach((les, lIdx) => {
-                    // Tạo Wrapper cho bài học để có thể thu gọn
                     const lesId = `les_${cIdx}_${lIdx}`;
                     const lesEl = document.createElement('div');
-                    const isLesOpen = true; // Mặc định mở bài học
+                    const isLesOpen = true; // Mặc định mở
 
-                    // Header bài học (Có mũi tên thu gọn)
+                    // Lesson Header (Có mũi tên thu gọn)
                     lesEl.innerHTML = `
                         <div class="flex items-center justify-between px-2 py-1.5 mt-2 cursor-pointer hover:text-brand transition-colors select-none" onclick="window.toggleCollapse('${lesId}', this)">
-                            <div class="text-[11px] font-bold text-gray-500 uppercase tracking-wider truncate pr-2"><i class="fa-solid fa-bookmark mr-1 text-gray-300"></i> ${les.title || 'Bài học'}</div>
+                            <div class="text-[11px] font-bold text-gray-500 uppercase tracking-wider truncate pr-2 flex items-center">
+                                <i class="fa-solid fa-bookmark mr-1.5 text-gray-300"></i> ${les.title || 'Bài học'}
+                            </div>
                             <i class="fa-solid fa-chevron-right text-[10px] text-gray-300 transition-transform duration-300 ${isLesOpen ? 'rotate-90' : ''}"></i>
                         </div>
                         <div id="${lesId}" class="space-y-0.5 ${isLesOpen ? '' : 'hidden'} overflow-hidden transition-all border-l border-gray-100 ml-2 pl-1 mb-2"></div>
                     `;
                     const lesBody = lesEl.querySelector(`#${lesId}`);
 
-                    // --- ITEMS (NỘI DUNG) ---
+                    // --- ITEMS ---
                     (les.items || []).forEach((item) => {
                         flatItems.push(item);
                         const currentIndex = flatItems.length - 1;
 
-                        // Màu sắc Icon
-                        let iconClass = 'fa-circle-play text-red-500'; // Video đỏ
+                        // Màu sắc Icon (Cập nhật theo yêu cầu)
+                        let iconClass = 'fa-circle-play text-red-500'; // Video Đỏ
                         let typeLabel = 'Video';
                         if(item.type === 'pdf') { iconClass = 'fa-file-pdf text-blue-500'; typeLabel = 'Tài liệu'; } // PDF Xanh
                         if(item.type === 'quiz') { iconClass = 'fa-clipboard-question text-orange-500'; typeLabel = 'Bài tập'; } // Quiz Cam
@@ -349,10 +351,12 @@
             icon.classList.toggle('rotate-90');
         };
 
+        // Logic Toggle Sidebar (Đã fix lỗi xung đột)
         window.toggleSidebar = () => {
             const sb = document.getElementById('sidebar');
             const overlay = document.getElementById('mobileOverlay');
             if (window.innerWidth >= 768) {
+                // Desktop Toggle
                 if (sb.classList.contains('desktop-expanded')) {
                     sb.classList.remove('desktop-expanded');
                     sb.classList.add('desktop-collapsed');
@@ -361,6 +365,7 @@
                     sb.classList.add('desktop-expanded');
                 }
             } else {
+                // Mobile Toggle
                 sb.classList.toggle('mobile-hide');
                 sb.classList.toggle('mobile-show');
                 overlay.classList.toggle('hidden');
