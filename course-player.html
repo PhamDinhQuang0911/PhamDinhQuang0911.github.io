@@ -30,23 +30,13 @@
         ::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 3px; }
         ::-webkit-scrollbar-thumb:hover { background: #94A3B8; }
 
-        /* Sidebar Transition */
+        /* Sidebar Transition Logic */
         #sidebar {
-            transition: width 0.3s ease, transform 0.3s ease;
-            flex-shrink: 0;
-            white-space: nowrap;
-            overflow: hidden;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            white-space: nowrap; /* Giữ chữ trên 1 dòng khi thu nhỏ */
         }
         
-        /* Desktop States */
-        .desktop-expanded { width: 20rem; } /* 320px */
-        .desktop-collapsed { width: 0; border: none; }
-
-        /* Mobile States */
-        .mobile-show { transform: translateX(0); }
-        .mobile-hide { transform: translateX(-100%); }
-
-        /* Active Lesson */
+        /* Trạng thái Active cho bài học */
         .lesson-item.active { 
             background-color: #F0FDFA; 
             border-left: 4px solid #0F766E;
@@ -58,12 +48,16 @@
 </head>
 <body class="bg-darker h-screen flex text-gray-800 overflow-hidden">
 
-    <aside id="sidebar" class="desktop-expanded fixed inset-y-0 left-0 z-50 border-r border-gray-200 flex flex-col md:relative mobile-hide shadow-xl" style="background-color: #ffffff !important;">
+    <aside id="sidebar" 
+           class="fixed inset-y-0 left-0 z-50 flex flex-col h-full border-r border-gray-200 shadow-xl 
+                  transform -translate-x-full transition-all duration-300 w-80
+                  md:relative md:translate-x-0 md:w-80 flex-shrink-0"
+           style="background-color: #ffffff;">
         
         <div class="h-16 px-5 flex items-center justify-between border-b border-gray-100 bg-white shrink-0">
             <div class="flex items-center gap-3 overflow-hidden">
-                <div class="w-8 h-8 bg-brand text-white rounded-lg flex items-center justify-center font-black text-lg shadow-sm shrink-0">C</div>
-                <span class="font-black text-xl text-brand tracking-tight truncate">Thầy Choang</span>
+                <img id="brandLogo" src="" class="h-8 object-contain hidden"> 
+                <span id="brandText" class="font-black text-xl text-brand tracking-tight truncate">Thầy Choang</span>
             </div>
             <button onclick="toggleSidebar()" class="md:hidden text-gray-400 hover:text-red-500"><i class="fa-solid fa-xmark text-xl"></i></button>
         </div>
@@ -99,25 +93,25 @@
         </div>
     </aside>
 
-    <div id="mobileOverlay" onclick="toggleSidebar()" class="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm hidden md:hidden transition-opacity"></div>
+    <div id="mobileOverlay" onclick="toggleSidebar()" class="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm hidden transition-opacity md:hidden"></div>
 
     <main class="flex-1 flex flex-col relative w-full h-full bg-darker transition-all min-w-0">
         
         <header class="h-16 bg-dark border-b border-gray-800 flex items-center justify-between px-4 md:px-6 shrink-0 z-30 shadow-lg">
             <div class="flex items-center gap-4 overflow-hidden">
-                <button onclick="toggleSidebar()" class="text-gray-400 hover:text-white p-2 rounded-lg hover:bg-gray-800 transition-colors">
+                <button onclick="toggleSidebar()" class="text-gray-400 hover:text-white p-2 rounded-lg hover:bg-gray-800 transition-colors" title="Menu">
                     <i class="fa-solid fa-bars text-xl"></i>
                 </button>
                 <div class="w-[1px] h-6 bg-gray-700 hidden md:block"></div>
                 <div class="flex flex-col min-w-0">
-                    <h1 id="courseTitle" class="text-gray-200 font-bold text-sm md:text-base truncate max-w-[200px] md:max-w-md">Đang tải dữ liệu...</h1>
+                    <h1 id="courseTitle" class="text-gray-200 font-bold text-sm md:text-base truncate max-w-[200px] md:max-w-md">Đang tải...</h1>
                     <span id="lessonTitle" class="text-xs text-brand font-bold truncate">...</span>
                 </div>
             </div>
 
             <div class="flex items-center gap-2">
-                <button id="btnPrev" class="w-9 h-9 rounded-full bg-gray-800 text-gray-400 flex items-center justify-center hover:bg-gray-700 hover:text-white disabled:opacity-30 transition-all"><i class="fa-solid fa-chevron-left text-xs"></i></button>
-                <button id="btnNext" class="w-9 h-9 rounded-full bg-gray-800 text-gray-400 flex items-center justify-center hover:bg-gray-700 hover:text-white disabled:opacity-30 transition-all"><i class="fa-solid fa-chevron-right text-xs"></i></button>
+                <button id="btnPrev" class="w-9 h-9 rounded-full bg-gray-800 text-gray-400 flex items-center justify-center hover:bg-gray-700 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-all"><i class="fa-solid fa-chevron-left text-xs"></i></button>
+                <button id="btnNext" class="w-9 h-9 rounded-full bg-gray-800 text-gray-400 flex items-center justify-center hover:bg-gray-700 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-all"><i class="fa-solid fa-chevron-right text-xs"></i></button>
             </div>
         </header>
 
@@ -130,9 +124,12 @@
             <iframe id="mainFrame" class="w-full h-full hidden bg-black z-20" frameborder="0" allowfullscreen></iframe>
 
             <div id="quizContainer" class="hidden w-full h-full flex flex-col items-center justify-center bg-darker text-white p-6 text-center z-20">
-                <i class="fa-solid fa-clipboard-question text-6xl text-accent mb-6 animate-bounce"></i>
-                <h2 class="text-2xl font-bold mb-4">Bài tập trắc nghiệm</h2>
-                <button id="btnStartQuiz" class="px-8 py-3 bg-brand text-white font-bold rounded-xl hover:bg-teal-600 transition-all shadow-lg">Làm bài ngay</button>
+                <div class="relative mb-8">
+                    <div class="absolute inset-0 bg-accent/20 blur-2xl rounded-full"></div>
+                    <i class="fa-solid fa-clipboard-question text-7xl text-accent relative z-10 animate-bounce"></i>
+                </div>
+                <h2 class="text-2xl font-bold mb-3">Bài tập trắc nghiệm</h2>
+                <button id="btnStartQuiz" class="px-8 py-3 bg-brand text-white font-bold rounded-xl hover:bg-teal-600 transition-all shadow-lg hover:shadow-brand/30">Làm bài ngay</button>
             </div>
         </div>
     </main>
@@ -142,6 +139,7 @@
         import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
         import { getFirestore, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
+        // CẤU HÌNH FIREBASE
         const firebaseConfig = {
             apiKey: "AIzaSyCqAX3x1MbJ3do7m3EaH9JA4kFuVhlAc78",
             authDomain: "lms-thitracnghiem.firebaseapp.com",
@@ -156,15 +154,36 @@
         const db = getFirestore(app);
 
         let courseData = null;
-        let flatItems = [];
+        let flatItems = []; 
         let currentItemIndex = -1;
-        const courseId = new URLSearchParams(window.location.search).get('id');
+        const urlParams = new URLSearchParams(window.location.search);
+        const courseId = urlParams.get('id');
 
+        // Init Check
         onAuthStateChanged(auth, (user) => {
-            if(!user) window.location.href = 'index.html';
-            else if(courseId) loadCourse(courseId);
-            else window.location.href = 'student.html';
+            if(!user) {
+                sessionStorage.setItem('redirect_after_login', window.location.href);
+                window.location.href = 'index.html';
+            } else if(courseId) {
+                loadLogo();
+                loadCourse(courseId);
+            } else {
+                window.location.href = 'student.html';
+            }
         });
+
+        async function loadLogo() {
+            try {
+                const docSnap = await getDoc(doc(db, "site_settings", "homepage_hero"));
+                if (docSnap.exists() && docSnap.data().logo) {
+                    const imgEl = document.getElementById('brandLogo');
+                    const textEl = document.getElementById('brandText');
+                    imgEl.src = docSnap.data().logo;
+                    imgEl.classList.remove('hidden');
+                    textEl.classList.add('hidden');
+                }
+            } catch(e) {}
+        }
 
         async function loadCourse(id) {
             try {
@@ -192,13 +211,12 @@
 
             list.forEach((chap, cIdx) => {
                 const chapId = `chap_${cIdx}`;
-                // Mặc định mở chương 1 (index 0)
                 const isOpen = cIdx === 0;
                 
                 const chapEl = document.createElement('div');
                 chapEl.className = 'mb-1';
                 chapEl.innerHTML = `
-                    <div class="flex items-center justify-between px-3 py-3 bg-gray-50 hover:bg-gray-100 rounded-lg cursor-pointer transition-colors group select-none" onclick="toggleCollapse('${chapId}', this)">
+                    <div class="flex items-center justify-between px-3 py-3 bg-gray-50 hover:bg-gray-100 rounded-lg cursor-pointer transition-colors group select-none" onclick="window.toggleCollapse('${chapId}', this)">
                         <div class="font-bold text-gray-700 text-sm flex-1 truncate pr-2"><i class="fa-solid fa-folder-open text-brand/50 mr-2 text-xs"></i>${chap.title}</div>
                         <i class="fa-solid fa-chevron-right text-xs text-gray-400 transition-transform duration-300 ${isOpen ? 'rotate-90' : ''}"></i>
                     </div>
@@ -218,22 +236,22 @@
                     (les.items || []).forEach((item) => {
                         flatItems.push(item);
                         const currentIndex = flatItems.length - 1;
-                        let iconClass = 'fa-circle-play text-red-500';
+                        let iconClass = 'fa-circle-play icon-video';
                         let typeLabel = 'Video';
-                        if(item.type==='pdf') { iconClass = 'fa-file-pdf text-blue-500'; typeLabel='Tài liệu'; }
-                        if(item.type==='quiz') { iconClass = 'fa-clipboard-question text-orange-500'; typeLabel='Bài tập'; }
+                        if(item.type==='pdf') { iconClass = 'fa-file-pdf icon-pdf'; typeLabel='Tài liệu'; }
+                        if(item.type==='quiz') { iconClass = 'fa-clipboard-question icon-quiz'; typeLabel='Bài tập'; }
 
                         const itemEl = document.createElement('div');
                         itemEl.className = `lesson-item flex items-center gap-3 px-3 py-3 rounded-lg cursor-pointer text-sm text-gray-600 transition-all border-l-4 border-transparent ml-2`;
                         itemEl.dataset.index = currentIndex;
                         itemEl.innerHTML = `
-                            <i class="fa-solid ${iconClass} text-sm w-5 text-center"></i>
+                            <i class="fa-solid ${iconClass} text-sm w-5 text-center shrink-0"></i>
                             <div class="flex-1 min-w-0">
                                 <div class="item-title truncate text-xs md:text-sm font-semibold">${item.title}</div>
                                 <div class="text-[10px] text-gray-400 font-medium">${typeLabel} • ${item.duration||'--'}p</div>
                             </div>
                         `;
-                        itemEl.onclick = () => playItem(currentIndex);
+                        itemEl.onclick = () => window.playItem(currentIndex);
                         chapBody.appendChild(itemEl);
                     });
                 });
@@ -281,14 +299,19 @@
                 };
             }
             updateNavButtons();
-            if(window.innerWidth < 768) toggleSidebar();
+            
+            // Auto close mobile sidebar
+            if(window.innerWidth < 768) {
+                const sb = document.getElementById('sidebar');
+                if(!sb.classList.contains('-translate-x-full')) window.toggleSidebar();
+            }
         };
 
         function updateNavButtons() {
             document.getElementById('btnPrev').disabled = currentItemIndex <= 0;
             document.getElementById('btnNext').disabled = currentItemIndex >= flatItems.length - 1;
-            document.getElementById('btnPrev').onclick = () => playItem(currentItemIndex - 1);
-            document.getElementById('btnNext').onclick = () => playItem(currentItemIndex + 1);
+            document.getElementById('btnPrev').onclick = () => window.playItem(currentItemIndex - 1);
+            document.getElementById('btnNext').onclick = () => window.playItem(currentItemIndex + 1);
         }
 
         function updateStats() {
@@ -304,14 +327,28 @@
 
         window.toggleSidebar = () => {
             const sb = document.getElementById('sidebar');
-            const ov = document.getElementById('mobileOverlay');
+            const overlay = document.getElementById('mobileOverlay');
+            
             if (window.innerWidth >= 768) {
-                sb.classList.toggle('desktop-expanded');
-                sb.classList.toggle('desktop-collapsed');
+                // Desktop: Toggle Width (320px vs 0px)
+                if (sb.classList.contains('md:w-80')) {
+                    // Thu gọn
+                    sb.classList.remove('md:w-80');
+                    sb.classList.add('md:w-0', 'overflow-hidden');
+                } else {
+                    // Mở rộng
+                    sb.classList.add('md:w-80');
+                    sb.classList.remove('md:w-0', 'overflow-hidden');
+                }
             } else {
-                sb.classList.toggle('mobile-hide');
-                sb.classList.toggle('mobile-show');
-                ov.classList.toggle('hidden');
+                // Mobile: Slide
+                if (sb.classList.contains('-translate-x-full')) {
+                    sb.classList.remove('-translate-x-full');
+                    overlay.classList.remove('hidden');
+                } else {
+                    sb.classList.add('-translate-x-full');
+                    overlay.classList.add('hidden');
+                }
             }
         };
     </script>
