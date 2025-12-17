@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quản lý Khóa học - Thầy Choang</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: { colors: { brand: '#0F766E', accent: '#F97316' } }
+            }
+        }
+    </script>
+    <style>
+        body { font-family: 'Nunito', sans-serif; background-color: #F8FAFC; }
+        .modal { transition: opacity 0.2s ease; }
+        body.modal-active { overflow: hidden; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        /* Animation */
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-fade-in { animation: fadeIn 0.3s ease-out forwards; }
+    </style>
+</head>
+<body class="flex flex-col h-screen overflow-hidden">
+
+    <header class="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-6 shrink-0 z-20 shadow-sm">
+        <div class="flex items-center gap-3">
+            <button onclick="window.history.back()" class="text-gray-400 hover:text-gray-600"><i class="fa-solid fa-arrow-left text-xl"></i></button>
+            <h1 class="text-xl font-bold text-gray-800 flex items-center gap-2">
+                <span class="w-8 h-8 bg-orange-100 text-orange-600 rounded-lg flex items-center justify-center"><i class="fa-solid fa-shapes"></i></span>
+                Quản lý Khóa học & Trang chủ
+            </h1>
+        </div>
+        <div class="flex gap-2">
+            <button onclick="window.openHeroModal()" class="px-4 py-2 bg-orange-50 text-orange-600 font-bold rounded-lg text-sm hover:bg-orange-100 transition-colors flex items-center gap-2">
+                <i class="fa-solid fa-paintbrush"></i> Banner
+            </button>
+            <button onclick="window.openPaymentConfigModal()" class="px-4 py-2 bg-blue-50 text-blue-600 font-bold rounded-lg text-sm hover:bg-blue-100 transition-colors flex items-center gap-2">
+                <i class="fa-solid fa-credit-card"></i> Thanh toán
+            </button>
+            <button onclick="window.openCourseModal()" class="px-4 py-2 bg-brand text-white font-bold rounded-lg text-sm hover:bg-teal-700 transition-colors shadow-lg flex items-center gap-2">
+                <i class="fa-solid fa-plus"></i> Thêm khóa mới
+            </button>
+        </div>
+    </header>
+
+    <main class="flex-1 overflow-y-auto p-6 relative">
+        <div class="max-w-7xl mx-auto">
+            <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse">
+                        <thead class="bg-gray-50 text-gray-500 text-xs uppercase font-bold sticky top-0 z-10 border-b border-gray-200">
+                            <tr>
+                                <th class="p-4 whitespace-nowrap w-20">Ảnh</th>
+                                <th class="p-4 whitespace-nowrap">Tên khóa học</th>
+                                <th class="p-4 whitespace-nowrap">Học phí</th>
+                                <th class="p-4 whitespace-nowrap text-center">Học viên</th>
+                                <th class="p-4 whitespace-nowrap text-right">Hành động</th>
+                            </tr>
+                        </thead>
+                        <tbody id="courseListTable" class="divide-y divide-gray-100 text-sm">
+                            <tr><td colspan="5" class="p-8 text-center text-gray-400 italic">Đang tải dữ liệu...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <div id="courseModal" class="modal opacity-0 pointer-events-none fixed inset-0 z-[100] flex items-center justify-center bg-gray-900/60 backdrop-blur-sm p-4 transition-all duration-300">
+        <div class="bg-white w-full max-w-4xl h-[85vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden transform scale-95 transition-transform duration-300">
+            <div class="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+                <h3 class="font-bold text-gray-800 text-lg" id="courseModalTitle">Thông tin khóa học</h3>
+                <button onclick="window.toggleModal('courseModal', false)" class="text-gray-400 hover:text-red-500"><i class="fa-solid fa-times text-xl"></i></button>
+            </div>
+            
+            <div class="flex-1 overflow-y-auto p-6 grid grid-cols-1 lg:grid-cols-3 gap-8">
+                <div class="lg:col-span-1 space-y-5">
+                    <div>
+                        <label class="block text-xs font-bold text-gray-500 uppercase mb-2">Ảnh bìa (16:9)</label>
+                        <div class="relative group cursor-pointer border-2 border-dashed border-gray-300 rounded-xl overflow-hidden aspect-video bg-gray-50 flex items-center justify-center hover:border-brand transition-all" onclick="document.getElementById('courseThumbInput').click()">
+                            <img id="courseThumbPreview" src="" class="absolute inset-0 w-full h-full object-cover hidden">
+                            <div class="text-center text-gray-400 group-hover:text-brand z-10">
+                                <i class="fa-solid fa-cloud-arrow-up text-3xl mb-1"></i>
+                                <p class="text-xs font-bold">Tải ảnh lên</p>
+                            </div>
+                            <input type="file" id="courseThumbInput" class="hidden" accept="image/*" onchange="window.handleUpload(this, 'thumb')">
+                        </div>
+                    </div>
+
+                    <div class="space-y-3">
+                        <div><label class="block text-xs font-bold text-gray-700 mb-1">Tên khóa học</label><input type="text" id="cTitle" class="input-field" placeholder="VD: Luyện thi Toán 10"></div>
+                        <div class="grid grid-cols-2 gap-3">
+                            <div><label class="block text-xs font-bold text-gray-700 mb-1">Giá bán (VNĐ)</label><input type="number" id="cPrice" class="input-field font-bold text-brand" placeholder="0"></div>
+                            <div><label class="block text-xs font-bold text-gray-700 mb-1">Giá gốc</label><input type="number" id="cOriginalPrice" class="input-field text-gray-500 line-through"></div>
+                        </div>
+                        <div><label class="block text-xs font-bold text-gray-700 mb-1">Tag (Nhãn)</label><input type="text" id="cTag" class="input-field" placeholder="Mới, Hot..."></div>
+                        <div><label class="block text-xs font-bold text-gray-700 mb-1">Số học sinh (Fake)</label><input type="text" id="cStudentCount" class="input-field" value="0"></div>
+                    </div>
+                </div>
+
+                <div class="lg:col-span-2 flex flex-col h-full space-y-4">
+                    <div>
+                        <label class="block text-xs font-bold text-gray-700 mb-1">Mô tả ngắn</label>
+                        <textarea id="cShortDesc" class="input-field h-20 resize-none" placeholder="Hiện ở trang chủ..."></textarea>
+                    </div>
+                    <div class="flex-1 flex flex-col">
+                        <div class="flex justify-between items-center mb-1">
+                            <label class="block text-xs font-bold text-gray-700">Nội dung chi tiết</label>
+                            <button onclick="document.getElementById('descImgInput').click()" class="text-xs bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded text-blue-600 font-bold"><i class="fa-regular fa-image"></i> Chèn ảnh</button>
+                            <input type="file" id="descImgInput" class="hidden" accept="image/*" onchange="window.handleUpload(this, 'desc')">
+                        </div>
+                        <textarea id="cFullDesc" class="input-field flex-1 font-mono text-sm leading-relaxed p-4" placeholder="Hỗ trợ HTML cơ bản..."></textarea>
+                    </div>
+                </div>
+            </div>
+
+            <div class="p-4 border-t border-gray-100 bg-gray-50 flex justify-end gap-3">
+                <button onclick="window.toggleModal('courseModal', false)" class="px-5 py-2.5 bg-white border border-gray-300 rounded-xl font-bold text-gray-600 hover:bg-gray-100 text-sm">Hủy bỏ</button>
+                <button onclick="window.saveCourse()" class="px-6 py-2.5 bg-brand text-white rounded-xl font-bold shadow-lg hover:bg-teal-700 text-sm flex items-center gap-2"><i class="fa-solid fa-save"></i> Lưu khóa học</button>
+            </div>
+        </div>
+    </div>
+    
+    <div id="notificationContainer" class="fixed top-5 right-5 z-[200] flex flex-col gap-3 pointer-events-none"></div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+        import { getFirestore, doc, getDoc, setDoc, collection, addDoc, query, getDocs, deleteDoc, updateDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+        // CẤU HÌNH FIREBASE (Giữ nguyên key cũ của bạn)
+        const firebaseConfig = {
+            apiKey: "AIzaSyCqAX3x1MbJ3do7m3EaH9JA4kFuVhlAc78",
+            authDomain: "lms-thitracnghiem.firebaseapp.com",
+            projectId: "lms-thitracnghiem",
+            storageBucket: "lms-thitracnghiem.firebasestorage.app",
+            messagingSenderId: "760187217240",
+            appId: "1:760187217240:web:d043cd5808c349f87a712d"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        // BIẾN TOÀN CỤC
+        let currentCourseId = null;
+        let currentThumbUrl = "";
+
+        // --- AUTH CHECK ---
+        onAuthStateChanged(auth, (user) => {
+            if (!user) window.location.href = "index.html"; // Đá về login nếu chưa đăng nhập
+            else loadCourses(); // Tải danh sách khóa học
+        });
+
+        // --- HÀM UI ---
+        window.toggleModal = (id, show) => {
+            const el = document.getElementById(id);
+            const container = el.querySelector('.modal-container') || el.children[0];
+            if(show) { 
+                el.classList.remove('opacity-0', 'pointer-events-none'); 
+                document.body.classList.add('modal-active');
+                if(container) { container.classList.remove('scale-95'); container.classList.add('scale-100'); }
+            } else { 
+                el.classList.add('opacity-0', 'pointer-events-none'); 
+                document.body.classList.remove('modal-active');
+                if(container) { container.classList.remove('scale-100'); container.classList.add('scale-95'); }
+            }
+        }
+
+        window.showNotification = (msg, type = 'success') => {
+            const container = document.getElementById('notificationContainer');
+            const div = document.createElement('div');
+            const color = type === 'success' ? 'green' : 'red';
+            div.className = `pointer-events-auto bg-white border-l-4 border-${color}-500 shadow-xl rounded-lg p-4 w-80 flex items-start gap-3 transform translate-x-full transition-all duration-300`;
+            div.innerHTML = `<i class="fa-solid fa-${type==='success'?'check':'circle-exclamation'} text-${color}-500 mt-1"></i><div><h4 class="font-bold text-gray-800 text-sm">${type==='success'?'Thành công':'Lỗi'}</h4><p class="text-sm text-gray-600">${msg}</p></div>`;
+            container.appendChild(div);
+            requestAnimationFrame(() => div.classList.remove('translate-x-full'));
+            setTimeout(() => { div.style.opacity = '0'; setTimeout(() => div.remove(), 500); }, 3000);
+        }
+
+        // --- LOGIC QUẢN LÝ KHÓA HỌC ---
+        async function loadCourses() {
+            const tbody = document.getElementById('courseListTable');
+            tbody.innerHTML = '<tr><td colspan="5" class="p-8 text-center text-gray-400"><i class="fa-solid fa-circle-notch fa-spin mr-2"></i> Đang tải dữ liệu...</td></tr>';
+            
+            try {
+                const q = query(collection(db, "public_courses"));
+                const snap = await getDocs(q);
+                
+                if (snap.empty) {
+                    tbody.innerHTML = '<tr><td colspan="5" class="p-8 text-center text-gray-400">Chưa có khóa học nào.</td></tr>';
+                    return;
+                }
+
+                let html = '';
+                snap.forEach(doc => {
+                    const c = doc.data();
+                    const priceText = parseInt(c.price || 0) === 0 ? '<span class="text-green-600 font-bold">Miễn phí</span>' : parseInt(c.price).toLocaleString('vi-VN') + 'đ';
+                    
+                    html += `
+                    <tr class="hover:bg-gray-50 transition-colors group border-b border-gray-100 last:border-0">
+                        <td class="p-4">
+                            <img src="${c.thumbnail || 'https://via.placeholder.com/100'}" class="w-12 h-12 rounded-lg object-cover border border-gray-200 shadow-sm">
+                        </td>
+                        <td class="p-4">
+                            <div class="font-bold text-gray-800 text-base mb-0.5">${c.title}</div>
+                            <div class="text-xs text-gray-400 line-clamp-1">${c.desc || c.shortDesc || '...'}</div>
+                        </td>
+                        <td class="p-4 font-mono font-bold text-gray-700">${priceText}</td>
+                        <td class="p-4 text-center">
+                            <span class="bg-blue-50 text-blue-700 px-2 py-1 rounded text-xs font-bold border border-blue-100">${c.students || 0}</span>
+                        </td>
+                        <td class="p-4 text-right">
+                            <div class="flex justify-end gap-2 opacity-100">
+                                <button onclick="alert('Tính năng đang phát triển!')" class="p-2 bg-purple-50 text-purple-600 rounded-lg hover:bg-purple-100 transition-colors" title="Soạn nội dung"><i class="fa-solid fa-book-open"></i></button>
+                                <button onclick="window.editCourse('${doc.id}')" class="p-2 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200 transition-colors" title="Sửa"><i class="fa-solid fa-pen"></i></button>
+                                <button onclick="window.deleteCourse('${doc.id}')" class="p-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-colors" title="Xóa"><i class="fa-solid fa-trash"></i></button>
+                            </div>
+                        </td>
+                    </tr>`;
+                });
+                tbody.innerHTML = html;
+
+            } catch(e) { console.error(e); tbody.innerHTML = '<tr><td colspan="5" class="p-4 text-center text-red-500">Lỗi tải dữ liệu!</td></tr>'; }
+        }
+
+        // --- CÁC HÀM XỬ LÝ (CRUD) ---
+        window.openCourseModal = () => {
+            currentCourseId = null;
+            currentThumbUrl = "";
+            document.getElementById('courseModalTitle').innerText = "Thêm khóa học mới";
+            // Reset form
+            ['cTitle','cPrice','cOriginalPrice','cTag','cStudentCount','cShortDesc','cFullDesc'].forEach(id => document.getElementById(id).value = '');
+            document.getElementById('courseThumbPreview').src = "";
+            document.getElementById('courseThumbPreview').classList.add('hidden');
+            window.toggleModal('courseModal', true);
+        };
+
+        window.editCourse = async (id) => {
+            currentCourseId = id;
+            try {
+                const docSnap = await getDoc(doc(db, "public_courses", id));
+                if (docSnap.exists()) {
+                    const d = docSnap.data();
+                    document.getElementById('courseModalTitle').innerText = "Chỉnh sửa khóa học";
+                    document.getElementById('cTitle').value = d.title;
+                    document.getElementById('cPrice').value = d.price;
+                    document.getElementById('cOriginalPrice').value = d.originalPrice;
+                    document.getElementById('cTag').value = d.tag;
+                    document.getElementById('cStudentCount').value = d.students;
+                    document.getElementById('cShortDesc').value = d.shortDesc;
+                    document.getElementById('cFullDesc').value = d.fullDesc;
+                    
+                    currentThumbUrl = d.thumbnail;
+                    if(d.thumbnail) {
+                        const img = document.getElementById('courseThumbPreview');
+                        img.src = d.thumbnail;
+                        img.classList.remove('hidden');
+                    }
+                    window.toggleModal('courseModal', true);
+                }
+            } catch(e) { console.error(e); }
+        };
+
+        window.saveCourse = async () => {
+            const data = {
+                title: document.getElementById('cTitle').value,
+                price: document.getElementById('cPrice').value,
+                originalPrice: document.getElementById('cOriginalPrice').value,
+                tag: document.getElementById('cTag').value,
+                students: document.getElementById('cStudentCount').value,
+                shortDesc: document.getElementById('cShortDesc').value,
+                fullDesc: document.getElementById('cFullDesc').value,
+                thumbnail: currentThumbUrl,
+                updatedAt: new Date().toISOString()
+            };
+
+            if(!data.title) return window.showNotification("Vui lòng nhập tên khóa học", "error");
+
+            try {
+                if(currentCourseId) {
+                    await updateDoc(doc(db, "public_courses", currentCourseId), data);
+                    window.showNotification("Đã cập nhật khóa học!", "success");
+                } else {
+                    data.createdAt = new Date().toISOString();
+                    await addDoc(collection(db, "public_courses"), data);
+                    window.showNotification("Đã thêm khóa học mới!", "success");
+                }
+                window.toggleModal('courseModal', false);
+                loadCourses();
+            } catch(e) { window.showNotification("Lỗi lưu: " + e.message, "error"); }
+        };
+
+        window.deleteCourse = async (id) => {
+            if(confirm("Bạn có chắc chắn muốn xóa khóa học này không?")) {
+                try {
+                    await deleteDoc(doc(db, "public_courses", id));
+                    window.showNotification("Đã xóa khóa học!", "success");
+                    loadCourses();
+                } catch(e) { window.showNotification("Lỗi xóa: " + e.message, "error"); }
+            }
+        };
+
+        // --- UPLOAD ẢNH (Dùng Worker R2 của bạn) ---
+        window.handleUpload = async (input, type) => {
+            const file = input.files[0];
+            if (!file) return;
+            
+            window.showNotification("Đang tải ảnh...", "info");
+            
+            try {
+                // Nén ảnh trước khi upload
+                const compressedBlob = await compressImage(file, 0.8, 1200);
+                const formData = new FormData();
+                formData.append('file', compressedBlob, `course_${Date.now()}.jpg`);
+                
+                const res = await fetch("https://upload-helper.phamngockhanh-942001.workers.dev/", { method: 'PUT', body: formData });
+                if(!res.ok) throw new Error("Upload failed");
+                
+                const data = await res.json();
+                const url = data.url;
+
+                if (type === 'thumb') {
+                    currentThumbUrl = url;
+                    const img = document.getElementById('courseThumbPreview');
+                    img.src = url;
+                    img.classList.remove('hidden');
+                } else if (type === 'desc') {
+                    const textarea = document.getElementById('cFullDesc');
+                    const imgTag = `<div class="my-4 text-center"><img src="${url}" class="rounded shadow-sm max-w-full inline-block"></div>`;
+                    textarea.value += imgTag;
+                }
+                window.showNotification("Tải ảnh thành công!", "success");
+            } catch(e) { window.showNotification("Lỗi upload: " + e.message, "error"); }
+        };
+
+        function compressImage(file, quality, maxWidth) {
+            return new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.readAsDataURL(file);
+                reader.onload = (e) => {
+                    const img = new Image();
+                    img.src = e.target.result;
+                    img.onload = () => {
+                        const canvas = document.createElement('canvas');
+                        let w = img.width, h = img.height;
+                        if(w > maxWidth) { h = (h * maxWidth) / w; w = maxWidth; }
+                        canvas.width = w; canvas.height = h;
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(img, 0, 0, w, h);
+                        canvas.toBlob(resolve, 'image/jpeg', quality);
+                    };
+                };
+            });
+        }
+        
+        // --- CÁC HÀM BANNER & THANH TOÁN (GIỮ NGUYÊN HOẶC COPY TỪ DASHBOARD SANG NẾU CẦN) ---
+        // (Để file gọn, bạn có thể copy 2 hàm openHeroModal và openPaymentConfigModal từ dashboard.html sang đây nếu muốn quản lý chung tại đây luôn)
+    </script>
+    
+    <style>
+        .input-field { width: 100%; padding: 10px 16px; border: 1px solid #E2E8F0; border-radius: 12px; outline: none; transition: all 0.2s; background: #F8FAFC; }
+        .input-field:focus { background: white; border-color: #0F766E; ring: 2px solid #CCFBF1; }
+    </style>
+</body>
+</html>
