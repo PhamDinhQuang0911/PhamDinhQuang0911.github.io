@@ -371,65 +371,66 @@
         };
 
         // --- EDIT BASIC INFO (MODAL 1 - UPDATED) ---
-        window.editCourse = async (id) => {
-            const d = await getDoc(doc(db,"public_courses",id));
-            if(d.exists()) {
-                const dt = d.data();
-                document.getElementById('courseId').value = id;
-                document.getElementById('cTitle').value = dt.title;
-                document.getElementById('cPrice').value = dt.price;
-                document.getElementById('cStudents').value = dt.students;
-                document.getElementById('cDesc').value = dt.desc || '';
-                document.getElementById('cThumb').value = dt.thumbnail || '';
-                
-                // Hiển thị Preview ảnh
-                if(dt.thumbnail) {
-                    document.getElementById('previewThumb').src = dt.thumbnail;
-                    document.getElementById('thumbPreviewBox').classList.remove('hidden');
-                    document.getElementById('thumbEmptyState').classList.add('hidden');
-                } else {
-                    document.getElementById('thumbPreviewBox').classList.add('hidden');
-                    document.getElementById('thumbEmptyState').classList.remove('hidden');
-                }
-                window.toggleModal('courseModal', true);
-            }
-        };
+        // BƯỚC 2: Thay thế 2 hàm này trong thẻ <script>
 
-        window.handleThumbUpload = (input) => {
-            if(input.files && input.files[0]) {
-                const file = input.files[0];
-                const reader = new FileReader();
-                reader.onload = (e) => {
-                    // Preview ngay lập tức
-                    document.getElementById('previewThumb').src = e.target.result;
-                    document.getElementById('thumbPreviewBox').classList.remove('hidden');
-                    document.getElementById('thumbEmptyState').classList.add('hidden');
-                    // TODO: GỌI API UPLOAD THẬT Ở ĐÂY, sau đó gán URL vào #cThumb
-                    // document.getElementById('cThumb').value = uploadedUrl;
-                    window.showToast("Đã chọn ảnh (Cần tích hợp API Upload)", "info");
-                };
-                reader.readAsDataURL(file);
-            }
-        };
+// Hàm tải dữ liệu lên form sửa
+window.editCourse = async (id) => {
+    const d = await getDoc(doc(db, "public_courses", id));
+    if(d.exists()) {
+        const dt = d.data();
+        document.getElementById('courseId').value = id;
+        document.getElementById('cTitle').value = dt.title;
+        
+        // Cập nhật giá gốc
+        document.getElementById('cOriginalPrice').value = dt.originalPrice || '';
+        document.getElementById('cPrice').value = dt.price;
+        
+        document.getElementById('cStudents').value = dt.students;
+        document.getElementById('cDesc').value = dt.desc || '';
+        document.getElementById('cThumb').value = dt.thumbnail || '';
+        
+        // Preview ảnh (Code cũ giữ nguyên logic này)
+        if(dt.thumbnail) {
+            document.getElementById('previewThumb').src = dt.thumbnail;
+            document.getElementById('thumbPreviewBox').classList.remove('hidden');
+            document.getElementById('thumbEmptyState').classList.add('hidden');
+        } else {
+            document.getElementById('thumbPreviewBox').classList.add('hidden');
+            document.getElementById('thumbEmptyState').classList.remove('hidden');
+        }
+        window.toggleModal('courseModal', true);
+    }
+};
 
-        window.saveCourseBasic = async () => {
-            const id = document.getElementById('courseId').value;
-            const data = {
-                title: document.getElementById('cTitle').value,
-                price: parseInt(document.getElementById('cPrice').value) || 0,
-                students: parseInt(document.getElementById('cStudents').value) || 0,
-                desc: document.getElementById('cDesc').value,
-                thumbnail: document.getElementById('cThumb').value, // URL ảnh
-                updatedAt: new Date().toISOString()
-            };
-            try {
-                if(id) await updateDoc(doc(db,"public_courses",id), data);
-                else { data.createdAt = new Date().toISOString(); await setDoc(doc(collection(db,"public_courses")), data); }
-                window.showToast("Đã lưu thiết lập!");
-                window.toggleModal('courseModal', false);
-                loadCourses();
-            } catch(e) { window.showToast(e.message, 'error'); }
-        };
+// Hàm lưu dữ liệu
+window.saveCourseBasic = async () => {
+    const id = document.getElementById('courseId').value;
+    const data = {
+        title: document.getElementById('cTitle').value,
+        originalPrice: parseInt(document.getElementById('cOriginalPrice').value) || 0, // Lưu giá gốc
+        price: parseInt(document.getElementById('cPrice').value) || 0,
+        students: parseInt(document.getElementById('cStudents').value) || 0,
+        desc: document.getElementById('cDesc').value,
+        thumbnail: document.getElementById('cThumb').value,
+        updatedAt: new Date().toISOString()
+    };
+    
+    if(!data.title) return window.showToast("Vui lòng nhập tên khóa học", "error");
+
+    try {
+        if(id) {
+            await updateDoc(doc(db, "public_courses", id), data);
+        } else { 
+            data.createdAt = new Date().toISOString(); 
+            await setDoc(doc(collection(db, "public_courses")), data); 
+        }
+        window.showToast("Đã lưu thiết lập thành công!");
+        window.toggleModal('courseModal', false);
+        loadCourses();
+    } catch(e) { 
+        window.showToast(e.message, 'error'); 
+    }
+};
 
         // --- CURRICULUM EDITOR (3 LEVELS) ---
         window.openCurriculumEditor = async (courseId) => {
