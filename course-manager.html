@@ -360,13 +360,268 @@
             });
         }
         
-        // --- CÁC HÀM BANNER & THANH TOÁN (GIỮ NGUYÊN HOẶC COPY TỪ DASHBOARD SANG NẾU CẦN) ---
-        // (Để file gọn, bạn có thể copy 2 hàm openHeroModal và openPaymentConfigModal từ dashboard.html sang đây nếu muốn quản lý chung tại đây luôn)
+    // ==========================================
+        // JS XỬ LÝ GIAO DIỆN EDITOR (PHẦN 2)
+        // ==========================================
+
+        let currentActiveLessonId = null; // ID bài học đang sửa
+        let currentLessonType = 'video';  // video | pdf | quiz
+
+        // 1. Mở/Đóng Modal
+        window.openCurriculumEditor = (courseId) => {
+            const modal = document.getElementById('curriculumModal');
+            modal.classList.remove('hidden');
+            document.body.style.overflow = 'hidden';
+            
+            // TODO: Fetch dữ liệu khóa học thật từ Firebase ở Phần 3
+            document.getElementById('editorCourseTitle').innerText = "Đang tải dữ liệu..."; 
+            
+            // Reset giao diện về trạng thái Welcome
+            document.getElementById('editorWelcome').classList.remove('hidden');
+            document.getElementById('editorForm').classList.add('hidden');
+        };
+
+        window.closeCurriculumModal = () => {
+            if(confirm("Các thay đổi chưa lưu sẽ bị mất. Bạn chắc chắn muốn đóng?")) {
+                document.getElementById('curriculumModal').classList.add('hidden');
+                document.body.style.overflow = '';
+            }
+        };
+
+        // 2. Chuyển đổi Loại bài học (Tabs)
+        window.setLessonType = (type) => {
+            currentLessonType = type;
+            
+            // Update UI Button style
+            document.querySelectorAll('.type-btn').forEach(btn => {
+                btn.className = "type-btn px-4 py-1.5 rounded-md text-sm font-bold text-gray-500 hover:bg-white hover:shadow-sm transition-all";
+            });
+            const activeBtn = document.getElementById(
+                type === 'video' ? 'btnTypeVideo' : 
+                type === 'pdf' ? 'btnTypePdf' : 'btnTypeQuiz'
+            );
+            activeBtn.className = "type-btn px-4 py-1.5 rounded-md text-sm font-bold shadow-sm transition-all " + 
+                (type === 'video' ? "bg-red-50 text-red-600" : 
+                 type === 'pdf' ? "bg-blue-50 text-blue-600" : "bg-orange-50 text-orange-600");
+
+            // Show/Hide Panels
+            document.querySelectorAll('.content-panel').forEach(p => p.classList.add('hidden'));
+            const panelId = type === 'video' ? 'panelVideo' : type === 'pdf' ? 'panelPdf' : 'panelQuiz';
+            document.getElementById(panelId).classList.remove('hidden');
+        };
+
+        // 3. Xử lý Preview Video YouTube
+        window.previewVideo = (url) => {
+            const previewArea = document.getElementById('videoPreviewArea');
+            const iframe = document.getElementById('videoFrame');
+            
+            // Regex lấy ID Youtube
+            const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
+            const match = url.match(regExp);
+
+            if (match && match[2].length === 11) {
+                const videoId = match[2];
+                iframe.src = `https://www.youtube.com/embed/${videoId}`;
+                previewArea.classList.remove('hidden');
+            } else {
+                previewArea.classList.add('hidden');
+                iframe.src = "";
+            }
+        };
+
+        // 4. Xử lý PDF (Toggle Upload vs Drive)
+        window.togglePdfSource = () => {
+            const source = document.querySelector('input[name="pdfSource"]:checked').value;
+            if(source === 'upload') {
+                document.getElementById('pdfUploadArea').classList.remove('hidden');
+                document.getElementById('pdfDriveArea').classList.add('hidden');
+                // Reset preview nếu chuyển chế độ
+                document.getElementById('pdfPreviewArea').classList.add('hidden');
+            } else {
+                document.getElementById('pdfUploadArea').classList.add('hidden');
+                document.getElementById('pdfDriveArea').classList.remove('hidden');
+            }
+        };
+
+        // 5. Xử lý Preview Google Drive Link
+        window.previewDrive = (url) => {
+            const previewArea = document.getElementById('pdfPreviewArea');
+            const iframe = document.getElementById('pdfFrame');
+            
+            // Chuyển link view thành link preview/embed
+            // Ví dụ: .../view?usp=sharing -> .../preview
+            if(url.includes('drive.google.com')) {
+                let embedUrl = url.replace('/view', '/preview').replace('/edit', '/preview');
+                iframe.src = embedUrl;
+                previewArea.classList.remove('hidden');
+            } else {
+                previewArea.classList.add('hidden');
+            }
+        };
+
+        // --- CÁC HÀM PLACEHOLDER CHO PHẦN 3 ---
+        window.addChapter = () => {
+            alert("Tính năng thêm chương sẽ được xử lý logic ở Phần 3");
+            // Logic: Thêm object chương vào mảng curriculum -> render lại cây
+        };
+
+        window.saveCurriculum = () => {
+             alert("Lưu dữ liệu và Xóa file rác trên Cloudflare sẽ thực hiện ở Phần 3");
+             // Logic: Duyệt mảng curriculum -> Update Firestore -> Gọi API delete file thừa
+        };
     </script>
     
     <style>
         .input-field { width: 100%; padding: 10px 16px; border: 1px solid #E2E8F0; border-radius: 12px; outline: none; transition: all 0.2s; background: #F8FAFC; }
         .input-field:focus { background: white; border-color: #0F766E; ring: 2px solid #CCFBF1; }
     </style>
+    <div id="curriculumModal" class="hidden fixed inset-0 z-50 bg-gray-900/90 backdrop-blur-sm transition-opacity duration-300">
+        <div class="flex h-screen w-full p-4 gap-4">
+            
+            <div class="w-1/3 max-w-sm bg-white rounded-2xl shadow-xl flex flex-col overflow-hidden animate-fade-in-up">
+                <div class="p-4 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
+                    <div>
+                        <h3 class="font-extrabold text-gray-800 text-lg">Cấu trúc khóa học</h3>
+                        <p id="editorCourseTitle" class="text-xs text-gray-500 truncate w-40">Đang tải...</p>
+                    </div>
+                    <button onclick="addChapter()" class="px-3 py-1.5 bg-brand/10 text-brand rounded-lg text-sm font-bold hover:bg-brand hover:text-white transition-all">
+                        <i class="fa-solid fa-folder-plus mr-1"></i> Thêm Chương
+                    </button>
+                </div>
+
+                <div id="curriculumTree" class="flex-1 overflow-y-auto p-3 space-y-4 bg-white scrollbar-hide">
+                    <div class="text-center mt-10 text-gray-400">
+                        <i class="fa-solid fa-layer-group text-4xl mb-3 opacity-30"></i>
+                        <p class="text-sm">Chưa có nội dung nào.</p>
+                    </div>
+                </div>
+
+                <div class="p-4 border-t border-gray-100 bg-gray-50 text-center">
+                    <button onclick="saveCurriculum()" class="w-full py-3 bg-gradient-to-r from-brand to-teal-600 text-white rounded-xl font-bold shadow-lg hover:shadow-xl hover:scale-[1.02] transition-all">
+                        <i class="fa-solid fa-save mr-2"></i> LƯU GIÁO ÁN
+                    </button>
+                    <button onclick="closeCurriculumModal()" class="mt-2 text-xs text-gray-500 hover:text-red-500 font-semibold">
+                        Đóng không lưu
+                    </button>
+                </div>
+            </div>
+
+            <div class="flex-1 bg-white rounded-2xl shadow-xl flex flex-col overflow-hidden relative animate-fade-in-up" style="animation-delay: 0.1s;">
+                
+                <div id="editorWelcome" class="absolute inset-0 flex flex-col items-center justify-center bg-gray-50 z-10">
+                    <img src="https://cdn-icons-png.flaticon.com/512/3079/3079296.png" class="w-24 h-24 mb-4 opacity-50 grayscale">
+                    <h3 class="text-xl font-bold text-gray-400">Chọn một bài học để chỉnh sửa</h3>
+                    <p class="text-gray-400 text-sm">Hoặc tạo mới từ cột bên trái</p>
+                </div>
+
+                <div id="editorForm" class="hidden flex flex-col h-full">
+                    <div class="h-16 border-b border-gray-100 flex items-center px-6 justify-between bg-white">
+                        <div class="flex items-center gap-3">
+                            <span class="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold text-sm" id="editLessonIndex">1</span>
+                            <input type="text" id="editLessonTitle" class="text-lg font-bold text-gray-800 outline-none border-b border-transparent focus:border-brand placeholder-gray-300 w-96 transition-all" placeholder="Nhập tên bài học tại đây...">
+                        </div>
+                        
+                        <div class="flex bg-gray-100 p-1 rounded-lg">
+                            <button onclick="setLessonType('video')" id="btnTypeVideo" class="type-btn px-4 py-1.5 rounded-md text-sm font-bold text-gray-500 hover:bg-white hover:shadow-sm transition-all"><i class="fa-brands fa-youtube mr-1"></i> Video</button>
+                            <button onclick="setLessonType('pdf')" id="btnTypePdf" class="type-btn px-4 py-1.5 rounded-md text-sm font-bold text-gray-500 hover:bg-white hover:shadow-sm transition-all"><i class="fa-solid fa-file-pdf mr-1"></i> Tài liệu</button>
+                            <button onclick="setLessonType('quiz')" id="btnTypeQuiz" class="type-btn px-4 py-1.5 rounded-md text-sm font-bold text-gray-500 hover:bg-white hover:shadow-sm transition-all"><i class="fa-solid fa-clipboard-question mr-1"></i> Bài tập</button>
+                        </div>
+                    </div>
+
+                    <div class="flex-1 overflow-y-auto bg-gray-50/50 p-8">
+                        
+                        <div id="panelVideo" class="content-panel hidden space-y-6 max-w-4xl mx-auto">
+                            <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                                <label class="block text-sm font-bold text-gray-700 mb-2">Đường dẫn Video (YouTube)</label>
+                                <div class="flex gap-2">
+                                    <input type="text" id="videoUrlInput" oninput="previewVideo(this.value)" class="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand focus:border-transparent outline-none transition-all" placeholder="Ví dụ: https://www.youtube.com/watch?v=...">
+                                </div>
+                                <p class="text-xs text-gray-400 mt-2"><i class="fa-solid fa-circle-info"></i> Hệ thống sẽ tự động lấy ID và hiển thị khung xem trước.</p>
+                            </div>
+                            
+                            <div id="videoPreviewArea" class="aspect-video bg-black rounded-xl overflow-hidden shadow-lg hidden relative group">
+                                <iframe id="videoFrame" class="w-full h-full" src="" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+                            </div>
+                        </div>
+
+                        <div id="panelPdf" class="content-panel hidden space-y-6 max-w-4xl mx-auto">
+                            <div class="flex gap-4 mb-4">
+                                <label class="flex-1 cursor-pointer">
+                                    <input type="radio" name="pdfSource" value="upload" class="peer sr-only" checked onchange="togglePdfSource()">
+                                    <div class="p-4 rounded-xl border-2 border-gray-200 peer-checked:border-brand peer-checked:bg-teal-50 hover:bg-white transition-all text-center">
+                                        <i class="fa-solid fa-cloud-arrow-up text-2xl mb-2 text-gray-400 peer-checked:text-brand"></i>
+                                        <div class="font-bold text-sm text-gray-700">Tải file lên (Cloudflare)</div>
+                                    </div>
+                                </label>
+                                <label class="flex-1 cursor-pointer">
+                                    <input type="radio" name="pdfSource" value="drive" class="peer sr-only" onchange="togglePdfSource()">
+                                    <div class="p-4 rounded-xl border-2 border-gray-200 peer-checked:border-blue-500 peer-checked:bg-blue-50 hover:bg-white transition-all text-center">
+                                        <i class="fa-brands fa-google-drive text-2xl mb-2 text-gray-400 peer-checked:text-blue-500"></i>
+                                        <div class="font-bold text-sm text-gray-700">Link Google Drive</div>
+                                    </div>
+                                </label>
+                            </div>
+
+                            <div id="pdfUploadArea" class="bg-white p-8 rounded-xl border-2 border-dashed border-gray-300 text-center hover:border-brand transition-colors cursor-pointer group">
+                                <input type="file" id="pdfFileInput" accept=".pdf" class="hidden">
+                                <div class="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-3 group-hover:bg-teal-50 transition-colors">
+                                    <i class="fa-solid fa-file-pdf text-3xl text-gray-400 group-hover:text-brand"></i>
+                                </div>
+                                <p class="font-bold text-gray-700">Nhấn để chọn file PDF</p>
+                                <p class="text-xs text-gray-400 mt-1">Hỗ trợ file tối đa 50MB</p>
+                                <div id="uploadProgress" class="hidden mt-4">
+                                    <div class="w-full bg-gray-200 rounded-full h-2">
+                                        <div class="bg-brand h-2 rounded-full" style="width: 45%"></div>
+                                    </div>
+                                    <p class="text-xs text-brand font-bold mt-1">Đang tải lên... 45%</p>
+                                </div>
+                            </div>
+
+                            <div id="pdfDriveArea" class="hidden bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                                <label class="block text-sm font-bold text-gray-700 mb-2">Dán link Google Drive (Chế độ công khai)</label>
+                                <input type="text" id="driveUrlInput" oninput="previewDrive(this.value)" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" placeholder="https://drive.google.com/file/d/...">
+                            </div>
+
+                            <div id="pdfPreviewArea" class="h-[500px] bg-gray-800 rounded-xl overflow-hidden shadow-lg hidden">
+                                <iframe id="pdfFrame" class="w-full h-full" src=""></iframe>
+                            </div>
+                        </div>
+
+                        <div id="panelQuiz" class="content-panel hidden max-w-4xl mx-auto text-center py-10">
+                            <div class="w-24 h-24 bg-orange-100 rounded-full flex items-center justify-center mx-auto mb-4 animate-bounce">
+                                <i class="fa-solid fa-star text-4xl text-orange-500"></i>
+                            </div>
+                            <h3 class="text-xl font-bold text-gray-800 mb-2">Chọn đề thi kiểm tra</h3>
+                            <p class="text-gray-500 mb-6 max-w-md mx-auto">Học sinh cần làm đạt điểm yêu cầu của bài tập này mới được học bài tiếp theo.</p>
+                            
+                            <div class="flex justify-center gap-4">
+                                <button class="px-6 py-3 bg-white border-2 border-orange-500 text-orange-600 rounded-xl font-bold hover:bg-orange-50 transition-all flex items-center gap-2">
+                                    <i class="fa-solid fa-list-check"></i> Chọn từ Ngân hàng đề
+                                </button>
+                                <div class="relative">
+                                     <select id="examSelect" class="px-4 py-3 bg-gray-50 border border-gray-300 rounded-xl outline-none focus:border-orange-500 font-semibold w-64">
+                                        <option value="">-- Đề thi đã chọn --</option>
+                                        </select>
+                                </div>
+                            </div>
+                        </div>
+
+                    </div>
+
+                    <div class="bg-white border-t border-gray-100 p-4 flex gap-6 text-sm font-bold text-gray-600">
+                        <label class="flex items-center gap-2 cursor-pointer hover:text-brand">
+                            <input type="checkbox" id="isPreview" class="accent-brand w-4 h-4">
+                            <span>Cho phép học thử (Preview)</span>
+                        </label>
+                        <label class="flex items-center gap-2 cursor-pointer hover:text-brand">
+                            <input type="checkbox" id="isPublished" checked class="accent-brand w-4 h-4">
+                            <span>Đã xuất bản (Hiện cho HS)</span>
+                        </label>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
 </body>
 </html>
