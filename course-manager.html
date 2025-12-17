@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Quản lý Khóa học - Thầy Choang</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
@@ -161,15 +162,30 @@
         <div class="flex h-screen w-full p-4 gap-4">
             
             <div class="w-1/3 max-w-sm bg-white rounded-2xl shadow-xl flex flex-col overflow-hidden animate-fade-in-up">
-                <div class="p-4 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
-                    <div>
-                        <h3 class="font-extrabold text-gray-800 text-lg">Nội dung khóa học</h3>
-                        <p id="editorCourseTitle" class="text-xs text-gray-500 truncate w-40">Đang tải...</p>
-                    </div>
-                    <button onclick="addChapter()" class="px-3 py-1.5 bg-brand text-white rounded-lg text-xs font-bold hover:bg-teal-800 shadow transition-all">
-                        <i class="fa-solid fa-folder-plus mr-1"></i> Thêm Chương
-                    </button>
-                </div>
+                <div class="p-4 border-b border-gray-100 bg-gray-50 flex flex-col gap-3">
+    <div class="flex justify-between items-center">
+        <div>
+            <h3 class="font-extrabold text-gray-800 text-lg">Nội dung khóa học</h3>
+            <p id="editorCourseTitle" class="text-xs text-gray-500 truncate w-40">Đang tải...</p>
+        </div>
+        <button onclick="addChapter()" class="px-3 py-1.5 bg-brand text-white rounded-lg text-xs font-bold hover:bg-teal-800 shadow transition-all">
+            <i class="fa-solid fa-folder-plus mr-1"></i> Thêm Chương
+        </button>
+    </div>
+    
+    <div class="flex gap-2 border-t border-gray-200 pt-3">
+        <button onclick="downloadTemplate()" class="flex-1 py-1.5 bg-white border border-gray-300 text-gray-600 rounded text-xs font-bold hover:bg-gray-100" title="Tải file mẫu">
+            <i class="fa-solid fa-download mr-1"></i> Mẫu
+        </button>
+        <button onclick="exportCurriculum()" class="flex-1 py-1.5 bg-white border border-gray-300 text-green-600 rounded text-xs font-bold hover:bg-green-50" title="Xuất ra Excel">
+            <i class="fa-solid fa-file-export mr-1"></i> Xuất
+        </button>
+        <button onclick="document.getElementById('importInput').click()" class="flex-1 py-1.5 bg-white border border-gray-300 text-blue-600 rounded text-xs font-bold hover:bg-blue-50" title="Nhập từ Excel">
+            <i class="fa-solid fa-file-import mr-1"></i> Nhập
+        </button>
+        <input type="file" id="importInput" hidden accept=".xlsx, .xls" onchange="importCurriculum(this)">
+    </div>
+</div>
                 <div id="curriculumTree" class="flex-1 overflow-y-auto p-3 space-y-2 bg-white scrollbar-hide"></div>
                 <div class="p-4 border-t border-gray-100 bg-gray-50 text-center">
                     <button onclick="saveCurriculum()" class="w-full py-3 bg-gradient-to-r from-brand to-teal-600 text-white rounded-xl font-bold shadow-lg hover:shadow-xl hover:scale-[1.02] transition-all">
@@ -972,6 +988,202 @@ function setupDragEvents(el, data) {
         renderCurriculumTree();
     };
 }
+        // ==========================================
+// TÍNH NĂNG EXCEL (IMPORT / EXPORT / TEMPLATE)
+// ==========================================
+
+// 1. TẢI FILE MẪU
+window.downloadTemplate = () => {
+    // Tạo dữ liệu mẫu chuẩn
+    const data = [
+        {
+            "Chương": "Chương 1: Giới thiệu",
+            "Bài học": "Bài 1: Tổng quan",
+            "Tên nội dung": "Video giới thiệu",
+            "Loại (video/pdf/quiz)": "video",
+            "Link/ID (Youtube hoặc Drive)": "https://www.youtube.com/watch?v=example",
+            "Thời gian (phút)": 10,
+            "Học thử (có/không)": "có"
+        },
+        {
+            "Chương": "Chương 1: Giới thiệu",
+            "Bài học": "Bài 1: Tổng quan",
+            "Tên nội dung": "Tài liệu nhập môn",
+            "Loại (video/pdf/quiz)": "pdf",
+            "Link/ID (Youtube hoặc Drive)": "https://drive.google.com/file/d/example",
+            "Thời gian (phút)": "",
+            "Học thử (có/không)": "không"
+        },
+        {
+            "Chương": "Chương 1: Giới thiệu",
+            "Bài học": "Bài 2: Kiểm tra đầu vào",
+            "Tên nội dung": "Đề khảo sát",
+            "Loại (video/pdf/quiz)": "quiz",
+            "Link/ID (Youtube hoặc Drive)": "ID_DE_THI_TU_NGAN_HANG",
+            "Thời gian (phút)": "",
+            "Học thử (có/không)": "không"
+        }
+    ];
+
+    const ws = XLSX.utils.json_to_sheet(data);
+    
+    // Chỉnh độ rộng cột cho dễ nhìn
+    const wscols = [{wch:25}, {wch:25}, {wch:30}, {wch:15}, {wch:40}, {wch:15}, {wch:15}];
+    ws['!cols'] = wscols;
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Mau_Cau_Truc");
+    XLSX.writeFile(wb, "Mau_Nhap_Khoa_Hoc.xlsx");
+};
+
+// 2. XUẤT CẤU TRÚC HIỆN TẠI RA EXCEL
+window.exportCurriculum = () => {
+    if(currentCurriculum.length === 0) return window.showToast("Giáo án trống, không có gì để xuất!", "error");
+
+    const rows = [];
+    
+    currentCurriculum.forEach(chap => {
+        // Nếu chương không có bài học, vẫn xuất dòng chương
+        if(!chap.lessons || chap.lessons.length === 0) {
+            rows.push({
+                "Chương": chap.title, "Bài học": "", "Tên nội dung": "", "Loại (video/pdf/quiz)": "", "Link/ID (Youtube hoặc Drive)": "", "Thời gian (phút)": "", "Học thử (có/không)": ""
+            });
+        } else {
+            chap.lessons.forEach(les => {
+                // Nếu bài học không có item
+                if(!les.items || les.items.length === 0) {
+                    rows.push({
+                        "Chương": chap.title, "Bài học": les.title, "Tên nội dung": "", "Loại (video/pdf/quiz)": "", "Link/ID (Youtube hoặc Drive)": "", "Thời gian (phút)": "", "Học thử (có/không)": ""
+                    });
+                } else {
+                    les.items.forEach(item => {
+                        let content = item.content || "";
+                        // Nếu là quiz thì lấy ID đề thi
+                        if(item.type === 'quiz') content = item.examId || "";
+                        
+                        rows.push({
+                            "Chương": chap.title,
+                            "Bài học": les.title,
+                            "Tên nội dung": item.title,
+                            "Loại (video/pdf/quiz)": item.type,
+                            "Link/ID (Youtube hoặc Drive)": content,
+                            "Thời gian (phút)": item.minWatchTime || "",
+                            "Học thử (có/không)": item.isPreview ? "có" : "không"
+                        });
+                    });
+                }
+            });
+        }
+    });
+
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Cau_Truc_Khoa_Hoc");
+    XLSX.writeFile(wb, `Cau_Truc_${document.getElementById('cTitle').value || 'Khoa_Hoc'}.xlsx`);
+};
+
+// 3. NHẬP TỪ EXCEL (IMPORT)
+window.importCurriculum = (input) => {
+    const file = input.files[0];
+    if(!file) return;
+
+    if(!confirm("Cảnh báo: Hành động này sẽ GHI ĐÈ toàn bộ cấu trúc giáo án hiện tại. Bạn có chắc chắn muốn tiếp tục?")) {
+        input.value = ''; // Reset input
+        return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        try {
+            const data = new Uint8Array(e.target.result);
+            const workbook = XLSX.read(data, {type: 'array'});
+            const firstSheetName = workbook.SheetNames[0];
+            const worksheet = workbook.Sheets[firstSheetName];
+            const json = XLSX.utils.sheet_to_json(worksheet);
+
+            if(json.length === 0) return window.showToast("File rỗng!", "error");
+
+            // LOGIC PARSING: Chuyển Flat JSON -> Nested Array (Chapter > Lesson > Item)
+            const newCurriculum = [];
+            let currentChap = null;
+            let currentLes = null;
+
+            // Biến tạm để nhớ giá trị dòng trước (nếu người dùng merge cell hoặc để trống ô lặp lại)
+            let lastChapName = "";
+            let lastLesName = "";
+
+            json.forEach(row => {
+                // Lấy giá trị các cột (Trim space thừa)
+                let cName = (row["Chương"] || "").toString().trim();
+                let lName = (row["Bài học"] || "").toString().trim();
+                let iName = (row["Tên nội dung"] || "").toString().trim();
+                let iType = (row["Loại (video/pdf/quiz)"] || "video").toString().toLowerCase().trim();
+                let iLink = (row["Link/ID (Youtube hoặc Drive)"] || "").toString().trim();
+                let iTime = row["Thời gian (phút)"];
+                let iPreview = (row["Học thử (có/không)"] || "").toString().toLowerCase().includes("có");
+
+                // Logic điền đầy (Fill down) nếu để trống (giả lập merge cell)
+                if(cName === "") cName = lastChapName; else lastChapName = cName;
+                if(lName === "") lName = lastLesName; else lastLesName = lName;
+
+                // 1. Xử lý CHƯƠNG
+                if(cName) {
+                    // Nếu chưa có chương hoặc tên chương thay đổi -> Tạo chương mới
+                    if(!currentChap || currentChap.title !== cName) {
+                        currentChap = { title: cName, lessons: [], isCollapsed: false };
+                        newCurriculum.push(currentChap);
+                        currentLes = null; // Reset lesson khi qua chương mới
+                    }
+                }
+
+                // 2. Xử lý BÀI HỌC
+                if(lName && currentChap) {
+                    if(!currentLes || currentLes.title !== lName) {
+                        currentLes = { title: lName, items: [], isCollapsed: false };
+                        currentChap.lessons.push(currentLes);
+                    }
+                }
+
+                // 3. Xử lý NỘI DUNG (ITEM)
+                if(iName && currentLes) {
+                    const newItem = {
+                        id: 'it_' + Date.now() + Math.random().toString(36).substr(2, 9),
+                        title: iName,
+                        type: iType,
+                        content: iLink, // Mặc định gán link vào content
+                        minWatchTime: iTime || 10,
+                        isPreview: iPreview,
+                        isPublished: true
+                    };
+
+                    // Nếu là Quiz, content chính là ExamID. Cần query lấy Title đề thi (tuy nhiên import excel khó check title ngay, tạm thời để trống title)
+                    if(iType === 'quiz') {
+                        newItem.examId = iLink;
+                        newItem.examTitle = "Đề thi (ID: " + iLink + ")"; // Placeholder
+                    }
+
+                    currentLes.items.push(newItem);
+                }
+            });
+
+            // Cập nhật dữ liệu
+            currentCurriculum = newCurriculum;
+            renderCurriculumTree();
+            window.showToast("Đã nhập cấu trúc thành công!", "success");
+            
+            // Reset UI editor
+            document.getElementById('editorForm').classList.add('hidden');
+            document.getElementById('editorWelcome').classList.remove('hidden');
+
+        } catch (err) {
+            console.error(err);
+            window.showToast("Lỗi đọc file: " + err.message, "error");
+        } finally {
+            input.value = ''; // Reset để chọn lại file cũ được
+        }
+    };
+    reader.readAsArrayBuffer(file);
+};
     </script>
     <div id="renameModal" class="hidden fixed inset-0 z-[220] flex items-center justify-center bg-gray-900/60 backdrop-blur-sm">
     <div class="bg-white rounded-2xl shadow-2xl p-6 w-96 animate-fade-in-up">
