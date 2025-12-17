@@ -158,8 +158,12 @@
                         <h3 class="font-bold text-gray-800 mb-4 pb-3 border-b border-gray-100"><i class="fa-solid fa-users text-purple-600 mr-2"></i> Đối tượng</h3>
                         <div class="space-y-3">
                             <label class="flex items-center gap-2 p-2 border rounded hover:bg-gray-50" onclick="togglePrivasySettings('public')"><input type="radio" name="settingAccess" value="public" checked> <div><div class="font-bold text-sm">Công khai</div><div class="text-xs text-gray-500">Ai cũng có thể làm</div></div></label>
-                            <label class="flex items-center gap-2 p-2 border rounded hover:bg-gray-50" onclick="togglePrivasySettings('class')"><input type="radio" name="settingAccess" value="class"> <div><div class="font-bold text-sm">Lớp học</div><div class="text-xs text-gray-500">Chỉ lớp được chọn</div></div></label>
-                            <div id="classSelectionArea" class="hidden pl-6"><select id="settingClassSelect" class="form-input bg-white border-blue-300 font-bold text-blue-800"><option value="">-- Chọn lớp --</option></select></div>
+                            <label class="flex items-center gap-2 p-2 border rounded hover:bg-gray-50" onclick="togglePrivasySettings('class')"><input type="radio" name="settingAccess" value="class"> <div><div class="font-bold text-sm">Lớp học</div><div class="text-xs text-gray-500">Chỉ các lớp được chọn</div></div></label>
+                            <div id="classSelectionArea" class="hidden pl-6 mt-2">
+                                <div id="classCheckboxList" class="max-h-40 overflow-y-auto border border-blue-200 rounded-lg p-2 bg-gray-50 space-y-1 custom-scrollbar">
+                                    <p class="text-xs text-gray-400 italic">Đang tải danh sách lớp...</p>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1070,13 +1074,27 @@
                         window.togglePrivasySettings(data.accessType);
                         if (data.accessType === 'class') filterBtn.classList.remove('hidden'); else filterBtn.classList.add('hidden');
                     }
-                    if(data.allowedClassId) {
-                        setTimeout(async () => { 
-                            document.getElementById('settingClassSelect').value = data.allowedClassId;
-                            const cls = await getDoc(doc(db, "classes", data.allowedClassId));
-                            if(cls.exists()) { filterBtn.textContent = cls.data().name; classStudentList = cls.data().students || []; }
-                        }, 500);
-                    }
+                    
+                    // [CẬP NHẬT] Logic load nhiều lớp
+                    setTimeout(async () => { 
+                        // Lấy danh sách ID lớp (tương thích cả cũ và mới)
+                        let selectedIds = [];
+                        if (data.allowedClassIds && Array.isArray(data.allowedClassIds)) {
+                            selectedIds = data.allowedClassIds;
+                        } else if (data.allowedClassId) {
+                            selectedIds = [data.allowedClassId]; // Hỗ trợ đề thi cũ
+                        }
+
+                        // Tích chọn vào các checkbox tương ứng
+                        selectedIds.forEach(id => {
+                            const cb = document.querySelector(`.class-checkbox[value="${id}"]`);
+                            if(cb) cb.checked = true;
+                        });
+
+                        // Cập nhật text cho nút lọc thống kê (nếu cần)
+                        if(selectedIds.length > 0) filterBtn.textContent = `${selectedIds.length} Lớp`;
+                    }, 800); // Tăng delay xíu để đảm bảo list lớp đã load xong
+
                     window.questions = data.questions || [];
                     window.originalQuestionsData = JSON.parse(JSON.stringify(window.questions));
                     
@@ -1445,7 +1463,9 @@
                 password: document.getElementById('settingPassword').value, attempts: parseInt(document.getElementById('settingAttempts').value) || 0,
                 proctoring: document.getElementById('settingProctoring').checked, shuffle: document.getElementById('settingShuffle').checked,
                 showScore: document.querySelector('input[name="settingShowScore"]:checked').value, showResult: document.querySelector('input[name="settingShowResult"]:checked').value,
-                accessType: document.querySelector('input[name="settingAccess"]:checked').value, allowedClassId: document.getElementById('settingClassSelect').value
+                accessType: document.querySelector('input[name="settingAccess"]:checked').value, 
+                // [CẬP NHẬT] Lưu mảng các ID lớp học
+                allowedClassIds: Array.from(document.querySelectorAll('.class-checkbox:checked')).map(cb => cb.value)
             };
             try {
                 if (currentExamId && window.originalQuestionsData.length > 0) {
@@ -1535,8 +1555,33 @@
         window.copySettingLink = () => { document.getElementById("settingShareLink").select(); document.execCommand("copy"); window.showToast("Đã sao chép link!"); };
         window.closeShareModal = () => { document.getElementById('shareModal').classList.add('opacity-0', 'pointer-events-none'); };
         window.showToast = (message, type='success') => { const c = document.getElementById('toastContainer'); const d = document.createElement('div'); d.className = `bg-white border-l-4 border-green-500 shadow-xl rounded-lg p-4 flex items-center gap-3 min-w-[300px] transform translate-x-full transition-transform duration-300`; d.innerHTML = `<div><h4 class="font-bold text-gray-800 text-sm">THÔNG BÁO</h4><p class="text-sm text-gray-600">${message}</p></div>`; c.appendChild(d); requestAnimationFrame(()=>d.classList.remove('translate-x-full')); setTimeout(()=>{d.classList.add('translate-x-full'); setTimeout(()=>d.remove(), 500);}, 3000); };
-        window.togglePrivasySettings = (type) => { document.getElementById('classSelectionArea').className = type === 'class' ? 'pl-6 block' : 'hidden'; };
-        async function loadTeacherClasses() { const s = document.getElementById('settingClassSelect'); if (!currentUser) return; const q = query(collection(db, "classes"), where("teacherId", "==", currentUser.uid)); const snap = await getDocs(q); s.innerHTML = ''; const d = document.createElement('option'); d.value = ""; d.textContent = "-- Chọn lớp học --"; s.appendChild(d); snap.forEach(doc => { const o = document.createElement('option'); o.value = doc.id; o.textContent = doc.data().name; s.appendChild(o); }); };
+        window.togglePrivasySettings = (type) => { document.getElementById('classSelectionArea').className = type === 'class' ? 'pl-6 block mt-2' : 'hidden'; };
+        
+        // [CẬP NHẬT] Hàm load danh sách lớp dạng Checkbox
+        async function loadTeacherClasses() { 
+            const container = document.getElementById('classCheckboxList'); 
+            if (!currentUser || !container) return; 
+            const q = query(collection(db, "classes"), where("teacherId", "==", currentUser.uid)); 
+            const snap = await getDocs(q); 
+            container.innerHTML = ''; 
+            
+            if(snap.empty) {
+                container.innerHTML = '<p class="text-xs text-red-500 p-2">Thầy cô chưa tạo lớp học nào.</p>';
+                return;
+            }
+
+            snap.forEach(doc => { 
+                const cls = doc.data();
+                const div = document.createElement('div');
+                div.className = 'flex items-center gap-2 p-1.5 hover:bg-white rounded cursor-pointer';
+                div.innerHTML = `
+                    <input type="checkbox" id="cls_${doc.id}" value="${doc.id}" class="class-checkbox w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer">
+                    <label for="cls_${doc.id}" class="text-sm text-gray-700 font-bold cursor-pointer select-none flex-1">${cls.name}</label>
+                `;
+                container.appendChild(div);
+            }); 
+        };
+
         window.toggleSidebar = () => { const s = document.getElementById('mainSidebar'); const o = document.getElementById('sidebarOverlay'); if (s.classList.contains('-translate-x-full')) { s.classList.remove('-translate-x-full'); o.classList.remove('hidden'); } else { s.classList.add('-translate-x-full'); o.classList.add('hidden'); } };
         window.openScoringModal = () => { document.getElementById('scoringModal').classList.remove('opacity-0', 'pointer-events-none'); document.getElementById('scoringModal').querySelector('div').classList.add('scale-100'); let cM=0, cTF=0, cE=0; let h=''; window.questions.forEach((q,i)=>{ if(q.type==='essay'){ cE++; h+=`<div class="flex items-center gap-2 text-sm"><span class="w-16 font-bold">Câu ${i+1}</span><input type="number" id="essay-score-${i}" class="form-input h-8 text-right w-20" value="${q.point||0}" step="0.1"></div>`; } else if(q.type==='tf') cTF++; else cM++; }); document.getElementById('countMcShort').textContent=cM; document.getElementById('countTF').textContent=cTF; document.getElementById('countEssay').textContent=cE; document.getElementById('essayScoreList').innerHTML = cE>0 ? h : '<p class="text-xs text-gray-400 italic">Không có câu tự luận.</p>'; };
         window.closeScoringModal = () => { document.getElementById('scoringModal').classList.add('opacity-0', 'pointer-events-none'); };
