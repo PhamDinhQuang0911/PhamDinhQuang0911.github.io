@@ -15,9 +15,19 @@
     
     <script>
         tailwind.config = {
-            darkMode: 'class', // Kích hoạt chế độ Dark Mode thủ công
+            darkMode: 'class',
             theme: {
-                extend: { colors: { brand: '#0F766E', primary: '#0F766E', accent: '#F97316' } }
+                extend: { 
+                    colors: { 
+                        brand: '#0F766E', 
+                        primary: '#0F766E', 
+                        accent: '#F97316',
+                        // Bảng màu tối chuyên nghiệp (Slate)
+                        darkbg: '#0f172a', // Slate 900
+                        darkcard: '#1e293b', // Slate 800
+                        darkinput: '#334155' // Slate 700
+                    } 
+                }
             }
         }
     </script>
@@ -26,10 +36,9 @@
         body { font-family: 'Nunito', sans-serif; }
         .font-handwriting { font-family: 'Pacifico', cursive; }
         
-        /* Sidebar Active State - Light & Dark */
-        .nav-item.active { background-color: #FFF7ED; color: #C2410C; border-right: 3px solid #F97316; font-weight: 700; }
-        .dark .nav-item.active { background-color: #372818; color: #FB923C; border-right: 3px solid #FB923C; }
-        
+        /* Sidebar Active State */
+        .nav-item.active { background-color: #FFF7ED; color: #C2410C; border-right: 3px solid #F97316; font-weight: 800; }
+        .dark .nav-item.active { background-color: #334155; color: #fdba74; border-right: 3px solid #fdba74; }
         .nav-item i { width: 24px; text-align: center; }
 
         /* File Explorer Items */
@@ -37,114 +46,98 @@
         .explorer-item:hover { transform: translateY(-2px); box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
         .explorer-item.drag-over { background-color: #DBEAFE !important; border: 2px dashed #2563EB !important; transform: scale(1.05); z-index: 10; }
         .dark .explorer-item.drag-over { background-color: #1e3a8a !important; border-color: #60a5fa !important; }
-        .explorer-item.dragging { opacity: 0.4; border: 2px dashed #9CA3AF; }
-
-        /* Animations */
-        @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
-        @keyframes fadeOut { from { opacity: 1; } to { opacity: 0; } }
-        .notification-toast { animation: slideIn 0.5s ease forwards; }
-        .notification-toast.hide { animation: fadeOut 0.5s ease forwards; }
+        
+        /* Modal Transitions */
         .modal { transition: opacity 0.2s ease; }
         body.modal-active { overflow: hidden; }
 
         /* Custom Scrollbar */
-        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
         .dark ::-webkit-scrollbar-thumb { background: #475569; }
         ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
         
-        /* Glass effect */
-        .glass { backdrop-filter: blur(2px); }
-        
-        /* Input Styles reuse */
-        .input-dark {
-            @apply w-full px-4 py-3 rounded-xl border outline-none transition-all;
-            @apply border-gray-200 bg-white text-gray-800 focus:ring-2 focus:ring-blue-100 focus:border-blue-500; 
-            @apply dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:focus:ring-gray-600 dark:focus:border-blue-400;
+        /* Notifications */
+        @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        .notification-toast { animation: slideIn 0.5s ease forwards; }
+
+        /* --- CLASS TÙY CHỈNH CHO GIAO DIỆN --- */
+        /* Input chuẩn cho cả Sáng/Tối */
+        .input-std {
+            @apply w-full px-4 py-2.5 rounded-xl border outline-none transition-all duration-200;
+            @apply bg-white border-gray-300 text-gray-800 focus:ring-2 focus:ring-blue-100 focus:border-blue-500;
+            @apply dark:bg-slate-700 dark:border-slate-600 dark:text-white dark:focus:ring-slate-600 dark:focus:border-blue-400;
+        }
+        /* Nút phụ (Cancel/Close) */
+        .btn-secondary {
+            @apply px-4 py-2 rounded-lg font-bold transition-colors;
+            @apply bg-gray-100 text-gray-600 hover:bg-gray-200;
+            @apply dark:bg-slate-700 dark:text-gray-300 dark:hover:bg-slate-600;
+        }
+        /* Card nền */
+        .card-base {
+            @apply bg-white border border-gray-200 shadow-sm;
+            @apply dark:bg-slate-800 dark:border-slate-700 dark:shadow-none;
         }
     </style>
 </head>
-<body class="h-screen flex overflow-hidden text-gray-800 bg-gray-50 dark:bg-gray-900 dark:text-gray-100 transition-colors duration-200">
+<body class="h-screen flex overflow-hidden text-gray-800 bg-gray-50 dark:bg-slate-900 dark:text-gray-100 transition-colors duration-200">
 
     <div id="notificationContainer" class="fixed top-5 right-5 z-[100] flex flex-col gap-3 pointer-events-none"></div>
+    <div id="sidebarOverlay" onclick="window.toggleSidebar()" class="fixed inset-0 bg-black/50 z-30 hidden md:hidden backdrop-blur-sm transition-opacity"></div>
 
-    <div id="sidebarOverlay" onclick="window.toggleSidebar()" class="fixed inset-0 bg-black/50 z-30 hidden md:hidden glass transition-opacity"></div>
-
-    <aside id="mainSidebar" class="fixed inset-y-0 left-0 w-64 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col z-40 shadow-xl transition-transform duration-300 -translate-x-full md:relative md:translate-x-0 flex-shrink-0">
-        <div class="h-16 flex items-center justify-between px-6 border-b border-gray-100 dark:border-gray-700 shrink-0">
+    <aside id="mainSidebar" class="fixed inset-y-0 left-0 w-64 bg-white dark:bg-slate-800 border-r border-gray-200 dark:border-slate-700 flex flex-col z-40 shadow-xl transition-transform duration-300 -translate-x-full md:relative md:translate-x-0 flex-shrink-0">
+        <div class="h-16 flex items-center justify-between px-6 border-b border-gray-100 dark:border-slate-700 shrink-0">
             <div class="flex items-center gap-3">
-                <div class="w-8 h-8 bg-orange-500 rounded-lg flex items-center justify-center text-white font-bold shadow-sm">
-                    <i class="fa-solid fa-graduation-cap"></i>
-                </div>
+                <div class="w-8 h-8 bg-orange-500 rounded-lg flex items-center justify-center text-white font-bold shadow-sm"><i class="fa-solid fa-graduation-cap"></i></div>
                 <span class="text-lg text-orange-600 dark:text-orange-400 font-handwriting pt-1">Thầy Choang</span>
             </div>
-            <button onclick="window.toggleSidebar()" class="md:hidden text-gray-400 hover:text-red-500">
-                <i class="fa-solid fa-times text-xl"></i>
-            </button>
+            <button onclick="window.toggleSidebar()" class="md:hidden text-gray-400 hover:text-red-500"><i class="fa-solid fa-times text-xl"></i></button>
         </div>
 
-        <div class="p-4 border-b border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
+        <div class="p-4 border-b border-gray-100 dark:border-slate-700 bg-gray-50 dark:bg-slate-800/50">
             <div class="flex items-center gap-3 cursor-pointer" onclick="window.openMyProfile()">
-                <img id="sidebarAvatar" src="https://via.placeholder.com/150" class="w-10 h-10 rounded-full border-2 border-white dark:border-gray-600 shadow-sm object-cover">
+                <img id="sidebarAvatar" src="https://via.placeholder.com/150" class="w-10 h-10 rounded-full border-2 border-white dark:border-slate-600 shadow-sm object-cover">
                 <div class="overflow-hidden">
-                    <p id="sidebarName" class="text-sm font-bold text-gray-800 dark:text-gray-100 truncate">Đang tải...</p>
+                    <p id="sidebarName" class="text-sm font-bold text-gray-800 dark:text-gray-200 truncate">Đang tải...</p>
                     <p id="sidebarRole" class="text-xs text-gray-500 dark:text-gray-400 truncate">Quản trị viên</p>
                 </div>
             </div>
         </div>
 
         <nav class="flex-1 overflow-y-auto py-4 space-y-1">
-            <button onclick="switchView('home'); window.toggleSidebar()" id="nav-home" class="nav-item w-full text-left px-6 py-3 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors flex items-center gap-3 active">
-                <i class="fa-solid fa-house"></i> Sảnh chính
-            </button>
-            
+            <button onclick="switchView('home'); window.toggleSidebar()" id="nav-home" class="nav-item w-full text-left px-6 py-3 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors flex items-center gap-3 active"><i class="fa-solid fa-house"></i> Sảnh chính</button>
             <div id="teacherMenu">
                 <div class="px-6 mt-4 mb-2 text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Quản lý</div>
-                <button onclick="switchView('classes'); window.toggleSidebar()" id="nav-classes" class="nav-item w-full text-left px-6 py-3 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors flex items-center gap-3">
-                    <i class="fa-solid fa-chalkboard-user"></i> Danh sách lớp học
-                </button>
-                <button onclick="switchView('exambank'); window.toggleSidebar()" id="nav-exambank" class="nav-item w-full text-left px-6 py-3 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors flex items-center gap-3">
-                    <i class="fa-solid fa-folder-tree"></i> Ngân hàng đề thi
-                </button>
+                <button onclick="switchView('classes'); window.toggleSidebar()" id="nav-classes" class="nav-item w-full text-left px-6 py-3 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors flex items-center gap-3"><i class="fa-solid fa-chalkboard-user"></i> Danh sách lớp học</button>
+                <button onclick="switchView('exambank'); window.toggleSidebar()" id="nav-exambank" class="nav-item w-full text-left px-6 py-3 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors flex items-center gap-3"><i class="fa-solid fa-folder-tree"></i> Ngân hàng đề thi</button>
+                <button onclick="window.location.href='course-manager.html'" id="nav-course-manager" class="nav-item w-full text-left px-6 py-3 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors flex items-center gap-3"><i class="fa-solid fa-shapes"></i> Quản lý Khóa học</button>
                 
-                <button onclick="window.location.href='course-manager.html'" id="nav-course-manager" class="nav-item w-full text-left px-6 py-3 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors flex items-center gap-3">
-                    <i class="fa-solid fa-shapes"></i> Quản lý Khóa học
-                </button>
-
                 <div class="px-6 mt-4 mb-2 text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Cấu hình Hệ thống</div>
-                <button onclick="window.openHeroModal(); window.toggleSidebar()" class="nav-item w-full text-left px-6 py-3 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors flex items-center gap-3">
-                    <i class="fa-solid fa-paintbrush"></i> Cài đặt Banner & Logo
-                </button>
-                <button onclick="window.openPaymentConfigModal(); window.toggleSidebar()" class="nav-item w-full text-left px-6 py-3 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors flex items-center gap-3">
-                    <i class="fa-solid fa-credit-card"></i> Cấu hình Thanh toán
-                </button>
+                <button onclick="window.openHeroModal(); window.toggleSidebar()" class="nav-item w-full text-left px-6 py-3 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors flex items-center gap-3"><i class="fa-solid fa-paintbrush"></i> Cài đặt Banner & Logo</button>
+                <button onclick="window.openPaymentConfigModal(); window.toggleSidebar()" class="nav-item w-full text-left px-6 py-3 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors flex items-center gap-3"><i class="fa-solid fa-credit-card"></i> Cấu hình Thanh toán</button>
             </div>
         </nav>
-
-        <div class="p-4 border-t border-gray-200 dark:border-gray-700">
-            <button id="logoutBtn" class="w-full py-2 text-gray-500 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400 font-bold text-sm flex items-center justify-center gap-2 transition-colors">
-                <i class="fa-solid fa-right-from-bracket"></i> Đăng xuất
-            </button>
+        
+        <div class="p-4 border-t border-gray-200 dark:border-slate-700">
+            <button id="logoutBtn" class="w-full py-2 text-gray-500 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400 font-bold text-sm flex items-center justify-center gap-2 transition-colors"><i class="fa-solid fa-right-from-bracket"></i> Đăng xuất</button>
         </div>
     </aside>
 
-    <main class="flex-1 flex flex-col overflow-hidden relative w-full bg-gray-50 dark:bg-gray-900">
-        <div class="h-16 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between px-4 sticky top-0 z-20 shrink-0 shadow-sm">
+    <main class="flex-1 flex flex-col overflow-hidden relative w-full bg-gray-50 dark:bg-slate-900">
+        <div class="h-16 bg-white dark:bg-slate-800 border-b border-gray-200 dark:border-slate-700 flex items-center justify-between px-4 sticky top-0 z-20 shrink-0 shadow-sm">
             <div class="flex items-center gap-3 md:hidden">
-                <button onclick="window.toggleSidebar()" class="text-gray-600 dark:text-gray-300 hover:text-orange-500 text-2xl p-1">
-                    <i class="fa-solid fa-bars"></i>
-                </button>
+                <button onclick="window.toggleSidebar()" class="text-gray-600 dark:text-gray-300 hover:text-orange-500 text-2xl p-1"><i class="fa-solid fa-bars"></i></button>
                 <span class="font-handwriting text-orange-600 dark:text-orange-400 text-lg">Thầy Choang</span>
             </div>
             
             <div class="flex items-center gap-3 ml-auto">
-                <button onclick="window.toggleThemeMode()" id="themeToggleBtn" class="w-10 h-10 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-yellow-400 hover:bg-gray-200 dark:hover:bg-gray-600 transition-all flex items-center justify-center" title="Đổi giao diện">
+                <button onclick="window.toggleThemeMode()" id="themeToggleBtn" class="w-10 h-10 rounded-full bg-gray-100 dark:bg-slate-700 text-gray-500 dark:text-yellow-400 hover:bg-gray-200 dark:hover:bg-slate-600 transition-all flex items-center justify-center border border-transparent dark:border-slate-600 shadow-sm" title="Đổi giao diện">
                     <i class="fa-solid fa-moon"></i>
                 </button>
-                
-                <div onclick="window.openMyProfile()" class="w-9 h-9 rounded-full bg-gray-100 dark:bg-gray-700 overflow-hidden border border-gray-200 dark:border-gray-600 active:scale-95 transition-transform md:hidden">
-                    <img id="mobileAvatar" src="https://via.placeholder.com/150" class="w-full h-full object-cover"> 
+                <div onclick="window.openMyProfile()" class="w-9 h-9 rounded-full bg-gray-100 dark:bg-slate-700 overflow-hidden border border-gray-200 dark:border-slate-600 active:scale-95 transition-transform md:hidden">
+                    <img id="mobileAvatar" src="https://via.placeholder.com/150" class="w-full h-full object-cover">
                 </div>
             </div>
         </div>
@@ -152,134 +145,97 @@
         <div id="view-home" class="view-section flex-1 overflow-y-auto p-4 md:p-8">
             <div class="max-w-6xl mx-auto">
                 <div class="bg-gradient-to-r from-orange-500 to-pink-500 rounded-3xl p-6 md:p-8 text-white mb-8 md:mb-10 shadow-lg relative overflow-hidden">
-                    <div class="relative z-10">
-                        <h1 class="text-2xl md:text-3xl font-bold mb-2">Xin chào Thầy Cô! 👋</h1>
-                        <p class="opacity-90 text-sm md:text-base">Chúc thầy cô một ngày làm việc hiệu quả.</p>
-                    </div>
-                    <div class="absolute top-0 right-0 -mr-16 -mt-16 w-64 h-64 rounded-full bg-white opacity-10"></div>
-                    <div class="absolute bottom-0 right-20 w-32 h-32 rounded-full bg-white opacity-10"></div>
+                    <div class="relative z-10"><h1 class="text-2xl md:text-3xl font-bold mb-2">Xin chào Thầy Cô! 👋</h1><p class="opacity-90 text-sm md:text-base">Chúc thầy cô một ngày làm việc hiệu quả.</p></div>
+                    <div class="absolute top-0 right-0 -mr-16 -mt-16 w-64 h-64 rounded-full bg-white opacity-10"></div><div class="absolute bottom-0 right-20 w-32 h-32 rounded-full bg-white opacity-10"></div>
                 </div>
-                
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <div onclick="switchView('classes')" class="bg-white dark:bg-gray-800 p-6 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm hover:shadow-md cursor-pointer transition-all">
-                        <div class="w-12 h-12 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 flex items-center justify-center text-xl mb-4"><i class="fa-solid fa-users"></i></div>
-                        <h3 class="font-bold text-lg text-gray-800 dark:text-gray-100">Quản lý Lớp</h3>
-                        <p class="text-sm text-gray-500 dark:text-gray-400">Xem danh sách lớp và học sinh</p>
-                    </div>
-                    <div onclick="switchView('exambank')" class="bg-white dark:bg-gray-800 p-6 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm hover:shadow-md cursor-pointer transition-all">
-                        <div class="w-12 h-12 rounded-full bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 flex items-center justify-center text-xl mb-4"><i class="fa-solid fa-file-lines"></i></div>
-                        <h3 class="font-bold text-lg text-gray-800 dark:text-gray-100">Ngân hàng đề</h3>
-                        <p class="text-sm text-gray-500 dark:text-gray-400">Soạn thảo và quản lý đề thi</p>
-                    </div>
-                    <div onclick="window.location.href='course-manager.html'" class="bg-white dark:bg-gray-800 p-6 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm hover:shadow-md cursor-pointer transition-all">
-                        <div class="w-12 h-12 rounded-full bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 flex items-center justify-center text-xl mb-4"><i class="fa-solid fa-shapes"></i></div>
-                        <h3 class="font-bold text-lg text-gray-800 dark:text-gray-100">Khóa học & Banner</h3>
-                        <p class="text-sm text-gray-500 dark:text-gray-400">Cài đặt trang chủ và khóa học</p>
-                    </div>
+                    <div onclick="switchView('classes')" class="card-base p-6 rounded-xl hover:shadow-md cursor-pointer transition-all"><div class="w-12 h-12 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 flex items-center justify-center text-xl mb-4"><i class="fa-solid fa-users"></i></div><h3 class="font-bold text-lg text-gray-800 dark:text-gray-100">Quản lý Lớp</h3><p class="text-sm text-gray-500 dark:text-gray-400">Xem danh sách lớp và học sinh</p></div>
+                    <div onclick="switchView('exambank')" class="card-base p-6 rounded-xl hover:shadow-md cursor-pointer transition-all"><div class="w-12 h-12 rounded-full bg-green-100 dark:bg-green-900/40 text-green-600 dark:text-green-400 flex items-center justify-center text-xl mb-4"><i class="fa-solid fa-file-lines"></i></div><h3 class="font-bold text-lg text-gray-800 dark:text-gray-100">Ngân hàng đề</h3><p class="text-sm text-gray-500 dark:text-gray-400">Soạn thảo và quản lý đề thi</p></div>
+                    <div onclick="window.location.href='course-manager.html'" class="card-base p-6 rounded-xl hover:shadow-md cursor-pointer transition-all"><div class="w-12 h-12 rounded-full bg-purple-100 dark:bg-purple-900/40 text-purple-600 dark:text-purple-400 flex items-center justify-center text-xl mb-4"><i class="fa-solid fa-shapes"></i></div><h3 class="font-bold text-lg text-gray-800 dark:text-gray-100">Khóa học & Banner</h3><p class="text-sm text-gray-500 dark:text-gray-400">Cài đặt trang chủ và khóa học</p></div>
                 </div>
             </div>
         </div>
 
         <div id="view-classes" class="view-section hidden flex-1 flex flex-col h-full">
-            <div class="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 p-4 md:p-6 flex justify-between items-center shadow-sm z-10">
+            <div class="bg-white dark:bg-slate-800 border-b border-gray-200 dark:border-slate-700 p-4 md:p-6 flex justify-between items-center shadow-sm z-10">
                 <h2 class="text-xl md:text-2xl font-bold text-gray-800 dark:text-gray-100 flex items-center"><i class="fa-solid fa-chalkboard-user mr-2 text-blue-500"></i> <span class="hidden md:inline">Quản lý</span> Lớp học</h2>
                 <button id="createClassBtn" class="px-3 md:px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold shadow-md transition-all flex items-center gap-2 text-sm md:text-base"><i class="fa-solid fa-plus"></i> <span class="hidden md:inline">Tạo lớp mới</span><span class="md:hidden">Tạo mới</span></button>
             </div>
-            <div class="flex-1 overflow-y-auto p-4 md:p-6 bg-gray-50 dark:bg-gray-900">
+            <div class="flex-1 overflow-y-auto p-4 md:p-6 bg-gray-50 dark:bg-slate-900">
                 <div id="classList" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6"><p class="text-gray-400 italic col-span-3 text-center py-10">Đang tải dữ liệu...</p></div>
             </div>
         </div>
 
-        <div id="view-teacher-class-detail" class="view-section hidden flex-1 flex flex-col h-full bg-white dark:bg-gray-800">
-            <div class="h-16 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between px-4 md:px-6 bg-white dark:bg-gray-800 shrink-0 z-10 shadow-sm">
+        <div id="view-teacher-class-detail" class="view-section hidden flex-1 flex flex-col h-full bg-white dark:bg-slate-800">
+            <div class="h-16 border-b border-gray-200 dark:border-slate-700 flex items-center justify-between px-4 md:px-6 bg-white dark:bg-slate-800 shrink-0 z-10 shadow-sm">
                 <div class="flex items-center gap-3 md:gap-4">
-                    <button onclick="switchView('classes')" class="w-8 h-8 rounded-full bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 flex items-center justify-center transition-colors text-gray-600 dark:text-gray-300">
-                        <i class="fa-solid fa-arrow-left"></i>
-                    </button>
+                    <button onclick="switchView('classes')" class="w-8 h-8 rounded-full bg-gray-100 dark:bg-slate-700 hover:bg-gray-200 dark:hover:bg-slate-600 flex items-center justify-center transition-colors text-gray-600 dark:text-gray-300"><i class="fa-solid fa-arrow-left"></i></button>
                     <div class="overflow-hidden">
-                        <div class="flex items-center gap-2">
-                            <h2 class="text-base md:text-lg font-bold text-blue-800 dark:text-blue-400 truncate max-w-[150px] md:max-w-xs" id="teacherClassTitle">Chi tiết Lớp học</h2>
-                            <button onclick="window.editClassName()" class="text-gray-400 hover:text-blue-600 p-1 rounded transition-colors"><i class="fa-solid fa-pen text-xs"></i></button>
-                        </div>
+                        <div class="flex items-center gap-2"><h2 class="text-base md:text-lg font-bold text-blue-800 dark:text-blue-400 truncate max-w-[150px] md:max-w-xs" id="teacherClassTitle">Chi tiết Lớp học</h2><button onclick="window.editClassName()" class="text-gray-400 hover:text-blue-600 p-1 rounded transition-colors"><i class="fa-solid fa-pen text-xs"></i></button></div>
                         <p class="text-[10px] md:text-xs text-gray-500 dark:text-gray-400">Quản lý HS & Bài tập</p>
                     </div>
                 </div>
-                
-                <div class="flex bg-gray-100 dark:bg-gray-700 p-1 rounded-lg shrink-0">
-                    <button onclick="window.switchTab('students')" id="tabBtnStudents" class="px-3 md:px-4 py-1.5 text-xs md:text-sm font-bold rounded-md transition-all text-blue-700 dark:text-blue-300 bg-white dark:bg-gray-600 shadow-sm">Học sinh</button>
+                <div class="flex bg-gray-100 dark:bg-slate-700 p-1 rounded-lg shrink-0">
+                    <button onclick="window.switchTab('students')" id="tabBtnStudents" class="px-3 md:px-4 py-1.5 text-xs md:text-sm font-bold rounded-md transition-all text-blue-700 dark:text-blue-300 bg-white dark:bg-slate-600 shadow-sm">Học sinh</button>
                     <button onclick="window.switchTab('exams')" id="tabBtnExams" class="px-3 md:px-4 py-1.5 text-xs md:text-sm font-bold rounded-md transition-all text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200">Bài tập</button>
                 </div>
             </div>
-
-            <div class="flex-1 overflow-y-auto p-4 md:p-6 bg-gray-50 dark:bg-gray-900 w-full">
+            <div class="flex-1 overflow-y-auto p-4 md:p-6 bg-gray-50 dark:bg-slate-900 w-full">
                 <div id="tabContentStudents" class="space-y-4 md:space-y-6 w-full max-w-7xl mx-auto">
-                    <div class="bg-white dark:bg-gray-800 p-4 md:p-6 rounded-2xl border border-gray-200 dark:border-gray-700 shadow-sm">
+                    <div class="card-base p-4 md:p-6 rounded-2xl">
                         <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 gap-3">
                             <h4 class="font-bold text-gray-800 dark:text-gray-200 text-sm uppercase flex items-center gap-2">
-                                <span class="w-6 h-6 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 flex items-center justify-center"><i class="fa-solid fa-user-plus text-xs"></i></span>
-                                Thêm học sinh
+                                <span class="w-6 h-6 rounded bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 flex items-center justify-center"><i class="fa-solid fa-user-plus text-xs"></i></span> Thêm học sinh
                             </h4>
                             <div class="flex gap-2 w-full md:w-auto">
-                                <button onclick="window.addExistingStudent()" class="flex-1 md:flex-none text-xs px-3 py-1.5 bg-purple-100 dark:bg-purple-900/30 border border-purple-200 dark:border-purple-700 text-purple-700 dark:text-purple-300 rounded-lg hover:bg-purple-200 dark:hover:bg-purple-800 font-bold justify-center flex"><i class="fa-solid fa-magnifying-glass-plus mr-1"></i> Tìm & Thêm HS</button>
-                                <button onclick="window.downloadTemplate()" class="flex-1 md:flex-none text-xs px-3 py-1.5 bg-white dark:bg-gray-700 border border-green-500 text-green-600 dark:text-green-400 rounded-lg hover:bg-green-50 dark:hover:bg-green-900 font-bold justify-center flex"><i class="fa-solid fa-download mr-1"></i> File mẫu</button>
+                                <button onclick="window.addExistingStudent()" class="flex-1 md:flex-none text-xs px-3 py-1.5 bg-purple-100 dark:bg-purple-900/40 border border-purple-200 dark:border-purple-800 text-purple-700 dark:text-purple-300 rounded-lg hover:bg-purple-200 dark:hover:bg-purple-800 font-bold justify-center flex"><i class="fa-solid fa-magnifying-glass-plus mr-1"></i> Tìm & Thêm HS</button>
+                                <button onclick="window.downloadTemplate()" class="flex-1 md:flex-none text-xs px-3 py-1.5 bg-white dark:bg-slate-700 border border-green-500 text-green-600 dark:text-green-400 rounded-lg hover:bg-green-50 dark:hover:bg-green-900/30 font-bold justify-center flex"><i class="fa-solid fa-download mr-1"></i> File mẫu</button>
                                 <label for="excelInput" class="flex-1 md:flex-none text-xs px-3 py-1.5 bg-green-500 text-white rounded-lg cursor-pointer hover:bg-green-600 flex items-center gap-1 font-bold shadow-green-200 shadow-sm justify-center"><i class="fa-solid fa-file-excel"></i> Nhập Excel</label>
                                 <input type="file" id="excelInput" accept=".xlsx, .xls" class="hidden" onchange="window.handleFileUpload(this)">
                             </div>
                         </div>
                         <div class="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4 mb-4">
-                            <input type="text" id="newStudentName" placeholder="Họ và tên học sinh" class="input-dark">
-                            <input type="text" id="newStudentUser" placeholder="Tên đăng nhập (VD: quang123)" class="input-dark">
-                            <input type="text" id="newStudentPass" placeholder="Mật khẩu" class="input-dark">
+                            <input type="text" id="newStudentName" placeholder="Họ và tên học sinh" class="input-std">
+                            <input type="text" id="newStudentUser" placeholder="Tên đăng nhập (VD: quang123)" class="input-std">
+                            <input type="text" id="newStudentPass" placeholder="Mật khẩu" class="input-std">
                         </div>
                         <button id="addStudentBtn" class="w-full py-2.5 bg-blue-600 text-white rounded-xl font-bold text-sm hover:bg-blue-700 transition-colors shadow-lg shadow-blue-200 flex items-center justify-center gap-2"><i class="fa-solid fa-plus"></i> Tạo tài khoản mới cho lớp</button>
                     </div>
 
-                    <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
-                        <div class="px-4 md:px-6 py-4 border-b border-gray-100 dark:border-gray-700 flex justify-between items-center bg-gray-50/50 dark:bg-gray-700/50">
+                    <div class="card-base rounded-2xl overflow-hidden">
+                        <div class="px-4 md:px-6 py-4 border-b border-gray-100 dark:border-slate-700 flex justify-between items-center bg-gray-50/50 dark:bg-slate-800/50">
                             <h4 class="font-bold text-gray-800 dark:text-gray-200 text-sm uppercase">Danh sách lớp</h4>
-                            <span id="studentCountBadge" class="bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-xs font-bold px-2.5 py-1 rounded-lg">0 học sinh</span>
+                            <span id="studentCountBadge" class="bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 text-xs font-bold px-2.5 py-1 rounded-lg">0 học sinh</span>
                         </div>
                         <div class="overflow-x-auto w-full">
                             <table class="w-full text-sm text-left text-gray-500 dark:text-gray-400 min-w-[700px]">
-                                <thead class="text-xs text-gray-500 dark:text-gray-400 uppercase bg-gray-50 dark:bg-gray-700 sticky top-0 z-10">
-                                    <tr>
-                                        <th class="px-6 py-3 font-bold">STT</th>
-                                        <th class="px-6 py-3 font-bold">Họ tên</th>
-                                        <th class="px-6 py-3 font-bold">Tài khoản</th>
-                                        <th class="px-6 py-3 font-bold">Mật khẩu</th>
-                                        <th class="px-6 py-3 text-center font-bold">Hành động</th>
-                                    </tr>
+                                <thead class="text-xs text-gray-500 dark:text-gray-400 uppercase bg-gray-50 dark:bg-slate-700 sticky top-0 z-10">
+                                    <tr><th class="px-6 py-3 font-bold">STT</th><th class="px-6 py-3 font-bold">Họ tên</th><th class="px-6 py-3 font-bold">Tài khoản</th><th class="px-6 py-3 font-bold">Mật khẩu</th><th class="px-6 py-3 text-center font-bold">Hành động</th></tr>
                                 </thead>
-                                <tbody id="studentListTable" class="divide-y divide-gray-100 dark:divide-gray-700"></tbody>
+                                <tbody id="studentListTable" class="divide-y divide-gray-100 dark:divide-slate-700"></tbody>
                             </table>
                         </div>
-                        <div id="emptyStudentMsg" class="flex flex-col items-center justify-center py-12 text-gray-400 hidden">
-                            <i class="fa-solid fa-users-slash text-4xl mb-2 text-gray-300 dark:text-gray-600"></i>
-                            <p>Lớp chưa có học sinh nào.</p>
-                        </div>
+                        <div id="emptyStudentMsg" class="flex flex-col items-center justify-center py-12 text-gray-400 hidden"><i class="fa-solid fa-users-slash text-4xl mb-2 text-gray-300 dark:text-gray-600"></i><p>Lớp chưa có học sinh nào.</p></div>
                     </div>
                 </div>
-
-                <div id="tabContentExams" class="hidden space-y-6 w-full max-w-7xl mx-auto">
-                    <div id="teacherExamList" class="space-y-3"></div>
-                </div>
+                <div id="tabContentExams" class="hidden space-y-6 w-full max-w-7xl mx-auto"><div id="teacherExamList" class="space-y-3"></div></div>
             </div>
         </div>
 
-        <div id="view-exambank" class="view-section hidden flex-1 flex flex-col h-full bg-white dark:bg-gray-800">
-            <div class="h-16 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between px-4 md:px-6 bg-white dark:bg-gray-800 shrink-0">
+        <div id="view-exambank" class="view-section hidden flex-1 flex flex-col h-full bg-white dark:bg-slate-800">
+            <div class="h-16 border-b border-gray-200 dark:border-slate-700 flex items-center justify-between px-4 md:px-6 bg-white dark:bg-slate-800 shrink-0">
                 <div class="flex items-center gap-2 md:gap-4 overflow-hidden">
-                    <div class="flex items-center text-gray-500 dark:text-gray-400 text-xs md:text-sm bg-gray-100 dark:bg-gray-700 px-2 md:px-3 py-1.5 rounded-lg whitespace-nowrap overflow-x-auto no-scrollbar">
+                    <div class="flex items-center text-gray-500 dark:text-gray-400 text-xs md:text-sm bg-gray-100 dark:bg-slate-700 px-2 md:px-3 py-1.5 rounded-lg whitespace-nowrap overflow-x-auto no-scrollbar">
                         <button onclick="window.navigateFolder('root')" class="hover:text-blue-600 dark:hover:text-blue-400 font-bold flex items-center gap-1" title="Về thư mục gốc"><i class="fa-solid fa-house"></i></button>
                         <span id="breadcrumbContainer" class="flex items-center"></span>
                     </div>
                 </div>
                 <div class="flex items-center gap-2 md:gap-3 shrink-0">
-                    <button onclick="window.createNewFolder()" class="px-3 py-2 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400 hover:bg-yellow-200 dark:hover:bg-yellow-900/50 rounded-lg text-xs md:text-sm font-bold transition-colors"><i class="fa-solid fa-folder-plus mr-1"></i> <span class="hidden md:inline">Tạo thư mục</span></button>
-                    <button onclick="window.location.href='exam-editor.html'" class="px-3 py-2 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 hover:bg-green-200 dark:hover:bg-green-900/50 rounded-lg text-xs md:text-sm font-bold transition-colors"><i class="fa-solid fa-file-circle-plus mr-1"></i> <span class="hidden md:inline">Soạn đề mới</span><span class="md:hidden">Soạn đề</span></button>
+                    <button onclick="window.createNewFolder()" class="px-3 py-2 bg-yellow-100 dark:bg-yellow-900/40 text-yellow-700 dark:text-yellow-400 hover:bg-yellow-200 dark:hover:bg-yellow-900/60 rounded-lg text-xs md:text-sm font-bold transition-colors"><i class="fa-solid fa-folder-plus mr-1"></i> <span class="hidden md:inline">Tạo thư mục</span></button>
+                    <button onclick="window.location.href='exam-editor.html'" class="px-3 py-2 bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-400 hover:bg-green-200 dark:hover:bg-green-900/60 rounded-lg text-xs md:text-sm font-bold transition-colors"><i class="fa-solid fa-file-circle-plus mr-1"></i> <span class="hidden md:inline">Soạn đề mới</span><span class="md:hidden">Soạn đề</span></button>
                 </div>
             </div>
-            <div class="flex-1 overflow-y-auto p-4 md:p-6 bg-gray-50 dark:bg-gray-900" id="fileExplorerArea">
+            <div class="flex-1 overflow-y-auto p-4 md:p-6 bg-gray-50 dark:bg-slate-900" id="fileExplorerArea">
                 <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 md:gap-4" id="explorerGrid"></div>
                 <div id="emptyExplorerMsg" class="hidden flex flex-col items-center justify-center h-64 text-gray-400"><i class="fa-regular fa-folder-open text-6xl mb-4 text-gray-300 dark:text-gray-600"></i><p>Thư mục trống</p></div>
             </div>
@@ -287,28 +243,27 @@
     </main>
 
     <div id="heroModal" class="modal opacity-0 pointer-events-none fixed inset-0 z-[95] flex items-center justify-center bg-gray-900 bg-opacity-60 px-4">
-        <div class="modal-content bg-white dark:bg-gray-800 w-full max-w-2xl rounded-2xl shadow-2xl transform scale-95 transition-transform duration-300 flex flex-col max-h-[90vh]">
-            <div class="p-4 border-b border-gray-100 dark:border-gray-700 flex justify-between items-center bg-orange-50 dark:bg-orange-900/30 rounded-t-2xl">
+        <div class="modal-content bg-white dark:bg-slate-800 w-full max-w-2xl rounded-2xl shadow-2xl transform scale-95 transition-transform duration-300 flex flex-col max-h-[90vh] overflow-hidden">
+            <div class="p-4 border-b border-orange-200 dark:border-orange-900/50 flex justify-between items-center bg-orange-50 dark:bg-orange-900/20">
                 <h3 class="font-bold text-orange-800 dark:text-orange-400 text-lg"><i class="fa-solid fa-paintbrush mr-2"></i>Cài đặt Giao diện & Logo</h3>
                 <button onclick="window.toggleModal('heroModal', false)" class="text-gray-400 hover:text-red-500"><i class="fa-solid fa-times text-xl"></i></button>
             </div>
             <div class="p-6 overflow-y-auto space-y-6">
-                <div class="bg-gray-50 dark:bg-gray-700/50 p-4 rounded-xl border border-gray-200 dark:border-gray-600">
+                <div class="bg-gray-50 dark:bg-slate-700/50 p-4 rounded-xl border border-gray-200 dark:border-slate-600">
                     <label class="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase mb-2">Logo Website</label>
                     <div class="flex items-center gap-4">
-                        <div class="w-16 h-16 bg-white dark:bg-gray-600 border border-gray-200 dark:border-gray-500 rounded-lg flex items-center justify-center overflow-hidden p-1">
+                        <div class="w-16 h-16 bg-white dark:bg-slate-600 border border-gray-200 dark:border-slate-500 rounded-lg flex items-center justify-center overflow-hidden p-1">
                             <img id="logoPreview" src="https://via.placeholder.com/100" class="w-full h-full object-contain">
                         </div>
                         <div class="flex-1">
-                            <button onclick="document.getElementById('logoInput').click()" class="px-4 py-2 bg-white dark:bg-gray-600 border border-gray-300 dark:border-gray-500 text-gray-700 dark:text-gray-200 rounded-lg text-sm font-bold hover:bg-gray-100 dark:hover:bg-gray-500 w-full mb-1"><i class="fa-solid fa-cloud-arrow-up"></i> Tải Logo mới</button>
+                            <button onclick="document.getElementById('logoInput').click()" class="px-4 py-2 bg-white dark:bg-slate-600 border border-gray-300 dark:border-slate-500 text-gray-700 dark:text-gray-200 rounded-lg text-sm font-bold hover:bg-gray-100 dark:hover:bg-slate-500 w-full mb-1"><i class="fa-solid fa-cloud-arrow-up"></i> Tải Logo mới</button>
                             <input type="file" id="logoInput" class="hidden" accept="image/*" onchange="window.handleLogoUpload(this)">
-                            <p class="text-[10px] text-red-500 italic mt-1">* Ảnh vuông (100x100px), nền trong suốt (PNG).</p>
                         </div>
                     </div>
                 </div>
                 <div class="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-xl border border-blue-100 dark:border-blue-800">
                     <label class="block text-xs font-bold text-blue-700 dark:text-blue-400 uppercase mb-2">Chọn phong cách hiển thị</label>
-                    <select id="hStyle" class="input-dark cursor-pointer">
+                    <select id="hStyle" class="input-std cursor-pointer">
                         <option value="style1">Style 1: Cổ điển (Ảnh phải - Chữ trái)</option>
                         <option value="style2">Style 2: Hiện đại (Căn giữa - Ảnh lớn)</option>
                         <option value="style3">Style 3: Sang trọng (Nền tối - Dark Mode)</option>
@@ -316,55 +271,54 @@
                         <option value="style5">Style 5: Phá cách (Chia đôi màn hình)</option>
                     </select>
                 </div>
-                <div class="bg-gray-50 dark:bg-gray-700/50 p-4 rounded-xl border border-gray-200 dark:border-gray-600">
+                <div class="bg-gray-50 dark:bg-slate-700/50 p-4 rounded-xl border border-gray-200 dark:border-slate-600">
                     <label class="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase mb-2">Danh sách ảnh Banner (Trình chiếu)</label>
                     <div id="heroImageList" class="grid grid-cols-3 gap-3 mb-3 empty:hidden"></div>
-                    <button onclick="document.getElementById('heroImgInput').click()" class="w-full py-4 border-2 border-dashed border-teal-300 dark:border-teal-700 bg-teal-50 dark:bg-teal-900/30 rounded-lg text-teal-700 dark:text-teal-400 font-bold hover:bg-white dark:hover:bg-gray-700 hover:border-teal-500 transition-all flex flex-col items-center justify-center gap-1 shadow-sm">
+                    <button onclick="document.getElementById('heroImgInput').click()" class="w-full py-4 border-2 border-dashed border-teal-300 dark:border-teal-700 bg-teal-50 dark:bg-teal-900/20 rounded-lg text-teal-700 dark:text-teal-400 font-bold hover:bg-white dark:hover:bg-slate-700 hover:border-teal-500 transition-all flex flex-col items-center justify-center gap-1 shadow-sm">
                         <i class="fa-solid fa-plus-circle text-2xl"></i><span class="text-xs uppercase tracking-wide">Thêm ảnh vào Slide</span>
                     </button>
                     <input type="file" id="heroImgInput" class="hidden" accept="image/*" onchange="window.handleHeroImageUpload(this)">
-                    <div class="mt-3 text-[10px] text-gray-500 dark:text-gray-400 italic border-t border-gray-200 dark:border-gray-600 pt-2"><p class="mb-1"><i class="fa-solid fa-circle-info text-teal-600"></i> <b>Cơ chế:</b> Tải nhiều ảnh để tạo hiệu ứng chuyển động (Slide). Nếu chỉ tải 1 ảnh, nó sẽ đứng yên.</p></div>
                 </div>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div class="col-span-2"><label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Tiêu đề dòng 1</label><input type="text" id="hTitle1" class="input-dark font-bold"></div>
-                    <div class="col-span-2"><label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Tiêu đề dòng 2 (Màu chủ đạo)</label><input type="text" id="hTitle2" class="input-dark font-black text-orange-600 dark:text-orange-400"></div>
-                    <div class="col-span-2"><label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Thẻ Tags</label><input type="text" id="hTags" class="input-dark text-sm" placeholder="VD: 30 Đề Thi, Luyện Tốc Độ"></div>
-                    <div class="col-span-2"><label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Mô tả ngắn</label><textarea id="hDesc" class="input-dark h-20 text-sm"></textarea></div>
-                    <div><label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Chữ trên nút</label><input type="text" id="hBtnText" class="input-dark font-bold"></div>
-                    <div><label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Link nút bấm</label><input type="text" id="hBtnLink" class="input-dark text-blue-600 dark:text-blue-400"></div>
+                    <div class="col-span-2"><label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Tiêu đề dòng 1</label><input type="text" id="hTitle1" class="input-std font-bold"></div>
+                    <div class="col-span-2"><label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Tiêu đề dòng 2 (Màu chủ đạo)</label><input type="text" id="hTitle2" class="input-std font-black text-orange-600 dark:text-orange-400"></div>
+                    <div class="col-span-2"><label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Thẻ Tags</label><input type="text" id="hTags" class="input-std text-sm" placeholder="VD: 30 Đề Thi, Luyện Tốc Độ"></div>
+                    <div class="col-span-2"><label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Mô tả ngắn</label><textarea id="hDesc" class="input-std h-20 text-sm"></textarea></div>
+                    <div><label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Chữ trên nút</label><input type="text" id="hBtnText" class="input-std font-bold"></div>
+                    <div><label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Link nút bấm</label><input type="text" id="hBtnLink" class="input-std text-blue-600 dark:text-blue-400"></div>
                 </div>
             </div>
-            <div class="p-4 border-t border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 rounded-b-2xl flex justify-end gap-3">
-                <button onclick="window.toggleModal('heroModal', false)" class="px-4 py-2 text-gray-500 dark:text-gray-400 font-bold hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg text-sm">Hủy bỏ</button>
+            <div class="p-4 border-t border-gray-100 dark:border-slate-700 bg-gray-50 dark:bg-slate-800 flex justify-end gap-3">
+                <button onclick="window.toggleModal('heroModal', false)" class="btn-secondary">Hủy bỏ</button>
                 <button onclick="window.saveHeroSettings()" class="px-6 py-2 bg-orange-600 text-white font-bold rounded-lg shadow hover:bg-orange-700 text-sm flex items-center gap-2"><i class="fa-solid fa-save"></i> Lưu & Áp dụng</button>
             </div>
         </div>
     </div>
 
     <div id="paymentConfigModal" class="modal opacity-0 pointer-events-none fixed inset-0 z-[95] flex items-center justify-center bg-gray-900 bg-opacity-60 px-4 transition-opacity duration-300">
-        <div class="modal-content bg-white dark:bg-gray-800 w-full max-w-lg rounded-2xl shadow-2xl transform scale-95 transition-transform duration-300">
-            <div class="p-5 border-b border-gray-100 dark:border-gray-700 flex justify-between items-center bg-blue-50 dark:bg-blue-900/30 rounded-t-2xl">
-                <h3 class="font-bold text-blue-800 dark:text-blue-400 text-lg"><i class="fa-solid fa-university mr-2"></i>Cấu hình Tài khoản Nhận tiền</h3>
-                <button onclick="window.toggleModal('paymentConfigModal', false)" class="text-gray-400 hover:text-red-500"><i class="fa-solid fa-times text-xl"></i></button>
+        <div class="modal-content bg-white dark:bg-slate-800 w-full max-w-lg rounded-2xl shadow-2xl transform scale-95 transition-transform duration-300 overflow-hidden">
+            <div class="p-5 border-b border-blue-200 dark:border-blue-900/50 flex justify-between items-center bg-blue-600 dark:bg-blue-900">
+                <h3 class="font-bold text-white text-lg flex items-center gap-2"><i class="fa-solid fa-university"></i> Cấu hình Tài khoản Nhận tiền</h3>
+                <button onclick="window.toggleModal('paymentConfigModal', false)" class="text-blue-200 hover:text-white"><i class="fa-solid fa-times text-xl"></i></button>
             </div>
-            <div class="p-6 space-y-4">
+            <div class="p-6 space-y-5">
                 <div>
                     <label class="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase mb-1">Chọn Ngân hàng (Chuẩn VietQR)</label>
-                    <select id="confBankId" class="input-dark font-bold text-blue-700 dark:text-blue-400 cursor-pointer">
+                    <select id="confBankId" class="input-std font-bold text-blue-700 dark:text-blue-400 cursor-pointer">
                         <option value="970422">MB Bank (Quân Đội)</option><option value="970454">Timo (Ngân hàng số)</option><option value="970436">Vietcombank</option><option value="970407">Techcombank</option><option value="970415">VietinBank</option><option value="970418">BIDV</option><option value="970416">ACB</option><option value="970432">VPBank</option><option value="970423">TPBank</option><option value="970403">Sacombank</option><option value="970441">VIB</option><option value="970437">HDBank</option><option value="970426">MSB</option><option value="970448">OCB</option><option value="970443">SHB</option>
                     </select>
                 </div>
-                <div><label class="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase mb-1">Số tài khoản</label><input type="text" id="confAccountNo" class="input-dark font-bold text-xl tracking-wider" placeholder="VD: 033..."></div>
-                <div><label class="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase mb-1">Tên chủ tài khoản (Viết hoa không dấu)</label><input type="text" id="confAccountName" class="input-dark font-bold uppercase" placeholder="VD: PHAM DINH QUANG"></div>
+                <div><label class="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase mb-1">Số tài khoản</label><input type="text" id="confAccountNo" class="input-std font-bold text-xl tracking-wider" placeholder="VD: 033..."></div>
+                <div><label class="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase mb-1">Tên chủ tài khoản (Viết hoa không dấu)</label><input type="text" id="confAccountName" class="input-std font-bold uppercase" placeholder="VD: PHAM DINH QUANG"></div>
                 <div>
                     <label class="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase mb-1">Giao diện mã QR</label>
-                    <select id="confTemplate" class="input-dark">
+                    <select id="confTemplate" class="input-std">
                         <option value="compact2">Hiện đại (Khuyên dùng)</option><option value="compact">Gọn gàng</option><option value="qr_only">Chỉ mã QR</option><option value="print">Bản in (Print)</option>
                     </select>
                 </div>
             </div>
-            <div class="p-5 border-t border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 rounded-b-2xl flex justify-end gap-3">
-                <button onclick="window.toggleModal('paymentConfigModal', false)" class="px-4 py-2 text-gray-500 dark:text-gray-400 font-bold hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg text-sm">Hủy</button>
+            <div class="p-5 border-t border-gray-100 dark:border-slate-700 bg-gray-50 dark:bg-slate-800 flex justify-end gap-3">
+                <button onclick="window.toggleModal('paymentConfigModal', false)" class="btn-secondary">Hủy</button>
                 <button onclick="window.savePaymentConfig()" class="px-6 py-2 bg-blue-600 text-white font-bold rounded-lg shadow hover:bg-blue-700 text-sm flex items-center gap-2"><i class="fa-solid fa-save"></i> Lưu cấu hình</button>
             </div>
         </div>
@@ -372,66 +326,66 @@
 
     <div id="editStudentModal" class="modal opacity-0 pointer-events-none fixed w-full h-full top-0 left-0 flex items-center justify-center z-[60] px-2 md:px-0">
         <div class="modal-overlay absolute w-full h-full bg-gray-900 opacity-50 backdrop-blur-sm"></div>
-        <div class="modal-container bg-white dark:bg-gray-800 w-full md:max-w-xl mx-auto rounded-2xl shadow-2xl z-[60] overflow-y-auto transform scale-95 transition-transform duration-300 max-h-[90vh] flex flex-col">
-            <div class="flex justify-between items-center py-4 px-6 border-b border-gray-100 dark:border-gray-700 bg-orange-50 dark:bg-orange-900/30 rounded-t-2xl shrink-0"><p class="text-xl font-bold text-orange-800 dark:text-orange-400">Sửa thông tin học sinh</p><div onclick="window.toggleModal('editStudentModal', false)" class="cursor-pointer p-2 hover:bg-orange-200 dark:hover:bg-orange-800 rounded-full text-orange-500 transition-colors"><i class="fa-solid fa-times"></i></div></div>
+        <div class="modal-container bg-white dark:bg-slate-800 w-full md:max-w-xl mx-auto rounded-2xl shadow-2xl z-[60] overflow-y-auto transform scale-95 transition-transform duration-300 max-h-[90vh] flex flex-col">
+            <div class="flex justify-between items-center py-4 px-6 border-b border-gray-100 dark:border-slate-700 bg-orange-50 dark:bg-orange-900/30 rounded-t-2xl shrink-0"><p class="text-xl font-bold text-orange-800 dark:text-orange-400">Sửa thông tin học sinh</p><div onclick="window.toggleModal('editStudentModal', false)" class="cursor-pointer p-2 hover:bg-orange-200 dark:hover:bg-orange-800 rounded-full text-orange-500 transition-colors"><i class="fa-solid fa-times"></i></div></div>
             <div class="p-6 space-y-4 overflow-y-auto">
-                <div class="grid grid-cols-2 gap-4"><div class="col-span-2"><label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Họ và tên</label><input type="text" id="editStuName" class="input-dark"></div><div><label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Số báo danh</label><input type="text" id="editStuSBD" class="input-dark"></div><div><label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Giới tính</label><select id="editStuGender" class="input-dark"><option value="Nam">Nam</option><option value="Nữ">Nữ</option></select></div></div>
-                <div class="grid grid-cols-2 gap-4"><div><label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">SĐT Học sinh</label><input type="text" id="editStuPhone" class="input-dark"></div><div><label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">SĐT Phụ huynh</label><input type="text" id="editStuParentPhone" class="input-dark"></div><div class="col-span-2"><label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Email</label><input type="email" id="editStuEmail" class="input-dark"></div></div><hr class="border-gray-100 dark:border-gray-700"><div class="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-xl border border-blue-100 dark:border-blue-800"><h5 class="text-xs font-bold text-blue-800 dark:text-blue-400 uppercase mb-3">Thông tin đăng nhập</h5><div class="space-y-3"><div><label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Tên đăng nhập</label><input type="text" id="editStuUsername" class="input-dark bg-gray-100 dark:bg-gray-700 text-gray-500 cursor-not-allowed"></div><div><label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Mật khẩu</label><div class="flex gap-2"><div class="relative flex-1"><input type="password" id="editStuPassword" class="input-dark pr-10"><div onclick="window.togglePasswordVisibility('editStuPassword')" class="absolute inset-y-0 right-0 pr-3 flex items-center cursor-pointer text-gray-400"><i class="fa-regular fa-eye"></i></div></div><button onclick="window.refreshPassword()" class="px-3 py-2 bg-white dark:bg-gray-600 border border-blue-300 dark:border-blue-600 text-blue-600 dark:text-blue-300 rounded-lg text-xs font-bold hover:bg-blue-50 dark:hover:bg-gray-500"><i class="fa-solid fa-rotate"></i> Làm mới</button></div></div></div></div>
+                <div class="grid grid-cols-2 gap-4"><div class="col-span-2"><label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Họ và tên</label><input type="text" id="editStuName" class="input-std"></div><div><label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Số báo danh</label><input type="text" id="editStuSBD" class="input-std"></div><div><label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Giới tính</label><select id="editStuGender" class="input-std"><option value="Nam">Nam</option><option value="Nữ">Nữ</option></select></div></div>
+                <div class="grid grid-cols-2 gap-4"><div><label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">SĐT Học sinh</label><input type="text" id="editStuPhone" class="input-std"></div><div><label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">SĐT Phụ huynh</label><input type="text" id="editStuParentPhone" class="input-std"></div><div class="col-span-2"><label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Email</label><input type="email" id="editStuEmail" class="input-std"></div></div><hr class="border-gray-100 dark:border-slate-700"><div class="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-xl border border-blue-100 dark:border-blue-800"><h5 class="text-xs font-bold text-blue-800 dark:text-blue-400 uppercase mb-3">Thông tin đăng nhập</h5><div class="space-y-3"><div><label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Tên đăng nhập</label><input type="text" id="editStuUsername" class="input-std bg-gray-100 dark:bg-slate-700 text-gray-500 cursor-not-allowed"></div><div><label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Mật khẩu</label><div class="flex gap-2"><div class="relative flex-1"><input type="password" id="editStuPassword" class="input-std pr-10"><div onclick="window.togglePasswordVisibility('editStuPassword')" class="absolute inset-y-0 right-0 pr-3 flex items-center cursor-pointer text-gray-400"><i class="fa-regular fa-eye"></i></div></div><button onclick="window.refreshPassword()" class="px-3 py-2 bg-white dark:bg-slate-600 border border-blue-300 dark:border-blue-600 text-blue-600 dark:text-blue-300 rounded-lg text-xs font-bold hover:bg-blue-50 dark:hover:bg-slate-500"><i class="fa-solid fa-rotate"></i> Làm mới</button></div></div></div></div>
             </div>
-            <div class="flex justify-end pt-2 pb-6 px-6 gap-3 bg-gray-50 dark:bg-gray-800 rounded-b-2xl shrink-0"><button onclick="window.toggleModal('editStudentModal', false)" class="px-4 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600">Hủy</button><button id="saveStudentBtn" class="px-6 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 font-bold shadow-md">Lưu thông tin</button></div>
+            <div class="flex justify-end pt-2 pb-6 px-6 gap-3 bg-gray-50 dark:bg-slate-800 rounded-b-2xl shrink-0"><button onclick="window.toggleModal('editStudentModal', false)" class="btn-secondary">Hủy</button><button id="saveStudentBtn" class="px-6 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 font-bold shadow-md">Lưu thông tin</button></div>
         </div>
     </div>
 
     <div id="profileModal" class="modal opacity-0 pointer-events-none fixed inset-0 z-[80] flex items-center justify-center bg-gray-900 bg-opacity-50 transition-opacity duration-300 px-2 md:px-0">
-        <div class="modal-container bg-white dark:bg-gray-800 w-full max-w-lg rounded-2xl shadow-2xl p-0 transform scale-95 transition-transform duration-300 relative overflow-hidden flex flex-col max-h-[90vh]">
-            <div class="px-6 py-4 border-b border-gray-100 dark:border-gray-700 bg-gradient-to-r from-orange-50 to-white dark:from-gray-800 dark:to-gray-800 flex justify-between items-center shrink-0">
+        <div class="modal-container bg-white dark:bg-slate-800 w-full max-w-lg rounded-2xl shadow-2xl p-0 transform scale-95 transition-transform duration-300 relative overflow-hidden flex flex-col max-h-[90vh]">
+            <div class="px-6 py-4 border-b border-gray-100 dark:border-slate-700 bg-gradient-to-r from-orange-50 to-white dark:from-slate-800 dark:to-slate-800 flex justify-between items-center shrink-0">
                 <h3 class="text-xl font-bold text-gray-800 dark:text-gray-100 flex items-center gap-2"><i class="fa-solid fa-id-card text-orange-500"></i> Thông tin cá nhân</h3>
                 <button onclick="window.toggleModal('profileModal', false)" class="text-gray-400 hover:text-red-500 transition-colors"><i class="fa-solid fa-times text-xl"></i></button>
             </div>
             <div class="p-6 overflow-y-auto flex-1 custom-scrollbar">
                 <div class="mb-6">
-                    <h4 class="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase mb-3 border-b border-gray-100 dark:border-gray-700 pb-1">Thông tin cơ bản</h4>
+                    <h4 class="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase mb-3 border-b border-gray-100 dark:border-slate-700 pb-1">Thông tin cơ bản</h4>
                     <div class="grid grid-cols-2 gap-4">
-                        <div class="col-span-2"><label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Họ và tên</label><input type="text" id="proDisplayName" class="input-dark font-bold"></div>
-                        <div><label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Ngày sinh</label><input type="date" id="proBirthDate" class="input-dark"></div>
-                        <div><label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Giới tính</label><select id="proGender" class="input-dark"><option value="Nam">Nam</option><option value="Nữ">Nữ</option></select></div>
-                        <div><label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">SĐT Cá nhân</label><input type="tel" id="proPhone" class="input-dark"></div>
-                        <div><label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">SĐT Phụ huynh</label><input type="tel" id="proParentPhone" class="input-dark bg-gray-100 dark:bg-gray-700 text-gray-500 cursor-not-allowed" readonly></div>
+                        <div class="col-span-2"><label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Họ và tên</label><input type="text" id="proDisplayName" class="input-std font-bold"></div>
+                        <div><label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Ngày sinh</label><input type="date" id="proBirthDate" class="input-std"></div>
+                        <div><label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Giới tính</label><select id="proGender" class="input-std"><option value="Nam">Nam</option><option value="Nữ">Nữ</option></select></div>
+                        <div><label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">SĐT Cá nhân</label><input type="tel" id="proPhone" class="input-std"></div>
+                        <div><label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">SĐT Phụ huynh</label><input type="tel" id="proParentPhone" class="input-std bg-gray-100 dark:bg-slate-700 text-gray-500 cursor-not-allowed" readonly></div>
                     </div>
                 </div>
                 <div class="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-xl border border-blue-100 dark:border-blue-800">
                     <h4 class="text-xs font-bold text-blue-600 dark:text-blue-400 uppercase mb-3 flex items-center gap-2"><i class="fa-solid fa-shield-halved"></i> Tài khoản & Bảo mật</h4>
                     <div class="space-y-3">
-                        <div><label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Tên đăng nhập / Email</label><input type="text" id="proUsername" class="input-dark bg-white dark:bg-gray-700 text-gray-500 font-mono text-sm" readonly></div>
-                        <div><label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Đổi mật khẩu mới</label><div class="flex gap-2"><div class="relative flex-1"><input type="password" id="proNewPass" placeholder="Nhập mật khẩu mới" class="input-dark pr-10"><div onclick="window.togglePasswordVisibility('proNewPass')" class="absolute inset-y-0 right-0 pr-3 flex items-center cursor-pointer text-gray-400 hover:text-blue-600"><i class="fa-regular fa-eye"></i></div></div><button onclick="window.refreshNewPass()" class="px-3 py-2 bg-white dark:bg-gray-600 border border-blue-200 dark:border-blue-700 text-blue-600 dark:text-blue-300 rounded-lg text-xs font-bold hover:bg-blue-50 dark:hover:bg-gray-500" title="Tạo mật khẩu ngẫu nhiên"><i class="fa-solid fa-rotate"></i></button></div></div>
+                        <div><label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Tên đăng nhập / Email</label><input type="text" id="proUsername" class="input-std bg-white dark:bg-slate-700 text-gray-500 font-mono text-sm" readonly></div>
+                        <div><label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Đổi mật khẩu mới</label><div class="flex gap-2"><div class="relative flex-1"><input type="password" id="proNewPass" placeholder="Nhập mật khẩu mới" class="input-std pr-10"><div onclick="window.togglePasswordVisibility('proNewPass')" class="absolute inset-y-0 right-0 pr-3 flex items-center cursor-pointer text-gray-400 hover:text-blue-600"><i class="fa-regular fa-eye"></i></div></div><button onclick="window.refreshNewPass()" class="px-3 py-2 bg-white dark:bg-slate-600 border border-blue-200 dark:border-blue-700 text-blue-600 dark:text-blue-300 rounded-lg text-xs font-bold hover:bg-blue-50 dark:hover:bg-slate-500" title="Tạo mật khẩu ngẫu nhiên"><i class="fa-solid fa-rotate"></i></button></div></div>
                     </div>
                 </div>
             </div>
-            <div class="p-4 bg-gray-50 dark:bg-gray-800 border-t border-gray-100 dark:border-gray-700 flex justify-end gap-3 shrink-0">
-                <button onclick="window.toggleModal('profileModal', false)" class="px-4 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-600 dark:text-gray-300 font-bold hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors">Hủy bỏ</button>
+            <div class="p-4 bg-gray-50 dark:bg-slate-800 border-t border-gray-100 dark:border-slate-700 flex justify-end gap-3 shrink-0">
+                <button onclick="window.toggleModal('profileModal', false)" class="btn-secondary">Hủy bỏ</button>
                 <button id="btnSaveMyProfile" class="px-6 py-2 bg-orange-500 text-white rounded-lg font-bold hover:bg-orange-600 shadow-md shadow-orange-200 transition-colors flex items-center gap-2"><i class="fa-solid fa-save"></i> Lưu thay đổi</button>
             </div>
         </div>
     </div>
 
     <div id="genericConfirmModal" class="modal opacity-0 pointer-events-none fixed inset-0 z-[100] flex items-center justify-center bg-gray-900 bg-opacity-50 transition-opacity duration-300 px-4">
-        <div class="modal-container bg-white dark:bg-gray-800 w-[90%] max-w-sm rounded-2xl shadow-2xl p-6 transform scale-95 transition-transform duration-300 text-center relative">
+        <div class="modal-container bg-white dark:bg-slate-800 w-[90%] max-w-sm rounded-2xl shadow-2xl p-6 transform scale-95 transition-transform duration-300 text-center relative">
             <button id="gConfirmClose" class="absolute top-4 right-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"><i class="fa-solid fa-times"></i></button>
             <div class="w-16 h-16 bg-red-100 dark:bg-red-900/30 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4 text-3xl"><i class="fa-solid fa-triangle-exclamation"></i></div>
             <h3 class="text-lg font-bold text-gray-800 dark:text-gray-100 mb-2">Xác nhận</h3><p id="gConfirmMsg" class="text-gray-500 dark:text-gray-400 mb-6">?</p>
-            <div class="flex justify-center gap-3"><button id="gConfirmCancel" class="px-5 py-2 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300 rounded-xl font-bold">Hủy</button><button id="gConfirmOk" class="px-5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold shadow-lg">Đồng ý</button></div>
+            <div class="flex justify-center gap-3"><button id="gConfirmCancel" class="btn-secondary">Hủy</button><button id="gConfirmOk" class="px-5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold shadow-lg">Đồng ý</button></div>
         </div>
     </div>
     <div id="genericInputModal" class="modal opacity-0 pointer-events-none fixed inset-0 z-[100] flex items-center justify-center bg-gray-900 bg-opacity-50 transition-opacity duration-300 px-4">
-        <div class="modal-container bg-white dark:bg-gray-800 w-[90%] max-w-sm rounded-2xl shadow-2xl p-6 transform scale-95 transition-transform duration-300 relative">
+        <div class="modal-container bg-white dark:bg-slate-800 w-[90%] max-w-sm rounded-2xl shadow-2xl p-6 transform scale-95 transition-transform duration-300 relative">
             <button id="gInputClose" class="absolute top-4 right-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"><i class="fa-solid fa-times"></i></button>
             <h3 id="gInputTitle" class="text-lg font-bold text-gray-800 dark:text-gray-100 mb-4">Nhập thông tin</h3>
-            <input type="text" id="gInputVal" class="input-dark">
-            <div class="flex justify-end gap-3 mt-6"><button id="gInputCancel" class="px-5 py-2 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300 rounded-xl font-bold">Hủy</button><button id="gInputConfirm" class="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-lg">OK</button></div>
+            <input type="text" id="gInputVal" class="input-std">
+            <div class="flex justify-end gap-3 mt-6"><button id="gInputCancel" class="btn-secondary">Hủy</button><button id="gInputConfirm" class="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-lg">OK</button></div>
         </div>
     </div>
     <div id="actionModal" class="modal opacity-0 pointer-events-none fixed inset-0 z-[80] flex items-center justify-center bg-gray-900 bg-opacity-50 px-4">
-        <div class="modal-container bg-white dark:bg-gray-800 w-[90%] max-w-sm rounded-2xl shadow-2xl p-6 relative">
+        <div class="modal-container bg-white dark:bg-slate-800 w-[90%] max-w-sm rounded-2xl shadow-2xl p-6 relative">
             <h3 id="actionModalTitle" class="text-xl font-bold text-gray-800 dark:text-gray-100 mb-4">Hành động</h3><div id="dynamicContent"></div> 
             <button onclick="window.toggleModal('actionModal', false)" class="absolute top-4 right-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"><i class="fa-solid fa-times"></i></button>
         </div>
@@ -487,7 +441,6 @@
         window.currentLogoImg = "";
 
         // --- DARK MODE LOGIC (AUTO / MANUAL) ---
-        // Giờ mặc định: Tối từ 18h đến 6h sáng
         const DARK_START = 18; 
         const DARK_END = 6;
 
@@ -500,13 +453,13 @@
             if (mode === 'auto') {
                 const hour = new Date().getHours();
                 if (hour >= DARK_START || hour < DARK_END) isDark = true;
-                if(btn) btn.innerHTML = '<i class="fa-solid fa-clock"></i>'; // Icon Đồng hồ
+                if(btn) btn.innerHTML = '<i class="fa-solid fa-clock"></i>'; 
             } else if (mode === 'dark') {
                 isDark = true;
-                if(btn) btn.innerHTML = '<i class="fa-solid fa-moon"></i>'; // Icon Trăng
+                if(btn) btn.innerHTML = '<i class="fa-solid fa-moon"></i>';
             } else {
                 isDark = false;
-                if(btn) btn.innerHTML = '<i class="fa-solid fa-sun"></i>'; // Icon Trời
+                if(btn) btn.innerHTML = '<i class="fa-solid fa-sun"></i>';
             }
 
             if (isDark) html.classList.add('dark');
@@ -521,11 +474,9 @@
             localStorage.setItem('theme_mode', nextMode);
             window.applyTheme();
             
-            const label = nextMode === 'auto' ? 'Tự động theo giờ (18h-6h)' : (nextMode === 'dark' ? 'Giao diện Tối' : 'Giao diện Sáng');
-            window.showNotification("Đã chuyển: " + label, "info");
+            const label = nextMode === 'auto' ? 'Tự động' : (nextMode === 'dark' ? 'Tối' : 'Sáng');
+            window.showNotification("Chế độ: " + label, "info");
         }
-        
-        // Chạy ngay khi load
         window.applyTheme();
 
         // 3. HỆ THỐNG MODAL & THÔNG BÁO
@@ -549,7 +500,7 @@
             const container = document.getElementById('notificationContainer');
             const div = document.createElement('div');
             const color = type === 'success' ? 'green' : (type === 'info' ? 'blue' : 'red');
-            div.className = `notification-toast pointer-events-auto bg-white dark:bg-gray-800 border-l-4 border-${color}-500 shadow-lg rounded-lg p-4 w-80 flex items-start transform transition-all duration-300`;
+            div.className = `notification-toast pointer-events-auto bg-white dark:bg-slate-800 border-l-4 border-${color}-500 shadow-lg rounded-lg p-4 w-80 flex items-start transform transition-all duration-300`;
             div.innerHTML = `<i class="fa-solid fa-${type==='success'?'check':(type==='info'?'circle-info':'circle-exclamation')} text-${color}-500 mt-1 mr-3"></i><div><h4 class="font-bold text-gray-800 dark:text-white text-sm">${type==='success'?'Thành công':(type==='info'?'Thông báo':'Lỗi')}</h4><p class="text-sm text-gray-600 dark:text-gray-300">${msg}</p></div>`;
             container.appendChild(div);
             requestAnimationFrame(() => div.classList.remove('translate-x-full'));
@@ -709,13 +660,13 @@
                 snap.forEach(d => {
                     const cl = d.data();
                     const card = document.createElement('div');
-                    card.className = "bg-white dark:bg-gray-800 p-5 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm hover:shadow-md transition-all cursor-pointer relative group";
+                    card.className = "bg-white dark:bg-slate-800 p-5 rounded-xl border border-gray-200 dark:border-slate-700 shadow-sm hover:shadow-md transition-all cursor-pointer relative group";
                     const words = cl.name.trim().split(/\s+/);
                     let acronym = words.length >= 2 ? (words[0][0] + words[1][0]).toUpperCase() : words[0].substring(0, 2).toUpperCase();
                     
                     card.innerHTML = `
                         <div class="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity z-10 flex gap-1">
-                            <button onclick="event.stopPropagation(); window.openTeacherClassDetail('${d.id}', '${cl.name}')" class="p-2 text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-gray-700 rounded-full transition-colors"><i class="fa-solid fa-pen"></i></button>
+                            <button onclick="event.stopPropagation(); window.openTeacherClassDetail('${d.id}', '${cl.name}')" class="p-2 text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-slate-700 rounded-full transition-colors"><i class="fa-solid fa-pen"></i></button>
                             <button onclick="event.stopPropagation(); window.deleteClass('${d.id}')" class="p-2 text-red-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-full transition-colors"><i class="fa-solid fa-trash"></i></button>
                         </div>
                         <div class="flex justify-between items-start mb-2">
@@ -729,7 +680,7 @@
                 });
                 
                 const addCard = document.createElement('button');
-                addCard.className = "border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-5 flex flex-col items-center justify-center text-gray-400 dark:text-gray-500 hover:border-blue-400 dark:hover:border-blue-500 hover:text-blue-500 transition-colors h-full min-h-[140px]";
+                addCard.className = "border-2 border-dashed border-gray-300 dark:border-slate-600 rounded-xl p-5 flex flex-col items-center justify-center text-gray-400 dark:text-gray-500 hover:border-blue-400 dark:hover:border-blue-500 hover:text-blue-500 transition-colors h-full min-h-[140px]";
                 addCard.innerHTML = `<i class="fa-solid fa-plus text-3xl mb-2"></i><span class="font-bold">Tạo lớp mới</span>`;
                 addCard.onclick = window.handleCreateClass;
                 list.appendChild(addCard);
@@ -848,7 +799,7 @@
             }
         };
         
-        function renderStudentList(list) { const table = document.getElementById('studentListTable'); if(!table) return; table.innerHTML = ''; document.getElementById('studentCountBadge').textContent = `${list.length} học sinh`; if (list.length === 0) document.getElementById('emptyStudentMsg').classList.remove('hidden'); else { document.getElementById('emptyStudentMsg').classList.add('hidden'); list.forEach((st, index) => { table.innerHTML += `<tr class="bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 border-b dark:border-gray-700"><td class="px-6 py-3 font-medium text-gray-500 dark:text-gray-400">${index + 1}</td><td class="px-6 py-3 font-medium text-gray-900 dark:text-gray-100">${st.name}</td><td class="px-6 py-3 text-blue-600 dark:text-blue-400 font-medium">${st.username}</td><td class="px-6 py-3 font-mono text-gray-400">******</td><td class="px-6 py-3 text-center"><button onclick="window.openEditStudent(${index})" class="text-blue-500 hover:text-blue-700 bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 p-2 rounded-lg transition-colors mr-1"><i class="fa-solid fa-pen-to-square"></i></button><button onclick="window.deleteStudent(${index})" class="text-red-500 hover:text-red-700 bg-red-50 dark:bg-red-900/30 hover:bg-red-100 p-2 rounded-lg transition-colors"><i class="fa-solid fa-trash"></i></button></td></tr>`; }); } }
+        function renderStudentList(list) { const table = document.getElementById('studentListTable'); if(!table) return; table.innerHTML = ''; document.getElementById('studentCountBadge').textContent = `${list.length} học sinh`; if (list.length === 0) document.getElementById('emptyStudentMsg').classList.remove('hidden'); else { document.getElementById('emptyStudentMsg').classList.add('hidden'); list.forEach((st, index) => { table.innerHTML += `<tr class="bg-white dark:bg-slate-800 hover:bg-gray-50 dark:hover:bg-slate-700 border-b dark:border-slate-700"><td class="px-6 py-3 font-medium text-gray-500 dark:text-gray-400">${index + 1}</td><td class="px-6 py-3 font-medium text-gray-900 dark:text-gray-100">${st.name}</td><td class="px-6 py-3 text-blue-600 dark:text-blue-400 font-medium">${st.username}</td><td class="px-6 py-3 font-mono text-gray-400">******</td><td class="px-6 py-3 text-center"><button onclick="window.openEditStudent(${index})" class="text-blue-500 hover:text-blue-700 bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 p-2 rounded-lg transition-colors mr-1"><i class="fa-solid fa-pen-to-square"></i></button><button onclick="window.deleteStudent(${index})" class="text-red-500 hover:text-red-700 bg-red-50 dark:bg-red-900/30 hover:bg-red-100 p-2 rounded-lg transition-colors"><i class="fa-solid fa-trash"></i></button></td></tr>`; }); } }
         window.openEditStudent = function(index) { editingStudentIndex = index; const st = currentClassStudents[index]; document.getElementById('editStuName').value = st.name || ''; document.getElementById('editStuSBD').value = st.sbd || ''; document.getElementById('editStuGender').value = st.gender || 'Nam'; document.getElementById('editStuPhone').value = st.phoneStudent || ''; document.getElementById('editStuParentPhone').value = st.phoneParent || ''; document.getElementById('editStuEmail').value = st.email || ''; document.getElementById('editStuUsername').value = st.username || ''; document.getElementById('editStuPassword').value = st.password || ''; document.getElementById('editStuPassword').type = "password"; window.toggleModal('editStudentModal', true); }
         
         window.deleteStudent = async function(index) {
@@ -985,7 +936,7 @@
                 const q = query(collection(db, "exams"), where("accessType", "==", "class"), where("allowedClassId", "==", classId));
                 const snap = await getDocs(q);
                 if (snap.empty) {
-                    container.innerHTML = `<div class="border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-xl p-8 text-center bg-gray-50 dark:bg-gray-800"><div class="w-16 h-16 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center mx-auto mb-4 text-gray-400 text-2xl"><i class="fa-regular fa-folder-open"></i></div><h3 class="text-gray-500 dark:text-gray-300 font-bold">Chưa có đề thi nào</h3><p class="text-sm text-gray-400 dark:text-gray-500 mt-1">Thầy hãy vào "Ngân hàng đề thi" để tạo và giao đề nhé.</p></div>`;
+                    container.innerHTML = `<div class="border-2 border-dashed border-gray-200 dark:border-slate-700 rounded-xl p-8 text-center bg-gray-50 dark:bg-slate-800"><div class="w-16 h-16 bg-gray-100 dark:bg-slate-700 rounded-full flex items-center justify-center mx-auto mb-4 text-gray-400 text-2xl"><i class="fa-regular fa-folder-open"></i></div><h3 class="text-gray-500 dark:text-gray-300 font-bold">Chưa có đề thi nào</h3><p class="text-sm text-gray-400 dark:text-gray-500 mt-1">Thầy hãy vào "Ngân hàng đề thi" để tạo và giao đề nhé.</p></div>`;
                     return;
                 }
                 let html = '<div class="grid grid-cols-1 gap-4">';
@@ -993,7 +944,7 @@
                     const exam = doc.data();
                     const examId = doc.id;
                     const statusBadge = exam.status === 'published' ? '<span class="bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 px-2 py-1 rounded text-xs font-bold">Đang mở</span>' : '<span class="bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 px-2 py-1 rounded text-xs font-bold">Bản nháp</span>';
-                    html += `<div class="bg-white dark:bg-gray-800 p-5 rounded-xl border border-gray-200 dark:border-gray-700 hover:border-blue-300 dark:hover:border-blue-500 transition-all flex justify-between items-center group cursor-pointer" onclick="window.location.href='exam-editor.html?id=${examId}'"><div class="flex items-center gap-4"><div class="w-12 h-12 rounded-lg bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 flex items-center justify-center text-xl"><i class="fa-solid fa-file-pen"></i></div><div><h4 class="font-bold text-gray-800 dark:text-gray-100 text-lg group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">${exam.title}</h4><div class="text-xs text-gray-500 dark:text-gray-400 flex gap-3 mt-1"><span><i class="fa-regular fa-clock"></i> ${exam.duration} phút</span><span><i class="fa-solid fa-list-ol"></i> ${exam.questionCount || 0} câu</span><span><i class="fa-solid fa-calendar-days"></i> Hạn: ${exam.endTime ? new Date(exam.endTime).toLocaleDateString('vi-VN') : 'Không giới hạn'}</span></div></div></div><div class="text-right">${statusBadge}<div class="text-xs text-gray-400 mt-2"><i class="fa-solid fa-gear mr-1"></i> Cài đặt</div></div></div>`;
+                    html += `<div class="bg-white dark:bg-slate-800 p-5 rounded-xl border border-gray-200 dark:border-slate-700 hover:border-blue-300 dark:hover:border-blue-500 transition-all flex justify-between items-center group cursor-pointer" onclick="window.location.href='exam-editor.html?id=${examId}'"><div class="flex items-center gap-4"><div class="w-12 h-12 rounded-lg bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 flex items-center justify-center text-xl"><i class="fa-solid fa-file-pen"></i></div><div><h4 class="font-bold text-gray-800 dark:text-gray-100 text-lg group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">${exam.title}</h4><div class="text-xs text-gray-500 dark:text-gray-400 flex gap-3 mt-1"><span><i class="fa-regular fa-clock"></i> ${exam.duration} phút</span><span><i class="fa-solid fa-list-ol"></i> ${exam.questionCount || 0} câu</span><span><i class="fa-solid fa-calendar-days"></i> Hạn: ${exam.endTime ? new Date(exam.endTime).toLocaleDateString('vi-VN') : 'Không giới hạn'}</span></div></div></div><div class="text-right">${statusBadge}<div class="text-xs text-gray-400 mt-2"><i class="fa-solid fa-gear mr-1"></i> Cài đặt</div></div></div>`;
                 });
                 html += '</div>';
                 container.innerHTML = html;
@@ -1024,7 +975,7 @@
             if (window.currentHeroImages.length === 0) { container.classList.add('hidden'); return; }
             container.classList.remove('hidden');
             window.currentHeroImages.forEach((url, index) => {
-                container.innerHTML += `<div class="relative h-24 rounded-lg overflow-hidden border border-gray-300 dark:border-gray-600 group shadow-sm bg-white dark:bg-gray-700"><img src="${url}" class="w-full h-full object-contain p-1"><button onclick="removeHeroImage(${index})" class="absolute top-1 right-1 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center text-xs shadow-md opacity-0 group-hover:opacity-100 transition-opacity"><i class="fa-solid fa-times"></i></button><span class="absolute bottom-1 left-1 bg-black/60 text-white text-[9px] px-1.5 py-0.5 rounded font-bold">${index + 1}</span></div>`;
+                container.innerHTML += `<div class="relative h-24 rounded-lg overflow-hidden border border-gray-300 dark:border-slate-600 group shadow-sm bg-white dark:bg-slate-700"><img src="${url}" class="w-full h-full object-contain p-1"><button onclick="removeHeroImage(${index})" class="absolute top-1 right-1 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center text-xs shadow-md opacity-0 group-hover:opacity-100 transition-opacity"><i class="fa-solid fa-times"></i></button><span class="absolute bottom-1 left-1 bg-black/60 text-white text-[9px] px-1.5 py-0.5 rounded font-bold">${index + 1}</span></div>`;
             });
         }
         window.removeHeroImage = (index) => { window.currentHeroImages.splice(index, 1); renderHeroImageList(); };
@@ -1111,7 +1062,7 @@
         
         // --- LOGIC FILE EXPLORER (GIỮ NGUYÊN) ---
         async function loadFileManager() { try { const qFolders = query(collection(db, "folders"), where("teacherId", "==", currentUserUid), limit(100)); const snapFolders = await getDocs(qFolders); folderData = []; snapFolders.forEach(d => folderData.push({id: d.id, ...d.data()})); const qExams = query(collection(db, "exams"), where("teacherId", "==", currentUserUid), limit(100)); const snapExams = await getDocs(qExams); examData = []; snapExams.forEach(d => examData.push({id: d.id, ...d.data()})); renderExplorer(); } catch (e) { console.error(e); } }
-        function renderExplorer() { const grid = document.getElementById('explorerGrid'); grid.innerHTML = ''; const currentFolders = folderData.filter(f => f.parentId === currentFolderId); const currentExams = examData.filter(e => (e.folderId || null) === currentFolderId); if (currentFolders.length === 0 && currentExams.length === 0) document.getElementById('emptyExplorerMsg').classList.remove('hidden'); else document.getElementById('emptyExplorerMsg').classList.add('hidden'); currentFolders.forEach(f => { const div = document.createElement('div'); div.className = "explorer-item bg-white dark:bg-gray-800 p-4 rounded-xl border border-gray-200 dark:border-gray-700 relative group"; div.draggable = true; div.ondragstart = (evt) => window.handleDragStart(evt, f.id, 'folder'); div.ondragover = (evt) => window.handleDragOver(evt); div.ondragleave = (evt) => window.handleDragLeave(evt); div.ondrop = (evt) => window.handleDrop(evt, f.id); div.onclick = (e) => { if(!e.target.closest('button')) window.navigateFolder(f.id, f.name); }; div.innerHTML = `<div class="text-4xl text-yellow-400 mb-3 text-center pointer-events-none"><i class="fa-solid fa-folder"></i></div><p class="text-sm font-bold text-gray-700 dark:text-gray-300 text-center truncate px-2 pointer-events-none">${f.name}</p><div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"><button onclick="event.stopPropagation(); window.openContextMenu('${f.id}', 'folder', '${f.name}')" class="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-gray-500 dark:text-gray-400"><i class="fa-solid fa-ellipsis-vertical"></i></button></div>`; grid.appendChild(div); }); currentExams.forEach(exam => { const div = document.createElement('div'); div.className = "explorer-item bg-white dark:bg-gray-800 p-4 rounded-xl border border-gray-200 dark:border-gray-700 relative group"; div.draggable = true; div.ondragstart = (evt) => window.handleDragStart(evt, exam.id, 'exam'); div.onclick = (e) => { if(!e.target.closest('button')) window.location.href = `exam-editor.html?id=${exam.id}`; }; div.innerHTML = `<div class="text-4xl text-blue-500 mb-3 text-center pointer-events-none"><i class="fa-regular fa-file-lines"></i></div><p class="text-sm font-bold text-gray-700 dark:text-gray-300 text-center truncate px-2 pointer-events-none" title="${exam.title}">${exam.title}</p><div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"><button onclick="event.stopPropagation(); window.openContextMenu('${exam.id}', 'exam', '${exam.title}')" class="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-gray-500 dark:text-gray-400"><i class="fa-solid fa-ellipsis-vertical"></i></button></div>`; grid.appendChild(div); }); renderBreadcrumb(); }
+        function renderExplorer() { const grid = document.getElementById('explorerGrid'); grid.innerHTML = ''; const currentFolders = folderData.filter(f => f.parentId === currentFolderId); const currentExams = examData.filter(e => (e.folderId || null) === currentFolderId); if (currentFolders.length === 0 && currentExams.length === 0) document.getElementById('emptyExplorerMsg').classList.remove('hidden'); else document.getElementById('emptyExplorerMsg').classList.add('hidden'); currentFolders.forEach(f => { const div = document.createElement('div'); div.className = "explorer-item bg-white dark:bg-slate-800 p-4 rounded-xl border border-gray-200 dark:border-slate-700 relative group"; div.draggable = true; div.ondragstart = (evt) => window.handleDragStart(evt, f.id, 'folder'); div.ondragover = (evt) => window.handleDragOver(evt); div.ondragleave = (evt) => window.handleDragLeave(evt); div.ondrop = (evt) => window.handleDrop(evt, f.id); div.onclick = (e) => { if(!e.target.closest('button')) window.navigateFolder(f.id, f.name); }; div.innerHTML = `<div class="text-4xl text-yellow-400 mb-3 text-center pointer-events-none"><i class="fa-solid fa-folder"></i></div><p class="text-sm font-bold text-gray-700 dark:text-gray-300 text-center truncate px-2 pointer-events-none">${f.name}</p><div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"><button onclick="event.stopPropagation(); window.openContextMenu('${f.id}', 'folder', '${f.name}')" class="p-1 hover:bg-gray-100 dark:hover:bg-slate-700 rounded text-gray-500 dark:text-gray-400"><i class="fa-solid fa-ellipsis-vertical"></i></button></div>`; grid.appendChild(div); }); currentExams.forEach(exam => { const div = document.createElement('div'); div.className = "explorer-item bg-white dark:bg-slate-800 p-4 rounded-xl border border-gray-200 dark:border-slate-700 relative group"; div.draggable = true; div.ondragstart = (evt) => window.handleDragStart(evt, exam.id, 'exam'); div.onclick = (e) => { if(!e.target.closest('button')) window.location.href = `exam-editor.html?id=${exam.id}`; }; div.innerHTML = `<div class="text-4xl text-blue-500 mb-3 text-center pointer-events-none"><i class="fa-regular fa-file-lines"></i></div><p class="text-sm font-bold text-gray-700 dark:text-gray-300 text-center truncate px-2 pointer-events-none" title="${exam.title}">${exam.title}</p><div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"><button onclick="event.stopPropagation(); window.openContextMenu('${exam.id}', 'exam', '${exam.title}')" class="p-1 hover:bg-gray-100 dark:hover:bg-slate-700 rounded text-gray-500 dark:text-gray-400"><i class="fa-solid fa-ellipsis-vertical"></i></button></div>`; grid.appendChild(div); }); renderBreadcrumb(); }
         window.handleDragStart = (e, id, type) => { e.dataTransfer.setData("text/plain", JSON.stringify({id, type})); e.target.classList.add('dragging'); e.stopPropagation(); }
         window.handleDragOver = (e) => { e.preventDefault(); e.currentTarget.classList.add('drag-over'); }
         window.handleDragLeave = (e) => { e.currentTarget.classList.remove('drag-over'); }
@@ -1122,7 +1073,7 @@
         function renderBreadcrumb() { const container = document.getElementById('breadcrumbContainer'); if (!currentFolderId) { container.innerHTML = '<span class="mx-2 text-gray-400 dark:text-gray-500">/</span><span>Tất cả</span>'; return; } let path = []; let curr = folderData.find(f => f.id === currentFolderId); while(curr) { path.unshift(curr); curr = folderData.find(f => f.id === curr.parentId); } let html = '<span class="mx-2 text-gray-400 dark:text-gray-500">/</span><button onclick="window.navigateFolder(\'root\')" class="hover:text-blue-600 dark:hover:text-blue-400">...</button><span class="mx-2">/</span>Current'; path.forEach((p, idx) => { html += `<span class="mx-2 text-gray-400 dark:text-gray-500">/</span>`; if (idx === path.length - 1) html += `<span class="font-bold text-gray-800 dark:text-gray-100">${p.name}</span>`; else html += `<button onclick="window.navigateFolder(\'${p.id}\')" class="hover:text-blue-600 dark:hover:text-blue-400">${p.name}</button>`; }); container.innerHTML = html; }
         window.openContextMenu = (id, type, name) => { currentActionItem = {id, type, name}; document.getElementById('actionModalTitle').textContent = `Thao tác: ${name}`; const content = document.getElementById('dynamicContent'); content.innerHTML = `<div class="grid grid-cols-3 gap-3 mb-4"><button onclick="window.triggerAction('rename')" class="p-3 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-lg font-bold hover:bg-blue-100 dark:hover:bg-blue-800 flex flex-col items-center"><i class="fa-solid fa-pen mb-1"></i> Đổi tên</button><button onclick="window.triggerAction('move')" class="p-3 bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 rounded-lg font-bold hover:bg-purple-100 dark:hover:bg-purple-800 flex flex-col items-center"><i class="fa-solid fa-arrow-right-to-bracket mb-1"></i> Di chuyển</button><button onclick="window.triggerAction('delete')" class="p-3 bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded-lg font-bold hover:bg-red-100 dark:hover:bg-red-800 flex flex-col items-center"><i class="fa-solid fa-trash mb-1"></i> Xóa</button></div><div id="subActionContent"></div>`; window.toggleModal('actionModal', true); }
         async function deleteR2Image(fileKeyOrUrl) { if (!fileKeyOrUrl) return; try { let keyName = fileKeyOrUrl; if (fileKeyOrUrl.startsWith('http')) { try { const urlObj = new URL(fileKeyOrUrl); keyName = urlObj.pathname.substring(1); keyName = decodeURIComponent(keyName); } catch(e) { console.warn("Không parse được URL:", fileKeyOrUrl); } } return fetch(`https://upload-helper.phamngockhanh-942001.workers.dev/?key=${encodeURIComponent(keyName)}`, { method: 'DELETE', keepalive: true }); } catch (e) { console.error("Lỗi xóa R2:", e); } }
-        window.triggerAction = async (action) => { const container = document.getElementById('subActionContent'); container.innerHTML = ''; if (action === 'rename') { container.innerHTML = `<label class="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-2">Tên mới</label><div class="flex gap-2"><input type="text" id="renameInput" value="${currentActionItem.name}" class="input-dark flex-1"><button onclick="window.commitRename()" class="bg-blue-600 text-white px-4 rounded font-bold">Lưu</button></div>`; } else if (action === 'delete') { window.toggleModal('actionModal', false); if(await window.customConfirm(`CẢNH BÁO: Xóa đề thi "${currentActionItem.name}" sẽ xóa vĩnh viễn cả CÂU HỎI và HÌNH ẢNH đi kèm.\nBạn có chắc chắn không?`)) { try { const collName = currentActionItem.type === 'folder' ? 'folders' : 'exams'; if (currentActionItem.type === 'exam') { const docSnap = await getDoc(doc(db, "exams", currentActionItem.id)); if (docSnap.exists()) { const examData = docSnap.data(); const strData = JSON.stringify(examData); const regex = /(https:\/\/[^"'\s\\]+\.r2\.dev\/[^"'\s\\]+|https:\/\/firebasestorage\.googleapis\.com\/v0\/b\/[^"'\s\\]+)/g; const images = strData.match(regex) || []; if (images.length > 0) { window.showNotification(`Đang dọn dẹp ${images.length} file ảnh trên Cloud...`, "warning"); await Promise.all(images.map(url => deleteR2Image(url))); } } } await deleteDoc(doc(db, collName, currentActionItem.id)); window.showNotification("Đã xóa hoàn toàn đề thi và dữ liệu!", "success"); loadFileManager(); } catch(e) { console.error(e); window.showNotification("Lỗi xóa: " + e.message, 'error'); } } } else if (action === 'move') { let html = '<p class="text-sm font-bold text-gray-700 dark:text-gray-300 mb-2">Chọn thư mục đến:</p><div class="h-40 overflow-y-auto border border-gray-300 dark:border-gray-600 rounded p-1 space-y-1">'; html += `<button onclick="window.commitMove(null)" class="w-full text-left px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2"><i class="fa-solid fa-house text-gray-400"></i> Thư mục gốc</button>`; folderData.forEach(f => { if (f.id !== currentActionItem.id) html += `<button onclick="window.commitMove('${f.id}')" class="w-full text-left px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded flex items-center gap-2"><i class="fa-solid fa-folder text-yellow-400"></i> ${f.name}</button>`; }); html += '</div>'; container.innerHTML = html; } }
+        window.triggerAction = async (action) => { const container = document.getElementById('subActionContent'); container.innerHTML = ''; if (action === 'rename') { container.innerHTML = `<label class="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-2">Tên mới</label><div class="flex gap-2"><input type="text" id="renameInput" value="${currentActionItem.name}" class="input-std flex-1"><button onclick="window.commitRename()" class="bg-blue-600 text-white px-4 rounded font-bold">Lưu</button></div>`; } else if (action === 'delete') { window.toggleModal('actionModal', false); if(await window.customConfirm(`CẢNH BÁO: Xóa đề thi "${currentActionItem.name}" sẽ xóa vĩnh viễn cả CÂU HỎI và HÌNH ẢNH đi kèm.\nBạn có chắc chắn không?`)) { try { const collName = currentActionItem.type === 'folder' ? 'folders' : 'exams'; if (currentActionItem.type === 'exam') { const docSnap = await getDoc(doc(db, "exams", currentActionItem.id)); if (docSnap.exists()) { const examData = docSnap.data(); const strData = JSON.stringify(examData); const regex = /(https:\/\/[^"'\s\\]+\.r2\.dev\/[^"'\s\\]+|https:\/\/firebasestorage\.googleapis\.com\/v0\/b\/[^"'\s\\]+)/g; const images = strData.match(regex) || []; if (images.length > 0) { window.showNotification(`Đang dọn dẹp ${images.length} file ảnh trên Cloud...`, "warning"); await Promise.all(images.map(url => deleteR2Image(url))); } } } await deleteDoc(doc(db, collName, currentActionItem.id)); window.showNotification("Đã xóa hoàn toàn đề thi và dữ liệu!", "success"); loadFileManager(); } catch(e) { console.error(e); window.showNotification("Lỗi xóa: " + e.message, 'error'); } } } else if (action === 'move') { let html = '<p class="text-sm font-bold text-gray-700 dark:text-gray-300 mb-2">Chọn thư mục đến:</p><div class="h-40 overflow-y-auto border border-gray-300 dark:border-slate-600 rounded p-1 space-y-1">'; html += `<button onclick="window.commitMove(null)" class="w-full text-left px-3 py-2 hover:bg-gray-100 dark:hover:bg-slate-700 rounded flex items-center gap-2"><i class="fa-solid fa-house text-gray-400"></i> Thư mục gốc</button>`; folderData.forEach(f => { if (f.id !== currentActionItem.id) html += `<button onclick="window.commitMove('${f.id}')" class="w-full text-left px-3 py-2 hover:bg-gray-100 dark:hover:bg-slate-700 rounded flex items-center gap-2"><i class="fa-solid fa-folder text-yellow-400"></i> ${f.name}</button>`; }); html += '</div>'; container.innerHTML = html; } }
         window.commitRename = async () => { const newName = document.getElementById('renameInput').value; if(!newName) return; const collName = currentActionItem.type === 'folder' ? 'folders' : 'exams'; await updateDoc(doc(db, collName, currentActionItem.id), { name: newName, title: newName }); window.showNotification("Đã đổi tên"); window.toggleModal('actionModal', false); loadFileManager(); }
         window.commitMove = async (targetFolderId) => { const collName = currentActionItem.type === 'folder' ? 'folders' : 'exams'; const field = currentActionItem.type === 'folder' ? 'parentId' : 'folderId'; await updateDoc(doc(db, collName, currentActionItem.id), { [field]: targetFolderId }); window.toggleModal('actionModal', false); window.showNotification("Đã di chuyển"); loadFileManager(); }
 
