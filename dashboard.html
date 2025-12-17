@@ -163,6 +163,12 @@
                     </div>
                 </div>
                 <div class="flex items-center gap-2 md:gap-3 shrink-0">
+                    <div class="bg-gray-100 p-1 rounded-lg flex items-center mr-2">
+                        <button onclick="window.switchExplorerView('grid')" id="btnExpGrid" class="p-1.5 rounded text-blue-600 bg-white shadow-sm transition-all" title="Lưới"><i class="fa-solid fa-border-all"></i></button>
+                        <button onclick="window.switchExplorerView('list')" id="btnExpList" class="p-1.5 rounded text-gray-400 hover:text-blue-600 transition-all" title="Danh sách"><i class="fa-solid fa-list"></i></button>
+                    </div>
+                    
+                    <button onclick="window.createNewFolder()" class="px-3 py-2 bg-yellow-100 text-yellow-700 hover:bg-yellow-200 rounded-lg text-xs md:text-sm font-bold transition-colors"><i class="fa-solid fa-folder-plus mr-1"></i> <span class="hidden md:inline">Tạo thư mục</span></button>
                     <button onclick="window.createNewFolder()" class="px-3 py-2 bg-yellow-100 text-yellow-700 hover:bg-yellow-200 rounded-lg text-xs md:text-sm font-bold transition-colors"><i class="fa-solid fa-folder-plus mr-1"></i> <span class="hidden md:inline">Tạo thư mục</span></button>
                     <button onclick="window.location.href='exam-editor.html'" class="px-3 py-2 bg-green-100 text-green-700 hover:bg-green-200 rounded-lg text-xs md:text-sm font-bold transition-colors"><i class="fa-solid fa-file-circle-plus mr-1"></i> <span class="hidden md:inline">Soạn đề mới</span><span class="md:hidden">Soạn đề</span></button>
                 </div>
@@ -352,7 +358,23 @@
         let currentActionItem = null;
         window.currentHeroImages = [];
         window.currentLogoImg = "";
+        // --- VIEW MODE STATE ---
+        let currentExplorerView = 'grid'; // Mặc định là Grid
 
+        window.switchExplorerView = (mode) => {
+            currentExplorerView = mode;
+            // Cập nhật màu nút bấm
+            const btnGrid = document.getElementById('btnExpGrid');
+            const btnList = document.getElementById('btnExpList');
+            if(mode === 'grid') {
+                btnGrid.className = "p-1.5 rounded text-blue-600 bg-white shadow-sm transition-all";
+                btnList.className = "p-1.5 rounded text-gray-400 hover:text-blue-600 transition-all";
+            } else {
+                btnList.className = "p-1.5 rounded text-blue-600 bg-white shadow-sm transition-all";
+                btnGrid.className = "p-1.5 rounded text-gray-400 hover:text-blue-600 transition-all";
+            }
+            renderExplorer(); // Vẽ lại giao diện
+        };
         // 3. HỆ THỐNG MODAL & THÔNG BÁO
         window.toggleModal = (id, show) => {
             const el = document.getElementById(id);
@@ -936,7 +958,101 @@
         
         // --- LOGIC FILE EXPLORER (GIỮ NGUYÊN) ---
         async function loadFileManager() { try { const qFolders = query(collection(db, "folders"), where("teacherId", "==", currentUserUid), limit(100)); const snapFolders = await getDocs(qFolders); folderData = []; snapFolders.forEach(d => folderData.push({id: d.id, ...d.data()})); const qExams = query(collection(db, "exams"), where("teacherId", "==", currentUserUid), limit(100)); const snapExams = await getDocs(qExams); examData = []; snapExams.forEach(d => examData.push({id: d.id, ...d.data()})); renderExplorer(); } catch (e) { console.error(e); } }
-        function renderExplorer() { const grid = document.getElementById('explorerGrid'); grid.innerHTML = ''; const currentFolders = folderData.filter(f => f.parentId === currentFolderId); const currentExams = examData.filter(e => (e.folderId || null) === currentFolderId); if (currentFolders.length === 0 && currentExams.length === 0) document.getElementById('emptyExplorerMsg').classList.remove('hidden'); else document.getElementById('emptyExplorerMsg').classList.add('hidden'); currentFolders.forEach(f => { const div = document.createElement('div'); div.className = "explorer-item bg-white p-4 rounded-xl border border-gray-200 relative group"; div.draggable = true; div.ondragstart = (evt) => window.handleDragStart(evt, f.id, 'folder'); div.ondragover = (evt) => window.handleDragOver(evt); div.ondragleave = (evt) => window.handleDragLeave(evt); div.ondrop = (evt) => window.handleDrop(evt, f.id); div.onclick = (e) => { if(!e.target.closest('button')) window.navigateFolder(f.id, f.name); }; div.innerHTML = `<div class="text-4xl text-yellow-400 mb-3 text-center pointer-events-none"><i class="fa-solid fa-folder"></i></div><p class="text-sm font-bold text-gray-700 text-center truncate px-2 pointer-events-none">${f.name}</p><div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"><button onclick="event.stopPropagation(); window.openContextMenu('${f.id}', 'folder', '${f.name}')" class="p-1 hover:bg-gray-100 rounded text-gray-500"><i class="fa-solid fa-ellipsis-vertical"></i></button></div>`; grid.appendChild(div); }); currentExams.forEach(exam => { const div = document.createElement('div'); div.className = "explorer-item bg-white p-4 rounded-xl border border-gray-200 relative group"; div.draggable = true; div.ondragstart = (evt) => window.handleDragStart(evt, exam.id, 'exam'); div.onclick = (e) => { if(!e.target.closest('button')) window.location.href = `exam-editor.html?id=${exam.id}`; }; div.innerHTML = `<div class="text-4xl text-blue-500 mb-3 text-center pointer-events-none"><i class="fa-regular fa-file-lines"></i></div><p class="text-sm font-bold text-gray-700 text-center truncate px-2 pointer-events-none" title="${exam.title}">${exam.title}</p><div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"><button onclick="event.stopPropagation(); window.openContextMenu('${exam.id}', 'exam', '${exam.title}')" class="p-1 hover:bg-gray-100 rounded text-gray-500"><i class="fa-solid fa-ellipsis-vertical"></i></button></div>`; grid.appendChild(div); }); renderBreadcrumb(); }
+        function renderExplorer() { 
+            const container = document.getElementById('explorerGrid'); 
+            container.innerHTML = ''; 
+            
+            // Lọc dữ liệu thư mục và đề thi hiện tại
+            const currentFolders = folderData.filter(f => f.parentId === currentFolderId); 
+            const currentExams = examData.filter(e => (e.folderId || null) === currentFolderId); 
+            
+            // Xử lý thông báo trống
+            if (currentFolders.length === 0 && currentExams.length === 0) {
+                document.getElementById('emptyExplorerMsg').classList.remove('hidden'); 
+            } else {
+                document.getElementById('emptyExplorerMsg').classList.add('hidden'); 
+            }
+
+            // --- THIẾT LẬP CLASS CHO CONTAINER DỰA VÀO CHẾ ĐỘ VIEW ---
+            if (currentExplorerView === 'list') {
+                container.className = "flex flex-col space-y-2"; // Class cho dạng List
+            } else {
+                container.className = "grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 md:gap-4"; // Class cho dạng Grid
+            }
+
+            // HÀM RENDER ITEM (FOLDER)
+            currentFolders.forEach(f => { 
+                const div = document.createElement('div'); 
+                div.draggable = true; 
+                div.ondragstart = (evt) => window.handleDragStart(evt, f.id, 'folder'); 
+                div.ondragover = (evt) => window.handleDragOver(evt); 
+                div.ondragleave = (evt) => window.handleDragLeave(evt); 
+                div.ondrop = (evt) => window.handleDrop(evt, f.id); 
+                div.onclick = (e) => { if(!e.target.closest('button')) window.navigateFolder(f.id, f.name); }; 
+                
+                if (currentExplorerView === 'list') {
+                    // Giao diện LIST cho Folder
+                    div.className = "explorer-item bg-white px-4 py-3 rounded-xl border border-gray-200 flex items-center justify-between hover:bg-blue-50 group";
+                    div.innerHTML = `
+                        <div class="flex items-center gap-3 overflow-hidden">
+                            <div class="text-xl text-yellow-400"><i class="fa-solid fa-folder"></i></div>
+                            <p class="text-sm font-bold text-gray-700 truncate pointer-events-none">${f.name}</p>
+                        </div>
+                        <button onclick="event.stopPropagation(); window.openContextMenu('${f.id}', 'folder', '${f.name}')" class="text-gray-400 hover:text-gray-600 p-1 opacity-0 group-hover:opacity-100 transition-opacity"><i class="fa-solid fa-ellipsis-vertical"></i></button>
+                    `;
+                } else {
+                    // Giao diện GRID cho Folder (Cũ)
+                    div.className = "explorer-item bg-white p-4 rounded-xl border border-gray-200 relative group flex flex-col items-center justify-center aspect-square md:aspect-auto";
+                    div.innerHTML = `
+                        <div class="text-4xl text-yellow-400 mb-2 pointer-events-none"><i class="fa-solid fa-folder"></i></div>
+                        <p class="text-sm font-bold text-gray-700 text-center truncate w-full px-1 pointer-events-none">${f.name}</p>
+                        <div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button onclick="event.stopPropagation(); window.openContextMenu('${f.id}', 'folder', '${f.name}')" class="p-1 hover:bg-gray-100 rounded text-gray-500"><i class="fa-solid fa-ellipsis-vertical"></i></button>
+                        </div>
+                    `;
+                }
+                container.appendChild(div); 
+            }); 
+
+            // HÀM RENDER ITEM (EXAM)
+            currentExams.forEach(exam => { 
+                const div = document.createElement('div'); 
+                div.draggable = true; 
+                div.ondragstart = (evt) => window.handleDragStart(evt, exam.id, 'exam'); 
+                div.onclick = (e) => { if(!e.target.closest('button')) window.location.href = `exam-editor.html?id=${exam.id}`; }; 
+                
+                if (currentExplorerView === 'list') {
+                    // Giao diện LIST cho Exam
+                    div.className = "explorer-item bg-white px-4 py-3 rounded-xl border border-gray-200 flex items-center justify-between hover:bg-blue-50 group";
+                    div.innerHTML = `
+                        <div class="flex items-center gap-3 overflow-hidden flex-1">
+                            <div class="text-xl text-blue-500"><i class="fa-regular fa-file-lines"></i></div>
+                            <div class="flex flex-col overflow-hidden">
+                                <p class="text-sm font-bold text-gray-700 truncate pointer-events-none">${exam.title}</p>
+                                <p class="text-[10px] text-gray-400 hidden md:block">Ngày tạo: ${new Date(exam.createdAt).toLocaleDateString('vi-VN')}</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-4">
+                            <span class="text-xs font-bold bg-gray-100 text-gray-500 px-2 py-1 rounded hidden md:inline-block">${exam.duration} phút</span>
+                            <button onclick="event.stopPropagation(); window.openContextMenu('${exam.id}', 'exam', '${exam.title}')" class="text-gray-400 hover:text-gray-600 p-1 opacity-0 group-hover:opacity-100 transition-opacity"><i class="fa-solid fa-ellipsis-vertical"></i></button>
+                        </div>
+                    `;
+                } else {
+                    // Giao diện GRID cho Exam (Cũ)
+                    div.className = "explorer-item bg-white p-4 rounded-xl border border-gray-200 relative group flex flex-col items-center justify-center aspect-square md:aspect-auto";
+                    div.innerHTML = `
+                        <div class="text-4xl text-blue-500 mb-2 pointer-events-none"><i class="fa-regular fa-file-lines"></i></div>
+                        <p class="text-sm font-bold text-gray-700 text-center truncate w-full px-1 pointer-events-none" title="${exam.title}">${exam.title}</p>
+                        <div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button onclick="event.stopPropagation(); window.openContextMenu('${exam.id}', 'exam', '${exam.title}')" class="p-1 hover:bg-gray-100 rounded text-gray-500"><i class="fa-solid fa-ellipsis-vertical"></i></button>
+                        </div>
+                    `;
+                }
+                container.appendChild(div); 
+            }); 
+            
+            renderBreadcrumb(); 
+        }
         window.handleDragStart = (e, id, type) => { e.dataTransfer.setData("text/plain", JSON.stringify({id, type})); e.target.classList.add('dragging'); e.stopPropagation(); }
         window.handleDragOver = (e) => { e.preventDefault(); e.currentTarget.classList.add('drag-over'); }
         window.handleDragLeave = (e) => { e.currentTarget.classList.remove('drag-over'); }
