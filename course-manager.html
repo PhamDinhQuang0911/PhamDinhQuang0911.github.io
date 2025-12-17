@@ -298,7 +298,7 @@
             <div class="p-4 bg-green-50 border-b border-green-100 flex gap-2 items-end">
                 <div class="flex-1">
                     <label class="text-xs font-bold text-green-700 uppercase mb-1 block">Thêm học viên (Email)</label>
-                    <input type="email" id="inputStudentEmail" class="w-full px-4 py-2 border border-green-200 rounded-xl focus:ring-2 focus:ring-green-500 outline-none" placeholder="nhap_email_hoc_sinh@gmail.com">
+                    <input type="text" id="inputStudentEmail" class="w-full px-4 py-2 border border-green-200 rounded-xl focus:ring-2 focus:ring-green-500 outline-none" placeholder="Nhập tên đăng nhập (VD: hocsinh123)">
                 </div>
                 <button onclick="window.addStudentToCourse()" class="px-4 py-2 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700 shadow-md h-[42px]"><i class="fa-solid fa-plus mr-1"></i> Thêm</button>
             </div>
@@ -1253,29 +1253,70 @@ window.importCurriculum = (input) => {
             } catch (e) { window.showToast("Lỗi: " + e.message, "error"); }
         };
 
-        window.addStudentToCourse = async () => {
-            const email = document.getElementById('inputStudentEmail').value.trim();
-            if (!email) return window.showToast("Nhập email!", "error");
-            try {
-                const qUser = query(collection(db, "users"), where("email", "==", email));
-                const userSnap = await getDocs(qUser);
-                if (userSnap.empty) return alert("Không tìm thấy email này trong hệ thống users!");
-                const userData = userSnap.docs[0].data();
-                
-                await setDoc(doc(collection(db, "orders")), {
-                    userId: userSnap.docs[0].id, userEmail: email, userName: userData.displayName || "Học viên",
-                    courseId: currentManageCourseId, courseTitle: currentManageCourseTitle,
-                    amount: 0, status: 'approved', createdAt: new Date().toISOString(), note: 'Admin added'
-                });
-                window.showToast("Đã thêm thành công!", "success");
-                document.getElementById('inputStudentEmail').value = '';
-                window.openStudentManager(currentManageCourseId);
-            } catch (e) { window.showToast(e.message, "error"); }
-        };
+       window.addStudentToCourse = async () => {
+    let inputValue = document.getElementById('inputStudentEmail').value.trim();
+    if (!inputValue) return window.showToast("Vui lòng nhập tên đăng nhập!", "error");
 
-        window.removeStudentFromCourse = async (oid) => {
-            if(confirm("Xóa học viên khỏi khóa?")) { await deleteDoc(doc(db, "orders", oid)); window.openStudentManager(currentManageCourseId); }
-        };        
+    // LOGIC MỚI: Tự động thêm đuôi @gmail.com nếu chưa có
+    let email = inputValue;
+    if (!email.includes('@')) {
+        email = inputValue + "@gmail.com";
+    }
+
+    const btn = document.querySelector('button[onclick="window.addStudentToCourse()"]');
+    const originalText = btn.innerHTML;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+    btn.disabled = true;
+
+    try {
+        // Tìm User theo Email trong collection 'users'
+        const qUser = query(collection(db, "users"), where("email", "==", email));
+        const userSnap = await getDocs(qUser);
+
+        if (userSnap.empty) {
+            alert(`Không tìm thấy học viên có email "${email}" trong hệ thống.\nHãy yêu cầu học viên đăng nhập vào web ít nhất 1 lần.`);
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+            return;
+        }
+
+        const userData = userSnap.docs[0].data();
+        const userId = userSnap.docs[0].id;
+
+        // Kiểm tra xem đã có trong khóa chưa
+        const qCheck = query(collection(db, "orders"), where("courseId", "==", currentManageCourseId), where("userId", "==", userId), where("status", "==", "approved"));
+        const checkSnap = await getDocs(qCheck);
+
+        if (!checkSnap.empty) {
+            window.showToast("Học viên này đã có trong khóa học!", "info");
+        } else {
+            // Tạo Order Approved giả
+            await setDoc(doc(collection(db, "orders")), {
+                userId: userId,
+                userEmail: email,
+                userName: userData.displayName || "Học viên",
+                courseId: currentManageCourseId,
+                courseTitle: currentManageCourseTitle,
+                amount: 0,
+                status: 'approved', // Status này giúp hiện khóa học bên Student
+                createdAt: new Date().toISOString(),
+                note: 'Thêm thủ công bởi Admin'
+            });
+            
+            window.showToast(`Đã thêm thành công: ${email}`, "success");
+            document.getElementById('inputStudentEmail').value = '';
+            // Reload list
+            window.openStudentManager(currentManageCourseId);
+        }
+
+    } catch (e) {
+        console.error(e);
+        window.showToast("Lỗi: " + e.message, "error");
+    } finally {
+        btn.innerHTML = originalText;
+        btn.disabled = false;
+    }
+};      
     </script>
     
     <div id="renameModal" class="hidden fixed inset-0 z-[220] flex items-center justify-center bg-gray-900/60 backdrop-blur-sm">
