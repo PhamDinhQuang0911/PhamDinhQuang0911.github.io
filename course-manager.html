@@ -35,13 +35,19 @@
         
         /* Tree Item Styles */
         .tree-item {
-            @apply flex items-center justify-between p-3 rounded-lg cursor-pointer transition-all border border-transparent;
-            @apply hover:bg-gray-100 dark:hover:bg-slate-700;
+            @apply flex items-center justify-between p-3 pl-4 border-l-2 border-gray-200 dark:border-slate-600 cursor-pointer transition-all ml-3;
+            @apply hover:bg-gray-100 dark:hover:bg-slate-700 hover:border-gray-300;
         }
         .tree-item.active {
-            @apply bg-teal-50 border-teal-200 text-brand font-bold;
-            @apply dark:bg-teal-900/30 dark:border-teal-700 dark:text-teal-400;
+            @apply bg-teal-50 border-brand text-brand font-bold;
+            @apply dark:bg-teal-900/30 dark:border-brand dark:text-teal-400;
         }
+        
+        /* Accordion Animation */
+        .accordion-content { transition: max-height 0.3s ease-out; max-height: 2000px; overflow: hidden; }
+        .accordion-content.collapsed { max-height: 0; }
+        .rotate-icon { transition: transform 0.3s; }
+        .collapsed .rotate-icon { transform: rotate(-90deg); }
     </style>
 </head>
 <body class="flex flex-col h-screen overflow-hidden bg-gray-50 dark:bg-slate-900 text-gray-800 dark:text-gray-100 transition-colors duration-200">
@@ -158,8 +164,11 @@
             <div class="flex-1 flex overflow-hidden">
                 <div class="w-1/3 border-r border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-900 flex flex-col">
                     <div class="p-4 border-b border-gray-200 dark:border-slate-700 flex justify-between items-center bg-white dark:bg-slate-800">
-                        <h4 class="font-bold text-sm text-gray-700 dark:text-gray-300 uppercase">Cấu trúc</h4>
-                        <button onclick="window.addChapter()" class="text-xs bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 px-2 py-1 rounded font-bold hover:bg-orange-200 dark:hover:bg-orange-800 transition-colors"><i class="fa-solid fa-plus"></i> Thêm chương</button>
+                        <div class="flex gap-2">
+                            <button onclick="window.toggleAllChapters(true)" class="text-xs text-gray-500 hover:text-brand bg-gray-100 dark:bg-slate-700 p-1.5 rounded" title="Mở tất cả"><i class="fa-solid fa-expand"></i></button>
+                            <button onclick="window.toggleAllChapters(false)" class="text-xs text-gray-500 hover:text-brand bg-gray-100 dark:bg-slate-700 p-1.5 rounded" title="Đóng tất cả"><i class="fa-solid fa-compress"></i></button>
+                        </div>
+                        <button onclick="window.addChapter()" class="text-xs bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 px-3 py-1.5 rounded font-bold hover:bg-orange-200 dark:hover:bg-orange-800 transition-colors flex items-center gap-1"><i class="fa-solid fa-plus"></i> Chương mới</button>
                     </div>
                     <div class="flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar" id="curriculumTree">
                         </div>
@@ -167,63 +176,94 @@
 
                 <div class="w-2/3 bg-white dark:bg-slate-800 flex flex-col">
                     <div id="editorPlaceholder" class="flex-1 flex flex-col items-center justify-center text-gray-400 dark:text-slate-500">
-                        <i class="fa-regular fa-hand-point-left text-4xl mb-3"></i>
-                        <p>Chọn một bài học để chỉnh sửa</p>
+                        <div class="w-20 h-20 bg-gray-100 dark:bg-slate-700 rounded-full flex items-center justify-center mb-4">
+                            <i class="fa-regular fa-hand-point-left text-4xl"></i>
+                        </div>
+                        <p class="font-bold">Chọn một bài học để bắt đầu biên tập</p>
                     </div>
 
                     <div id="lessonEditor" class="hidden flex-1 flex-col h-full">
-                        <div class="p-6 border-b border-gray-100 dark:border-slate-700">
-                            <label class="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase mb-1">Tên bài học</label>
-                            <input type="text" id="leTitle" class="text-xl font-bold w-full bg-transparent border-none focus:ring-0 outline-none placeholder-gray-300 dark:placeholder-slate-600 text-gray-800 dark:text-white p-0" placeholder="Nhập tên bài học...">
+                        <div class="p-6 border-b border-gray-100 dark:border-slate-700 flex gap-4 bg-gray-50/30 dark:bg-slate-800">
+                            <div class="flex-1">
+                                <label class="block text-xs font-bold text-gray-400 dark:text-gray-500 uppercase mb-1">Tên bài học</label>
+                                <input type="text" id="leTitle" class="text-xl font-bold w-full bg-transparent border-b border-transparent focus:border-brand focus:ring-0 outline-none placeholder-gray-300 dark:placeholder-slate-600 text-gray-800 dark:text-white p-0 pb-1 transition-colors" placeholder="Nhập tên bài học...">
+                            </div>
+                            <div class="w-24">
+                                <label class="block text-xs font-bold text-gray-400 dark:text-gray-500 uppercase mb-1">Thời lượng</label>
+                                <input type="text" id="leDuration" class="text-sm font-bold w-full bg-white dark:bg-slate-700 border border-gray-200 dark:border-slate-600 rounded px-2 py-1 focus:border-brand outline-none text-gray-600 dark:text-gray-300" placeholder="VD: 10p">
+                            </div>
                         </div>
                         
                         <div class="flex-1 overflow-y-auto p-6 space-y-6">
                             <div class="grid grid-cols-2 gap-4">
                                 <div>
-                                    <label class="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase mb-2">Loại bài học</label>
-                                    <select id="leType" onchange="window.handleLessonTypeChange()" class="input-std">
+                                    <label class="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase mb-2">Loại nội dung</label>
+                                    <select id="leType" onchange="window.handleLessonTypeChange()" class="input-std font-bold text-brand">
                                         <option value="video">🎥 Video (YouTube)</option>
                                         <option value="text">📄 Tài liệu (Text/PDF)</option>
                                         <option value="quiz">📝 Bài tập (Đề thi)</option>
                                     </select>
                                 </div>
                                 <div class="flex items-center pt-6">
-                                    <label class="flex items-center cursor-pointer gap-2 select-none">
-                                        <input type="checkbox" id="lePreview" class="w-5 h-5 rounded border-gray-300 text-brand focus:ring-brand">
-                                        <span class="text-sm font-bold text-gray-700 dark:text-gray-300">Cho phép học thử (Free)</span>
+                                    <label class="flex items-center cursor-pointer gap-2 select-none group">
+                                        <input type="checkbox" id="lePreview" class="w-5 h-5 rounded border-gray-300 text-brand focus:ring-brand accent-brand">
+                                        <span class="text-sm font-bold text-gray-600 dark:text-gray-400 group-hover:text-brand transition-colors">Cho phép học thử (Free)</span>
                                     </label>
                                 </div>
                             </div>
 
-                            <div id="areaVideo" class="space-y-2">
-                                <label class="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase">Đường dẫn Video (YouTube ID hoặc URL)</label>
-                                <input type="text" id="leVideoUrl" class="input-std font-mono text-blue-600 dark:text-blue-400" placeholder="VD: https://youtu.be/..." oninput="window.previewVideo(this.value)">
-                                <div class="aspect-video bg-black rounded-xl overflow-hidden shadow-lg mt-3 relative">
-                                    <iframe id="videoPreviewFrame" class="w-full h-full" src="" frameborder="0" allowfullscreen></iframe>
-                                    <div id="videoPlaceholder" class="absolute inset-0 flex items-center justify-center text-gray-500">Preview Video</div>
-                                </div>
-                            </div>
-
-                            <div id="areaText" class="hidden space-y-2 h-64 flex flex-col">
-                                <label class="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase">Nội dung bài học</label>
-                                <textarea id="leContent" class="input-std flex-1 font-mono leading-relaxed resize-none p-4" placeholder="Nhập nội dung bài học, hỗ trợ HTML..."></textarea>
-                            </div>
-
-                            <div id="areaQuiz" class="hidden space-y-2">
-                                <label class="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase">Chọn đề thi từ Ngân hàng</label>
+                            <div id="areaVideo" class="space-y-2 animate-fade-in">
+                                <label class="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase">Đường dẫn Video (YouTube)</label>
                                 <div class="flex gap-2">
-                                    <select id="leExamSelect" class="input-std">
-                                        <option value="">-- Chọn đề thi --</option>
-                                        </select>
-                                    <button onclick="window.refreshExamList()" class="px-3 bg-gray-100 dark:bg-slate-700 rounded-lg text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-slate-600"><i class="fa-solid fa-rotate"></i></button>
+                                    <input type="text" id="leVideoUrl" class="input-std font-mono text-blue-600 dark:text-blue-400" placeholder="Paste link YouTube vào đây (VD: https://youtu.be/...)" oninput="window.previewVideo(this.value)">
                                 </div>
-                                <p class="text-xs text-gray-400 italic">Học sinh cần làm đạt điểm qua môn mới được tính là hoàn thành bài học này.</p>
+                                <p class="text-[10px] text-gray-400 italic">* Hệ thống sẽ tự động lấy ảnh Thumbnail và nhúng video.</p>
+                                
+                                <div class="aspect-video bg-black rounded-xl overflow-hidden shadow-lg mt-3 relative group">
+                                    <iframe id="videoPreviewFrame" class="w-full h-full" src="" frameborder="0" allowfullscreen></iframe>
+                                    <div id="videoPlaceholder" class="absolute inset-0 flex flex-col items-center justify-center text-gray-500 bg-gray-100 dark:bg-slate-700">
+                                        <i class="fa-brands fa-youtube text-5xl mb-2 text-gray-300 dark:text-slate-600"></i>
+                                        <span>Preview Video sẽ hiện ở đây</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div id="areaText" class="hidden space-y-2 h-80 flex flex-col animate-fade-in">
+                                <label class="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase">Nội dung bài học</label>
+                                <div class="flex-1 border border-gray-300 dark:border-slate-600 rounded-lg overflow-hidden flex flex-col">
+                                    <div class="bg-gray-50 dark:bg-slate-700 p-2 border-b border-gray-300 dark:border-slate-600 flex gap-2">
+                                        <button class="p-1 hover:bg-gray-200 dark:hover:bg-slate-600 rounded" title="Chèn ảnh" onclick="alert('Tính năng chèn ảnh đang cập nhật')"><i class="fa-regular fa-image"></i></button>
+                                        <button class="p-1 hover:bg-gray-200 dark:hover:bg-slate-600 rounded" title="In đậm"><i class="fa-solid fa-bold"></i></button>
+                                    </div>
+                                    <textarea id="leContent" class="flex-1 w-full p-4 bg-white dark:bg-slate-800 outline-none resize-none font-mono text-sm" placeholder="Nhập nội dung bài học..."></textarea>
+                                </div>
+                            </div>
+
+                            <div id="areaQuiz" class="hidden space-y-3 animate-fade-in">
+                                <label class="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase">Chọn đề thi từ Ngân hàng</label>
+                                
+                                <div class="relative">
+                                    <span class="absolute inset-y-0 left-0 flex items-center pl-3 text-gray-400"><i class="fa-solid fa-magnifying-glass"></i></span>
+                                    <input type="text" id="examSearchInput" oninput="window.filterExamList(this.value)" class="w-full pl-9 pr-4 py-2 border border-gray-300 dark:border-slate-600 rounded-t-lg text-sm bg-white dark:bg-slate-700 focus:outline-none focus:border-brand" placeholder="Gõ tên đề thi để tìm kiếm...">
+                                </div>
+                                <select id="leExamSelect" class="w-full px-4 py-3 border border-t-0 border-gray-300 dark:border-slate-600 rounded-b-lg text-sm bg-gray-50 dark:bg-slate-800 focus:ring-2 focus:ring-brand outline-none" size="5">
+                                    </select>
+                                
+                                <div class="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-lg flex gap-3 items-start border border-blue-100 dark:border-blue-800">
+                                    <i class="fa-solid fa-circle-info text-blue-500 mt-0.5"></i>
+                                    <div class="text-xs text-blue-700 dark:text-blue-300">
+                                        <p class="font-bold">Lưu ý:</p>
+                                        <p>Học sinh cần làm đạt điểm qua môn (mặc định 5/10) mới được tính là hoàn thành bài học này.</p>
+                                    </div>
+                                </div>
                             </div>
                         </div>
 
                         <div class="p-4 border-t border-gray-100 dark:border-slate-700 bg-gray-50 dark:bg-slate-900 flex justify-between items-center">
-                            <span class="text-xs text-gray-400 italic" id="leStatus">Chưa lưu thay đổi</span>
-                            <button onclick="window.updateCurrentLesson()" class="px-6 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-bold shadow text-sm">Cập nhật bài học</button>
+                            <span class="text-xs text-gray-400 italic" id="leStatus">Đang chỉnh sửa...</span>
+                            <button onclick="window.updateCurrentLesson()" class="px-6 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-bold shadow text-sm transition-transform active:scale-95">
+                                <i class="fa-solid fa-check mr-1"></i> Cập nhật bài học
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -259,10 +299,10 @@
         
         // BIẾN CHO COURSE BUILDER
         let editingCurriculumCourseId = null;
-        let currentCurriculum = []; // Mảng chứa chương (Chapters)
+        let currentCurriculum = []; 
         let selectedChapterIndex = -1;
         let selectedLessonIndex = -1;
-        let examListCache = []; // Cache danh sách đề thi
+        let examListCache = []; // Cache danh sách đề thi để search client-side
 
         // --- DARK MODE LOGIC ---
         window.applyTheme = () => {
@@ -298,7 +338,7 @@
             else {
                 currentUserId = user.uid;
                 loadCourses();
-                loadAllExamsForSelect(); // Tải trước danh sách đề thi
+                loadAllExamsForCache(); 
             }
         });
 
@@ -415,9 +455,8 @@
             }
         };
 
-        // --- LOGIC 2: COURSE BUILDER (BIÊN TẬP NỘI DUNG) ---
+        // --- LOGIC 2: COURSE BUILDER (THÔNG MINH) ---
         
-        // 2.1 Load & Render Tree
         window.openCurriculumEditor = async (courseId) => {
             editingCurriculumCourseId = courseId;
             document.getElementById('curriculumCourseTitle').innerText = "Đang tải...";
@@ -429,8 +468,11 @@
                     const data = docSnap.data();
                     document.getElementById('curriculumCourseTitle').innerText = data.title;
                     currentCurriculum = data.curriculum || [];
+                    // Mặc định mở hết
+                    currentCurriculum.forEach(c => c.isExpanded = true);
+                    
                     renderCurriculumTree();
-                    // Reset Editor View
+                    // Reset Editor
                     document.getElementById('editorPlaceholder').classList.remove('hidden');
                     document.getElementById('lessonEditor').classList.add('hidden');
                     selectedChapterIndex = -1; selectedLessonIndex = -1;
@@ -443,30 +485,33 @@
             container.innerHTML = '';
             
             if (currentCurriculum.length === 0) {
-                container.innerHTML = '<p class="text-center text-gray-400 text-sm mt-4">Chưa có chương nào.</p>';
+                container.innerHTML = '<p class="text-center text-gray-400 text-sm mt-4">Chưa có chương nào. Bấm nút "Chương mới" để tạo.</p>';
                 return;
             }
 
             currentCurriculum.forEach((chap, cIdx) => {
                 const chapDiv = document.createElement('div');
-                chapDiv.className = "mb-2 bg-white dark:bg-slate-800 rounded-lg border border-gray-200 dark:border-slate-600 overflow-hidden";
+                chapDiv.className = `mb-2 bg-white dark:bg-slate-800 rounded-lg border border-gray-200 dark:border-slate-600 overflow-hidden ${chap.isExpanded ? '' : 'collapsed'}`;
                 
-                // Header Chương
+                // Header Chương (Accordion)
                 chapDiv.innerHTML = `
-                    <div class="p-3 bg-gray-50 dark:bg-slate-700 flex items-center justify-between group">
+                    <div class="p-3 bg-gray-50 dark:bg-slate-700 flex items-center justify-between group cursor-pointer" onclick="window.toggleChapter(${cIdx})">
                         <div class="flex items-center gap-2 flex-1">
-                            <span class="font-bold text-sm text-gray-700 dark:text-gray-300">Chương ${cIdx + 1}:</span>
-                            <input type="text" value="${chap.title}" onchange="window.updateChapterTitle(${cIdx}, this.value)" class="bg-transparent border-none text-sm font-bold text-gray-800 dark:text-white outline-none w-full focus:bg-white dark:focus:bg-slate-600 rounded px-1">
+                            <i class="fa-solid fa-chevron-down text-xs text-gray-400 rotate-icon transition-transform"></i>
+                            <span class="font-bold text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap">Chương ${cIdx + 1}:</span>
+                            <input type="text" value="${chap.title}" onclick="event.stopPropagation()" onchange="window.updateChapterTitle(${cIdx}, this.value)" class="bg-transparent border-none text-sm font-bold text-gray-800 dark:text-white outline-none w-full focus:bg-white dark:focus:bg-slate-600 rounded px-1">
                         </div>
                         <div class="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button onclick="window.deleteChapter(${cIdx})" class="text-red-500 hover:bg-red-100 p-1 rounded"><i class="fa-solid fa-trash text-xs"></i></button>
-                            <button onclick="window.addLesson(${cIdx})" class="text-blue-600 hover:bg-blue-100 p-1 rounded" title="Thêm bài học"><i class="fa-solid fa-plus text-xs"></i></button>
+                            <button onclick="event.stopPropagation(); window.deleteChapter(${cIdx})" class="text-red-500 hover:bg-red-100 p-1 rounded" title="Xóa chương"><i class="fa-solid fa-trash text-xs"></i></button>
+                            <button onclick="event.stopPropagation(); window.addLesson(${cIdx})" class="text-blue-600 hover:bg-blue-100 p-1 rounded" title="Thêm bài học"><i class="fa-solid fa-plus text-xs"></i></button>
                         </div>
                     </div>
                 `;
 
-                // List Bài học
-                const lessonList = document.createElement('div');
+                // Content Chương
+                const lessonContainer = document.createElement('div');
+                lessonContainer.className = "accordion-content bg-white dark:bg-slate-800";
+                
                 if (chap.lessons && chap.lessons.length > 0) {
                     chap.lessons.forEach((les, lIdx) => {
                         const isActive = (cIdx === selectedChapterIndex && lIdx === selectedLessonIndex);
@@ -478,36 +523,50 @@
                         if (les.type === 'quiz') icon = 'fa-clipboard-question';
 
                         lesDiv.innerHTML = `
-                            <div class="flex items-center gap-2 truncate" onclick="window.selectLesson(${cIdx}, ${lIdx})">
-                                <i class="fa-regular ${icon}"></i> <span>${les.title}</span>
+                            <div class="flex items-center gap-2 truncate flex-1" onclick="window.selectLesson(${cIdx}, ${lIdx})">
+                                <i class="fa-regular ${icon} w-4"></i> <span>${les.title}</span>
                             </div>
-                            <button onclick="window.deleteLesson(${cIdx}, ${lIdx})" class="text-gray-300 hover:text-red-500"><i class="fa-solid fa-times"></i></button>
+                            <div class="flex gap-2">
+                                <span class="text-[10px] bg-gray-100 dark:bg-slate-700 px-1 rounded text-gray-400">${les.duration || ''}</span>
+                                <button onclick="window.deleteLesson(${cIdx}, ${lIdx})" class="text-gray-300 hover:text-red-500"><i class="fa-solid fa-times"></i></button>
+                            </div>
                         `;
-                        lessonList.appendChild(lesDiv);
+                        lessonContainer.appendChild(lesDiv);
                     });
                 } else {
-                    lessonList.innerHTML = '<div class="p-2 pl-8 text-xs text-gray-400 italic">Trống</div>';
+                    lessonContainer.innerHTML = '<div class="p-2 pl-8 text-xs text-gray-400 italic">Chưa có bài học nào.</div>';
                 }
                 
-                chapDiv.appendChild(lessonList);
+                chapDiv.appendChild(lessonContainer);
                 container.appendChild(chapDiv);
             });
         }
 
-        // 2.2 CRUD Operations (Structure)
+        // Smart features
+        window.toggleChapter = (idx) => {
+            currentCurriculum[idx].isExpanded = !currentCurriculum[idx].isExpanded;
+            renderCurriculumTree();
+        }
+        window.toggleAllChapters = (expand) => {
+            currentCurriculum.forEach(c => c.isExpanded = expand);
+            renderCurriculumTree();
+        }
+
         window.addChapter = () => {
-            currentCurriculum.push({ id: 'chap_' + Date.now(), title: 'Chương mới', lessons: [] });
+            currentCurriculum.push({ id: 'chap_' + Date.now(), title: 'Chương mới', lessons: [], isExpanded: true });
             renderCurriculumTree();
         };
         window.updateChapterTitle = (idx, val) => { currentCurriculum[idx].title = val; };
         window.deleteChapter = (idx) => { if(confirm('Xóa chương này?')) { currentCurriculum.splice(idx, 1); renderCurriculumTree(); } };
 
         window.addLesson = (cIdx) => {
+            if(!currentCurriculum[cIdx].isExpanded) currentCurriculum[cIdx].isExpanded = true;
             currentCurriculum[cIdx].lessons.push({
                 id: 'les_' + Date.now(),
                 title: 'Bài học mới',
                 type: 'video',
                 content: '',
+                duration: '',
                 isPreview: false
             });
             renderCurriculumTree();
@@ -530,29 +589,28 @@
             selectedChapterIndex = cIdx; selectedLessonIndex = lIdx;
             const lesson = currentCurriculum[cIdx].lessons[lIdx];
             
-            // Highlight in tree
-            renderCurriculumTree();
+            renderCurriculumTree(); // Update active state
             
-            // Show Editor
             document.getElementById('editorPlaceholder').classList.add('hidden');
             document.getElementById('lessonEditor').classList.remove('hidden');
             document.getElementById('lessonEditor').classList.add('flex');
             
             // Fill Form
             document.getElementById('leTitle').value = lesson.title;
+            document.getElementById('leDuration').value = lesson.duration || '';
             document.getElementById('leType').value = lesson.type;
             document.getElementById('lePreview').checked = lesson.isPreview || false;
             
-            // Trigger UI changes based on type
             window.handleLessonTypeChange();
             
-            // Fill specific fields
             if (lesson.type === 'video') {
                 document.getElementById('leVideoUrl').value = lesson.content || '';
                 window.previewVideo(lesson.content);
             } else if (lesson.type === 'text') {
                 document.getElementById('leContent').value = lesson.content || '';
             } else if (lesson.type === 'quiz') {
+                // Populate select before setting value
+                window.filterExamList('');
                 document.getElementById('leExamSelect').value = lesson.examId || '';
             }
             
@@ -570,6 +628,7 @@
             if(type === 'quiz') document.getElementById('areaQuiz').classList.remove('hidden');
         };
 
+        // Smart Video Preview
         window.previewVideo = (url) => {
             const frame = document.getElementById('videoPreviewFrame');
             const ph = document.getElementById('videoPlaceholder');
@@ -591,6 +650,7 @@
             const lesson = currentCurriculum[selectedChapterIndex].lessons[selectedLessonIndex];
             
             lesson.title = document.getElementById('leTitle').value;
+            lesson.duration = document.getElementById('leDuration').value;
             lesson.type = document.getElementById('leType').value;
             lesson.isPreview = document.getElementById('lePreview').checked;
             
@@ -598,8 +658,8 @@
             else if (lesson.type === 'text') lesson.content = document.getElementById('leContent').value;
             else if (lesson.type === 'quiz') lesson.examId = document.getElementById('leExamSelect').value;
             
-            renderCurriculumTree(); // Refresh title in tree
-            document.getElementById('leStatus').innerText = "Đã cập nhật vào bộ nhớ tạm (Chưa lưu Server)";
+            renderCurriculumTree(); // Update UI
+            document.getElementById('leStatus').innerText = "Đã cập nhật (Chưa lưu Server)";
             document.getElementById('leStatus').className = "text-xs text-green-600 font-bold italic";
         };
 
@@ -615,21 +675,37 @@
             finally { btn.innerHTML = '<i class="fa-solid fa-save"></i> Lưu thay đổi'; btn.disabled = false; }
         };
 
-        // --- UTILS: TẢI ĐỀ THI CHO SELECT ---
-        async function loadAllExamsForSelect() {
+        // --- UTILS: TẢI & TÌM KIẾM ĐỀ THI ---
+        async function loadAllExamsForCache() {
             try {
-                // Chỉ lấy đề của GV hiện tại
                 const q = query(collection(db, "exams"), where("teacherId", "==", currentUserId || "")); 
                 const snap = await getDocs(q);
-                const select = document.getElementById('leExamSelect');
-                let html = '<option value="">-- Chọn đề thi --</option>';
-                snap.forEach(d => {
-                    html += `<option value="${d.id}">${d.data().title}</option>`;
-                });
-                select.innerHTML = html;
-            } catch(e) { console.log("Chưa load được đề thi cho dropdown", e); }
+                examListCache = [];
+                snap.forEach(d => { examListCache.push({ id: d.id, title: d.data().title }); });
+                window.filterExamList(''); // Init list
+            } catch(e) { console.log("Chưa load được đề thi", e); }
         }
-        window.refreshExamList = () => { loadAllExamsForSelect(); window.showNotification("Đã làm mới danh sách đề thi"); };
+        
+        window.filterExamList = (keyword) => {
+            const select = document.getElementById('leExamSelect');
+            select.innerHTML = '<option value="">-- Chọn đề thi --</option>';
+            
+            const filtered = examListCache.filter(e => e.title.toLowerCase().includes(keyword.toLowerCase()));
+            
+            filtered.forEach(e => {
+                const opt = document.createElement('option');
+                opt.value = e.id;
+                opt.text = e.title;
+                select.appendChild(opt);
+            });
+            
+            if(filtered.length === 0) {
+                 const opt = document.createElement('option');
+                 opt.text = "Không tìm thấy đề thi phù hợp";
+                 select.appendChild(opt);
+            }
+        }
+        window.refreshExamList = () => { loadAllExamsForCache(); window.showNotification("Đã làm mới danh sách đề thi"); };
 
         // --- UPLOAD ẢNH (Dùng Worker) ---
         window.handleUpload = async (input, type) => {
