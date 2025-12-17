@@ -1269,26 +1269,28 @@ window.importCurriculum = (input) => {
     btn.disabled = true;
 
     try {
-        // Tìm User theo Email trong collection 'users'
-        const qUser = query(collection(db, "users"), where("email", "==", email));
-        const userSnap = await getDocs(qUser);
+        let userSnap = null;
+        let finalEmail = inputValue; // Lưu email cuối cùng tìm được để tạo order
 
-        if (userSnap.empty) {
-            alert(`Không tìm thấy học viên có email "${email}" trong hệ thống.\nHãy yêu cầu học viên đăng nhập vào web ít nhất 1 lần.`);
-            btn.innerHTML = originalText;
-            btn.disabled = false;
-            return;
-        }
-
-        const userData = userSnap.docs[0].data();
-        const userId = userSnap.docs[0].id;
-
-        // Kiểm tra xem đã có trong khóa chưa
-        const qCheck = query(collection(db, "orders"), where("courseId", "==", currentManageCourseId), where("userId", "==", userId), where("status", "==", "approved"));
-        const checkSnap = await getDocs(qCheck);
-
-        if (!checkSnap.empty) {
-            window.showToast("Học viên này đã có trong khóa học!", "info");
+        // --- LOGIC TÌM KIẾM THÔNG MINH (3 BƯỚC) ---
+        if (inputValue.includes('@')) {
+            // 1. Nếu có @ -> Tìm chính xác theo email nhập vào
+            userSnap = await getDocs(query(collection(db, "users"), where("email", "==", inputValue)));
+        } else {
+            // 2. Tìm theo Username trước (Ưu tiên cao nhất)
+            userSnap = await getDocs(query(collection(db, "users"), where("username", "==", inputValue)));
+            
+            // 3. Nếu không thấy -> Thử ghép đuôi @hocsinh.com
+            if (userSnap.empty) {
+                finalEmail = inputValue + "@hocsinh.com";
+                userSnap = await getDocs(query(collection(db, "users"), where("email", "==", finalEmail)));
+            }
+            
+            // 4. Nếu vẫn không thấy -> Thử ghép đuôi @gmail.com
+            if (userSnap.empty) {
+                finalEmail = inputValue + "@gmail.com";
+                userSnap = await getDocs(query(collection(db, "users"), where("email", "==", finalEmail)));
+            }
         } else {
             // Tạo Order Approved giả
             await setDoc(doc(collection(db, "orders")), {
