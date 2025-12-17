@@ -29,6 +29,11 @@
         /* Tree View Styles */
         .tree-line { position: absolute; left: 14px; top: 0; bottom: 0; width: 1px; background: #e2e8f0; }
         .tree-connector { position: absolute; left: 0; top: 50%; width: 12px; height: 1px; background: #e2e8f0; }
+        /* BƯỚC 2: Thêm vào thẻ <style> */
+.draggable-source { opacity: 0.4; border: 2px dashed #0F766E; }
+.drag-over-top { border-top: 2px solid #0F766E !important; }
+.drag-over-bottom { border-bottom: 2px solid #0F766E !important; }
+.drag-over-inside { background-color: #F0FDFA !important; border: 2px dashed #0F766E !important; }
     </style>
 </head>
 <body class="text-gray-700">
@@ -282,6 +287,9 @@
         let activeChapIdx = -1;
         let activeLesIdx = -1;
         let activeItemIdx = -1; // Cấp 3: Item (Nội dung)
+        // Thêm vào phần khai báo biến đầu script
+        let renameTarget = null; // { type: 'chap'|'les', cIdx, lIdx }
+        let dragSrc = null; // Lưu thông tin phần tử đang được kéo
 
         // --- UTILS ---
         window.showToast = (msg, type='success') => {
@@ -445,74 +453,98 @@
             });
         }
 
-        function renderCurriculumTree() {
-            const tree = document.getElementById('curriculumTree');
-            tree.innerHTML = '';
-            if(currentCurriculum.length === 0) return tree.innerHTML = `<div class="text-center mt-10 text-xs text-gray-400">Chưa có nội dung</div>`;
+        // BƯỚC 3.2: Thay thế hàm renderCurriculumTree cũ bằng hàm này
+function renderCurriculumTree() {
+    const tree = document.getElementById('curriculumTree');
+    tree.innerHTML = '';
+    if(currentCurriculum.length === 0) return tree.innerHTML = `<div class="text-center mt-10 text-xs text-gray-400">Chưa có nội dung</div>`;
 
-            currentCurriculum.forEach((chap, cIdx) => {
-                const chapEl = document.createElement('div');
-                chapEl.className = "mb-2 border border-gray-100 rounded-lg overflow-hidden bg-white shadow-sm";
-                
-                // Level 1: Chapter
-                chapEl.innerHTML = `
-                    <div class="bg-gray-50 p-2.5 flex justify-between items-center group hover:bg-gray-100 cursor-pointer select-none" onclick="toggleCollapse('chap_body_${cIdx}')">
-                        <div class="font-bold text-gray-800 text-sm flex-1 truncate"><i class="fa-solid fa-folder text-brand mr-2"></i>${chap.title}</div>
-                        <div class="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button onclick="event.stopPropagation(); renameChapter(${cIdx})" class="w-6 h-6 hover:bg-white rounded text-gray-500"><i class="fa-solid fa-pen text-[10px]"></i></button>
-                            <button onclick="event.stopPropagation(); addLesson(${cIdx})" class="w-6 h-6 hover:bg-white rounded text-blue-600"><i class="fa-solid fa-plus text-[10px]"></i></button>
-                            <button onclick="event.stopPropagation(); deleteChapter(${cIdx})" class="w-6 h-6 hover:bg-white rounded text-red-600"><i class="fa-solid fa-trash text-[10px]"></i></button>
-                        </div>
+    currentCurriculum.forEach((chap, cIdx) => {
+        // --- LEVEL 1: CHAPTER ---
+        const chapEl = document.createElement('div');
+        chapEl.className = "mb-2 border border-gray-100 rounded-lg overflow-hidden bg-white shadow-sm transition-all";
+        chapEl.draggable = true;
+        // Sự kiện Drag cho Chapter
+        setupDragEvents(chapEl, { type: 'chap', cIdx });
+
+        const isCollapsed = chap.isCollapsed || false; // Trạng thái thu gọn
+
+        chapEl.innerHTML = `
+            <div class="bg-gray-50 p-2.5 flex justify-between items-center group hover:bg-gray-100 cursor-pointer select-none" onclick="toggleCollapse(${cIdx}, 'chap')">
+                <div class="font-bold text-gray-800 text-sm flex-1 truncate flex items-center gap-2">
+                    <i class="fa-solid fa-grip-lines text-gray-300 cursor-move hover:text-gray-500"></i>
+                    <i class="fa-solid ${isCollapsed ? 'fa-folder' : 'fa-folder-open'} text-brand"></i>
+                    ${chap.title}
+                </div>
+                <div class="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button onclick="event.stopPropagation(); openRenameModal('chap', ${cIdx})" class="w-6 h-6 hover:bg-white rounded text-gray-500"><i class="fa-solid fa-pen text-[10px]"></i></button>
+                    <button onclick="event.stopPropagation(); addLesson(${cIdx})" class="w-6 h-6 hover:bg-white rounded text-blue-600"><i class="fa-solid fa-plus text-[10px]"></i></button>
+                    <button onclick="event.stopPropagation(); deleteChapter(${cIdx})" class="w-6 h-6 hover:bg-white rounded text-red-600"><i class="fa-solid fa-trash text-[10px]"></i></button>
+                    <i class="fa-solid fa-chevron-${isCollapsed ? 'right' : 'down'} text-gray-400 text-xs ml-2 w-4 text-center"></i>
+                </div>
+            </div>
+            <div id="chap_body_${cIdx}" class="pl-3 pr-1 pb-2 space-y-2 mt-1 ${isCollapsed ? 'hidden' : ''}"></div>
+        `;
+        
+        const chapBody = chapEl.querySelector(`#chap_body_${cIdx}`);
+
+        // --- LEVEL 2: LESSON ---
+        (chap.lessons || []).forEach((les, lIdx) => {
+            const lesEl = document.createElement('div');
+            lesEl.className = "relative pl-4 border-l-2 border-gray-200 hover:border-brand transition-colors bg-white rounded";
+            lesEl.draggable = true;
+            setupDragEvents(lesEl, { type: 'les', cIdx, lIdx });
+
+            const isLesCollapsed = les.isCollapsed || false;
+
+            lesEl.innerHTML = `
+                <div class="flex justify-between items-center py-1 group/les cursor-pointer select-none" onclick="toggleCollapse(${cIdx}, 'les', ${lIdx})">
+                    <div class="text-sm font-bold text-gray-700 truncate flex items-center gap-2">
+                        <i class="fa-solid fa-grip-vertical text-gray-300 text-xs cursor-move"></i>
+                        <span class="${isLesCollapsed ? 'text-gray-500' : 'text-brand'}">${les.title}</span>
                     </div>
-                    <div id="chap_body_${cIdx}" class="pl-3 pr-1 pb-2 space-y-2 mt-1 hidden"></div>
-                `;
+                    <div class="flex gap-1 opacity-0 group-hover/les:opacity-100 items-center">
+                        <button onclick="event.stopPropagation(); openRenameModal('les', ${cIdx}, ${lIdx})" class="text-gray-400 hover:text-brand"><i class="fa-solid fa-pen text-[10px]"></i></button>
+                        <button onclick="event.stopPropagation(); addItem(${cIdx},${lIdx})" class="text-[10px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded font-bold hover:bg-blue-100">+ Mục</button>
+                        <button onclick="event.stopPropagation(); deleteLesson(${cIdx},${lIdx})" class="text-gray-400 hover:text-red-500"><i class="fa-solid fa-times text-xs"></i></button>
+                        <i class="fa-solid fa-caret-${isLesCollapsed ? 'right' : 'down'} text-gray-300 text-xs ml-1"></i>
+                    </div>
+                </div>
+            `;
+
+            // --- LEVEL 3: ITEMS ---
+            const itemsContainer = document.createElement('div');
+            itemsContainer.className = `space-y-1 mt-1 ${isLesCollapsed ? 'hidden' : ''}`;
+            
+            (les.items || []).forEach((item, iIdx) => {
+                const isActive = (cIdx === activeChapIdx && lIdx === activeLesIdx && iIdx === activeItemIdx);
+                const icon = item.type === 'pdf' ? 'fa-file-pdf text-blue-500' : (item.type === 'quiz' ? 'fa-clipboard-question text-orange-500' : 'fa-play-circle text-red-500');
                 
-                const chapBody = chapEl.querySelector(`#chap_body_${cIdx}`);
-                // Mặc định mở chương đầu hoặc chương đang active
-                if(cIdx === activeChapIdx || activeChapIdx === -1) chapBody.classList.remove('hidden');
+                const itemEl = document.createElement('div');
+                itemEl.draggable = true;
+                setupDragEvents(itemEl, { type: 'item', cIdx, lIdx, iIdx });
 
-                // Level 2: Lesson
-                (chap.lessons || []).forEach((les, lIdx) => {
-                    const lesEl = document.createElement('div');
-                    lesEl.className = "relative pl-4 border-l-2 border-gray-200 hover:border-brand transition-colors";
-                    lesEl.innerHTML = `
-                        <div class="flex justify-between items-center py-1 group/les cursor-pointer">
-                            <div class="text-sm font-bold text-gray-700 truncate" onclick="renameLesson(${cIdx},${lIdx})">${les.title}</div>
-                            <div class="flex gap-1 opacity-0 group-hover/les:opacity-100">
-                                <button onclick="addItem(${cIdx},${lIdx})" class="text-[10px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded font-bold hover:bg-blue-100">+ Nội dung</button>
-                                <button onclick="deleteLesson(${cIdx},${lIdx})" class="text-gray-400 hover:text-red-500"><i class="fa-solid fa-times"></i></button>
-                            </div>
-                        </div>
-                    `;
-
-                    // Level 3: Item (Nội dung thực tế)
-                    const itemsContainer = document.createElement('div');
-                    itemsContainer.className = "space-y-1 mt-1";
-                    
-                    (les.items || []).forEach((item, iIdx) => {
-                        const isActive = (cIdx === activeChapIdx && lIdx === activeLesIdx && iIdx === activeItemIdx);
-                        const icon = item.type === 'pdf' ? 'fa-file-pdf text-blue-500' : (item.type === 'quiz' ? 'fa-clipboard-question text-orange-500' : 'fa-play-circle text-red-500');
-                        
-                        const itemEl = document.createElement('div');
-                        itemEl.className = `flex justify-between items-center px-2 py-1.5 rounded text-xs cursor-pointer ${isActive ? 'bg-brand text-white shadow-md' : 'bg-gray-50 text-gray-600 hover:bg-gray-100'}`;
-                        itemEl.onclick = () => selectItem(cIdx, lIdx, iIdx);
-                        itemEl.innerHTML = `
-                            <div class="flex items-center gap-2 truncate">
-                                <i class="fa-solid ${icon}"></i>
-                                <span class="truncate max-w-[120px]">${item.title}</span>
-                            </div>
-                            <button onclick="event.stopPropagation(); deleteItem(${cIdx},${lIdx},${iIdx})" class="${isActive?'text-white/70 hover:text-white':'text-gray-300 hover:text-red-500'}"><i class="fa-solid fa-times"></i></button>
-                        `;
-                        itemsContainer.appendChild(itemEl);
-                    });
-                    
-                    lesEl.appendChild(itemsContainer);
-                    chapBody.appendChild(lesEl);
-                });
-
-                tree.appendChild(chapEl);
+                itemEl.className = `flex justify-between items-center px-2 py-1.5 rounded text-xs cursor-pointer border border-transparent transition-all ${isActive ? 'bg-brand text-white shadow-md' : 'bg-gray-50 text-gray-600 hover:bg-gray-100 hover:border-gray-200'}`;
+                itemEl.onclick = (e) => { e.stopPropagation(); selectItem(cIdx, lIdx, iIdx); };
+                
+                itemEl.innerHTML = `
+                    <div class="flex items-center gap-2 truncate pointer-events-none">
+                        <i class="fa-solid fa-grip-lines-vertical text-gray-300 text-[10px]"></i>
+                        <i class="fa-solid ${icon}"></i>
+                        <span class="truncate max-w-[120px]">${item.title}</span>
+                    </div>
+                    <button onclick="event.stopPropagation(); deleteItem(${cIdx},${lIdx},${iIdx})" class="${isActive?'text-white/70 hover:text-white':'text-gray-300 hover:text-red-500'}"><i class="fa-solid fa-times"></i></button>
+                `;
+                itemsContainer.appendChild(itemEl);
             });
-        }
+            
+            lesEl.appendChild(itemsContainer);
+            chapBody.appendChild(lesEl);
+        });
+
+        tree.appendChild(chapEl);
+    });
+}
 
         window.toggleCollapse = (id) => document.getElementById(id).classList.toggle('hidden');
 
@@ -741,6 +773,233 @@
         };
         window.closeCurriculumModal = () => window.customConfirm("Đóng mà không lưu?", () => document.getElementById('curriculumModal').classList.add('hidden'));
         window.deleteCourse = (id) => window.customConfirm("Xóa khóa học này?", async()=>{ await deleteDoc(doc(db,"public_courses",id)); window.showToast("Đã xóa"); loadCourses(); });
+        // --- LOGIC 1: ĐỔI TÊN (KHÔNG DÙNG PROMPT) ---
+window.openRenameModal = (type, cIdx, lIdx = null) => {
+    renameTarget = { type, cIdx, lIdx };
+    const currentTitle = type === 'chap' 
+        ? currentCurriculum[cIdx].title 
+        : currentCurriculum[cIdx].lessons[lIdx].title;
+    
+    document.getElementById('renameInput').value = currentTitle;
+    document.getElementById('renameModal').classList.remove('hidden');
+    document.getElementById('renameInput').focus();
+};
+
+window.confirmRename = () => {
+    const newName = document.getElementById('renameInput').value;
+    if(!newName) return;
+    
+    if(renameTarget.type === 'chap') {
+        currentCurriculum[renameTarget.cIdx].title = newName;
+    } else {
+        currentCurriculum[renameTarget.cIdx].lessons[renameTarget.lIdx].title = newName;
+    }
+    
+    document.getElementById('renameModal').classList.add('hidden');
+    renderCurriculumTree();
+};
+
+// --- LOGIC 2: THU GỌN (COLLAPSE) ---
+window.toggleCollapse = (cIdx, type, lIdx = null) => {
+    if(type === 'chap') {
+        currentCurriculum[cIdx].isCollapsed = !currentCurriculum[cIdx].isCollapsed;
+    } else {
+        currentCurriculum[cIdx].lessons[lIdx].isCollapsed = !currentCurriculum[cIdx].lessons[lIdx].isCollapsed;
+    }
+    renderCurriculumTree();
+};
+
+// --- LOGIC 3: CÀI ĐẶT VIDEO (THÊM INPUT THỜI GIAN) ---
+// Cập nhật sự kiện input cho trường thời gian
+document.getElementById('videoMinTime').oninput = (e) => {
+    if(activeItemIdx > -1) {
+        currentCurriculum[activeChapIdx].lessons[activeLesIdx].items[activeItemIdx].minWatchTime = e.target.value;
+    }
+};
+
+// Cập nhật hàm selectItem cũ để load dữ liệu thời gian
+const originalSelectItem = window.selectItem;
+window.selectItem = (cIdx, lIdx, iIdx) => {
+    // Gọi lại logic cũ để hiện form
+    activeChapIdx = cIdx; activeLesIdx = lIdx; activeItemIdx = iIdx;
+    const data = currentCurriculum[cIdx].lessons[lIdx].items[iIdx];
+    
+    // Logic cũ (Rút gọn để bạn copy đè hoặc merge)
+    renderCurriculumTree(); 
+    document.getElementById('editorWelcome').classList.add('hidden');
+    document.getElementById('editorForm').classList.remove('hidden');
+    document.getElementById('editItemTitle').value = data.title;
+    document.getElementById('isPreview').checked = data.isPreview || false;
+    document.getElementById('isPublished').checked = data.isPublished !== false;
+    window.setItemType(data.type);
+    if(data.type === 'video') {
+        document.getElementById('videoUrlInput').value = data.content || '';
+        // MỚI: Load thời gian xem
+        document.getElementById('videoMinTime').value = data.minWatchTime || 10;
+        window.previewVideo(data.content || '');
+    } else if (data.type === 'pdf') {
+        if(data.content && data.content.includes('drive.google.com')) {
+            document.querySelector('input[name="pdfSource"][value="drive"]').checked = true;
+            document.getElementById('driveUrlInput').value = data.content;
+        } else {
+            document.querySelector('input[name="pdfSource"][value="upload"]').checked = true;
+            if(data.content) document.getElementById('pdfFrame').src = data.content;
+        }
+        window.togglePdfSource();
+    } else if(data.type === 'quiz') {
+        document.getElementById('selectedExamTitle').innerText = data.examTitle || 'Chưa chọn đề';
+        document.getElementById('selectedExamInfo').classList.toggle('hidden', !data.examId);
+    }
+};
+
+// --- LOGIC 4: KÉO THẢ (DRAG & DROP ENGINE) ---
+function setupDragEvents(el, data) {
+    el.ondragstart = (e) => {
+        e.stopPropagation();
+        dragSrc = data;
+        el.classList.add('draggable-source');
+        e.dataTransfer.effectAllowed = 'move';
+        // Hack để trên Firefox hoạt động
+        e.dataTransfer.setData('text/plain', JSON.stringify(data)); 
+    };
+
+    el.ondragend = (e) => {
+        el.classList.remove('draggable-source');
+        document.querySelectorAll('.drag-over-top, .drag-over-bottom, .drag-over-inside').forEach(e => {
+            e.classList.remove('drag-over-top', 'drag-over-bottom', 'drag-over-inside');
+        });
+        dragSrc = null;
+    };
+
+    el.ondragover = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if(!dragSrc) return;
+        
+        // Logic hiển thị vạch chỉ dẫn (Trên/Dưới/Trong)
+        const rect = el.getBoundingClientRect();
+        const offset = e.clientY - rect.top;
+        
+        // Reset style
+        el.classList.remove('drag-over-top', 'drag-over-bottom', 'drag-over-inside');
+
+        // Logic Kéo Chapter
+        if(dragSrc.type === 'chap' && data.type === 'chap') {
+            if(offset < rect.height / 2) el.classList.add('drag-over-top');
+            else el.classList.add('drag-over-bottom');
+        }
+        // Logic Kéo Lesson (vào Lesson khác hoặc vào Chapter)
+        else if(dragSrc.type === 'les') {
+            if(data.type === 'les') {
+                if(offset < rect.height / 2) el.classList.add('drag-over-top');
+                else el.classList.add('drag-over-bottom');
+            } else if (data.type === 'chap') {
+                el.classList.add('drag-over-inside'); // Kéo Lesson vào Chapter
+            }
+        }
+        // Logic Kéo Item
+        else if(dragSrc.type === 'item') {
+            if(data.type === 'item') {
+                 if(offset < rect.height / 2) el.classList.add('drag-over-top');
+                else el.classList.add('drag-over-bottom');
+            } else if(data.type === 'les') {
+                 el.classList.add('drag-over-inside'); // Kéo Item vào Lesson
+            }
+        }
+    };
+
+    el.ondrop = (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        if(!dragSrc) return;
+        
+        // Xử lý Logic di chuyển dữ liệu
+        // 1. CHAPTER
+        if(dragSrc.type === 'chap' && data.type === 'chap') {
+            const srcItem = currentCurriculum[dragSrc.cIdx];
+            currentCurriculum.splice(dragSrc.cIdx, 1); // Xóa cũ
+            // Tính index mới (nếu kéo từ dưới lên thì index không đổi, nếu từ trên xuống thì -1)
+            let newIdx = data.cIdx;
+            if(el.classList.contains('drag-over-bottom')) newIdx++;
+            if(dragSrc.cIdx < data.cIdx) newIdx--; 
+            
+            currentCurriculum.splice(newIdx, 0, srcItem); // Chèn mới
+        }
+        // 2. LESSON
+        else if(dragSrc.type === 'les') {
+            const srcLesson = currentCurriculum[dragSrc.cIdx].lessons[dragSrc.lIdx];
+            
+            if(data.type === 'les') {
+                // Di chuyển trong cùng list hoặc khác list đều được
+                currentCurriculum[dragSrc.cIdx].lessons.splice(dragSrc.lIdx, 1);
+                
+                let newLIdx = data.lIdx;
+                if(el.classList.contains('drag-over-bottom')) newLIdx++;
+                // Nếu cùng 1 chapter và kéo xuống dưới, phải trừ index
+                if(dragSrc.cIdx === data.cIdx && dragSrc.lIdx < data.lIdx) newLIdx--;
+                
+                currentCurriculum[data.cIdx].lessons.splice(newLIdx, 0, srcLesson);
+            } else if (data.type === 'chap') {
+                // Thả vào Chapter (Append vào cuối)
+                currentCurriculum[dragSrc.cIdx].lessons.splice(dragSrc.lIdx, 1);
+                if(!currentCurriculum[data.cIdx].lessons) currentCurriculum[data.cIdx].lessons = [];
+                currentCurriculum[data.cIdx].lessons.push(srcLesson);
+            }
+        }
+        // 3. ITEM
+        else if(dragSrc.type === 'item') {
+             const srcItem = currentCurriculum[dragSrc.cIdx].lessons[dragSrc.lIdx].items[dragSrc.iIdx];
+             
+             if(data.type === 'item') {
+                 currentCurriculum[dragSrc.cIdx].lessons[dragSrc.lIdx].items.splice(dragSrc.iIdx, 1);
+                 
+                 let newIIdx = data.iIdx;
+                 if(el.classList.contains('drag-over-bottom')) newIIdx++;
+                 if(dragSrc.cIdx === data.cIdx && dragSrc.lIdx === data.lIdx && dragSrc.iIdx < data.iIdx) newIIdx--;
+                 
+                 currentCurriculum[data.cIdx].lessons[data.lIdx].items.splice(newIIdx, 0, srcItem);
+             } else if(data.type === 'les') {
+                 // Thả vào Lesson (Append cuối)
+                 currentCurriculum[dragSrc.cIdx].lessons[dragSrc.lIdx].items.splice(dragSrc.iIdx, 1);
+                 currentCurriculum[data.cIdx].lessons[data.lIdx].items.push(srcItem);
+             }
+        }
+        
+        // Reset selection và Render lại
+        activeChapIdx = -1; activeLesIdx = -1; activeItemIdx = -1;
+        document.getElementById('editorForm').classList.add('hidden');
+        document.getElementById('editorWelcome').classList.remove('hidden');
+        renderCurriculumTree();
+    };
+}
     </script>
+    <div id="renameModal" class="hidden fixed inset-0 z-[220] flex items-center justify-center bg-gray-900/60 backdrop-blur-sm">
+    <div class="bg-white rounded-2xl shadow-2xl p-6 w-96 animate-fade-in-up">
+        <h3 class="font-bold text-gray-800 text-lg mb-4">Đổi tên nội dung</h3>
+        <input type="text" id="renameInput" class="w-full px-4 py-2 border border-gray-300 rounded-xl focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none font-bold text-gray-700" placeholder="Nhập tên mới..." onkeyup="if(event.key==='Enter') confirmRename()">
+        <div class="flex justify-end gap-2 mt-6">
+            <button onclick="document.getElementById('renameModal').classList.add('hidden')" class="px-4 py-2 text-gray-500 font-bold hover:bg-gray-100 rounded-lg">Hủy</button>
+            <button onclick="confirmRename()" class="px-6 py-2 bg-brand text-white font-bold rounded-lg shadow-lg hover:shadow-xl">Lưu</button>
+        </div>
+    </div>
+</div>
+
+<div id="panelVideo" class="content-panel hidden space-y-6 max-w-4xl mx-auto">
+    <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-4">
+        <div>
+            <label class="block text-sm font-bold text-gray-700 mb-2">Đường dẫn Video (YouTube)</label>
+            <input type="text" id="videoUrlInput" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand outline-none" placeholder="https://www.youtube.com/watch?v=...">
+        </div>
+        <div>
+            <label class="block text-sm font-bold text-gray-700 mb-2">Thời gian xem tối thiểu (Phút)</label>
+            <div class="relative">
+                <input type="number" id="videoMinTime" value="10" class="w-full pl-4 pr-12 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand outline-none font-mono font-bold" placeholder="10">
+                <span class="absolute right-4 top-2 text-gray-400 text-sm font-bold">Phút</span>
+            </div>
+            <p class="text-xs text-gray-400 mt-1">Học sinh cần xem đủ thời gian này mới được tính là hoàn thành.</p>
+        </div>
+    </div>
+    <div id="videoPreviewArea" class="aspect-video bg-black rounded-xl overflow-hidden shadow-lg hidden relative"><iframe id="videoFrame" class="w-full h-full" src="" frameborder="0" allowfullscreen></iframe></div>
+</div>
 </body>
 </html>
