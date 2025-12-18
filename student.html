@@ -425,15 +425,34 @@
                 snapResults.forEach(d => submittedExamIds.add(d.data().examId));
 
                 let pendingExams = [];
-                for (const cid of myClassIds) {
-                    const qEx = query(collection(db, "exams"), where("allowedClassId", "==", cid), where("status", "==", "published"), limit(10));
-                    const snapEx = await getDocs(qEx);
-                    snapEx.forEach(d => {
-                        if (!submittedExamIds.has(d.id)) {
-                            pendingExams.push({id:d.id, ...d.data()});
-                        }
-                    });
-                }
+                
+                // [CẬP NHẬT] Lấy tất cả đề thi đang mở (Lọc JS để hỗ trợ multi-class)
+                const qEx = query(collection(db, "exams"), where("accessType", "==", "class"), where("status", "==", "published"));
+                const snapEx = await getDocs(qEx);
+
+                snapEx.forEach(d => {
+                    // Nếu đã làm rồi thì bỏ qua
+                    if (submittedExamIds.has(d.id)) return;
+
+                    const ex = d.data();
+                    let isAssignedToMe = false;
+
+                    // KIỂM TRA QUYỀN TRUY CẬP (Cũ + Mới)
+                    if (ex.allowedClassIds && Array.isArray(ex.allowedClassIds)) {
+                        // Logic mới: Đề thi gán cho nhiều lớp -> Check xem có lớp nào trùng với lớp của HS không
+                        isAssignedToMe = ex.allowedClassIds.some(allowedId => myClassIds.includes(allowedId));
+                    } else if (ex.allowedClassId) {
+                        // Logic cũ: Đề thi gán 1 lớp
+                        isAssignedToMe = myClassIds.includes(ex.allowedClassId);
+                    }
+
+                    if (isAssignedToMe) {
+                        pendingExams.push({id: d.id, ...ex});
+                    }
+                });
+                
+                // Giới hạn hiển thị 10 bài mới nhất
+                pendingExams = pendingExams.slice(0, 10);
                 
                 titleEl.innerHTML = `Em có <span class="text-red-500 font-black text-2xl mx-1">${pendingExams.length}</span> bài tập cần hoàn thành`;
 
@@ -480,9 +499,27 @@
                 studentResultsMap = {};
                 snapResults.forEach(d => { const r = d.data(); if (!studentResultsMap[r.examId] || r.score > studentResultsMap[r.examId].score) studentResultsMap[r.examId] = r; });
                 
-                const qExams = query(collection(db, "exams"), where("accessType", "==", "class"), where("allowedClassId", "==", classId), where("status", "==", "published"));
+                // [CẬP NHẬT] Tìm đề thi cho lớp này (Hỗ trợ cả AllowedClassId cũ và AllowedClassIds mới)
+                // Vì Firestore không hỗ trợ OR query phức tạp, ta sẽ lấy hết đề published rồi lọc
+                const qExams = query(collection(db, "exams"), where("accessType", "==", "class"), where("status", "==", "published"));
                 const snapExams = await getDocs(qExams);
-                currentClassExams = []; snapExams.forEach(d => currentClassExams.push({ id: d.id, ...d.data() }));
+                
+                currentClassExams = []; 
+                snapExams.forEach(d => {
+                    const ex = d.data();
+                    let isForThisClass = false;
+
+                    // Check logic đa lớp
+                    if (ex.allowedClassIds && Array.isArray(ex.allowedClassIds)) {
+                        isForThisClass = ex.allowedClassIds.includes(classId);
+                    } else if (ex.allowedClassId) {
+                        isForThisClass = ex.allowedClassId === classId;
+                    }
+
+                    if (isForThisClass) {
+                        currentClassExams.push({ id: d.id, ...ex });
+                    }
+                });
                 renderClassExams('newest');
             } catch (e) { console.error(e); container.innerHTML = '<p class="col-span-full text-red-500 text-center">Lỗi tải dữ liệu.</p>'; }
         };
