@@ -330,11 +330,7 @@
         let currentVoucherCode = null;
         let dynamicBankConfig = null;
 
-        const HARDCODED_VOUCHERS = {
-            'CHAO2025': { type: 'percent', value: 10, scope: 'global', expiry: '2025-12-31' },
-            'HOCGIOI': { type: 'fixed', value: 50000, scope: 'global', expiry: '2025-12-31' },
-            'MIENPHI': { type: 'percent', value: 100, scope: 'global', expiry: '2025-12-31' }
-        };
+        
 
         // --- HỆ THỐNG TOAST ---
         window.showNotification = (msg, type = 'success') => {
@@ -797,20 +793,28 @@
             try {
                 const q = query(collection(db, "vouchers"), where("code", "==", code));
                 const snap = await getDocs(q);
+                
                 if (!snap.empty) {
                     const vData = snap.docs[0].data();
                     const now = new Date();
+                    
                     if (vData.expiryDate && new Date(vData.expiryDate) < now) throw new Error("Mã giảm giá đã hết hạn sử dụng");
                     if (vData.limit && vData.used >= vData.limit) throw new Error("Mã giảm giá đã hết lượt sử dụng");
                     if (vData.scope === 'specific' && vData.courseIds && !vData.courseIds.includes(courseId)) throw new Error("Mã này không áp dụng cho khóa học này");
-                    return calculateDiscount(vData, originalPrice);
+                    
+                    // Logic tính toán
+                    let discount = 0;
+                    if (vData.type === 'percent') discount = (originalPrice * vData.value) / 100;
+                    else discount = vData.value;
+                    
+                    if (discount > originalPrice) discount = originalPrice;
+                    
+                    return { discount: discount, finalPrice: originalPrice - discount };
                 }
             } catch (e) {
-                if (e.message.includes("permission")) console.warn("Fallback to Mock Voucher due to permission error");
-                else if (!e.message.includes("không tồn tại")) throw e;
+                if (!e.message.includes("không tồn tại")) throw e;
             }
-            if (HARDCODED_VOUCHERS[code]) return calculateDiscount(HARDCODED_VOUCHERS[code], originalPrice);
-            throw new Error("Mã giảm giá không tồn tại hoặc sai cú pháp");
+            throw new Error("Mã giảm giá không tồn tại");
         }
 
         function calculateDiscount(vData, price) {
@@ -900,16 +904,39 @@
         };
 
         window.applyVoucher = async () => {
-            const code = document.getElementById('voucherInput').value.trim().toUpperCase();
+            const codeInput = document.getElementById('voucherInput');
+            const code = codeInput.value.trim().toUpperCase();
             const msgEl = document.getElementById('voucherMessage');
-            if(!code) return;
             
+            // Lấy giá gốc
             let original = 0;
             if (currentPayingCourse) {
                 let raw = currentPayingCourse.price;
                 if (typeof raw === 'string') raw = parseInt(raw.replace(/\D/g, '')) || 0;
                 original = raw;
             }
+
+            // [LOGIC MỚI] Nếu input trống -> Reset về giá gốc (Hủy voucher)
+            if (!code) {
+                currentFinalPrice = original;
+                currentVoucherCode = null;
+                document.getElementById('payDiscountAmount').innerText = '-0đ';
+                document.getElementById('payFinalPrice').innerText = currentFinalPrice.toLocaleString() + 'đ';
+                
+                msgEl.textContent = "Đã bỏ mã giảm giá.";
+                msgEl.className = "mb-2 text-xs font-bold text-gray-500 block";
+                
+                // Reset nút thanh toán về mặc định
+                resetPaymentButton(); 
+                return;
+            }
+
+            // Nếu có nhập mã -> Gọi API kiểm tra
+            // Reset nút thành đang tải
+            const btnApply = event.currentTarget || document.querySelector('#voucherInput + button');
+            const oldText = btnApply.innerHTML;
+            btnApply.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+            btnApply.disabled = true;
 
             try {
                 const res = await validateVoucher(code, currentPayingCourse.id, original);
@@ -921,33 +948,47 @@
                 
                 msgEl.textContent = `Áp dụng mã ${code} thành công!`;
                 msgEl.className = "mb-2 text-xs font-bold text-green-600 block";
-                document.getElementById('voucherInput').disabled = true;
+                
+                // Khóa ô input lại để người dùng biết đã áp dụng
+                codeInput.disabled = true; 
 
-                // [LOGIC MỚI] Kiểm tra nếu giá = 0đ
-                const btnAction = document.querySelector('#stepReview button[onclick^="window."]');
+                // Kiểm tra nếu giá = 0đ (Xử lý nút Nhận ngay)
+                const btnAction = document.getElementById('btnCtaAction');
                 if(btnAction) {
-                    btnAction.id = "btnCtaAction"; // Gán ID để dễ thao tác
                     if(currentFinalPrice === 0) {
-                        // Đổi thành nút kích hoạt ngay
                         btnAction.innerHTML = '<i class="fa-solid fa-gift"></i> NHẬN KHÓA HỌC NGAY';
                         btnAction.classList.remove('from-teal-600', 'to-teal-500');
                         btnAction.classList.add('from-green-600', 'to-green-500');
-                        // Gọi hàm kích hoạt mới (False vì đây là đơn mới)
                         btnAction.onclick = () => window.activateFreeCourse(null, false);
                     } else {
-                        // Reset về nút thanh toán thường
-                        btnAction.innerHTML = 'Tiếp tục thanh toán <i class="fa-solid fa-arrow-right"></i>';
-                        btnAction.classList.add('from-teal-600', 'to-teal-500');
-                        btnAction.classList.remove('from-green-600', 'to-green-500');
-                        btnAction.onclick = window.generatePaymentQR;
+                        resetPaymentButton();
                     }
                 }
 
             } catch (e) {
                 msgEl.textContent = e.message;
                 msgEl.className = "mb-2 text-xs font-bold text-red-500 block";
+                
+                // Nếu lỗi thì reset giá về gốc luôn cho an toàn
+                currentFinalPrice = original;
+                document.getElementById('payFinalPrice').innerText = original.toLocaleString() + 'đ';
+                document.getElementById('payDiscountAmount').innerText = '-0đ';
+            } finally {
+                btnApply.innerHTML = oldText;
+                btnApply.disabled = false;
             }
         };
+
+        // Hàm phụ trợ để reset nút thanh toán về trạng thái "Tiếp tục"
+        function resetPaymentButton() {
+            const btnAction = document.getElementById('btnCtaAction');
+            if (btnAction) {
+                btnAction.innerHTML = 'Tiếp tục thanh toán <i class="fa-solid fa-arrow-right"></i>';
+                btnAction.classList.add('from-teal-600', 'to-teal-500');
+                btnAction.classList.remove('from-green-600', 'to-green-500');
+                btnAction.onclick = window.generatePaymentQR;
+            }
+        }
 
         window.generatePaymentQR = () => {
             document.getElementById('stepReview').classList.add('hidden');
@@ -1049,6 +1090,10 @@
             document.getElementById('stepQR').classList.add('hidden');
             document.getElementById('stepQR').classList.remove('flex');
             document.getElementById('stepReview').classList.remove('hidden');
+            
+            // [FIX] Mở khóa ô nhập voucher để sửa
+            document.getElementById('voucherInput').disabled = false;
+            document.getElementById('voucherInput').focus();
         };
 
         // UI Helpers
