@@ -1464,26 +1464,37 @@ window.importCurriculum = (input) => {
             document.getElementById('voucherModal').classList.remove('hidden');
             window.switchVoucherTab('list');
             
-            // Tải danh sách khóa học để dùng cho dropdown chọn khóa
+            // Tải danh sách khóa học
             const qC = query(collection(db, "public_courses"));
             const snapC = await getDocs(qC);
             allCoursesForVoucher = [];
-            const container = document.getElementById('courseSelector');
-            container.innerHTML = '';
+            
+            // Container cho Tạo Lẻ
+            const containerSingle = document.getElementById('courseSelector');
+            // Container cho Tạo Hàng Loạt (Mới)
+            const containerBulk = document.getElementById('bCourseSelector');
+            
+            containerSingle.innerHTML = '';
+            containerBulk.innerHTML = '';
             
             snapC.forEach(d => {
                 const c = d.data();
                 allCoursesForVoucher.push({id: d.id, title: c.title});
-                container.innerHTML += `
+                
+                const html = `
                     <label class="flex items-center gap-2 p-2 hover:bg-white rounded cursor-pointer">
                         <input type="checkbox" value="${d.id}" class="course-check accent-orange-600 w-4 h-4">
                         <span class="text-sm text-gray-700 truncate">${c.title}</span>
                     </label>
                 `;
+                
+                // Render vào cả 2 nơi (Lưu ý class 'course-check' dùng chung để dễ style, nhưng khi lấy value sẽ query theo ID cha)
+                containerSingle.innerHTML += html;
+                containerBulk.innerHTML += html;
             });
 
             loadVouchers();
-        };
+        };};
 
         window.switchVoucherTab = (tab) => {
             document.querySelectorAll('.v-tab').forEach(el => {
@@ -1628,7 +1639,7 @@ window.importCurriculum = (input) => {
         };
 
         // 2. TẠO HÀNG LOẠT (BULK)
-        window.createBulkVouchers = async () => {
+       window.createBulkVouchers = async () => {
             const prefix = document.getElementById('bPrefix').value.trim().toUpperCase();
             const qty = parseInt(document.getElementById('bQuantity').value);
             
@@ -1636,11 +1647,20 @@ window.importCurriculum = (input) => {
             const type = document.getElementById('bType').value;
             const value = parseInt(document.getElementById('bValue').value);
             const limit = parseInt(document.getElementById('bMaxUses').value) || 1;
+            
+            // [MỚI] Lấy Scope từ Tab Bulk
+            const scope = document.querySelector('input[name="bScope"]:checked').value;
+            let courseIds = [];
+            if(scope === 'specific') {
+                // Chỉ tìm checkbox trong container Bulk (#bCourseSelector)
+                document.querySelectorAll('#bCourseSelector .course-check:checked').forEach(cb => courseIds.push(cb.value));
+                if(courseIds.length === 0) return window.showToast("Vui lòng chọn ít nhất 1 khóa học!", "error");
+            }
 
             if(!qty || qty < 1 || !value) return window.showToast("Vui lòng nhập đủ thông tin!", "error");
-            if(qty > 50) return window.showToast("Chỉ tạo tối đa 50 mã một lần để tránh lỗi!", "error");
+            if(qty > 50) return window.showToast("Chỉ tạo tối đa 50 mã một lần!", "error");
 
-            const btn = event.currentTarget;
+            const btn = document.querySelector('button[onclick="createBulkVouchers()"]');
             btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang xử lý...'; btn.disabled = true;
 
             try {
@@ -1650,14 +1670,14 @@ window.importCurriculum = (input) => {
                 for(let i=0; i<qty; i++) {
                     const randomStr = Math.random().toString(36).substring(2, 7).toUpperCase();
                     const code = (prefix + randomStr);
-                    const newDocRef = doc(collection(db, "vouchers")); // Auto ID cho doc
+                    const newDocRef = doc(collection(db, "vouchers")); 
                     
                     batch.set(newDocRef, {
                         code: code,
                         type: type,
                         value: value,
-                        scope: 'global', // Bulk thường áp dụng global cho tiện
-                        courseIds: null,
+                        scope: scope, // Lưu scope đã chọn
+                        courseIds: scope === 'specific' ? courseIds : null, // Lưu list khóa học
                         limit: limit,
                         expiryDate: null,
                         used: 0,
@@ -1688,6 +1708,46 @@ window.importCurriculum = (input) => {
                 window.showToast("Đã xóa voucher");
                 loadVouchers();
             } catch(e) { window.showToast(e.message, 'error'); }
+        };
+        // --- HÀM TOGGLE SCOPE CHO BULK (MỚI) ---
+        window.toggleBulkScope = () => {
+            const scope = document.querySelector('input[name="bScope"]:checked').value;
+            document.getElementById('bCourseSelector').classList.toggle('hidden', scope !== 'specific');
+        };
+
+        // --- HÀM XUẤT EXCEL (MỚI) ---
+        window.exportVouchersToExcel = () => {
+            if (allVouchers.length === 0) return window.showToast("Danh sách trống!", "error");
+
+            const rows = allVouchers.map(v => {
+                let status = "Đang hoạt động";
+                if (v.expiryDate && new Date(v.expiryDate) < new Date()) status = "Hết hạn";
+                else if (v.limit && v.used >= v.limit) status = "Hết lượt";
+
+                let phamVi = "Toàn bộ";
+                if (v.scope === 'specific') {
+                    // Tìm tên khóa học từ ID (nếu cần chi tiết hơn)
+                    phamVi = `${v.courseIds ? v.courseIds.length : 0} khóa học`;
+                }
+
+                return {
+                    "Mã Voucher": v.code,
+                    "Loại": v.type === 'percent' ? 'Phần trăm' : 'Số tiền',
+                    "Giá trị": v.value,
+                    "Đơn vị": v.type === 'percent' ? '%' : 'VNĐ',
+                    "Phạm vi": phamVi,
+                    "Đã dùng": v.used,
+                    "Giới hạn": v.limit || "Vô hạn",
+                    "Trạng thái": status,
+                    "Ngày hết hạn": v.expiryDate ? new Date(v.expiryDate).toLocaleDateString('vi-VN') : "Vĩnh viễn",
+                    "Ngày tạo": new Date(v.createdAt).toLocaleDateString('vi-VN')
+                };
+            });
+
+            const ws = XLSX.utils.json_to_sheet(rows);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "Danh_Sach_Voucher");
+            XLSX.writeFile(wb, "Danh_Sach_Voucher.xlsx");
         };
     </script>
     
@@ -1734,9 +1794,14 @@ window.importCurriculum = (input) => {
                 <div id="vContent-list" class="v-content flex-1 flex flex-col p-6 h-full">
                     <div class="flex justify-between items-center mb-4">
                         <h2 class="text-2xl font-black text-gray-800">Danh sách Voucher</h2>
-                        <div class="relative w-64">
-                            <i class="fa-solid fa-search absolute left-3 top-3 text-gray-400 text-xs"></i>
-                            <input type="text" id="voucherSearch" onkeyup="renderVoucherList()" placeholder="Tìm theo mã code..." class="w-full pl-8 pr-4 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:border-orange-500">
+                        <div class="flex gap-2">
+                            <button onclick="window.exportVouchersToExcel()" class="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-bold hover:bg-green-700 shadow-sm flex items-center gap-2">
+                                <i class="fa-solid fa-file-excel"></i> Xuất Excel
+                            </button>
+                            <div class="relative w-64">
+                                <i class="fa-solid fa-search absolute left-3 top-3 text-gray-400 text-xs"></i>
+                                <input type="text" id="voucherSearch" onkeyup="renderVoucherList()" placeholder="Tìm theo mã code..." class="w-full pl-8 pr-4 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:border-orange-500">
+                            </div>
                         </div>
                     </div>
                     <div class="flex-1 overflow-y-auto border border-gray-100 rounded-xl">
@@ -1830,6 +1895,22 @@ window.importCurriculum = (input) => {
                                 <label class="block text-xs font-bold text-gray-500 uppercase mb-2">Số lượng cần tạo</label>
                                 <input type="number" id="bQuantity" value="10" class="w-full px-4 py-3 border border-gray-200 rounded-xl font-bold outline-none" max="100">
                             </div>
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-bold text-gray-500 uppercase mb-2">Phạm vi áp dụng</label>
+                            <div class="flex gap-4 mb-3">
+                                <label class="flex items-center gap-2 cursor-pointer p-3 border border-gray-200 rounded-xl hover:bg-gray-50 flex-1">
+                                    <input type="radio" name="bScope" value="global" checked onchange="toggleBulkScope()" class="accent-teal-600 w-4 h-4">
+                                    <span class="font-bold text-sm">Toàn bộ khóa học</span>
+                                </label>
+                                <label class="flex items-center gap-2 cursor-pointer p-3 border border-gray-200 rounded-xl hover:bg-gray-50 flex-1">
+                                    <input type="radio" name="bScope" value="specific" onchange="toggleBulkScope()" class="accent-teal-600 w-4 h-4">
+                                    <span class="font-bold text-sm">Chọn khóa học cụ thể</span>
+                                </label>
+                            </div>
+                            <div id="bCourseSelector" class="hidden p-4 bg-gray-50 rounded-xl border border-gray-200 max-h-40 overflow-y-auto space-y-2">
+                                </div>
                         </div>
 
                         <div class="p-6 border border-gray-200 rounded-2xl bg-gray-50/50 space-y-4">
