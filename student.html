@@ -188,6 +188,15 @@
             </div>
 
             <div id="tab-my-courses" class="tab-content hidden animate-fade-in">
+                 <div id="pendingOrdersSection" class="hidden mb-10 bg-orange-50 border border-orange-100 rounded-2xl p-6 relative overflow-hidden">
+                    <div class="absolute top-0 right-0 w-32 h-32 bg-orange-200 rounded-full blur-3xl opacity-20 -mr-10 -mt-10"></div>
+                    <h3 class="font-black text-xl text-orange-700 mb-4 flex items-center gap-2 relative z-10">
+                        <i class="fa-solid fa-clock-rotate-left"></i> Đơn hàng chưa hoàn tất
+                    </h3>
+                    <div id="pendingOrdersList" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 relative z-10">
+                        </div>
+                 </div>
+
                  <div class="mb-8"><h2 class="text-3xl font-black text-gray-800 mb-2">Khóa học đã sở hữu</h2><p class="text-gray-500">Các khóa học bạn đã mua</p></div>
                 <div id="myPurchasedList" class="grid grid-cols-1 md:grid-cols-4 gap-6"></div>
             </div>
@@ -632,53 +641,86 @@
 
         // --- TÌM HÀM loadMyPurchased CŨ VÀ THAY BẰNG ĐOẠN NÀY ---
         async function loadMyPurchased(user) { 
-            const c = document.getElementById('myPurchasedList'); 
+            const listPaid = document.getElementById('myPurchasedList'); 
+            const sectionPending = document.getElementById('pendingOrdersSection');
+            const listPending = document.getElementById('pendingOrdersList');
+            
             try {
-                // Lấy cả đơn đã duyệt (approved) và đơn đã thanh toán tự động (paid)
-                const q = query(collection(db, "orders"), where("userId", "==", user.uid), where("status", "in", ["approved", "paid"])); 
+                // 1. Lấy TẤT CẢ đơn hàng của user này (kể cả pending, paid, approved)
+                const q = query(collection(db, "orders"), where("userId", "==", user.uid)); 
                 const s = await getDocs(q); 
                 
-                // Reset danh sách để cập nhật mới
-                purchasedCourseIds.clear();
+                purchasedCourseIds.clear(); // Reset danh sách ID đã mua
 
-                if (s.empty) {
-                    c.innerHTML = '<div class="col-span-full text-center py-12 bg-white rounded-2xl border border-dashed border-gray-300"><i class="fa-solid fa-basket-shopping text-4xl text-gray-200 mb-3"></i><p class="text-gray-500 font-bold">Bạn chưa đăng ký khóa học nào.</p></div>';
-                    return;
-                }
+                let htmlPaid = ''; 
+                let htmlPending = '';
+                let hasPending = false;
 
-                let h = ''; 
                 s.forEach(d => {
                     const o = d.data();
-                    purchasedCourseIds.add(o.courseId); // Lưu ID khóa học đã sở hữu
+                    const orderId = d.id;
 
-                    const percent = Math.floor(Math.random() * 90) + 5; 
-                    h += `
-                    <div class="bg-white p-5 rounded-2xl border border-teal-50 shadow-sm hover:border-teal-300 hover:shadow-md transition-all cursor-pointer group flex flex-col h-full relative overflow-hidden" onclick="window.location.href='course-player.html?id=${o.courseId}'">
-                        <div class="absolute top-0 right-0 bg-teal-500 w-16 h-16 rounded-bl-full opacity-10"></div>
-                        <div class="flex gap-3 mb-4 relative z-10">
-                            <div class="w-12 h-12 bg-teal-100 text-teal-600 rounded-xl flex items-center justify-center font-bold shrink-0 shadow-inner">
-                                <i class="fa-solid fa-graduation-cap text-xl"></i>
+                    // A. NẾU LÀ ĐƠN ĐÃ THANH TOÁN (Paid/Approved)
+                    if (o.status === 'paid' || o.status === 'approved') {
+                        purchasedCourseIds.add(o.courseId);
+                        const percent = Math.floor(Math.random() * 90) + 5; 
+                        htmlPaid += `
+                        <div class="bg-white p-5 rounded-2xl border border-teal-50 shadow-sm hover:border-teal-300 hover:shadow-md transition-all cursor-pointer group flex flex-col h-full relative overflow-hidden" onclick="window.location.href='course-player.html?id=${o.courseId}'">
+                            <div class="absolute top-0 right-0 bg-teal-500 w-16 h-16 rounded-bl-full opacity-10"></div>
+                            <div class="flex gap-3 mb-4 relative z-10">
+                                <div class="w-12 h-12 bg-teal-100 text-teal-600 rounded-xl flex items-center justify-center font-bold shrink-0 shadow-inner"><i class="fa-solid fa-graduation-cap text-xl"></i></div>
+                                <div class="flex-1 min-w-0">
+                                    <h4 class="font-bold text-gray-800 text-sm line-clamp-2 mb-1 group-hover:text-brand transition-colors">${o.courseTitle}</h4>
+                                    <p class="text-[10px] text-gray-400 flex items-center gap-1"><i class="fa-solid fa-calendar-check"></i> Đã kích hoạt</p>
+                                </div>
                             </div>
-                            <div class="flex-1 min-w-0">
-                                <h4 class="font-bold text-gray-800 text-sm line-clamp-2 mb-1 group-hover:text-brand transition-colors">${o.courseTitle}</h4>
-                                <p class="text-[10px] text-gray-400 flex items-center gap-1"><i class="fa-solid fa-calendar-check"></i> Đã kích hoạt</p>
+                            <div class="mt-auto pt-3 border-t border-dashed border-gray-100 relative z-10">
+                                <div class="flex justify-between items-center mb-1.5"><span class="text-[10px] font-extrabold text-gray-400 uppercase tracking-wider">Tiến độ</span><span class="text-[10px] font-bold text-brand bg-teal-50 px-2 py-0.5 rounded-full">${percent}%</span></div>
+                                <div class="w-full bg-gray-100 rounded-full h-2 overflow-hidden shadow-inner"><div class="bg-gradient-to-r from-teal-400 to-brand h-full rounded-full transition-all duration-1000" style="width: ${percent}%"></div></div>
+                            </div>
+                            <button class="w-full mt-4 py-2.5 bg-white border-2 border-teal-50 text-teal-700 text-xs font-bold rounded-xl group-hover:bg-brand group-hover:text-white group-hover:border-brand transition-all flex items-center justify-center gap-2 shadow-sm"><i class="fa-solid fa-play"></i> Tiếp tục học</button>
+                        </div>`;
+                    } 
+                    
+                    // B. NẾU LÀ ĐƠN TREO (Pending)
+                    else if (o.status === 'pending') {
+                        hasPending = true;
+                        // Format giá tiền
+                        const priceDisplay = o.amount ? o.amount.toLocaleString() + 'đ' : '0đ';
+                        // Mã hóa data để truyền vào nút bấm
+                        const orderDataSafe = encodeURIComponent(JSON.stringify({id: orderId, ...o}));
+
+                        htmlPending += `
+                        <div class="bg-white p-4 rounded-xl shadow-sm border border-orange-200 flex flex-col">
+                            <div class="flex justify-between items-start mb-2">
+                                <h4 class="font-bold text-gray-800 text-sm line-clamp-2">${o.courseTitle}</h4>
+                                <span class="bg-orange-100 text-orange-600 text-[10px] font-bold px-2 py-1 rounded">Chờ thanh toán</span>
+                            </div>
+                            <div class="text-xs text-gray-500 mb-4 space-y-1">
+                                <p>Mã đơn: <span class="font-mono text-gray-700">${orderId.substring(0,6)}</span></p>
+                                <p>Số tiền: <span class="font-bold text-orange-600 text-base">${priceDisplay}</span></p>
+                            </div>
+                            <div class="mt-auto grid grid-cols-2 gap-2">
+                                <button onclick="window.cancelOrder('${orderId}')" class="py-2 bg-gray-100 text-gray-500 text-xs font-bold rounded-lg hover:bg-red-50 hover:text-red-500 transition-colors">Hủy đơn</button>
+                                <button onclick="window.continuePayment('${orderDataSafe}')" class="py-2 bg-orange-500 text-white text-xs font-bold rounded-lg hover:bg-orange-600 transition-colors shadow-lg shadow-orange-200">Thanh toán ngay</button>
                             </div>
                         </div>
-                        <div class="mt-auto pt-3 border-t border-dashed border-gray-100 relative z-10">
-                            <div class="flex justify-between items-center mb-1.5">
-                                <span class="text-[10px] font-extrabold text-gray-400 uppercase tracking-wider">Tiến độ</span>
-                                <span class="text-[10px] font-bold text-brand bg-teal-50 px-2 py-0.5 rounded-full">${percent}%</span>
-                            </div>
-                            <div class="w-full bg-gray-100 rounded-full h-2 overflow-hidden shadow-inner">
-                                <div class="bg-gradient-to-r from-teal-400 to-brand h-full rounded-full transition-all duration-1000" style="width: ${percent}%"></div>
-                            </div>
-                        </div>
-                        <button class="w-full mt-4 py-2.5 bg-white border-2 border-teal-50 text-teal-700 text-xs font-bold rounded-xl group-hover:bg-brand group-hover:text-white group-hover:border-brand transition-all flex items-center justify-center gap-2 shadow-sm">
-                            <i class="fa-solid fa-play"></i> Tiếp tục học
-                        </button>
-                    </div>`;
+                        `;
+                    }
                 });
-                c.innerHTML = h;
+                
+                // Render danh sách đã mua
+                if (!htmlPaid) listPaid.innerHTML = '<div class="col-span-full text-center py-12 bg-white rounded-2xl border border-dashed border-gray-300"><i class="fa-solid fa-basket-shopping text-4xl text-gray-200 mb-3"></i><p class="text-gray-500 font-bold">Bạn chưa đăng ký khóa học nào.</p></div>';
+                else listPaid.innerHTML = htmlPaid;
+
+                // Render danh sách pending
+                if (hasPending) {
+                    sectionPending.classList.remove('hidden');
+                    listPending.innerHTML = htmlPending;
+                } else {
+                    sectionPending.classList.add('hidden');
+                }
+
             } catch(e) { console.error(e); }
         }
 
@@ -771,6 +813,19 @@
 
         window.openPaymentModal = async (courseId) => {
             if (!auth.currentUser) return alert("Vui lòng đăng nhập!");
+
+            // --- ĐOẠN MÃ MỚI THÊM VÀO ĐÂY ---
+            // Reset lại nút "Đã chuyển khoản xong" về chế độ tạo đơn mới
+            const btnConfirm = document.querySelector('#stepQR button'); // Lấy nút hiện tại (có thể là nút cũ hoặc nút đã bị replace)
+            if(btnConfirm) {
+                 const originalBtn = btnConfirm.cloneNode(true);
+                 btnConfirm.parentNode.replaceChild(originalBtn, btnConfirm);
+                 originalBtn.onclick = window.confirmPayment; // Gán lại hàm tạo đơn mới
+                 originalBtn.innerHTML = '<i class="fa-solid fa-check-circle"></i> ĐÃ CHUYỂN KHOẢN XONG';
+            }
+            // Hiện lại nút quay lại (nếu bị ẩn)
+            const backBtn = document.querySelector('#stepQR button[onclick="window.resetQrState()"]');
+            if(backBtn) backBtn.style.display = 'block';
             if (!dynamicBankConfig) {
                 try {
                     const s = await getDoc(doc(db, "site_settings", "payment_config"));
@@ -1081,6 +1136,106 @@
                 }
             }
         }
+        // --- 1. HÀM HỦY ĐƠN HÀNG ---
+        window.cancelOrder = async (orderId) => {
+            if(!confirm("Bạn có chắc muốn hủy đơn hàng này không?")) return;
+            try {
+                await deleteDoc(doc(db, "orders", orderId));
+                window.showNotification("Đã hủy đơn hàng thành công!", "success");
+                // Tải lại danh sách để cập nhật giao diện
+                loadMyPurchased(auth.currentUser);
+            } catch(e) {
+                window.showNotification("Lỗi hủy đơn: " + e.message, "error");
+            }
+        };
+
+        // --- 2. HÀM TIẾP TỤC THANH TOÁN (QUAN TRỌNG) ---
+        window.continuePayment = async (orderDataEncoded) => {
+            try {
+                const order = JSON.parse(decodeURIComponent(orderDataEncoded));
+                
+                // Lấy config ngân hàng nếu chưa có
+                if (!dynamicBankConfig) {
+                    const s = await getDoc(doc(db, "site_settings", "payment_config"));
+                    dynamicBankConfig = s.exists() ? s.data() : { BANK_ID: "970422", BANK_NAME: "MB Bank", ACCOUNT_NO: "0000", ACCOUNT_NAME: "ADMIN" };
+                }
+
+                // 1. Tái tạo mã QR
+                const bankBin = dynamicBankConfig.BANK_ID;
+                const accNo = dynamicBankConfig.ACCOUNT_NO;
+                const template = dynamicBankConfig.TEMPLATE || 'compact2';
+                const amount = order.amount;
+                const content = order.content; // Dùng lại nội dung cũ đã lưu trong đơn hàng
+                const addInfo = encodeURIComponent(content);
+                const accName = encodeURIComponent(dynamicBankConfig.ACCOUNT_NAME);
+                
+                const qrUrl = `https://img.vietqr.io/image/${bankBin}-${accNo}-${template}.png?amount=${amount}&addInfo=${addInfo}&accountName=${accName}`;
+
+                // 2. Điền dữ liệu vào Modal QR
+                document.getElementById('bankNameDisplay').innerText = dynamicBankConfig.BANK_NAME || dynamicBankConfig.BANK_ID;
+                document.getElementById('accountNoDisplay').innerText = dynamicBankConfig.ACCOUNT_NO;
+                document.getElementById('transferContentDisplay').innerText = content;
+                const img = document.getElementById('vietQrImage');
+                document.getElementById('qrLoading').classList.remove('hidden');
+                img.onload = () => document.getElementById('qrLoading').classList.add('hidden');
+                img.src = qrUrl;
+
+                // 3. Hiển thị Modal QR (Bỏ qua bước Review)
+                document.getElementById('paymentModal').classList.remove('hidden');
+                document.getElementById('stepReview').classList.add('hidden');
+                document.getElementById('stepQR').classList.remove('hidden');
+                document.getElementById('stepQR').classList.add('flex');
+
+                // 4. [CỰC KỲ QUAN TRỌNG] Sửa nút "Đã chuyển khoản xong"
+                // Lúc tạo mới thì nút này gọi confirmPayment (tạo đơn mới)
+                // Lúc này ta phải đổi nó thành gọi watchExistingOrder (theo dõi đơn cũ)
+                const btnConfirm = document.querySelector('#stepQR button[onclick^="window."]');
+                // Clone nút để xóa sạch các event cũ, gán event mới
+                const newBtn = btnConfirm.cloneNode(true);
+                btnConfirm.parentNode.replaceChild(newBtn, btnConfirm);
+                
+                newBtn.onclick = () => window.watchExistingOrder(order.id);
+                newBtn.innerHTML = '<i class="fa-solid fa-check-circle"></i> ĐÃ CHUYỂN KHOẢN XONG';
+                newBtn.disabled = false;
+                
+                // Ẩn nút "Quay lại sửa voucher" vì đơn đã chốt giá
+                const backBtn = document.querySelector('#stepQR button[onclick="window.resetQrState()"]');
+                if(backBtn) backBtn.style.display = 'none';
+
+            } catch(e) {
+                console.error(e);
+                window.showNotification("Có lỗi khi mở lại đơn hàng", "error");
+            }
+        };
+
+        // --- 3. HÀM THEO DÕI ĐƠN HÀNG CŨ (Mới) ---
+        // Hàm này giống confirmPayment nhưng KHÔNG tạo đơn mới, chỉ bật chế độ lắng nghe
+        window.watchExistingOrder = (orderId) => {
+            // Ẩn modal thanh toán, hiện modal chờ
+            document.getElementById('paymentModal').classList.add('hidden');
+            document.getElementById('processingModal').classList.remove('hidden');
+            document.getElementById('processingState').classList.remove('hidden');
+            document.getElementById('successState').classList.add('hidden');
+
+            if (processingListener) processingListener();
+
+            processingListener = onSnapshot(doc(db, "orders", orderId), async (snapshot) => {
+                if (snapshot.exists()) {
+                    const data = snapshot.data();
+                    if (data.status === 'paid' || data.status === 'approved') {
+                        document.getElementById('processingState').classList.add('hidden');
+                        document.getElementById('successState').classList.remove('hidden');
+                        await loadMyPurchased(auth.currentUser); 
+                        await loadMarket(); 
+                        if (processingListener) { processingListener(); processingListener = null; }
+                    }
+                } else {
+                    // Nếu đơn hàng bị xóa trong lúc đang chờ
+                    window.showNotification("Đơn hàng này không còn tồn tại.", "error");
+                    document.getElementById('processingModal').classList.add('hidden');
+                }
+            });
+        };
     </script>
 </body>
 </html>
