@@ -251,13 +251,45 @@
     </div>
 
     <div id="paymentModalContainer"></div>
+    <div id="processingModal" class="fixed inset-0 z-[300] hidden bg-gray-900/90 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl shadow-2xl max-w-md w-full p-8 text-center relative overflow-hidden">
+            <div class="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-teal-400 via-blue-500 to-purple-600 animate-pulse"></div>
+            
+            <div id="processingState">
+                <div class="w-24 h-24 mx-auto mb-6 relative">
+                    <div class="absolute inset-0 border-4 border-gray-100 rounded-full"></div>
+                    <div class="absolute inset-0 border-4 border-teal-500 rounded-full border-t-transparent animate-spin"></div>
+                    <i class="fa-solid fa-satellite-dish absolute inset-0 flex items-center justify-center text-3xl text-teal-600 animate-pulse"></i>
+                </div>
+                <h3 class="text-2xl font-black text-gray-800 mb-2">Đang xác thực giao dịch...</h3>
+                <p class="text-gray-500 text-sm mb-6 px-4">Hệ thống đang kết nối với ngân hàng để kiểm tra khoản chuyển của bạn. Vui lòng không tắt trình duyệt.</p>
+                <div class="bg-blue-50 p-4 rounded-xl border border-blue-100 text-left mb-4">
+                    <div class="flex justify-between text-xs font-bold text-gray-500 mb-1"><span>Thời gian ước tính:</span> <span>~2 phút</span></div>
+                    <div class="w-full bg-blue-200 h-1.5 rounded-full overflow-hidden">
+                        <div class="bg-blue-600 h-full rounded-full w-1/3 animate-[pulse_2s_infinite]"></div>
+                    </div>
+                </div>
+                <button onclick="window.closeProcessingModal()" class="text-xs text-gray-400 font-bold hover:text-red-500">Hủy theo dõi (Vẫn xử lý ngầm)</button>
+            </div>
 
+            <div id="successState" class="hidden">
+                <div class="w-24 h-24 mx-auto mb-6 bg-green-100 text-green-600 rounded-full flex items-center justify-center text-5xl animate-[bounce_1s_infinite]">
+                    <i class="fa-solid fa-check"></i>
+                </div>
+                <h3 class="text-2xl font-black text-gray-800 mb-2">Thanh toán thành công!</h3>
+                <p class="text-gray-500 text-sm mb-6">Khóa học đã được kích hoạt. Bạn có thể vào học ngay bây giờ.</p>
+                <button onclick="window.finishPaymentProcess()" class="w-full py-3.5 bg-brand text-white font-bold rounded-xl shadow-lg hover:bg-teal-700 transition-all text-lg">
+                    <i class="fa-solid fa-arrow-right mr-2"></i> VÀO HỌC NGAY
+                </button>
+            </div>
+        </div>
+    </div>
     <div id="notificationContainer" class="fixed top-5 right-5 z-[120] flex flex-col gap-3 pointer-events-none"></div>
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getAuth, onAuthStateChanged, signOut, updateProfile, updatePassword } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
-        import { getFirestore, doc, getDoc, updateDoc, collection, getDocs, query, where, addDoc, limit, orderBy, deleteDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { getFirestore, doc, getDoc, updateDoc, collection, getDocs, query, where, addDoc, limit, orderBy, deleteDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
         // CẤU HÌNH FIREBASE
         const firebaseConfig = {
@@ -276,6 +308,8 @@
         const ADMIN_EMAILS = ["phamngockhanh.942001@gmail.com", "phamngockhanh.942002@gmail.com", "admin@gmail.com", "phamdinhquang0911@gmail.com"];
         let currentClassExams = [];
         let studentResultsMap = {};
+        let purchasedCourseIds = new Set(); // Lưu danh sách ID khóa học đã mua để kiểm tra nhanh
+        let processingListener = null; // Biến lưu trình lắng nghe sự kiện thanh toán
 
         // === BIẾN GLOBAL CHO VIEW MODE ===
         let currentViewMode = 'grid'; // Mặc định Lưới
@@ -390,7 +424,28 @@
                 let h = '';
                 s.forEach(d=>{
                     const x=d.data();
-                    h+=`<div class="bg-white rounded-2xl shadow-sm border border-teal-50 hover:shadow-lg transition-all group overflow-hidden"><div class="h-36 bg-gray-100 relative overflow-hidden"><img src="${x.thumbnail||'https://via.placeholder.com/300'}" class="h-full w-full object-cover group-hover:scale-110 transition-transform"><span class="absolute top-3 left-3 bg-accent text-white text-xs font-black px-2 py-1 rounded shadow">${x.tag||'Mới'}</span></div><div class="p-5"><h4 class="font-bold text-gray-800 mb-2 line-clamp-1">${x.title}</h4><div class="flex justify-between items-center pt-2 border-t border-dashed border-gray-100"><span class="text-accent font-black">${parseInt(x.price).toLocaleString()}đ</span><button onclick="window.openPaymentModal('${d.id}')" class="bg-brand text-white text-xs px-3 py-1.5 rounded-lg font-bold hover:bg-teal-700 transition-colors">Mua ngay</button></div></div></div>`
+                    
+                    // Logic mới: Kiểm tra xem đã mua chưa để hiện nút tương ứng
+                    let actionBtn = '';
+                    if (purchasedCourseIds.has(d.id)) {
+                        actionBtn = `<button onclick="window.location.href='course-player.html?id=${d.id}'" class="bg-green-600 text-white text-xs px-3 py-1.5 rounded-lg font-bold hover:bg-green-700 transition-colors shadow-green-200 shadow-lg"><i class="fa-solid fa-play mr-1"></i> Vào học</button>`;
+                    } else {
+                        actionBtn = `<button onclick="window.openPaymentModal('${d.id}')" class="bg-brand text-white text-xs px-3 py-1.5 rounded-lg font-bold hover:bg-teal-700 transition-colors">Mua ngay</button>`;
+                    }
+
+                    h+=`<div class="bg-white rounded-2xl shadow-sm border border-teal-50 hover:shadow-lg transition-all group overflow-hidden">
+                        <div class="h-36 bg-gray-100 relative overflow-hidden">
+                            <img src="${x.thumbnail||'https://via.placeholder.com/300'}" class="h-full w-full object-cover group-hover:scale-110 transition-transform">
+                            <span class="absolute top-3 left-3 bg-accent text-white text-xs font-black px-2 py-1 rounded shadow">${x.tag||'Mới'}</span>
+                        </div>
+                        <div class="p-5">
+                            <h4 class="font-bold text-gray-800 mb-2 line-clamp-1">${x.title}</h4>
+                            <div class="flex justify-between items-center pt-2 border-t border-dashed border-gray-100">
+                                <span class="text-accent font-black">${parseInt(x.price).toLocaleString()}đ</span>
+                                ${actionBtn}
+                            </div>
+                        </div>
+                    </div>`
                 });
                 c.innerHTML=h||'<p class="col-span-full text-center text-gray-400">Chưa có khóa học.</p>';
             } catch(e){ console.error(e); }
@@ -579,17 +634,24 @@
         async function loadMyPurchased(user) { 
             const c = document.getElementById('myPurchasedList'); 
             try {
-                const q = query(collection(db, "orders"), where("userId", "==", user.uid), where("status", "==", "approved")); 
+                // Lấy cả đơn đã duyệt (approved) và đơn đã thanh toán tự động (paid)
+                const q = query(collection(db, "orders"), where("userId", "==", user.uid), where("status", "in", ["approved", "paid"])); 
                 const s = await getDocs(q); 
-                let h = ''; 
                 
-                // --- ĐOẠN MÃ MỚI BẮT ĐẦU ---
-                for (const d of s.docs) {
-                    const o = d.data();
-                    // Lấy thêm ảnh thumbnail từ public_courses nếu cần (hoặc dùng ảnh mặc định)
-                    // Random tiến độ demo
-                    const percent = Math.floor(Math.random() * 90) + 5; 
+                // Reset danh sách để cập nhật mới
+                purchasedCourseIds.clear();
 
+                if (s.empty) {
+                    c.innerHTML = '<div class="col-span-full text-center py-12 bg-white rounded-2xl border border-dashed border-gray-300"><i class="fa-solid fa-basket-shopping text-4xl text-gray-200 mb-3"></i><p class="text-gray-500 font-bold">Bạn chưa đăng ký khóa học nào.</p></div>';
+                    return;
+                }
+
+                let h = ''; 
+                s.forEach(d => {
+                    const o = d.data();
+                    purchasedCourseIds.add(o.courseId); // Lưu ID khóa học đã sở hữu
+
+                    const percent = Math.floor(Math.random() * 90) + 5; 
                     h += `
                     <div class="bg-white p-5 rounded-2xl border border-teal-50 shadow-sm hover:border-teal-300 hover:shadow-md transition-all cursor-pointer group flex flex-col h-full relative overflow-hidden" onclick="window.location.href='course-player.html?id=${o.courseId}'">
                         <div class="absolute top-0 right-0 bg-teal-500 w-16 h-16 rounded-bl-full opacity-10"></div>
@@ -602,7 +664,6 @@
                                 <p class="text-[10px] text-gray-400 flex items-center gap-1"><i class="fa-solid fa-calendar-check"></i> Đã kích hoạt</p>
                             </div>
                         </div>
-                        
                         <div class="mt-auto pt-3 border-t border-dashed border-gray-100 relative z-10">
                             <div class="flex justify-between items-center mb-1.5">
                                 <span class="text-[10px] font-extrabold text-gray-400 uppercase tracking-wider">Tiến độ</span>
@@ -612,15 +673,12 @@
                                 <div class="bg-gradient-to-r from-teal-400 to-brand h-full rounded-full transition-all duration-1000" style="width: ${percent}%"></div>
                             </div>
                         </div>
-                        
                         <button class="w-full mt-4 py-2.5 bg-white border-2 border-teal-50 text-teal-700 text-xs font-bold rounded-xl group-hover:bg-brand group-hover:text-white group-hover:border-brand transition-all flex items-center justify-center gap-2 shadow-sm">
                             <i class="fa-solid fa-play"></i> Tiếp tục học
                         </button>
                     </div>`;
-                }
-                // --- ĐOẠN MÃ MỚI KẾT THÚC ---
-
-                c.innerHTML = h || '<div class="col-span-full text-center py-12 bg-white rounded-2xl border border-dashed border-gray-300"><i class="fa-solid fa-basket-shopping text-4xl text-gray-200 mb-3"></i><p class="text-gray-500 font-bold">Bạn chưa đăng ký khóa học nào.</p></div>'; 
+                });
+                c.innerHTML = h;
             } catch(e) { console.error(e); }
         }
 
@@ -795,11 +853,15 @@
 
         window.confirmPayment = async () => {
             const btn = document.querySelector('#stepQR button');
-            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang xử lý...'; btn.disabled = true;
+            const oldBtnContent = btn.innerHTML;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang tạo đơn...'; 
+            btn.disabled = true;
+
             try {
-                await addDoc(collection(db, "orders"), {
+                // 1. Tạo đơn hàng lên Firebase
+                const docRef = await addDoc(collection(db, "orders"), {
                     userId: auth.currentUser.uid,
-                    userName: auth.currentUser.displayName,
+                    userName: auth.currentUser.displayName || "No Name",
                     courseId: currentPayingCourse.id,
                     courseTitle: currentPayingCourse.title,
                     amount: currentFinalPrice,
@@ -809,10 +871,57 @@
                     content: document.getElementById('transferContentDisplay').innerText,
                     createdAt: new Date().toISOString()
                 });
-                window.showNotification("Gửi đơn thành công! Vui lòng chờ duyệt.", "success");
+
+                // 2. Chuyển đổi giao diện: Ẩn Payment, Hiện Processing
                 document.getElementById('paymentModal').classList.add('hidden');
-            } catch(e) { window.showNotification("Lỗi: " + e.message, "error"); }
-            finally { btn.innerHTML = '<i class="fa-solid fa-check-circle"></i> ĐÃ CHUYỂN KHOẢN XONG'; btn.disabled = false; }
+                document.getElementById('processingModal').classList.remove('hidden');
+                document.getElementById('processingState').classList.remove('hidden');
+                document.getElementById('successState').classList.add('hidden');
+
+                // 3. Kích hoạt lắng nghe dữ liệu Real-time
+                if (processingListener) processingListener(); // Hủy cái cũ nếu có
+
+                processingListener = onSnapshot(doc(db, "orders", docRef.id), async (snapshot) => {
+                    if (snapshot.exists()) {
+                        const data = snapshot.data();
+                        
+                        // Khi Script Google cập nhật trạng thái thành 'paid'
+                        if (data.status === 'paid' || data.status === 'approved') {
+                            // a. Hiện thông báo thành công
+                            document.getElementById('processingState').classList.add('hidden');
+                            document.getElementById('successState').classList.remove('hidden');
+                            
+                            // b. Tự động tải lại dữ liệu để đổi nút Mua -> Vào học
+                            await loadMyPurchased(auth.currentUser); 
+                            await loadMarket(); 
+                            
+                            // c. Dừng lắng nghe
+                            if (processingListener) {
+                                processingListener();
+                                processingListener = null;
+                            }
+                        }
+                    }
+                });
+
+            } catch(e) { 
+                window.showNotification("Lỗi: " + e.message, "error"); 
+                btn.innerHTML = oldBtnContent;
+                btn.disabled = false;
+            }
+        };
+
+        // Hàm đóng modal chờ (nếu người dùng muốn tắt tay)
+        window.closeProcessingModal = () => {
+            if(confirm("Hệ thống vẫn sẽ kiểm tra ngầm. Bạn có chắc muốn đóng bảng này?")) {
+                document.getElementById('processingModal').classList.add('hidden');
+            }
+        };
+
+        // Hàm bấm nút "Vào học ngay" sau khi thành công
+        window.finishPaymentProcess = () => {
+            document.getElementById('processingModal').classList.add('hidden');
+            window.switchTab('my-courses');
         };
 
         window.resetQrState = () => {
