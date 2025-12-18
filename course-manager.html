@@ -64,6 +64,9 @@
                 <p class="text-gray-500 text-sm mt-1">Hệ thống quản lý nội dung học tập E-Learning</p>
             </div>
             <div class="flex gap-3">
+                <button onclick="window.openVoucherManager()" class="bg-white text-orange-600 border border-orange-100 px-5 py-2.5 rounded-xl hover:bg-orange-50 shadow-lg shadow-orange-100 font-bold transition-all flex items-center gap-2 transform hover:-translate-y-0.5">
+                    <i class="fa-solid fa-ticket"></i> Quản lý Voucher
+                </button>
                 <button onclick="window.toggleModal('courseModal')" class="bg-brand text-white px-5 py-2.5 rounded-xl hover:bg-teal-800 shadow-lg shadow-teal-700/20 font-bold transition-all flex items-center gap-2 transform hover:-translate-y-0.5">
                     <i class="fa-solid fa-plus"></i> Thêm khóa học
                 </button>
@@ -340,7 +343,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
-        import { getFirestore, collection, getDocs, doc, setDoc, updateDoc, deleteDoc, query, orderBy, getDoc, where } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { getFirestore, collection, getDocs, doc, setDoc, updateDoc, deleteDoc, query, orderBy, getDoc, where, writeBatch } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
         // CONFIG FIREBASE CỦA BẠN (DÁN VÀO ĐÂY)
         const firebaseConfig = {
@@ -1449,7 +1452,243 @@ window.importCurriculum = (input) => {
                 btn.innerHTML = originalText;
                 btn.disabled = false;
             }
-        };     
+        };   
+        // ==========================================
+        // VOUCHER MANAGER LOGIC
+        // ==========================================
+        
+        let allVouchers = [];
+        let allCoursesForVoucher = [];
+
+        window.openVoucherManager = async () => {
+            document.getElementById('voucherModal').classList.remove('hidden');
+            window.switchVoucherTab('list');
+            
+            // Tải danh sách khóa học để dùng cho dropdown chọn khóa
+            const qC = query(collection(db, "public_courses"));
+            const snapC = await getDocs(qC);
+            allCoursesForVoucher = [];
+            const container = document.getElementById('courseSelector');
+            container.innerHTML = '';
+            
+            snapC.forEach(d => {
+                const c = d.data();
+                allCoursesForVoucher.push({id: d.id, title: c.title});
+                container.innerHTML += `
+                    <label class="flex items-center gap-2 p-2 hover:bg-white rounded cursor-pointer">
+                        <input type="checkbox" value="${d.id}" class="course-check accent-orange-600 w-4 h-4">
+                        <span class="text-sm text-gray-700 truncate">${c.title}</span>
+                    </label>
+                `;
+            });
+
+            loadVouchers();
+        };
+
+        window.switchVoucherTab = (tab) => {
+            document.querySelectorAll('.v-tab').forEach(el => {
+                el.classList.remove('active', 'bg-white', 'shadow-sm', 'text-brand');
+                el.classList.add('text-gray-500');
+            });
+            document.getElementById('vTab-' + tab).classList.add('active', 'bg-white', 'shadow-sm', 'text-brand');
+            document.getElementById('vTab-' + tab).classList.remove('text-gray-500');
+
+            document.querySelectorAll('.v-content').forEach(el => el.classList.add('hidden'));
+            document.getElementById('vContent-' + tab).classList.remove('hidden');
+        };
+
+        window.toggleVoucherInput = () => {
+            const type = document.getElementById('vType').value;
+            const input = document.getElementById('vValue');
+            input.placeholder = type === 'percent' ? "VD: 10 (tức là 10%)" : "VD: 50000 (tức là 50k)";
+        };
+
+        window.toggleScope = () => {
+            const scope = document.querySelector('input[name="vScope"]:checked').value;
+            document.getElementById('courseSelector').classList.toggle('hidden', scope !== 'specific');
+        };
+
+        async function loadVouchers() {
+            const tbody = document.getElementById('voucherTableBody');
+            tbody.innerHTML = '<tr><td colspan="6" class="p-6 text-center"><i class="fa-solid fa-spinner fa-spin text-orange-500"></i> Đang tải...</td></tr>';
+            
+            try {
+                const q = query(collection(db, "vouchers"), orderBy("createdAt", "desc"));
+                const snap = await getDocs(q);
+                allVouchers = [];
+                
+                snap.forEach(d => allVouchers.push({id: d.id, ...d.data()}));
+                renderVoucherList();
+            } catch(e) { console.error(e); }
+        }
+
+        window.renderVoucherList = () => {
+            const keyword = document.getElementById('voucherSearch').value.toLowerCase();
+            const tbody = document.getElementById('voucherTableBody');
+            const filtered = allVouchers.filter(v => v.code.toLowerCase().includes(keyword));
+
+            if(filtered.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" class="p-6 text-center text-gray-400">Không tìm thấy voucher nào.</td></tr>';
+                return;
+            }
+
+            let html = '';
+            filtered.forEach(v => {
+                // Status logic
+                const isExpired = v.expiryDate && new Date(v.expiryDate) < new Date();
+                const isSoldOut = v.limit && v.used >= v.limit;
+                let statusClass = "bg-green-100 text-green-700 border-green-200";
+                let statusText = "Đang hoạt động";
+                
+                if (isExpired) { statusClass = "bg-red-100 text-red-700 border-red-200"; statusText = "Hết hạn"; }
+                else if (isSoldOut) { statusClass = "bg-gray-100 text-gray-700 border-gray-200"; statusText = "Hết lượt"; }
+
+                // Scope text
+                let scopeText = "Toàn bộ khóa học";
+                if(v.scope === 'specific') scopeText = `${v.courseIds ? v.courseIds.length : 0} khóa học`;
+
+                html += `
+                <tr class="hover:bg-gray-50 border-b border-gray-50">
+                    <td class="p-4"><span class="font-mono font-bold text-brand bg-teal-50 px-2 py-1 rounded border border-teal-100">${v.code}</span></td>
+                    <td class="p-4 font-bold text-gray-700">${v.value.toLocaleString()}${v.type==='percent'?'%':'đ'}</td>
+                    <td class="p-4 text-xs text-gray-500">${scopeText}</td>
+                    <td class="p-4">
+                        <div class="flex items-center gap-2 text-xs font-bold">
+                            <span class="text-orange-600">${v.used || 0}</span>
+                            <span class="text-gray-300">/</span>
+                            <span>${v.limit || '∞'}</span>
+                        </div>
+                        <div class="w-20 h-1.5 bg-gray-100 rounded-full mt-1 overflow-hidden">
+                            <div class="h-full bg-orange-500" style="width: ${v.limit ? Math.min((v.used/v.limit)*100, 100) : 0}%"></div>
+                        </div>
+                    </td>
+                    <td class="p-4 text-xs">
+                        <span class="px-2 py-1 rounded border ${statusClass} font-bold block w-fit mb-1">${statusText}</span>
+                        <div class="text-gray-400">${v.expiryDate ? new Date(v.expiryDate).toLocaleDateString('vi-VN') : 'Vĩnh viễn'}</div>
+                    </td>
+                    <td class="p-4 text-right">
+                        <button onclick="deleteVoucher('${v.id}')" class="text-gray-300 hover:text-red-500 transition-colors"><i class="fa-solid fa-trash"></i></button>
+                    </td>
+                </tr>`;
+            });
+            tbody.innerHTML = html;
+        };
+
+        // 1. TẠO VOUCHER LẺ
+        window.createVoucher = async () => {
+            const code = document.getElementById('vCode').value.trim().toUpperCase();
+            const type = document.getElementById('vType').value;
+            const value = parseInt(document.getElementById('vValue').value);
+            const scope = document.querySelector('input[name="vScope"]:checked').value;
+            const maxUses = parseInt(document.getElementById('vMaxUses').value) || null;
+            const expiry = document.getElementById('vExpiry').value || null;
+
+            if(!code || !value) return window.showToast("Vui lòng nhập mã và giá trị giảm!", "error");
+            if(type === 'percent' && value > 100) return window.showToast("Phần trăm không được quá 100%", "error");
+
+            let courseIds = [];
+            if(scope === 'specific') {
+                document.querySelectorAll('.course-check:checked').forEach(cb => courseIds.push(cb.value));
+                if(courseIds.length === 0) return window.showToast("Vui lòng chọn ít nhất 1 khóa học!", "error");
+            }
+
+            const btn = event.currentTarget;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang tạo...'; btn.disabled = true;
+
+            try {
+                // Check exist
+                const qExist = query(collection(db, "vouchers"), where("code", "==", code));
+                const snapExist = await getDocs(qExist);
+                if(!snapExist.empty) throw new Error("Mã này đã tồn tại!");
+
+                await setDoc(doc(collection(db, "vouchers")), {
+                    code: code,
+                    type: type,
+                    value: value,
+                    scope: scope,
+                    courseIds: scope === 'specific' ? courseIds : null,
+                    limit: maxUses,
+                    expiryDate: expiry,
+                    used: 0,
+                    usedBy: [], // Array để check mỗi user 1 lần
+                    createdAt: new Date().toISOString()
+                });
+
+                window.showToast("Tạo voucher thành công!");
+                // Reset form
+                document.getElementById('vCode').value = '';
+                loadVouchers();
+                switchVoucherTab('list');
+
+            } catch(e) {
+                window.showToast("Lỗi: " + e.message, "error");
+            } finally {
+                btn.innerHTML = '<i class="fa-solid fa-check-circle mr-2"></i> TẠO VOUCHER'; btn.disabled = false;
+            }
+        };
+
+        // 2. TẠO HÀNG LOẠT (BULK)
+        window.createBulkVouchers = async () => {
+            const prefix = document.getElementById('bPrefix').value.trim().toUpperCase();
+            const qty = parseInt(document.getElementById('bQuantity').value);
+            
+            // Common settings
+            const type = document.getElementById('bType').value;
+            const value = parseInt(document.getElementById('bValue').value);
+            const limit = parseInt(document.getElementById('bMaxUses').value) || 1;
+
+            if(!qty || qty < 1 || !value) return window.showToast("Vui lòng nhập đủ thông tin!", "error");
+            if(qty > 50) return window.showToast("Chỉ tạo tối đa 50 mã một lần để tránh lỗi!", "error");
+
+            const btn = event.currentTarget;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang xử lý...'; btn.disabled = true;
+
+            try {
+                const batch = writeBatch(db);
+                const generatedCodes = [];
+
+                for(let i=0; i<qty; i++) {
+                    const randomStr = Math.random().toString(36).substring(2, 7).toUpperCase();
+                    const code = (prefix + randomStr);
+                    const newDocRef = doc(collection(db, "vouchers")); // Auto ID cho doc
+                    
+                    batch.set(newDocRef, {
+                        code: code,
+                        type: type,
+                        value: value,
+                        scope: 'global', // Bulk thường áp dụng global cho tiện
+                        courseIds: null,
+                        limit: limit,
+                        expiryDate: null,
+                        used: 0,
+                        usedBy: [],
+                        createdAt: new Date().toISOString(),
+                        isBulk: true
+                    });
+                    generatedCodes.push(code);
+                }
+
+                await batch.commit();
+                window.showToast(`Đã tạo thành công ${qty} mã!`);
+                loadVouchers();
+                switchVoucherTab('list');
+
+            } catch(e) {
+                console.error(e);
+                window.showToast("Lỗi bulk create: " + e.message, "error");
+            } finally {
+                btn.innerHTML = '<i class="fa-solid fa-layer-group mr-2"></i> TIẾN HÀNH TẠO MÃ'; btn.disabled = false;
+            }
+        };
+
+        window.deleteVoucher = async (id) => {
+            if(!confirm("Xóa voucher này? Những người chưa dùng sẽ không dùng được nữa.")) return;
+            try {
+                await deleteDoc(doc(db, "vouchers", id));
+                window.showToast("Đã xóa voucher");
+                loadVouchers();
+            } catch(e) { window.showToast(e.message, 'error'); }
+        };
     </script>
     
     <div id="renameModal" class="hidden fixed inset-0 z-[220] flex items-center justify-center bg-gray-900/60 backdrop-blur-sm">
@@ -1480,5 +1719,146 @@ window.importCurriculum = (input) => {
     </div>
     <div id="videoPreviewArea" class="aspect-video bg-black rounded-xl overflow-hidden shadow-lg hidden relative"><iframe id="videoFrame" class="w-full h-full" src="" frameborder="0" allowfullscreen></iframe></div>
 </div>
+    <div id="voucherModal" class="hidden fixed inset-0 z-[90] bg-gray-900/80 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-white w-full max-w-5xl h-[85vh] rounded-2xl shadow-2xl flex overflow-hidden">
+            <div class="w-64 bg-gray-50 border-r border-gray-100 flex flex-col p-4 gap-2">
+                <h3 class="font-black text-gray-800 text-lg px-2 mb-2"><i class="fa-solid fa-ticket text-orange-500 mr-2"></i> Kho Voucher</h3>
+                <button onclick="switchVoucherTab('list')" id="vTab-list" class="v-tab active text-left px-4 py-3 rounded-xl font-bold text-sm flex items-center gap-3 transition-all bg-white shadow-sm text-brand"><i class="fa-solid fa-list-ul"></i> Danh sách mã</button>
+                <button onclick="switchVoucherTab('create')" id="vTab-create" class="v-tab text-left px-4 py-3 rounded-xl font-bold text-sm flex items-center gap-3 transition-all text-gray-500 hover:bg-white hover:shadow-sm"><i class="fa-solid fa-plus-circle"></i> Tạo mã mới</button>
+                <button onclick="switchVoucherTab('bulk')" id="vTab-bulk" class="v-tab text-left px-4 py-3 rounded-xl font-bold text-sm flex items-center gap-3 transition-all text-gray-500 hover:bg-white hover:shadow-sm"><i class="fa-solid fa-layer-group"></i> Tạo hàng loạt</button>
+            </div>
+
+            <div class="flex-1 flex flex-col bg-white relative">
+                <button onclick="document.getElementById('voucherModal').classList.add('hidden')" class="absolute top-4 right-4 z-10 w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 hover:bg-red-50 hover:text-red-500 transition-colors"><i class="fa-solid fa-times"></i></button>
+
+                <div id="vContent-list" class="v-content flex-1 flex flex-col p-6 h-full">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-2xl font-black text-gray-800">Danh sách Voucher</h2>
+                        <div class="relative w-64">
+                            <i class="fa-solid fa-search absolute left-3 top-3 text-gray-400 text-xs"></i>
+                            <input type="text" id="voucherSearch" onkeyup="renderVoucherList()" placeholder="Tìm theo mã code..." class="w-full pl-8 pr-4 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:border-orange-500">
+                        </div>
+                    </div>
+                    <div class="flex-1 overflow-y-auto border border-gray-100 rounded-xl">
+                        <table class="w-full text-left text-sm">
+                            <thead class="bg-gray-50 text-gray-500 font-bold text-xs uppercase sticky top-0">
+                                <tr>
+                                    <th class="p-4">Mã Code</th>
+                                    <th class="p-4">Giảm giá</th>
+                                    <th class="p-4">Phạm vi</th>
+                                    <th class="p-4">Giới hạn (Đã dùng/Tổng)</th>
+                                    <th class="p-4">Hạn dùng</th>
+                                    <th class="p-4 text-right">Hành động</th>
+                                </tr>
+                            </thead>
+                            <tbody id="voucherTableBody" class="divide-y divide-gray-100"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div id="vContent-create" class="v-content hidden flex-1 p-8 overflow-y-auto custom-scrollbar">
+                    <h2 class="text-2xl font-black text-gray-800 mb-6">Tạo Voucher Thủ Công</h2>
+                    <div class="max-w-2xl space-y-6">
+                        <div>
+                            <label class="block text-xs font-bold text-gray-500 uppercase mb-2">Mã Voucher (Viết liền, không dấu)</label>
+                            <div class="flex gap-2">
+                                <input type="text" id="vCode" class="flex-1 px-4 py-3 border border-gray-200 rounded-xl font-mono font-bold text-lg uppercase focus:border-orange-500 outline-none" placeholder="VD: SALE2025">
+                                <button onclick="document.getElementById('vCode').value = 'CODE'+Math.floor(Math.random()*10000)" class="px-4 py-3 bg-gray-100 rounded-xl font-bold text-gray-500 hover:bg-gray-200"><i class="fa-solid fa-dice"></i> Random</button>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-6">
+                            <div>
+                                <label class="block text-xs font-bold text-gray-500 uppercase mb-2">Loại giảm giá</label>
+                                <select id="vType" onchange="toggleVoucherInput()" class="w-full px-4 py-3 border border-gray-200 rounded-xl font-bold text-gray-700 outline-none">
+                                    <option value="percent">Theo Phần trăm (%)</option>
+                                    <option value="fixed">Số tiền trực tiếp (VNĐ)</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-gray-500 uppercase mb-2">Giá trị giảm</label>
+                                <input type="number" id="vValue" class="w-full px-4 py-3 border border-gray-200 rounded-xl font-bold text-orange-600 outline-none" placeholder="VD: 10">
+                            </div>
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-bold text-gray-500 uppercase mb-2">Phạm vi áp dụng</label>
+                            <div class="flex gap-4 mb-3">
+                                <label class="flex items-center gap-2 cursor-pointer p-3 border border-gray-200 rounded-xl hover:bg-gray-50 flex-1">
+                                    <input type="radio" name="vScope" value="global" checked onchange="toggleScope()" class="accent-orange-600 w-4 h-4">
+                                    <span class="font-bold text-sm">Toàn bộ khóa học</span>
+                                </label>
+                                <label class="flex items-center gap-2 cursor-pointer p-3 border border-gray-200 rounded-xl hover:bg-gray-50 flex-1">
+                                    <input type="radio" name="vScope" value="specific" onchange="toggleScope()" class="accent-orange-600 w-4 h-4">
+                                    <span class="font-bold text-sm">Chọn khóa học cụ thể</span>
+                                </label>
+                            </div>
+                            <div id="courseSelector" class="hidden p-4 bg-gray-50 rounded-xl border border-gray-200 max-h-40 overflow-y-auto space-y-2">
+                                </div>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-6">
+                            <div>
+                                <label class="block text-xs font-bold text-gray-500 uppercase mb-2">Số lượt dùng tối đa</label>
+                                <input type="number" id="vMaxUses" class="w-full px-4 py-3 border border-gray-200 rounded-xl outline-none" placeholder="VD: 100 (Để trống = Vô hạn)">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-gray-500 uppercase mb-2">Hạn sử dụng</label>
+                                <input type="date" id="vExpiry" class="w-full px-4 py-3 border border-gray-200 rounded-xl outline-none">
+                            </div>
+                        </div>
+
+                        <button onclick="createVoucher()" class="w-full py-4 bg-orange-600 text-white font-bold rounded-xl shadow-lg hover:bg-orange-700 transition-all text-lg">
+                            <i class="fa-solid fa-check-circle mr-2"></i> TẠO VOUCHER
+                        </button>
+                    </div>
+                </div>
+
+                <div id="vContent-bulk" class="v-content hidden flex-1 p-8 overflow-y-auto custom-scrollbar">
+                    <h2 class="text-2xl font-black text-gray-800 mb-6">Tạo Voucher Hàng Loạt</h2>
+                    <div class="bg-blue-50 p-4 rounded-xl border border-blue-100 mb-6 text-sm text-blue-800">
+                        <i class="fa-solid fa-circle-info mr-1"></i> Tính năng này giúp tạo nhanh hàng trăm mã ngẫu nhiên có cùng thiết lập.
+                    </div>
+
+                    <div class="max-w-2xl space-y-6">
+                        <div class="grid grid-cols-2 gap-6">
+                            <div>
+                                <label class="block text-xs font-bold text-gray-500 uppercase mb-2">Tiền tố (Prefix)</label>
+                                <input type="text" id="bPrefix" class="w-full px-4 py-3 border border-gray-200 rounded-xl font-mono font-bold uppercase outline-none" placeholder="VD: TET2025_">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-gray-500 uppercase mb-2">Số lượng cần tạo</label>
+                                <input type="number" id="bQuantity" value="10" class="w-full px-4 py-3 border border-gray-200 rounded-xl font-bold outline-none" max="100">
+                            </div>
+                        </div>
+
+                        <div class="p-6 border border-gray-200 rounded-2xl bg-gray-50/50 space-y-4">
+                            <h4 class="font-bold text-gray-800 border-b border-gray-200 pb-2">Thiết lập chung cho các mã</h4>
+                            
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label class="text-xs font-bold text-gray-500">Loại giảm giá</label>
+                                    <select id="bType" class="w-full mt-1 p-2 border rounded-lg text-sm"><option value="percent">% Phần trăm</option><option value="fixed">Số tiền (VNĐ)</option></select>
+                                </div>
+                                <div>
+                                    <label class="text-xs font-bold text-gray-500">Giá trị giảm</label>
+                                    <input type="number" id="bValue" class="w-full mt-1 p-2 border rounded-lg text-sm" placeholder="VD: 20">
+                                </div>
+                            </div>
+                            
+                            <div>
+                                <label class="text-xs font-bold text-gray-500">Số lượt dùng (mỗi mã)</label>
+                                <input type="number" id="bMaxUses" class="w-full mt-1 p-2 border rounded-lg text-sm" value="1">
+                            </div>
+                        </div>
+
+                        <button onclick="createBulkVouchers()" class="w-full py-4 bg-teal-600 text-white font-bold rounded-xl shadow-lg hover:bg-teal-700 transition-all text-lg">
+                            <i class="fa-solid fa-layer-group mr-2"></i> TIẾN HÀNH TẠO MÃ
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 </body>
 </html>
