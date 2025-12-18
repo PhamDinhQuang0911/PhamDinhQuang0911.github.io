@@ -824,46 +824,77 @@
         window.openPaymentModal = async (courseId) => {
             if (!auth.currentUser) return alert("Vui lòng đăng nhập!");
 
-            // --- ĐOẠN MÃ MỚI THÊM VÀO ĐÂY ---
-            // Reset lại nút "Đã chuyển khoản xong" về chế độ tạo đơn mới
-            const btnConfirm = document.querySelector('#stepQR button'); // Lấy nút hiện tại (có thể là nút cũ hoặc nút đã bị replace)
+            // [FIX] Reset nút CTA về trạng thái mặc định "Tiếp tục thanh toán"
+            const stepReview = document.getElementById('stepReview');
+            // Tìm và xóa nút cũ để clear event listener, tạo nút mới
+            const oldBtn = stepReview.querySelector('button[onclick^="window."]') || stepReview.querySelector('#btnCtaAction');
+            if(oldBtn) {
+                const newBtn = oldBtn.cloneNode(true);
+                newBtn.id = "btnCtaAction";
+                newBtn.innerHTML = 'Tiếp tục thanh toán <i class="fa-solid fa-arrow-right"></i>';
+                newBtn.className = "px-8 py-3 bg-gradient-to-r from-teal-600 to-teal-500 text-white font-bold rounded-xl shadow-lg hover:shadow-teal-200 hover:-translate-y-0.5 transition-all flex items-center gap-2";
+                newBtn.onclick = window.generatePaymentQR; // Mặc định là tạo QR
+                oldBtn.parentNode.replaceChild(newBtn, oldBtn);
+            }
+
+            // [FIX] Reset nút "Đã chuyển khoản" ở bước QR luôn
+            const btnConfirm = document.querySelector('#stepQR button'); 
             if(btnConfirm) {
                  const originalBtn = btnConfirm.cloneNode(true);
                  btnConfirm.parentNode.replaceChild(originalBtn, btnConfirm);
-                 originalBtn.onclick = window.confirmPayment; // Gán lại hàm tạo đơn mới
+                 originalBtn.onclick = window.confirmPayment;
                  originalBtn.innerHTML = '<i class="fa-solid fa-check-circle"></i> ĐÃ CHUYỂN KHOẢN XONG';
             }
-            // Hiện lại nút quay lại (nếu bị ẩn)
-            const backBtn = document.querySelector('#stepQR button[onclick="window.resetQrState()"]');
-            if(backBtn) backBtn.style.display = 'block';
-            if (!dynamicBankConfig) {
-                try {
+            
+            // Reset Voucher UI
+            document.getElementById('voucherInput').value = '';
+            document.getElementById('voucherInput').disabled = false;
+            document.getElementById('voucherMessage').className = 'hidden';
+            document.getElementById('payDiscountAmount').innerText = '-0đ';
+            currentVoucherCode = null;
+
+            // ... (Phần logic lấy data khóa học bên dưới)
+            if (!dynamicBankConfig) { 
+                 try {
                     const s = await getDoc(doc(db, "site_settings", "payment_config"));
                     dynamicBankConfig = s.exists() ? s.data() : { BANK_ID: "970422", BANK_NAME: "MB Bank", ACCOUNT_NO: "0000", ACCOUNT_NAME: "ADMIN" };
                 } catch(e) { console.error(e); }
             }
+
             document.getElementById('paymentModal').classList.remove('hidden');
             document.getElementById('stepReview').classList.remove('hidden');
             document.getElementById('stepQR').classList.add('hidden');
-            document.getElementById('voucherInput').value = '';
-            document.getElementById('voucherInput').disabled = false;
-            document.getElementById('voucherMessage').className = 'hidden';
-            currentVoucherCode = null;
+
             try {
                 const snap = await getDoc(doc(db, "public_courses", courseId));
                 if(snap.exists()){
                     const c = snap.data();
                     currentPayingCourse = { id: snap.id, ...c };
+                    
                     document.getElementById('payCourseTitle').innerText = c.title;
                     document.getElementById('payCourseImg').src = c.thumbnail || 'https://via.placeholder.com/150';
                     document.getElementById('payOrderId').innerText = `#${Date.now().toString().slice(-6)}`;
                     document.getElementById('payDate').innerText = new Date().toLocaleDateString('vi-VN');
+                    
                     let raw = c.price;
                     if (typeof raw === 'string') raw = parseInt(raw.replace(/\D/g, '')) || 0;
                     currentFinalPrice = raw;
+                    
                     document.getElementById('payOriginalPrice').innerText = raw.toLocaleString() + 'đ';
                     document.getElementById('payFinalPrice').innerText = raw.toLocaleString() + 'đ';
-                    document.getElementById('payDiscountAmount').innerText = '-0đ';
+
+                    // [LOGIC MỚI] Nếu khóa học gốc giá 0đ
+                    if (currentFinalPrice === 0) {
+                        const btn = document.getElementById('btnCtaAction');
+                        btn.innerHTML = '<i class="fa-solid fa-gift"></i> NHẬN MIỄN PHÍ';
+                        btn.classList.remove('from-teal-600', 'to-teal-500');
+                        btn.classList.add('from-green-600', 'to-green-500');
+                        btn.onclick = () => window.activateFreeCourse(null, false);
+                        
+                        // Disable nhập voucher
+                        document.getElementById('voucherInput').disabled = true;
+                        document.getElementById('voucherInput').placeholder = "Khóa học miễn phí";
+                    }
                 }
             } catch(e){ console.error(e); }
         };
@@ -872,21 +903,46 @@
             const code = document.getElementById('voucherInput').value.trim().toUpperCase();
             const msgEl = document.getElementById('voucherMessage');
             if(!code) return;
+            
             let original = 0;
             if (currentPayingCourse) {
                 let raw = currentPayingCourse.price;
                 if (typeof raw === 'string') raw = parseInt(raw.replace(/\D/g, '')) || 0;
                 original = raw;
             }
+
             try {
                 const res = await validateVoucher(code, currentPayingCourse.id, original);
                 currentFinalPrice = res.finalPrice;
                 currentVoucherCode = code;
+                
                 document.getElementById('payDiscountAmount').innerText = `-${res.discount.toLocaleString()}đ`;
                 document.getElementById('payFinalPrice').innerText = currentFinalPrice.toLocaleString() + 'đ';
+                
                 msgEl.textContent = `Áp dụng mã ${code} thành công!`;
                 msgEl.className = "mb-2 text-xs font-bold text-green-600 block";
                 document.getElementById('voucherInput').disabled = true;
+
+                // [LOGIC MỚI] Kiểm tra nếu giá = 0đ
+                const btnAction = document.querySelector('#stepReview button[onclick^="window."]');
+                if(btnAction) {
+                    btnAction.id = "btnCtaAction"; // Gán ID để dễ thao tác
+                    if(currentFinalPrice === 0) {
+                        // Đổi thành nút kích hoạt ngay
+                        btnAction.innerHTML = '<i class="fa-solid fa-gift"></i> NHẬN KHÓA HỌC NGAY';
+                        btnAction.classList.remove('from-teal-600', 'to-teal-500');
+                        btnAction.classList.add('from-green-600', 'to-green-500');
+                        // Gọi hàm kích hoạt mới (False vì đây là đơn mới)
+                        btnAction.onclick = () => window.activateFreeCourse(null, false);
+                    } else {
+                        // Reset về nút thanh toán thường
+                        btnAction.innerHTML = 'Tiếp tục thanh toán <i class="fa-solid fa-arrow-right"></i>';
+                        btnAction.classList.add('from-teal-600', 'to-teal-500');
+                        btnAction.classList.remove('from-green-600', 'to-green-500');
+                        btnAction.onclick = window.generatePaymentQR;
+                    }
+                }
+
             } catch (e) {
                 msgEl.textContent = e.message;
                 msgEl.className = "mb-2 text-xs font-bold text-red-500 block";
@@ -1160,29 +1216,49 @@
         };
 
         // --- 2. HÀM TIẾP TỤC THANH TOÁN (QUAN TRỌNG) ---
+        // --- 2. HÀM TIẾP TỤC THANH TOÁN (Đã sửa lỗi ảnh & 0đ) ---
         window.continuePayment = async (orderDataEncoded) => {
             try {
                 const order = JSON.parse(decodeURIComponent(orderDataEncoded));
                 
-                // Lấy config ngân hàng nếu chưa có
+                // [FIX] Lấy lại thông tin khóa học để hiển thị Ảnh Thumbnail
+                const courseSnap = await getDoc(doc(db, "public_courses", order.courseId));
+                const thumb = courseSnap.exists() ? (courseSnap.data().thumbnail || 'https://via.placeholder.com/150') : 'https://via.placeholder.com/150';
+                
+                // Điền thông tin vào Modal Review
+                document.getElementById('payCourseTitle').innerText = order.courseTitle;
+                document.getElementById('payCourseImg').src = thumb;
+                document.getElementById('payOrderId').innerText = order.id.substring(0,6); // Dùng ID đơn hàng làm mã hiển thị
+                document.getElementById('payDate').innerText = new Date(order.createdAt).toLocaleDateString('vi-VN');
+                document.getElementById('payOriginalPrice').innerText = (order.originalAmount || order.amount).toLocaleString() + 'đ';
+                document.getElementById('payFinalPrice').innerText = order.amount.toLocaleString() + 'đ';
+                
+                // [LOGIC MỚI] Nếu đơn hàng là 0đ -> Kích hoạt luôn
+                if (order.amount === 0) {
+                    if(confirm("Đơn hàng này miễn phí. Bạn có muốn kích hoạt ngay không?")) {
+                        await window.activateFreeCourse(order.id, true); // True = là đơn cũ
+                    }
+                    return;
+                }
+
+                // Nếu có tiền -> Hiện lại quy trình thanh toán QR
+                document.getElementById('paymentModal').classList.remove('hidden');
+                
+                // Lấy config ngân hàng
                 if (!dynamicBankConfig) {
                     const s = await getDoc(doc(db, "site_settings", "payment_config"));
                     dynamicBankConfig = s.exists() ? s.data() : { BANK_ID: "970422", BANK_NAME: "MB Bank", ACCOUNT_NO: "0000", ACCOUNT_NAME: "ADMIN" };
                 }
 
-                // 1. Tái tạo mã QR
+                // Tái tạo mã QR
                 const bankBin = dynamicBankConfig.BANK_ID;
                 const accNo = dynamicBankConfig.ACCOUNT_NO;
                 const template = dynamicBankConfig.TEMPLATE || 'compact2';
-                const amount = order.amount;
-                const content = order.content; // Dùng lại nội dung cũ đã lưu trong đơn hàng
-                const addInfo = encodeURIComponent(content);
-                const accName = encodeURIComponent(dynamicBankConfig.ACCOUNT_NAME);
-                
-                const qrUrl = `https://img.vietqr.io/image/${bankBin}-${accNo}-${template}.png?amount=${amount}&addInfo=${addInfo}&accountName=${accName}`;
+                const content = order.content;
+                const qrUrl = `https://img.vietqr.io/image/${bankBin}-${accNo}-${template}.png?amount=${order.amount}&addInfo=${encodeURIComponent(content)}&accountName=${encodeURIComponent(dynamicBankConfig.ACCOUNT_NAME)}`;
 
-                // 2. Điền dữ liệu vào Modal QR
-                document.getElementById('bankNameDisplay').innerText = dynamicBankConfig.BANK_NAME || dynamicBankConfig.BANK_ID;
+                // Điền data vào Modal QR
+                document.getElementById('bankNameDisplay').innerText = dynamicBankConfig.BANK_NAME;
                 document.getElementById('accountNoDisplay').innerText = dynamicBankConfig.ACCOUNT_NO;
                 document.getElementById('transferContentDisplay').innerText = content;
                 const img = document.getElementById('vietQrImage');
@@ -1190,25 +1266,19 @@
                 img.onload = () => document.getElementById('qrLoading').classList.add('hidden');
                 img.src = qrUrl;
 
-                // 3. Hiển thị Modal QR (Bỏ qua bước Review)
-                document.getElementById('paymentModal').classList.remove('hidden');
+                // Chuyển sang bước QR
                 document.getElementById('stepReview').classList.add('hidden');
                 document.getElementById('stepQR').classList.remove('hidden');
                 document.getElementById('stepQR').classList.add('flex');
 
-                // 4. [CỰC KỲ QUAN TRỌNG] Sửa nút "Đã chuyển khoản xong"
-                // Lúc tạo mới thì nút này gọi confirmPayment (tạo đơn mới)
-                // Lúc này ta phải đổi nó thành gọi watchExistingOrder (theo dõi đơn cũ)
+                // Sửa nút bấm thành "Theo dõi đơn hàng cũ"
                 const btnConfirm = document.querySelector('#stepQR button[onclick^="window."]');
-                // Clone nút để xóa sạch các event cũ, gán event mới
                 const newBtn = btnConfirm.cloneNode(true);
                 btnConfirm.parentNode.replaceChild(newBtn, btnConfirm);
-                
                 newBtn.onclick = () => window.watchExistingOrder(order.id);
                 newBtn.innerHTML = '<i class="fa-solid fa-check-circle"></i> ĐÃ CHUYỂN KHOẢN XONG';
-                newBtn.disabled = false;
                 
-                // Ẩn nút "Quay lại sửa voucher" vì đơn đã chốt giá
+                // Ẩn nút quay lại vì đơn cũ không sửa voucher được nữa
                 const backBtn = document.querySelector('#stepQR button[onclick="window.resetQrState()"]');
                 if(backBtn) backBtn.style.display = 'none';
 
@@ -1245,6 +1315,55 @@
                     document.getElementById('processingModal').classList.add('hidden');
                 }
             });
+        };
+        // --- HÀM KÍCH HOẠT KHÓA HỌC 0 ĐỒNG ---
+        window.activateFreeCourse = async (inputData, isExistingOrder = false) => {
+            // inputData: là courseId (nếu tạo mới) hoặc orderId (nếu là đơn cũ)
+            const loadingHtml = '<i class="fa-solid fa-spinner fa-spin"></i> Đang kích hoạt...';
+            
+            // Tìm nút bấm để hiện loading (nếu có)
+            let btn = document.getElementById('btnCtaAction'); 
+            if(btn) { btn.innerHTML = loadingHtml; btn.disabled = true; }
+
+            try {
+                if (isExistingOrder) {
+                    // TRƯỜNG HỢP 1: Kích hoạt từ đơn hàng cũ (Đơn chờ 0đ)
+                    await updateDoc(doc(db, "orders", inputData), {
+                        status: 'paid', // Kích hoạt luôn
+                        updatedAt: new Date().toISOString()
+                    });
+                } else {
+                    // TRƯỜNG HỢP 2: Tạo đơn mới 0đ (Mua mới hoặc Voucher 100%)
+                    await addDoc(collection(db, "orders"), {
+                        userId: auth.currentUser.uid,
+                        userName: auth.currentUser.displayName || "No Name",
+                        courseId: currentPayingCourse.id,
+                        courseTitle: currentPayingCourse.title,
+                        amount: 0, // Giá 0đ
+                        originalAmount: parseInt(String(currentPayingCourse.price).replace(/\D/g, '')) || 0,
+                        voucher: currentVoucherCode || null,
+                        status: 'paid', // Kích hoạt luôn
+                        content: "FREE_ACTIVATION",
+                        createdAt: new Date().toISOString()
+                    });
+                }
+
+                // Hiển thị thông báo thành công
+                window.showNotification("Kích hoạt khóa học thành công!", "success");
+                document.getElementById('paymentModal').classList.add('hidden');
+                
+                // Reload dữ liệu
+                await loadMyPurchased(auth.currentUser);
+                await loadMarket();
+                
+                // Chuyển tab
+                window.switchTab('my-courses');
+
+            } catch(e) {
+                console.error(e);
+                window.showNotification("Lỗi kích hoạt: " + e.message, "error");
+                if(btn) { btn.innerHTML = "Thử lại"; btn.disabled = false; }
+            }
         };
     </script>
 </body>
