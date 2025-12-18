@@ -1457,25 +1457,28 @@ window.importCurriculum = (input) => {
         // VOUCHER MANAGER LOGIC
         // ==========================================
         
+        // ==========================================
+        // VOUCHER MANAGER LOGIC (FULL & FIXED)
+        // ==========================================
+        
         let allVouchers = [];
         let allCoursesForVoucher = [];
 
+        // 1. MỞ MODAL & TẢI DATA
         window.openVoucherManager = async () => {
             document.getElementById('voucherModal').classList.remove('hidden');
             window.switchVoucherTab('list');
             
-            // Tải danh sách khóa học
+            // Tải danh sách khóa học để dùng cho dropdown chọn khóa (cho cả 2 tab)
             const qC = query(collection(db, "public_courses"));
             const snapC = await getDocs(qC);
             allCoursesForVoucher = [];
             
-            // Container cho Tạo Lẻ
             const containerSingle = document.getElementById('courseSelector');
-            // Container cho Tạo Hàng Loạt (Mới)
-            const containerBulk = document.getElementById('bCourseSelector');
+            const containerBulk = document.getElementById('bCourseSelector'); // Container chọn khóa cho Bulk
             
-            containerSingle.innerHTML = '';
-            containerBulk.innerHTML = '';
+            if(containerSingle) containerSingle.innerHTML = '';
+            if(containerBulk) containerBulk.innerHTML = '';
             
             snapC.forEach(d => {
                 const c = d.data();
@@ -1488,14 +1491,14 @@ window.importCurriculum = (input) => {
                     </label>
                 `;
                 
-                // Render vào cả 2 nơi (Lưu ý class 'course-check' dùng chung để dễ style, nhưng khi lấy value sẽ query theo ID cha)
-                containerSingle.innerHTML += html;
-                containerBulk.innerHTML += html;
+                if(containerSingle) containerSingle.innerHTML += html;
+                if(containerBulk) containerBulk.innerHTML += html;
             });
 
             loadVouchers();
-        };};
+        };
 
+        // 2. CHUYỂN TAB
         window.switchVoucherTab = (tab) => {
             document.querySelectorAll('.v-tab').forEach(el => {
                 el.classList.remove('active', 'bg-white', 'shadow-sm', 'text-brand');
@@ -1508,6 +1511,7 @@ window.importCurriculum = (input) => {
             document.getElementById('vContent-' + tab).classList.remove('hidden');
         };
 
+        // 3. UI HELPERS
         window.toggleVoucherInput = () => {
             const type = document.getElementById('vType').value;
             const input = document.getElementById('vValue');
@@ -1519,6 +1523,12 @@ window.importCurriculum = (input) => {
             document.getElementById('courseSelector').classList.toggle('hidden', scope !== 'specific');
         };
 
+        window.toggleBulkScope = () => {
+            const scope = document.querySelector('input[name="bScope"]:checked').value;
+            document.getElementById('bCourseSelector').classList.toggle('hidden', scope !== 'specific');
+        };
+
+        // 4. LOAD & RENDER DANH SÁCH
         async function loadVouchers() {
             const tbody = document.getElementById('voucherTableBody');
             tbody.innerHTML = '<tr><td colspan="6" class="p-6 text-center"><i class="fa-solid fa-spinner fa-spin text-orange-500"></i> Đang tải...</td></tr>';
@@ -1545,7 +1555,6 @@ window.importCurriculum = (input) => {
 
             let html = '';
             filtered.forEach(v => {
-                // Status logic
                 const isExpired = v.expiryDate && new Date(v.expiryDate) < new Date();
                 const isSoldOut = v.limit && v.used >= v.limit;
                 let statusClass = "bg-green-100 text-green-700 border-green-200";
@@ -1554,7 +1563,6 @@ window.importCurriculum = (input) => {
                 if (isExpired) { statusClass = "bg-red-100 text-red-700 border-red-200"; statusText = "Hết hạn"; }
                 else if (isSoldOut) { statusClass = "bg-gray-100 text-gray-700 border-gray-200"; statusText = "Hết lượt"; }
 
-                // Scope text
                 let scopeText = "Toàn bộ khóa học";
                 if(v.scope === 'specific') scopeText = `${v.courseIds ? v.courseIds.length : 0} khóa học`;
 
@@ -1585,7 +1593,7 @@ window.importCurriculum = (input) => {
             tbody.innerHTML = html;
         };
 
-        // 1. TẠO VOUCHER LẺ
+        // 5. TẠO VOUCHER LẺ
         window.createVoucher = async () => {
             const code = document.getElementById('vCode').value.trim().toUpperCase();
             const type = document.getElementById('vType').value;
@@ -1599,11 +1607,11 @@ window.importCurriculum = (input) => {
 
             let courseIds = [];
             if(scope === 'specific') {
-                document.querySelectorAll('.course-check:checked').forEach(cb => courseIds.push(cb.value));
+                document.querySelectorAll('#courseSelector .course-check:checked').forEach(cb => courseIds.push(cb.value));
                 if(courseIds.length === 0) return window.showToast("Vui lòng chọn ít nhất 1 khóa học!", "error");
             }
 
-            const btn = event.currentTarget;
+            const btn = document.querySelector('button[onclick="createVoucher()"]');
             btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang tạo...'; btn.disabled = true;
 
             try {
@@ -1621,12 +1629,11 @@ window.importCurriculum = (input) => {
                     limit: maxUses,
                     expiryDate: expiry,
                     used: 0,
-                    usedBy: [], // Array để check mỗi user 1 lần
+                    usedBy: [],
                     createdAt: new Date().toISOString()
                 });
 
                 window.showToast("Tạo voucher thành công!");
-                // Reset form
                 document.getElementById('vCode').value = '';
                 loadVouchers();
                 switchVoucherTab('list');
@@ -1638,21 +1645,19 @@ window.importCurriculum = (input) => {
             }
         };
 
-        // 2. TẠO HÀNG LOẠT (BULK)
-       window.createBulkVouchers = async () => {
+        // 6. TẠO HÀNG LOẠT (BULK) - ĐÃ CẬP NHẬT PHẠM VI ÁP DỤNG
+        window.createBulkVouchers = async () => {
             const prefix = document.getElementById('bPrefix').value.trim().toUpperCase();
             const qty = parseInt(document.getElementById('bQuantity').value);
             
-            // Common settings
             const type = document.getElementById('bType').value;
             const value = parseInt(document.getElementById('bValue').value);
             const limit = parseInt(document.getElementById('bMaxUses').value) || 1;
             
-            // [MỚI] Lấy Scope từ Tab Bulk
+            // Lấy Scope từ Tab Bulk
             const scope = document.querySelector('input[name="bScope"]:checked').value;
             let courseIds = [];
             if(scope === 'specific') {
-                // Chỉ tìm checkbox trong container Bulk (#bCourseSelector)
                 document.querySelectorAll('#bCourseSelector .course-check:checked').forEach(cb => courseIds.push(cb.value));
                 if(courseIds.length === 0) return window.showToast("Vui lòng chọn ít nhất 1 khóa học!", "error");
             }
@@ -1665,19 +1670,17 @@ window.importCurriculum = (input) => {
 
             try {
                 const batch = writeBatch(db);
-                const generatedCodes = [];
-
                 for(let i=0; i<qty; i++) {
                     const randomStr = Math.random().toString(36).substring(2, 7).toUpperCase();
                     const code = (prefix + randomStr);
-                    const newDocRef = doc(collection(db, "vouchers")); 
+                    const newDocRef = doc(collection(db, "vouchers"));
                     
                     batch.set(newDocRef, {
                         code: code,
                         type: type,
                         value: value,
-                        scope: scope, // Lưu scope đã chọn
-                        courseIds: scope === 'specific' ? courseIds : null, // Lưu list khóa học
+                        scope: scope,
+                        courseIds: scope === 'specific' ? courseIds : null,
                         limit: limit,
                         expiryDate: null,
                         used: 0,
@@ -1685,7 +1688,6 @@ window.importCurriculum = (input) => {
                         createdAt: new Date().toISOString(),
                         isBulk: true
                     });
-                    generatedCodes.push(code);
                 }
 
                 await batch.commit();
@@ -1701,21 +1703,17 @@ window.importCurriculum = (input) => {
             }
         };
 
+        // 7. XÓA VOUCHER
         window.deleteVoucher = async (id) => {
-            if(!confirm("Xóa voucher này? Những người chưa dùng sẽ không dùng được nữa.")) return;
+            if(!confirm("Xóa voucher này?")) return;
             try {
                 await deleteDoc(doc(db, "vouchers", id));
                 window.showToast("Đã xóa voucher");
                 loadVouchers();
             } catch(e) { window.showToast(e.message, 'error'); }
         };
-        // --- HÀM TOGGLE SCOPE CHO BULK (MỚI) ---
-        window.toggleBulkScope = () => {
-            const scope = document.querySelector('input[name="bScope"]:checked').value;
-            document.getElementById('bCourseSelector').classList.toggle('hidden', scope !== 'specific');
-        };
 
-        // --- HÀM XUẤT EXCEL (MỚI) ---
+        // 8. XUẤT EXCEL
         window.exportVouchersToExcel = () => {
             if (allVouchers.length === 0) return window.showToast("Danh sách trống!", "error");
 
@@ -1726,7 +1724,6 @@ window.importCurriculum = (input) => {
 
                 let phamVi = "Toàn bộ";
                 if (v.scope === 'specific') {
-                    // Tìm tên khóa học từ ID (nếu cần chi tiết hơn)
                     phamVi = `${v.courseIds ? v.courseIds.length : 0} khóa học`;
                 }
 
