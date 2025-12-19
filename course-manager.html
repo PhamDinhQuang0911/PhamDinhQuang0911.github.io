@@ -367,6 +367,23 @@
         const auth = getAuth(app);
         const db = getFirestore(app);
         const storage = getStorage(app);
+        // Hàm nén ảnh chuẩn từ Dashboard
+        window.compressImage = async (file, quality = 0.8, maxWidth = 1500) => {
+            return new Promise((resolve) => {
+                const reader = new FileReader(); reader.readAsDataURL(file);
+                reader.onload = (e) => {
+                    const img = new Image(); img.src = e.target.result;
+                    img.onload = () => {
+                        const canvas = document.createElement('canvas');
+                        let w = img.width, h = img.height;
+                        if (w > maxWidth) { h = (h * maxWidth) / w; w = maxWidth; }
+                        canvas.width = w; canvas.height = h;
+                        const ctx = canvas.getContext('2d'); ctx.drawImage(img, 0, 0, w, h);
+                        canvas.toBlob(resolve, 'image/jpeg', quality);
+                    };
+                };
+            });
+        };
 
         // STATE GLOBAL (3 CẤP)
         let currentCourseId = null;
@@ -523,21 +540,68 @@
         // --- EDIT BASIC INFO (MODAL 1 - UPDATED) ---
         // BƯỚC 2: Thay thế 2 hàm này trong thẻ <script>
 // --- HÀM XỬ LÝ ẢNH BÌA (THÊM MỚI ĐỂ SỬA LỖI) ---
-        window.handleThumbUpload = (input) => {
+        // --- HÀM XỬ LÝ ẢNH BÌA (THÊM MỚI ĐỂ SỬA LỖI) ---
+        // --- HÀM TẢI ẢNH BÌA LÊN CLOUDFLARE R2 (CẬP NHẬT TỪ DASHBOARD) ---
+        window.handleThumbUpload = async (input) => {
             const file = input.files[0];
             if (!file) return;
 
-            // 1. Hiển thị ảnh xem trước ngay lập tức (dùng Blob URL)
-            const previewUrl = URL.createObjectURL(file);
-            document.getElementById('previewThumb').src = previewUrl;
-            
-            // 2. Ẩn trạng thái trống, hiện khung ảnh
-            document.getElementById('thumbPreviewBox').classList.remove('hidden');
-            document.getElementById('thumbEmptyState').classList.add('hidden');
+            // 1. Hiển thị trạng thái đang tải (Loading UI)
+            const previewBox = document.getElementById('thumbPreviewBox');
+            const emptyState = document.getElementById('thumbEmptyState');
+            const previewImg = document.getElementById('previewThumb');
+            const originalEmptyContent = emptyState.innerHTML;
 
-            // 3. Gán giá trị vào ô input ẩn để hàm Lưu (saveCourseBasic) đọc được
-            // Lưu ý: Hiện tại đây là link tạm. Để lưu vĩnh viễn, bạn cần tích hợp thêm Firebase Storage.
-            document.getElementById('cThumb').value = previewUrl;
+            emptyState.innerHTML = `
+                <div class="py-6 flex flex-col items-center text-brand">
+                    <i class="fa-solid fa-spinner fa-spin text-3xl mb-2"></i>
+                    <span class="font-bold text-xs uppercase tracking-widest">Đang tải lên Cloud...</span>
+                </div>`;
+
+            try {
+                // 2. Nén ảnh (Giới hạn rộng 1280px, chất lượng 0.9)
+                const compressedBlob = await window.compressImage(file, 0.9, 1280);
+
+                // 3. Đặt tên file khoa học: courses/Năm/Tháng/timestamp_tên-file
+                const now = new Date();
+                const year = now.getFullYear();
+                const month = String(now.getMonth() + 1).padStart(2, '0');
+                const timestamp = now.getTime();
+                const cleanName = file.name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, '_').replace(/[^a-zA-Z0-9._-]/g, '');
+                const fileName = `courses/${year}/${month}/${timestamp}_${cleanName}`;
+
+                // 4. Chuẩn bị FormData gửi lên Worker
+                const formData = new FormData();
+                formData.append('file', compressedBlob, fileName);
+
+                // 5. Gửi lên Cloudflare Worker (Dùng URL từ Dashboard của bạn)
+                const res = await fetch("https://upload-helper.phamngockhanh-942001.workers.dev/", {
+                    method: 'PUT',
+                    body: formData
+                });
+
+                if (!res.ok) throw new Error("Lỗi Server Cloudflare: " + res.statusText);
+
+                const data = await res.json();
+                const finalUrl = data.url;
+
+                if (!finalUrl) throw new Error("Không nhận được URL ảnh từ Server.");
+
+                // 6. Hiển thị ảnh và Lưu link vào CSDL Firestore
+                previewImg.src = finalUrl;
+                document.getElementById('cThumb').value = finalUrl; // Lưu URL này vào Firestore
+                
+                previewBox.classList.remove('hidden');
+                emptyState.classList.add('hidden');
+                window.showToast("Đã tải ảnh bìa lên thành công!");
+
+            } catch (e) {
+                console.error("Lỗi upload:", e);
+                window.showToast("Lỗi: " + e.message, "error");
+                emptyState.innerHTML = originalEmptyContent; // Trả lại giao diện ban đầu nếu lỗi
+            } finally {
+                input.value = ''; // Reset input file
+            }
         };
 // Hàm tải dữ liệu lên form sửa
 window.editCourse = async (id) => {
