@@ -660,7 +660,7 @@ window.saveCourseBasic = async () => {
             await setDoc(doc(collection(db, "public_courses")), data); 
         }
         window.showToast("Đã lưu thiết lập thành công!");
-        window.toggleModal('courseModal', false);
+        window.toggleModal('courseModal', false); // Đảm bảo truyền tham số false
         loadCourses();
     } catch(e) { 
         window.showToast(e.message, 'error'); 
@@ -1045,58 +1045,72 @@ function renderCurriculumTree() {
         };
         
         // --- HÀM ĐÓNG MỞ MODAL CHUẨN ---
+        // --- HÀM ĐÓNG MỞ MODAL CHUẨN ---
         window.toggleModal = (id, show) => {
             const el = document.getElementById(id);
             if (!el) return;
-            // Nếu không truyền show, tự động đảo ngược trạng thái hidden
-            const isHidden = (show === undefined) ? el.classList.contains('hidden') : !show;
             
-            if (!isHidden) {
+            // Logic xử lý tham số show linh hoạt
+            let shouldShow;
+            if (show === undefined) {
+                shouldShow = el.classList.contains('hidden');
+            } else {
+                shouldShow = !!show;
+            }
+            
+            if (shouldShow) {
                 el.classList.remove('hidden');
                 document.body.classList.add('modal-active');
             } else {
                 el.classList.add('hidden');
                 document.body.classList.remove('modal-active');
+                // Reset ID khóa học khi đóng modal để tránh nhầm lẫn giữa thêm và sửa
+                if(id === 'courseModal') document.getElementById('courseId').value = '';
             }
         };
         window.closeCurriculumModal = () => window.customConfirm("Đóng mà không lưu?", () => document.getElementById('curriculumModal').classList.add('hidden'));
-       window.deleteCourse = (id) => window.customConfirm("Bạn có chắc chắn muốn xóa khóa học này và toàn bộ ảnh banner trên R2?", async () => {
+       window.deleteCourse = (id) => window.customConfirm("Hành động này sẽ xóa vĩnh viễn khóa học và ảnh banner trên R2. Bạn có chắc chắn không?", async () => {
             const btn = document.querySelector(`button[onclick="window.deleteCourse('${id}')"]`);
+            const originalContent = btn ? btn.innerHTML : '';
             if(btn) btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
 
             try {
-                // 1. Lấy thông tin URL ảnh bìa từ Firestore trước khi xóa document
+                // 1. Lấy thông tin khóa học trước khi xóa để lấy URL ảnh bìa
                 const courseRef = doc(db, "public_courses", id);
                 const courseSnap = await getDoc(courseRef);
                 let bannerUrl = null;
                 
                 if (courseSnap.exists()) {
-                    bannerUrl = courseSnap.data().thumbnail; // Lấy URL ảnh để xóa trên R2
+                    bannerUrl = courseSnap.data().thumbnail;
                 }
 
-                // 2. Thực hiện xóa dữ liệu văn bản trên Firestore
+                // 2. Xóa các bản ghi liên quan trong Firestore (Batch)
                 const batch = writeBatch(db);
-                batch.delete(courseRef);
+                batch.delete(courseRef); // Xóa chính khóa học
+
+                // Xóa đơn hàng
                 const qOrder = query(collection(db, "orders"), where("courseId", "==", id));
                 const snapOrder = await getDocs(qOrder);
-                snapOrder.forEach(doc => batch.delete(doc.ref));
+                snapOrder.forEach(d => batch.delete(d.ref));
+
+                // Xóa tiến độ học tập
                 const qProgress = query(collection(db, "user_progress"), where("courseId", "==", id));
                 const snapProgress = await getDocs(qProgress);
-                snapProgress.forEach(doc => batch.delete(doc.ref));
+                snapProgress.forEach(d => batch.delete(d.ref));
 
                 await batch.commit();
 
-                // 3. Sau khi Firestore xóa xong, tiến hành xóa file ảnh vật lý trên Cloudflare R2
-                if (bannerUrl && bannerUrl.includes('phamngockhanh-942001.workers.dev')) {
+                // 3. Xóa file ảnh vật lý trên Cloudflare R2
+                if (bannerUrl && bannerUrl.startsWith('http')) {
                     await window.deleteFileFromR2(bannerUrl);
                 }
 
-                window.showToast("Đã xóa hoàn toàn khóa học và dữ liệu rác!");
+                window.showToast("Đã xóa sạch dữ liệu khóa học và ảnh banner!");
                 loadCourses();
             } catch (e) {
                 console.error("Lỗi khi xóa:", e);
                 window.showToast("Lỗi: " + e.message, "error");
-                loadCourses();
+                if(btn) btn.innerHTML = originalContent;
             }
         });
         // Hàm phụ trợ: Xóa file trên Storage dựa vào URL
