@@ -553,32 +553,21 @@
             });
         }
 
-        // --- EDIT BASIC INFO (MODAL 1 - UPDATED) ---
-        // BƯỚC 2: Thay thế 2 hàm này trong thẻ <script>
-// --- HÀM XỬ LÝ ẢNH BÌA (THÊM MỚI ĐỂ SỬA LỖI) ---
-        // --- HÀM XỬ LÝ ẢNH BÌA (THÊM MỚI ĐỂ SỬA LỖI) ---
-        // --- HÀM TẢI ẢNH BÌA LÊN CLOUDFLARE R2 (CẬP NHẬT TỪ DASHBOARD) ---
+
+        // --- HÀM TẢI ẢNH BÌA LÊN CLOUDFLARE R2 ---
         window.handleThumbUpload = async (input) => {
             const file = input.files[0];
             if (!file) return;
 
-            // 1. Hiển thị trạng thái đang tải (Loading UI)
             const previewBox = document.getElementById('thumbPreviewBox');
             const emptyState = document.getElementById('thumbEmptyState');
             const previewImg = document.getElementById('previewThumb');
             const originalEmptyContent = emptyState.innerHTML;
 
-            emptyState.innerHTML = `
-                <div class="py-6 flex flex-col items-center text-brand">
-                    <i class="fa-solid fa-spinner fa-spin text-3xl mb-2"></i>
-                    <span class="font-bold text-xs uppercase tracking-widest">Đang tải lên Cloud...</span>
-                </div>`;
+            emptyState.innerHTML = `<div class="py-6 flex flex-col items-center text-brand"><i class="fa-solid fa-spinner fa-spin text-3xl mb-2"></i><span class="font-bold text-xs uppercase tracking-widest">Đang tải lên...</span></div>`;
 
             try {
-                // 2. Nén ảnh (Giới hạn rộng 1280px, chất lượng 0.9)
                 const compressedBlob = await window.compressImage(file, 0.9, 1280);
-
-                // 3. Đặt tên file khoa học: courses/Năm/Tháng/timestamp_tên-file
                 const now = new Date();
                 const year = now.getFullYear();
                 const month = String(now.getMonth() + 1).padStart(2, '0');
@@ -586,48 +575,27 @@
                 const cleanName = file.name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, '_').replace(/[^a-zA-Z0-9._-]/g, '');
                 const fileName = `courses/${year}/${month}/${timestamp}_${cleanName}`;
 
-                // 4. Chuẩn bị FormData gửi lên Worker
                 const formData = new FormData();
                 formData.append('file', compressedBlob, fileName);
 
-                // 5. Gửi lên Cloudflare Worker (Dùng URL từ Dashboard của bạn)
                 const res = await fetch("https://upload-helper.phamngockhanh-942001.workers.dev/", {
                     method: 'PUT',
                     body: formData
                 });
 
-                if (!res.ok) throw new Error("Lỗi Server Cloudflare: " + res.statusText);
+                if (!res.ok) throw new Error("Lỗi Server Cloudflare");
 
                 const data = await res.json();
                 const finalUrl = data.url;
 
-                if (!finalUrl) throw new Error("Không nhận được URL ảnh từ Server.");
-
-                // Kiểm tra và xóa ảnh cũ trên Cloudflare R2 nếu tồn tại
-                const currentThumbUrl = document.getElementById('cThumb').value;
-                if (currentThumbUrl && currentThumbUrl.startsWith('http') && currentThumbUrl !== finalUrl) {
-                    await window.deleteFileFromR2(currentThumbUrl);
+                // [SỬA LỖI TẠI ĐÂY] Đổi tên biến tránh lỗi "already declared"
+                const previousUrl = document.getElementById('cThumb').value;
+                if (previousUrl && previousUrl.startsWith('http') && previousUrl !== finalUrl) {
+                    await window.deleteFileFromR2(previousUrl);
                 }
 
-                // Hiển thị ảnh và gán URL mới vào input ẩn để lưu Firestore
                 previewImg.src = finalUrl;
                 document.getElementById('cThumb').value = finalUrl;
-                
-                previewBox.classList.remove('hidden');
-                emptyState.classList.add('hidden');
-                window.showToast("Đã tải ảnh bìa lên thành công!");
-                // ------------------------------------------------------
-
-                // 6. Xóa ảnh cũ trên R2 nếu có (Tránh rác dữ liệu)
-                const oldUrl = document.getElementById('cThumb').value;
-                if (oldUrl && oldUrl !== finalUrl) {
-                    await window.deleteFileFromR2(oldUrl);
-                }
-
-                // 7. Hiển thị ảnh và Lưu link vào CSDL Firestore
-                previewImg.src = finalUrl;
-                document.getElementById('cThumb').value = finalUrl; 
-                
                 previewBox.classList.remove('hidden');
                 emptyState.classList.add('hidden');
                 window.showToast("Đã tải ảnh bìa lên thành công!");
@@ -635,9 +603,9 @@
             } catch (e) {
                 console.error("Lỗi upload:", e);
                 window.showToast("Lỗi: " + e.message, "error");
-                emptyState.innerHTML = originalEmptyContent; // Trả lại giao diện ban đầu nếu lỗi
+                emptyState.innerHTML = originalEmptyContent;
             } finally {
-                input.value = ''; // Reset input file
+                input.value = '';
             }
         };
 // Hàm tải dữ liệu lên form sửa
@@ -1076,64 +1044,58 @@ function renderCurriculumTree() {
             finally { btn.innerHTML = '<i class="fa-solid fa-save mr-2"></i> LƯU GIÁO ÁN'; }
         };
         
-        // --- HÀM ĐÓNG MỞ MODAL ---
+        // --- HÀM ĐÓNG MỞ MODAL CHUẨN ---
         window.toggleModal = (id, show) => {
             const el = document.getElementById(id);
             if (!el) return;
+            // Nếu không truyền show, tự động đảo ngược trạng thái hidden
             const isHidden = (show === undefined) ? el.classList.contains('hidden') : !show;
             
             if (!isHidden) {
                 el.classList.remove('hidden');
                 document.body.classList.add('modal-active');
-                // Nếu là courseModal, reset form khi thêm mới
-                if (id === 'courseModal' && !document.getElementById('courseId').value) {
-                    document.getElementById('modalTitle').innerText = "Thêm Khóa Học Mới";
-                }
             } else {
                 el.classList.add('hidden');
                 document.body.classList.remove('modal-active');
             }
         };
         window.closeCurriculumModal = () => window.customConfirm("Đóng mà không lưu?", () => document.getElementById('curriculumModal').classList.add('hidden'));
-       window.deleteCourse = (id) => window.customConfirm("CẢNH BÁO: Hành động này sẽ xóa vĩnh viễn dữ liệu trên Firestore và Ảnh Banner trên Cloudflare R2.\nBạn có chắc chắn không?", async () => {
+       window.deleteCourse = (id) => window.customConfirm("Bạn có chắc chắn muốn xóa khóa học này và toàn bộ ảnh banner trên R2?", async () => {
             const btn = document.querySelector(`button[onclick="window.deleteCourse('${id}')"]`);
             if(btn) btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
 
             try {
-                // 1. Lấy dữ liệu khóa học hiện tại để tìm link ảnh Banner trước khi xóa
+                // 1. Lấy thông tin URL ảnh bìa từ Firestore trước khi xóa document
                 const courseRef = doc(db, "public_courses", id);
                 const courseSnap = await getDoc(courseRef);
                 let bannerUrl = null;
                 
                 if (courseSnap.exists()) {
-                    bannerUrl = courseSnap.data().thumbnail;
+                    bannerUrl = courseSnap.data().thumbnail; // Lấy URL ảnh để xóa trên R2
                 }
 
-                // 2. Xóa dữ liệu trong Firestore (Dùng Batch để đảm bảo sạch sẽ)
+                // 2. Thực hiện xóa dữ liệu văn bản trên Firestore
                 const batch = writeBatch(db);
                 batch.delete(courseRef);
-
                 const qOrder = query(collection(db, "orders"), where("courseId", "==", id));
                 const snapOrder = await getDocs(qOrder);
                 snapOrder.forEach(doc => batch.delete(doc.ref));
-
                 const qProgress = query(collection(db, "user_progress"), where("courseId", "==", id));
                 const snapProgress = await getDocs(qProgress);
                 snapProgress.forEach(doc => batch.delete(doc.ref));
 
-                // Thực thi xóa các bản ghi văn bản
                 await batch.commit();
 
-                // 3. Sau khi xóa DB thành công, tiến hành xóa file ảnh Banner trên Cloudflare R2
-                if (bannerUrl) {
+                // 3. Sau khi Firestore xóa xong, tiến hành xóa file ảnh vật lý trên Cloudflare R2
+                if (bannerUrl && bannerUrl.includes('phamngockhanh-942001.workers.dev')) {
                     await window.deleteFileFromR2(bannerUrl);
                 }
 
-                window.showToast("Đã xóa hoàn toàn khóa học và tệp tin đi kèm!");
+                window.showToast("Đã xóa hoàn toàn khóa học và dữ liệu rác!");
                 loadCourses();
             } catch (e) {
                 console.error("Lỗi khi xóa:", e);
-                window.showToast("Có lỗi khi dọn dẹp dữ liệu: " + e.message, "error");
+                window.showToast("Lỗi: " + e.message, "error");
                 loadCourses();
             }
         });
