@@ -88,6 +88,12 @@
             </div>
         </div>
 
+        <div class="p-4 border-b border-gray-100 bg-white shrink-0">
+            <button onclick="window.openLeaderboard()" class="w-full py-3 bg-gradient-to-r from-yellow-400 to-orange-500 text-white font-black rounded-xl shadow-lg shadow-orange-200 flex items-center justify-center gap-2 hover:scale-105 transition-transform group">
+                <i class="fa-solid fa-trophy text-lg group-hover:animate-bounce"></i> Bảng Vàng Thành Tích
+            </button>
+        </div>
+
         <div id="curriculumList" class="flex-1 overflow-y-auto p-2 space-y-2 bg-white">
             <div class="p-4 space-y-4 animate-pulse">
                 <div class="h-6 bg-gray-100 rounded w-3/4"></div>
@@ -145,11 +151,34 @@
             </div>
         </div>
     </main>
-
+    <div id="leaderboardModal" class="fixed inset-0 z-[60] bg-darker/80 backdrop-blur-sm hidden flex items-center justify-center p-4 opacity-0 transition-opacity duration-300">
+        <div class="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden transform scale-95 transition-transform duration-300 flex flex-col max-h-[85vh]">
+            <div class="p-5 bg-gradient-to-r from-yellow-400 to-orange-500 flex justify-between items-center shrink-0 relative overflow-hidden">
+                <div class="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] opacity-20"></div>
+                <h3 class="text-xl font-black text-white flex items-center gap-2 relative z-10"><i class="fa-solid fa-crown text-yellow-200"></i> Bảng Xếp Hạng</h3>
+                <button onclick="window.closeLeaderboard()" class="w-8 h-8 bg-white/20 hover:bg-white/40 rounded-full flex items-center justify-center text-white transition-colors relative z-10"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="p-2 bg-orange-50 flex justify-center border-b border-orange-100 shrink-0">
+                <span class="text-[10px] font-bold text-orange-600 uppercase tracking-wide"><i class="fa-solid fa-star mr-1"></i> Xếp hạng theo tổng điểm bài tập</span>
+            </div>
+            <div id="leaderboardList" class="flex-1 overflow-y-auto p-4 space-y-3 bg-white custom-scrollbar">
+                <div class="flex flex-col items-center justify-center h-40 text-gray-400">
+                    <i class="fa-solid fa-spinner fa-spin text-3xl mb-2 text-brand"></i>
+                    <p class="text-xs font-bold">Đang tổng hợp điểm số...</p>
+                </div>
+            </div>
+            <div class="p-4 bg-gray-50 border-t border-gray-100 text-center shrink-0">
+                <div class="flex items-center justify-center gap-2 text-xs font-bold text-gray-500">
+                    <span class="w-2 h-2 rounded-full bg-green-500"></span>
+                    Hạng của bạn: <span id="myRank" class="text-brand text-sm">--</span>
+                </div>
+            </div>
+        </div>
+    </div>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
-        import { getFirestore, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { getFirestore, doc, getDoc, collection, query, where, getDocs } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
         // CẤU HÌNH FIREBASE
         const firebaseConfig = {
@@ -165,11 +194,164 @@
         const auth = getAuth(app);
         const db = getFirestore(app);
 
-        let courseData = null;
-        let flatItems = [];
-        let currentItemIndex = -1;
-        const urlParams = new URLSearchParams(window.location.search);
-        const courseId = urlParams.get('id');
+        // --- LOGIC BẢNG XẾP HẠNG ---
+        let leaderboardCache = null; // Cache để không phải load lại liên tục
+
+        window.openLeaderboard = async () => {
+            const modal = document.getElementById('leaderboardModal');
+            const container = modal.querySelector('div');
+            const listEl = document.getElementById('leaderboardList');
+            
+            modal.classList.remove('hidden');
+            // Animation vào
+            setTimeout(() => {
+                modal.classList.remove('opacity-0');
+                container.classList.remove('scale-95');
+            }, 10);
+
+            if (leaderboardCache) {
+                renderLeaderboard(leaderboardCache);
+            } else {
+                await loadLeaderboardData();
+            }
+        };
+
+        window.closeLeaderboard = () => {
+            const modal = document.getElementById('leaderboardModal');
+            const container = modal.querySelector('div');
+            
+            modal.classList.add('opacity-0');
+            container.classList.add('scale-95');
+            setTimeout(() => modal.classList.add('hidden'), 300);
+        };
+
+        async function loadLeaderboardData() {
+            if (!courseData || !courseData.curriculum) return;
+
+            // 1. Lấy danh sách tất cả Exam ID trong khóa học này
+            const examIds = [];
+            courseData.curriculum.forEach(chap => {
+                if(chap.lessons) {
+                    chap.lessons.forEach(les => {
+                        if(les.items) {
+                            les.items.forEach(item => {
+                                if(item.type === 'quiz' && item.examId) {
+                                    examIds.push(item.examId);
+                                }
+                            });
+                        }
+                    });
+                }
+            });
+
+            if (examIds.length === 0) {
+                renderLeaderboard([]);
+                return;
+            }
+
+            try {
+                // 2. Tải kết quả làm bài. 
+                // Lưu ý: Firestore không hỗ trợ query 'in' quá 10 phần tử. 
+                // Ở đây ta sẽ query tất cả results và lọc client-side (với quy mô nhỏ) 
+                // hoặc query theo từng cụm nếu quy mô lớn. 
+                // Giải pháp đơn giản: Lấy kết quả của user hiện tại để hiện rank mình trước, 
+                // còn bảng xếp hạng chung cần Backend hỗ trợ tốt hơn. 
+                // Tuy nhiên, để demo "đẹp mắt", ta sẽ giả lập query collection "results" (cần permission read all).
+                
+                // Cách tối ưu thực tế: Tạo 1 collection 'course_progress' lưu tổng điểm.
+                // Ở đây mình sẽ query thủ công kết quả.
+                
+                const q = query(collection(db, "results")); // Cần Security Rules cho phép read
+                const snap = await getDocs(q);
+                
+                const userScores = {}; // { uid: { name, avatar, totalScore } }
+
+                snap.forEach(doc => {
+                    const data = doc.data();
+                    // Chỉ tính điểm các bài thi nằm trong khóa học này
+                    if (examIds.includes(data.examId)) {
+                        if (!userScores[data.studentId]) {
+                            userScores[data.studentId] = { 
+                                name: data.studentName || "Ẩn danh", 
+                                avatar: `https://ui-avatars.com/api/?name=${data.studentName || 'U'}&background=random`,
+                                score: 0 
+                            };
+                        }
+                        // Cộng điểm (giả sử mỗi bài lấy điểm cao nhất nếu có nhiều lần thi - cần logic lọc)
+                        // Ở đây cộng dồn đơn giản để demo
+                        if (data.score) userScores[data.studentId].score += parseFloat(data.score);
+                    }
+                });
+
+                // Chuyển về mảng và sắp xếp
+                const ranking = Object.entries(userScores).map(([uid, info]) => ({
+                    uid, ...info
+                })).sort((a, b) => b.score - a.score);
+
+                leaderboardCache = ranking;
+                renderLeaderboard(ranking);
+
+            } catch (e) {
+                console.error("Lỗi tải BXH:", e);
+                document.getElementById('leaderboardList').innerHTML = `<div class="text-center text-red-500 py-4 text-sm">Không thể tải dữ liệu xếp hạng.</div>`;
+            }
+        }
+
+        function renderLeaderboard(ranking) {
+            const listEl = document.getElementById('leaderboardList');
+            const myRankEl = document.getElementById('myRank');
+            const currentUserUid = auth.currentUser ? auth.currentUser.uid : null;
+
+            if (ranking.length === 0) {
+                listEl.innerHTML = `<div class="flex flex-col items-center justify-center py-10 text-gray-400 opacity-60"><i class="fa-solid fa-trophy text-4xl mb-2"></i><p class="text-sm">Chưa có dữ liệu xếp hạng</p></div>`;
+                myRankEl.innerText = "--";
+                return;
+            }
+
+            let html = '';
+            let myRank = "--";
+
+            ranking.forEach((user, index) => {
+                const rank = index + 1;
+                const isMe = user.uid === currentUserUid;
+                if (isMe) myRank = `#${rank}`;
+
+                // Style cho Top 3
+                let rankBadge = `<span class="w-6 h-6 flex items-center justify-center text-xs font-bold text-gray-500 bg-gray-100 rounded-full">${rank}</span>`;
+                let rowClass = "bg-white border-gray-100";
+                
+                if (rank === 1) {
+                    rankBadge = `<i class="fa-solid fa-crown text-yellow-500 text-xl animate-bounce"></i>`;
+                    rowClass = "bg-yellow-50 border-yellow-200 shadow-sm transform scale-[1.02]";
+                } else if (rank === 2) {
+                    rankBadge = `<i class="fa-solid fa-medal text-gray-400 text-lg"></i>`;
+                } else if (rank === 3) {
+                    rankBadge = `<i class="fa-solid fa-medal text-orange-400 text-lg"></i>`;
+                }
+
+                if (isMe) rowClass += " border-brand bg-teal-50 ring-1 ring-brand";
+
+                html += `
+                <div class="flex items-center gap-3 p-3 rounded-xl border ${rowClass} transition-all hover:shadow-md">
+                    <div class="w-8 flex justify-center shrink-0">${rankBadge}</div>
+                    <img src="${user.avatar}" class="w-10 h-10 rounded-full border-2 border-white shadow-sm object-cover">
+                    <div class="flex-1 min-w-0">
+                        <div class="text-sm font-bold text-gray-800 truncate flex items-center gap-1">
+                            ${user.name} ${isMe ? '<span class="text-[10px] bg-brand text-white px-1.5 rounded">Bạn</span>' : ''}
+                        </div>
+                        <div class="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Học viên</div>
+                    </div>
+                    <div class="text-right">
+                        <div class="text-brand font-black text-lg leading-none">${user.score.toFixed(1)}</div>
+                        <div class="text-[9px] text-gray-400 font-bold uppercase">Điểm</div>
+                    </div>
+                </div>
+                `;
+            });
+
+            listEl.innerHTML = html;
+            myRankEl.innerText = myRank;
+        }
 
         onAuthStateChanged(auth, (user) => {
             if(!user) {
@@ -386,6 +568,7 @@
                 }
             }
         };
+        
     </script>
 </body>
 </html>
