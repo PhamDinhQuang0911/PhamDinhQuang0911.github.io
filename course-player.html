@@ -527,39 +527,51 @@
             // YT.PlayerState.PLAYING = 1
             if (event.data == YT.PlayerState.PLAYING) {
                 timerInterval = setInterval(async () => {
-                    const currentTime = player.getCurrentTime();
-                    
-                    if(!isVideoCompleted) {
-                        watchedSeconds++;
-                        updateTimerUI();
-                        if (watchedSeconds >= requiredSeconds) {
-                            clearInterval(timerInterval);
-                            isVideoCompleted = true;
-                            
-                            // 1. Ghi nhận hoàn thành vào Firestore trước
-                            await markAsCompleted(currentItemIndex);
-                            
-                            // 2. Hiện thông báo (Bây giờ hàm này đã tồn tại nên sẽ không lỗi)
-                            window.showToast("Đã đủ thời gian tối thiểu! Bài tiếp theo đã mở khóa.", "success");
-                            
-                            // 3. Cập nhật giao diện làm sáng bài mới ngay lập tức
-                            updateStats(); 
-                            updateNavButtons();
+                    try {
+                        const currentTime = player.getCurrentTime();
+                        
+                        if(!isVideoCompleted) {
+                            watchedSeconds++;
+                            updateTimerUI();
+                            if (watchedSeconds >= requiredSeconds) {
+                                clearInterval(timerInterval);
+                                isVideoCompleted = true;
+                                
+                                // Ghi nhận hoàn thành và cộng QPoint
+                                await markAsCompleted(currentItemIndex);
+                                
+                                // Cập nhật giao diện mở khóa ngay lập tức
+                                updateStats(); 
+                                updateNavButtons();
+                            }
                         }
-                    }
 
-                    if (watchedSeconds % 5 === 0) {
-                        saveCurrentPlayback(currentTime, watchedSeconds);
+                        // Lưu vị trí xem mỗi 5 giây
+                        if (watchedSeconds % 5 === 0) {
+                            saveCurrentPlayback(currentTime, watchedSeconds);
+                        }
+                    } catch (e) {
+                        console.error("Lỗi trong timer:", e);
                     }
                 }, 1000);
             } 
+            // YT.PlayerState.ENDED = 0
             else if (event.data == YT.PlayerState.ENDED) {
                 if(timerInterval) clearInterval(timerInterval);
+                
                 if (isVideoCompleted) {
                     if (currentItemIndex < flatItems.length - 1) {
                         window.showToast("Đang chuyển sang bài tiếp theo...", "success");
                         setTimeout(() => window.playItem(currentItemIndex + 1), 2000);
+                    } else {
+                        window.showToast("Chúc mừng! Bạn đã hoàn thành toàn bộ bài giảng.", "success");
+                        if(document.getElementById('videoCompletedOverlay')) {
+                            document.getElementById('videoCompletedOverlay').classList.remove('hidden');
+                        }
                     }
+                } else {
+                    const remain = Math.ceil((requiredSeconds - watchedSeconds) / 60);
+                    alert(`Thầy yêu cầu bạn xem thêm ít nhất ${remain} phút nữa mới có thể hoàn thành bài này.`);
                 }
             } else {
                 if(timerInterval) clearInterval(timerInterval);
