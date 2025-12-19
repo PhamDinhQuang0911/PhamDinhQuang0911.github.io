@@ -324,7 +324,7 @@
     <script type="module">
         import { initializeApp, deleteApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getAuth, onAuthStateChanged, signOut, createUserWithEmailAndPassword, updateProfile, updatePassword } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
-        import { getFirestore, doc, getDoc, setDoc, collection, addDoc, query, where, getDocs, updateDoc, deleteDoc, arrayUnion, limit } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { getFirestore, doc, getDoc, setDoc, collection, addDoc, query, where, getDocs, updateDoc, deleteDoc, arrayUnion, limit, enableIndexedDbPersistence } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
         import { getStorage, ref, deleteObject } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js";
         import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-functions.js";
 
@@ -341,8 +341,18 @@
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
         const db = getFirestore(app);
+        const db = getFirestore(app);
         const storage = getStorage(app);
         const functions = getFunctions(app);
+
+        // --- KÍCH HOẠT CACHE OFFLINE (TĂNG TỐC ĐỘ TẢI LẠI TRANG) ---
+        enableIndexedDbPersistence(db).catch((err) => {
+            if (err.code == 'failed-precondition') {
+                console.log('Lỗi: Đang mở quá nhiều tab (Chỉ 1 tab được dùng cache).');
+            } else if (err.code == 'unimplemented') {
+                console.log('Trình duyệt này không hỗ trợ cache offline (Sẽ dùng chế độ Online).');
+            }
+        });
 
         // 2. BIẾN TOÀN CỤC
         let currentUser = null;
@@ -447,17 +457,21 @@
                 currentUser = user;
                 currentUserUid = user.uid;
                 
-                // 1. Cập nhật giao diện tĩnh NGAY LẬP TỨC
+                // 1. Cập nhật giao diện tĩnh NGAY LẬP TỨC (Lấy từ cache trình duyệt nếu có)
                 document.getElementById('sidebarName').textContent = user.displayName || user.email;
                 document.getElementById('sidebarRole').textContent = 'Quản trị viên';
                 const avatarUrl = user.photoURL || `https://ui-avatars.com/api/?name=${user.email}&background=random`;
                 document.getElementById('sidebarAvatar').src = avatarUrl;
                 if(document.getElementById('mobileAvatar')) document.getElementById('mobileAvatar').src = avatarUrl;
 
-                // 2. KÍCH HOẠT TẢI DỮ LIỆU NGẦM (KHÔNG DÙNG AWAIT)
-                // Giao diện sẽ hiện ra ngay, còn dữ liệu sẽ tự điền vào sau
-                loadClasses();      
-                loadFileManager();  
+                // 2. KÍCH HOẠT TẢI DỮ LIỆU SONG SONG
+                // Nhờ Bước 2 (Cache), dữ liệu cũ sẽ hiện lên NGAY LẬP TỨC từ ổ cứng
+                // Sau đó Firebase tự động tải ngầm cái mới về để cập nhật sau
+                const task1 = loadClasses();      
+                const task2 = loadFileManager();  
+                
+                // Đợi load xong để đảm bảo tính đồng bộ (nhưng nhờ cache nên sẽ rất nhanh)
+                await Promise.all([task1, task2]);
                 
                 // 3. Gán sự kiện
                 const createBtn = document.getElementById('createClassBtn');
@@ -971,7 +985,6 @@
             try { await setDoc(doc(db, "site_settings", "payment_config"), data); window.showNotification("Đã lưu cấu hình!", "success"); window.toggleModal('paymentConfigModal', false); } catch(e) { window.showNotification("Lỗi lưu: " + e.message, "error"); }
         };
         
-        // --- LOGIC FILE EXPLORER (GIỮ NGUYÊN) ---
         // --- LOGIC FILE EXPLORER (ĐÃ TỐI ƯU SONG SONG) ---
         async function loadFileManager() { 
             try { 
