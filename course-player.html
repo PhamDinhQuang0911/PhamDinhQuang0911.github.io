@@ -7,6 +7,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
     
     <script>
         tailwind.config = {
@@ -612,13 +613,36 @@
             completedItems.add(itemIndex);
             updateStats();
             
-            // Lưu DB
             const user = auth.currentUser;
             if (!user || !courseId) return;
             const percent = flatItems.length === 0 ? 0 : Math.round((completedItems.size / flatItems.length) * 100);
 
             try {
-                // 1. Lưu chi tiết vào user_progress
+                // 1. Hiệu ứng chúc mừng & Tặng QPoint
+                confetti({
+                    particleCount: 150,
+                    spread: 70,
+                    origin: { y: 0.6 },
+                    colors: ['#0F766E', '#F97316', '#FFD700']
+                });
+
+                const greetings = ["Tuyệt quá!", "Thầy rất tự hào về bạn!", "Nỗ lực tuyệt vời!", "Tiếp tục phát huy nhé!"];
+                const randomMsg = greetings[Math.floor(Math.random() * greetings.length)];
+                
+                // Tặng 10 Qpoint cho mỗi bài học hoàn thành
+                const bonusPoints = 10;
+                window.showToast(`${randomMsg} +${bonusPoints} Qpoint đã được cộng!`, "success");
+
+                // 2. Cập nhật điểm vào hồ sơ User
+                const userRef = doc(db, "users", user.uid);
+                const userSnap = await getDoc(userRef);
+                let currentPoints = 0;
+                if (userSnap.exists()) {
+                    currentPoints = userSnap.data().qPoints || 0;
+                }
+                await updateDoc(userRef, { qPoints: currentPoints + bonusPoints });
+
+                // 3. Lưu tiến độ vào user_progress
                 const progressRef = doc(db, "user_progress", `${user.uid}_${courseId}`);
                 await setDoc(progressRef, {
                     uid: user.uid,
@@ -628,13 +652,13 @@
                     lastUpdated: new Date().toISOString()
                 }, { merge: true });
 
-                // 2. Cập nhật vào orders (để hiển thị bên ngoài list khóa học)
+                // 4. Cập nhật vào orders
                 const qOrder = query(collection(db, "orders"), where("userId", "==", user.uid), where("courseId", "==", courseId));
                 const snapOrder = await getDocs(qOrder);
                 if (!snapOrder.empty) {
                     await updateDoc(doc(db, "orders", snapOrder.docs[0].id), { progress: percent });
                 }
-            } catch (e) { console.error("Lỗi lưu:", e); }
+            } catch (e) { console.error("Lỗi lưu tiến độ/điểm:", e); }
         }
 
         function updateStats() {
@@ -677,12 +701,34 @@
             try {
                 const progressRef = doc(db, "user_progress", `${user.uid}_${courseId}`);
                 const snap = await getDoc(progressRef);
+                
                 if (snap.exists()) {
                     const data = snap.data();
                     if (data.completedItems) completedItems = new Set(data.completedItems);
                     updateStats();
+
+                    // --- [RẢNH TAY] Tự động tìm bài đang học dở hoặc bài mới nhất ---
+                    if (flatItems.length > 0) {
+                        let resumeIndex = 0;
+                        // Tìm bài đầu tiên chưa hoàn thành
+                        for (let i = 0; i < flatItems.length; i++) {
+                            if (!completedItems.has(i)) {
+                                resumeIndex = i;
+                                break;
+                            }
+                        }
+                        
+                        // Nếu đã xong hết thì về bài cuối
+                        if (completedItems.size === flatItems.length) resumeIndex = flatItems.length - 1;
+
+                        window.showToast("Đang khôi phục bài học dở của bạn...", "info");
+                        setTimeout(() => window.playItem(resumeIndex), 1000);
+                    }
+                } else {
+                    // Nếu chưa có tiến độ (mới học lần đầu), mở bài 1
+                    if (flatItems.length > 0) window.playItem(0);
                 }
-            } catch (e) {}
+            } catch (e) { console.error("Lỗi Resume:", e); }
         }
         
         // --- HELPER UI ---
