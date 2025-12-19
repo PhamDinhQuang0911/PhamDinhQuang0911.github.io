@@ -58,43 +58,54 @@
     </div>
 
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
+        <div class="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 mb-8">
             <div>
                 <h1 class="text-2xl font-extrabold text-gray-800">Quản lý Khóa học</h1>
-                <p class="text-gray-500 text-sm mt-1">Hệ thống quản lý nội dung học tập E-Learning</p>
+                <p class="text-gray-500 text-sm mt-1">Hệ thống quản lý nội dung học tập</p>
             </div>
-            <div class="flex gap-3">
-                <button onclick="window.openVoucherManager()" class="bg-white text-orange-600 border border-orange-100 px-5 py-2.5 rounded-xl hover:bg-orange-50 shadow-lg shadow-orange-100 font-bold transition-all flex items-center gap-2 transform hover:-translate-y-0.5">
-                    <i class="fa-solid fa-ticket"></i> Quản lý Voucher
+            
+            <div class="flex flex-wrap gap-2 w-full md:w-auto">
+                <div class="bg-white p-1 rounded-xl border border-gray-200 shadow-sm flex mr-2">
+                    <button onclick="window.switchCourseView('list')" id="btn-view-list" class="p-2.5 rounded-lg text-brand bg-teal-50 transition-all w-10 h-10 flex items-center justify-center"><i class="fa-solid fa-list"></i></button>
+                    <button onclick="window.switchCourseView('grid')" id="btn-view-grid" class="p-2.5 rounded-lg text-gray-400 hover:text-brand transition-all w-10 h-10 flex items-center justify-center"><i class="fa-solid fa-border-all"></i></button>
+                </div>
+
+                <button onclick="window.openVoucherManager()" class="flex-1 md:flex-none bg-white text-orange-600 border border-orange-100 px-4 py-2.5 rounded-xl hover:bg-orange-50 shadow-sm font-bold text-sm flex items-center justify-center gap-2 whitespace-nowrap">
+                    <i class="fa-solid fa-ticket"></i> <span class="hidden sm:inline">Voucher</span>
                 </button>
-                <button onclick="window.toggleModal('courseModal')" class="bg-brand text-white px-5 py-2.5 rounded-xl hover:bg-teal-800 shadow-lg shadow-teal-700/20 font-bold transition-all flex items-center gap-2 transform hover:-translate-y-0.5">
-                    <i class="fa-solid fa-plus"></i> Thêm khóa học
+                <button onclick="window.toggleModal('courseModal')" class="flex-1 md:flex-none bg-brand text-white px-4 py-2.5 rounded-xl hover:bg-teal-800 shadow-lg shadow-teal-700/20 font-bold text-sm flex items-center justify-center gap-2 whitespace-nowrap">
+                    <i class="fa-solid fa-plus"></i> Thêm mới
                 </button>
             </div>
         </div>
 
-        <div class="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+        <div id="viewListContainer" class="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
             <div class="overflow-x-auto">
                 <table class="w-full text-left border-collapse">
                     <thead>
                         <tr class="bg-gray-50 border-b border-gray-200 text-xs uppercase text-gray-500 font-bold">
                             <th class="p-4 w-20">Ảnh</th>
                             <th class="p-4">Tên khóa học</th>
-                            <th class="p-4">Cấu trúc</th>
-                            <th class="p-4 text-center">Học viên</th>
+                            <th class="p-4 whitespace-nowrap">Cấu trúc</th>
+                            <th class="p-4 text-center whitespace-nowrap">Học viên</th>
                             <th class="p-4 text-right">Hành động</th>
                         </tr>
                     </thead>
-                    <tbody id="courseListTable" class="text-sm">
-                        <tr><td colspan="5" class="p-8 text-center text-gray-400"><i class="fa-solid fa-spinner fa-spin mr-2"></i> Đang tải dữ liệu...</td></tr>
-                    </tbody>
+                    <tbody id="courseListTable" class="text-sm"></tbody>
                 </table>
             </div>
         </div>
+
+        <div id="viewGridContainer" class="hidden grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6"></div>
+        
+        <div id="mainLoading" class="text-center py-12 text-gray-400 hidden">
+            <i class="fa-solid fa-spinner fa-spin text-2xl mb-2"></i>
+            <p>Đang tải dữ liệu...</p>
+        </div>
     </div>
 
-    <div id="courseModal" class="modal hidden fixed inset-0 z-50 flex items-center justify-center bg-gray-900/60 backdrop-blur-md p-4 transition-all">
-        <div class="bg-white w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+    <div id="courseModal" class="modal hidden fixed inset-0 z-50 flex items-end md:items-center justify-center bg-gray-900/60 backdrop-blur-md sm:p-4 transition-all">
+        <div class="bg-white w-full md:max-w-2xl h-full md:h-auto md:max-h-[90vh] md:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden flex flex-col">
             <div class="px-8 py-5 border-b border-gray-100 flex justify-between items-center bg-white sticky top-0 z-10">
                 <div>
                     <h3 class="font-extrabold text-gray-800 text-xl" id="modalTitle">Thiết lập Khóa học</h3>
@@ -417,42 +428,110 @@
             }
         });
 
+        let courseViewMode = 'list'; // Mặc định
+        let cachedCourses = []; // Cache dữ liệu để chuyển view không cần load lại
+
+        window.switchCourseView = (mode) => {
+            courseViewMode = mode;
+            // Update UI nút bấm
+            const btnList = document.getElementById('btn-view-list');
+            const btnGrid = document.getElementById('btn-view-grid');
+            
+            if(mode === 'list') {
+                btnList.className = "p-2.5 rounded-lg text-brand bg-teal-50 transition-all w-10 h-10 flex items-center justify-center";
+                btnGrid.className = "p-2.5 rounded-lg text-gray-400 hover:text-brand transition-all w-10 h-10 flex items-center justify-center";
+                document.getElementById('viewListContainer').classList.remove('hidden');
+                document.getElementById('viewGridContainer').classList.add('hidden');
+            } else {
+                btnGrid.className = "p-2.5 rounded-lg text-brand bg-teal-50 transition-all w-10 h-10 flex items-center justify-center";
+                btnList.className = "p-2.5 rounded-lg text-gray-400 hover:text-brand transition-all w-10 h-10 flex items-center justify-center";
+                document.getElementById('viewListContainer').classList.add('hidden');
+                document.getElementById('viewGridContainer').classList.remove('hidden');
+            }
+            renderCoursesUI();
+        };
+
         window.loadCourses = async () => {
+            document.getElementById('mainLoading').classList.remove('hidden');
+            document.getElementById('viewListContainer').classList.add('hidden');
+            document.getElementById('viewGridContainer').classList.add('hidden');
+
             try {
                 const q = query(collection(db, "public_courses"), orderBy("createdAt", "desc"));
                 const querySnapshot = await getDocs(q);
-                const list = document.getElementById('courseListTable');
-                list.innerHTML = '';
-                if(querySnapshot.empty) return list.innerHTML = `<tr><td colspan="5" class="p-8 text-center text-gray-400">Chưa có khóa học.</td></tr>`;
-
+                cachedCourses = [];
+                
                 querySnapshot.forEach(doc => {
-                    const c = doc.data();
-                    // Đếm tổng số Item (Nội dung thực tế)
-                    let itemCount = 0;
-                    if(c.curriculum) c.curriculum.forEach(ch => { if(ch.lessons) ch.lessons.forEach(l => { if(l.items) itemCount += l.items.length; }) });
-
-                    list.innerHTML += `
-                    <tr class="hover:bg-gray-50 border-b border-gray-100">
-                        <td class="p-4"><img src="${c.thumbnail || 'https://via.placeholder.com/100'}" class="w-12 h-12 rounded-lg object-cover border"></td>
-                        <td class="p-4"><div class="font-bold text-gray-800">${c.title}</div></td>
-                        <td class="p-4 text-xs text-gray-500 font-bold">${c.curriculum ? c.curriculum.length : 0} chương • ${itemCount} bài</td>
-                        <td class="p-4 text-center"><span class="bg-blue-50 text-blue-700 px-2 py-1 rounded text-xs font-bold">${c.students || 0} HV</span></td>
-                        <td class="p-4 text-right">
-                            <div class="flex justify-end gap-2 opacity-100">
-                                <button onclick="window.openStudentManager('${doc.id}')" class="p-2 bg-green-50 text-green-600 rounded-lg hover:bg-green-600 hover:text-white transition-all shadow-sm" title="Quản lý học viên">
-                                    <i class="fa-solid fa-user-plus"></i>
-                                </button>
-                                
-                                <button onclick="window.openCurriculumEditor('${doc.id}')" class="p-2 bg-purple-50 text-purple-600 rounded-lg hover:bg-purple-600 hover:text-white transition-all shadow-sm" title="Soạn giáo án">
-                                    <i class="fa-solid fa-book-open"></i>
-                                </button>
-                            <button onclick="window.editCourse('${doc.id}')" class="text-blue-600 hover:bg-blue-50 p-2 rounded"><i class="fa-solid fa-pen"></i></button>
-                            <button onclick="window.deleteCourse('${doc.id}')" class="text-red-600 hover:bg-red-50 p-2 rounded"><i class="fa-solid fa-trash"></i></button>
-                        </td>
-                    </tr>`;
+                    cachedCourses.push({ id: doc.id, ...doc.data() });
                 });
+                
+                renderCoursesUI();
             } catch(e) { window.showToast(e.message, 'error'); }
+            finally { document.getElementById('mainLoading').classList.add('hidden'); }
         };
+
+        function renderCoursesUI() {
+            const listTable = document.getElementById('courseListTable');
+            const gridContainer = document.getElementById('viewGridContainer');
+            
+            listTable.innerHTML = '';
+            gridContainer.innerHTML = '';
+
+            // Toggle hiển thị container
+            if (courseViewMode === 'list') document.getElementById('viewListContainer').classList.remove('hidden');
+            else document.getElementById('viewGridContainer').classList.remove('hidden');
+
+            if(cachedCourses.length === 0) {
+                const emptyHTML = `<div class="col-span-full p-8 text-center text-gray-400">Chưa có khóa học.</div>`;
+                listTable.innerHTML = `<tr><td colspan="5">${emptyHTML}</td></tr>`;
+                gridContainer.innerHTML = emptyHTML;
+                return;
+            }
+
+            cachedCourses.forEach(c => {
+                // Đếm item
+                let itemCount = 0;
+                if(c.curriculum) c.curriculum.forEach(ch => { if(ch.lessons) ch.lessons.forEach(l => { if(l.items) itemCount += l.items.length; }) });
+                const thumb = c.thumbnail || 'https://placehold.co/100';
+
+                // --- RENDER LIST ROW ---
+                listTable.innerHTML += `
+                <tr class="hover:bg-gray-50 border-b border-gray-100 group transition-colors">
+                    <td class="p-4"><img src="${thumb}" class="w-12 h-12 rounded-lg object-cover border border-gray-200 shadow-sm"></td>
+                    <td class="p-4"><div class="font-bold text-gray-800 group-hover:text-brand transition-colors">${c.title}</div><div class="text-xs text-gray-400 font-mono">#${c.id.substring(0,6)}</div></td>
+                    <td class="p-4 text-xs text-gray-500 font-bold">${c.curriculum ? c.curriculum.length : 0} chương • ${itemCount} bài</td>
+                    <td class="p-4 text-center"><span class="bg-blue-50 text-blue-700 px-2.5 py-1 rounded-full text-xs font-bold border border-blue-100">${c.students || 0} HV</span></td>
+                    <td class="p-4 text-right">
+                        <div class="flex justify-end gap-2">
+                            <button onclick="window.openStudentManager('${c.id}')" class="p-2 bg-green-50 text-green-600 rounded-lg hover:bg-green-600 hover:text-white transition-all shadow-sm" title="Quản lý học viên"><i class="fa-solid fa-user-plus"></i></button>
+                            <button onclick="window.openCurriculumEditor('${c.id}')" class="p-2 bg-purple-50 text-purple-600 rounded-lg hover:bg-purple-600 hover:text-white transition-all shadow-sm" title="Soạn giáo án"><i class="fa-solid fa-book-open"></i></button>
+                            <button onclick="window.editCourse('${c.id}')" class="p-2 bg-gray-100 text-gray-600 rounded-lg hover:bg-blue-50 hover:text-blue-600 transition-all"><i class="fa-solid fa-pen"></i></button>
+                            <button onclick="window.deleteCourse('${c.id}')" class="p-2 bg-gray-100 text-gray-600 rounded-lg hover:bg-red-50 hover:text-red-600 transition-all"><i class="fa-solid fa-trash"></i></button>
+                        </div>
+                    </td>
+                </tr>`;
+
+                // --- RENDER GRID CARD ---
+                gridContainer.innerHTML += `
+                <div class="bg-white rounded-2xl border border-gray-200 shadow-sm hover:shadow-lg hover:border-brand/30 transition-all overflow-hidden flex flex-col group h-full">
+                    <div class="h-40 bg-gray-100 relative overflow-hidden">
+                        <img src="${thumb}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500">
+                        <div class="absolute top-2 right-2 bg-black/50 text-white text-xs px-2 py-1 rounded-lg backdrop-blur-sm"><i class="fa-solid fa-users"></i> ${c.students||0}</div>
+                    </div>
+                    <div class="p-5 flex flex-col flex-1">
+                        <h3 class="font-bold text-gray-800 text-lg mb-2 line-clamp-2 group-hover:text-brand transition-colors">${c.title}</h3>
+                        <p class="text-xs text-gray-500 font-bold mb-4 flex items-center gap-2"><i class="fa-solid fa-layer-group text-orange-500"></i> ${c.curriculum ? c.curriculum.length : 0} chương / ${itemCount} bài</p>
+                        
+                        <div class="mt-auto grid grid-cols-4 gap-2 pt-4 border-t border-gray-100">
+                            <button onclick="window.openStudentManager('${c.id}')" class="col-span-1 py-2 bg-green-50 text-green-600 rounded-lg hover:bg-green-600 hover:text-white transition-colors" title="Học viên"><i class="fa-solid fa-user-plus"></i></button>
+                            <button onclick="window.openCurriculumEditor('${c.id}')" class="col-span-1 py-2 bg-purple-50 text-purple-600 rounded-lg hover:bg-purple-600 hover:text-white transition-colors" title="Giáo án"><i class="fa-solid fa-book-open"></i></button>
+                            <button onclick="window.editCourse('${c.id}')" class="col-span-1 py-2 bg-gray-50 text-gray-600 rounded-lg hover:bg-blue-50 hover:text-blue-600 transition-colors"><i class="fa-solid fa-pen"></i></button>
+                            <button onclick="window.deleteCourse('${c.id}')" class="col-span-1 py-2 bg-gray-50 text-gray-600 rounded-lg hover:bg-red-50 hover:text-red-600 transition-colors"><i class="fa-solid fa-trash"></i></button>
+                        </div>
+                    </div>
+                </div>`;
+            });
+        }
 
         // --- EDIT BASIC INFO (MODAL 1 - UPDATED) ---
         // BƯỚC 2: Thay thế 2 hàm này trong thẻ <script>
@@ -670,7 +749,13 @@ function renderCurriculumTree() {
 
         window.addItem = (ci,li) => {
             currentCurriculum[ci].lessons[li].items.push({ 
-                id: 'it_'+Date.now(), title: "Nội dung mới", type: 'video', content: '', isPublished: true 
+                id: 'it_'+Date.now(), 
+                title: "Nội dung mới", 
+                type: 'video', 
+                content: '', 
+                isPublished: true,
+                minWatchTime: 10, // [MỚI] Mặc định 10 phút
+                minScore: 5       // [MỚI] Mặc định 5 điểm (cho Quiz)
             });
             renderCurriculumTree();
             selectItem(ci, li, currentCurriculum[ci].lessons[li].items.length - 1);
