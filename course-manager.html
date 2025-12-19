@@ -350,6 +350,8 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
         import { getFirestore, collection, getDocs, doc, setDoc, updateDoc, deleteDoc, query, orderBy, getDoc, where, writeBatch } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        // [MỚI] Import thêm Storage để xóa file
+        import { getStorage, ref, deleteObject } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js";
 
         // CONFIG FIREBASE CỦA BẠN (DÁN VÀO ĐÂY)
         const firebaseConfig = {
@@ -364,6 +366,7 @@
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
         const db = getFirestore(app);
+        const storage = getStorage(app);
 
         // STATE GLOBAL (3 CẤP)
         let currentCourseId = null;
@@ -962,7 +965,90 @@ function renderCurriculumTree() {
             if(show) el.classList.remove('hidden'); else el.classList.add('hidden');
         };
         window.closeCurriculumModal = () => window.customConfirm("Đóng mà không lưu?", () => document.getElementById('curriculumModal').classList.add('hidden'));
-        window.deleteCourse = (id) => window.customConfirm("Xóa khóa học này?", async()=>{ await deleteDoc(doc(db,"public_courses",id)); window.showToast("Đã xóa"); loadCourses(); });
+       window.deleteCourse = (id) => window.customConfirm("CẢNH BÁO: Hành động này sẽ xóa vĩnh viễn:\n- Dữ liệu khóa học\n- Ảnh bìa & File tài liệu đã tải lên\n- Lịch sử đơn hàng & Tiến độ học viên\n\nBạn có chắc chắn không?", async () => {
+            const btn = document.querySelector(`button[onclick="window.deleteCourse('${id}')"]`);
+            if(btn) btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+
+            try {
+                // BƯỚC 1: Lấy dữ liệu khóa học để lấy link file cần xóa
+                const courseRef = doc(db, "public_courses", id);
+                const courseSnap = await getDoc(courseRef);
+                
+                if (courseSnap.exists()) {
+                    const data = courseSnap.data();
+                    
+                    // 1.1. Xóa ảnh bìa (Thumbnail)
+                    if (data.thumbnail) {
+                        await deleteFileByUrl(data.thumbnail);
+                    }
+
+                    // 1.2. Quét giáo án để xóa file PDF tải lên
+                    if (data.curriculum && Array.isArray(data.curriculum)) {
+                        // Dùng Promise.all để xóa song song cho nhanh
+                        const deletePromises = [];
+                        
+                        data.curriculum.forEach(chap => {
+                            if(chap.lessons) {
+                                chap.lessons.forEach(les => {
+                                    if(les.items) {
+                                        les.items.forEach(item => {
+                                            // Nếu là PDF và là file tải lên (không phải Drive/Link ngoài)
+                                            if (item.type === 'pdf' && item.content) {
+                                                 deletePromises.push(deleteFileByUrl(item.content));
+                                            }
+                                        });
+                                    }
+                                });
+                            }
+                        });
+                        
+                        await Promise.all(deletePromises);
+                    }
+                }
+
+                // BƯỚC 2: Xóa dữ liệu trong Database (Dùng Batch)
+                const batch = writeBatch(db);
+
+                // 2.1. Xóa khóa học chính
+                batch.delete(courseRef);
+
+                // 2.2. Xóa Đơn hàng (Orders)
+                const qOrder = query(collection(db, "orders"), where("courseId", "==", id));
+                const snapOrder = await getDocs(qOrder);
+                snapOrder.forEach(doc => batch.delete(doc.ref));
+
+                // 2.3. Xóa Tiến độ (User Progress)
+                const qProgress = query(collection(db, "user_progress"), where("courseId", "==", id));
+                const snapProgress = await getDocs(qProgress);
+                snapProgress.forEach(doc => batch.delete(doc.ref));
+
+                // Thực thi xóa DB
+                await batch.commit();
+
+                window.showToast("Đã xóa khóa học và dọn dẹp toàn bộ dữ liệu/file rác!");
+                loadCourses();
+            } catch (e) {
+                console.error(e);
+                window.showToast("Có lỗi xảy ra: " + e.message, "error");
+                // Vẫn load lại danh sách phòng trường hợp đã xóa được một phần
+                loadCourses();
+            }
+        });
+        // Hàm phụ trợ: Xóa file trên Storage dựa vào URL
+        async function deleteFileByUrl(url) {
+            if (!url) return;
+            // Chỉ xóa nếu link thuộc Firebase Storage của dự án này
+            if (!url.includes('firebasestorage.googleapis.com')) return; 
+
+            try {
+                // Tạo reference từ URL và xóa
+                const fileRef = ref(storage, url);
+                await deleteObject(fileRef);
+                console.log("Đã xóa file:", url);
+            } catch (error) {
+                console.warn("Không xóa được file (có thể file không tồn tại):", error.message);
+            }
+        }
         // --- LOGIC 1: ĐỔI TÊN (KHÔNG DÙNG PROMPT) ---
 window.openRenameModal = (type, cIdx, lIdx = null) => {
     renameTarget = { type, cIdx, lIdx };
