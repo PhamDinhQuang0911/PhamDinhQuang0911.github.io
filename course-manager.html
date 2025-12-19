@@ -73,7 +73,7 @@
                 <button onclick="window.openVoucherManager()" class="flex-1 md:flex-none bg-white text-orange-600 border border-orange-100 px-4 py-2.5 rounded-xl hover:bg-orange-50 shadow-sm font-bold text-sm flex items-center justify-center gap-2 whitespace-nowrap">
                     <i class="fa-solid fa-ticket"></i> <span class="hidden sm:inline">Voucher</span>
                 </button>
-                <button onclick="window.toggleModal('courseModal')" class="flex-1 md:flex-none bg-brand text-white px-4 py-2.5 rounded-xl hover:bg-teal-800 shadow-lg shadow-teal-700/20 font-bold text-sm flex items-center justify-center gap-2 whitespace-nowrap">
+                <button onclick="document.getElementById('courseId').value=''; document.getElementById('cTitle').value=''; document.getElementById('cThumb').value=''; document.getElementById('thumbPreviewBox').classList.add('hidden'); document.getElementById('thumbEmptyState').classList.remove('hidden'); window.toggleModal('courseModal', true);" class="flex-1 md:flex-none bg-brand text-white px-4 py-2.5 rounded-xl hover:bg-teal-800 shadow-lg shadow-teal-700/20 font-bold text-sm flex items-center justify-center gap-2 whitespace-nowrap">
                     <i class="fa-solid fa-plus"></i> Thêm mới
                 </button>
             </div>
@@ -603,13 +603,13 @@
 
                 if (!finalUrl) throw new Error("Không nhận được URL ảnh từ Server.");
 
-                // Lấy giá trị cũ từ input ẩn để dọn dẹp bộ nhớ trên R2
-                const currentStoredUrl = document.getElementById('cThumb').value;
-                if (currentStoredUrl && currentStoredUrl.startsWith('http') && currentStoredUrl !== finalUrl) {
-                    await window.deleteFileFromR2(currentStoredUrl);
+                // Kiểm tra và xóa ảnh cũ trên Cloudflare R2 nếu tồn tại
+                const currentThumbUrl = document.getElementById('cThumb').value;
+                if (currentThumbUrl && currentThumbUrl.startsWith('http') && currentThumbUrl !== finalUrl) {
+                    await window.deleteFileFromR2(currentThumbUrl);
                 }
 
-                // Cập nhật giao diện và gán URL mới vào input để lưu Firestore
+                // Hiển thị ảnh và gán URL mới vào input ẩn để lưu Firestore
                 previewImg.src = finalUrl;
                 document.getElementById('cThumb').value = finalUrl;
                 
@@ -1076,10 +1076,23 @@ function renderCurriculumTree() {
             finally { btn.innerHTML = '<i class="fa-solid fa-save mr-2"></i> LƯU GIÁO ÁN'; }
         };
         
+        // --- HÀM ĐÓNG MỞ MODAL ---
         window.toggleModal = (id, show) => {
             const el = document.getElementById(id);
-            if(show===undefined) show = el.classList.contains('hidden');
-            if(show) el.classList.remove('hidden'); else el.classList.add('hidden');
+            if (!el) return;
+            const isHidden = (show === undefined) ? el.classList.contains('hidden') : !show;
+            
+            if (!isHidden) {
+                el.classList.remove('hidden');
+                document.body.classList.add('modal-active');
+                // Nếu là courseModal, reset form khi thêm mới
+                if (id === 'courseModal' && !document.getElementById('courseId').value) {
+                    document.getElementById('modalTitle').innerText = "Thêm Khóa Học Mới";
+                }
+            } else {
+                el.classList.add('hidden');
+                document.body.classList.remove('modal-active');
+            }
         };
         window.closeCurriculumModal = () => window.customConfirm("Đóng mà không lưu?", () => document.getElementById('curriculumModal').classList.add('hidden'));
        window.deleteCourse = (id) => window.customConfirm("CẢNH BÁO: Hành động này sẽ xóa vĩnh viễn dữ liệu trên Firestore và Ảnh Banner trên Cloudflare R2.\nBạn có chắc chắn không?", async () => {
