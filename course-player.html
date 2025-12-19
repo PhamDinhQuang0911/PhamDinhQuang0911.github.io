@@ -226,7 +226,28 @@
         let currentItemIndex = -1;
         let completedItems = new Set();
         let leaderboardCache = null;
-        
+        // --- HÀM THÔNG BÁO (TOAST) ---
+        window.showToast = (msg, type = 'success') => {
+            // Tạo container nếu chưa có
+            let container = document.getElementById('toastContainer');
+            if (!container) {
+                container = document.createElement('div');
+                container.id = 'toastContainer';
+                container.className = 'fixed top-5 right-5 z-[200] space-y-3';
+                document.body.appendChild(container);
+            }
+            
+            const toast = document.createElement('div');
+            const bgColor = type === 'success' ? 'border-green-500' : 'border-red-500';
+            toast.className = `p-4 rounded-lg shadow-xl flex items-center gap-3 min-w-[300px] bg-white border-l-4 ${bgColor} animate-fade-in-up`;
+            toast.innerHTML = `<div class="font-bold text-sm text-gray-800">${msg}</div>`;
+            
+            container.appendChild(toast);
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                setTimeout(() => toast.remove(), 500);
+            }, 3000);
+        };
         // BIẾN VIDEO PLAYER (YOUTUBE)
         let player = null;
         let timerInterval = null;
@@ -501,7 +522,6 @@
         };
 
         // --- VIDEO TRACKING HELPER ---
-        // --- VIDEO TRACKING HELPER ---
         function onPlayerStateChange(event) {
             // YT.PlayerState.PLAYING = 1
             if (event.data == YT.PlayerState.PLAYING) {
@@ -515,38 +535,30 @@
                             clearInterval(timerInterval);
                             isVideoCompleted = true;
                             
-                            // Hiện thông báo và cập nhật trạng thái
+                            // 1. Ghi nhận hoàn thành vào Firestore trước
+                            await markAsCompleted(currentItemIndex);
+                            
+                            // 2. Hiện thông báo (Bây giờ hàm này đã tồn tại nên sẽ không lỗi)
                             window.showToast("Đã đủ thời gian tối thiểu! Bài tiếp theo đã mở khóa.", "success");
                             
-                            // Thực hiện đánh dấu hoàn thành và cập nhật UI ngay lập tức
-                            await markAsCompleted(currentItemIndex);
-                            updateStats(); // Làm sáng bài tiếp theo trên sidebar
-                            updateNavButtons(); // Bật nút Next
+                            // 3. Cập nhật giao diện làm sáng bài mới ngay lập tức
+                            updateStats(); 
+                            updateNavButtons();
                         }
                     }
 
-                    // [MỚI] Lưu vị trí xem mỗi 5 giây vào Firebase để hôm sau Resume
                     if (watchedSeconds % 5 === 0) {
                         saveCurrentPlayback(currentTime, watchedSeconds);
                     }
                 }, 1000);
             } 
-            // YT.PlayerState.ENDED = 0
             else if (event.data == YT.PlayerState.ENDED) {
                 if(timerInterval) clearInterval(timerInterval);
-                
-                // Tự động chuyển bài nếu đã đạt điều kiện thời gian tối thiểu
                 if (isVideoCompleted) {
                     if (currentItemIndex < flatItems.length - 1) {
                         window.showToast("Đang chuyển sang bài tiếp theo...", "success");
                         setTimeout(() => window.playItem(currentItemIndex + 1), 2000);
-                    } else {
-                        window.showToast("Chúc mừng! Bạn đã hoàn thành toàn bộ bài giảng.", "success");
-                        document.getElementById('videoCompletedOverlay').classList.remove('hidden');
                     }
-                } else {
-                    const remain = Math.ceil((requiredSeconds - watchedSeconds) / 60);
-                    alert(`Thầy yêu cầu bạn xem thêm ít nhất ${remain} phút nữa mới có thể hoàn thành bài này.`);
                 }
             } else {
                 if(timerInterval) clearInterval(timerInterval);
