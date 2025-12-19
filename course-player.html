@@ -56,6 +56,13 @@
         }
         .lesson-item.active .item-title { font-weight: 800; }
         .lesson-item:hover:not(.active) { background-color: #F8FAFC; }
+        /* Bài học bị khóa */
+        .lesson-item.locked { 
+            opacity: 0.5; 
+            cursor: not-allowed !important; 
+            pointer-events: none;
+            filter: grayscale(1);
+        }
     </style>
 </head>
 <body class="bg-darker h-screen flex text-gray-800 overflow-hidden">
@@ -226,9 +233,13 @@
         let watchedSeconds = 0;
         let requiredSeconds = 0;
         let isVideoCompleted = false;
+        let lastPlaybackPosition = 0; // [MỚI] Vị trí giây cuối cùng đã xem
+        let savedRemainingSeconds = -1; // [MỚI] Thời gian đếm ngược còn lại đã lưu
 
         const urlParams = new URLSearchParams(window.location.search);
         const courseId = urlParams.get('id');
+
+        // --- 1. LOAD YOUTUBE IFRAME API ---
 
         // --- 1. LOAD YOUTUBE IFRAME API ---
         const tag = document.createElement('script');
@@ -358,8 +369,18 @@
         }
 
         // --- 4. PLAYER & LOGIC XỬ LÝ (QUAN TRỌNG) ---
+        // --- 4. PLAYER & LOGIC XỬ LÝ (QUAN TRỌNG) ---
         window.playItem = async (index) => {
             if(index < 0 || index >= flatItems.length) return;
+            
+            // [CẢI TIẾN] Chặn nếu bài trước chưa xong (Trừ bài đầu tiên)
+            if (index > 0 && !completedItems.has(index - 1)) {
+                const itemBefore = flatItems[index-1];
+                const minMin = parseInt(itemBefore.minWatchTime) || 10;
+                window.showToast(`Thầy yêu cầu bạn xem xong bài trước (tối thiểu ${minMin} phút) mới có thể sang bài mới.`, 'error');
+                return;
+            }
+
             currentItemIndex = index;
             const item = flatItems[index];
 
@@ -374,7 +395,6 @@
             document.getElementById('lessonTitle').innerText = item.title;
             document.getElementById('emptyState').classList.add('hidden');
             
-            // Ẩn tất cả container trước
             const vidContainer = document.getElementById('videoPlayerContainer');
             const pdfFrame = document.getElementById('pdfFrame');
             const quizContainer = document.getElementById('quizContainer');
@@ -382,27 +402,37 @@
             vidContainer.classList.add('hidden');
             pdfFrame.classList.add('hidden');
             quizContainer.classList.add('hidden');
-            document.getElementById('videoCompletedOverlay').classList.add('hidden'); // Reset overlay
+            document.getElementById('videoCompletedOverlay').classList.add('hidden');
 
-            // Dừng timer cũ nếu có
             if(timerInterval) clearInterval(timerInterval);
 
-            // --- TRƯỜNG HỢP 1: VIDEO (CÓ TÍNH GIỜ) ---
             if(item.type === 'video') {
                 vidContainer.classList.remove('hidden');
                 
-                // Lấy thời gian yêu cầu (Mặc định 10 phút nếu không có cài đặt)
-                // Lưu ý: Dữ liệu từ course-manager lưu là 'minWatchTime'
                 const minMinutes = parseInt(item.minWatchTime) || 10;
                 requiredSeconds = minMinutes * 60;
                 
-                // Nếu đã học rồi thì coi như xong (watched = required)
                 isVideoCompleted = completedItems.has(index);
-                watchedSeconds = isVideoCompleted ? requiredSeconds : 0;
                 
+                // [MỚI] Tải lịch sử xem từ Firebase (nếu có)
+                const user = auth.currentUser;
+                const progressRef = doc(db, "user_progress", `${user.uid}_${courseId}`);
+                const pSnap = await getDoc(progressRef);
+                lastPlaybackPosition = 0;
+                watchedSeconds = 0;
+
+                if (pSnap.exists()) {
+                    const pData = pSnap.data();
+                    const itemKey = `item_${item.id || index}`;
+                    if (pData.playbackPositions && pData.playbackPositions[itemKey]) {
+                        lastPlaybackPosition = pData.playbackPositions[itemKey].position || 0;
+                        watchedSeconds = pData.playbackPositions[itemKey].watchedSeconds || 0;
+                    }
+                }
+
+                if (isVideoCompleted) watchedSeconds = requiredSeconds;
                 updateTimerUI();
 
-                // Load Video ID
                 let videoId = '';
                 if(item.content && item.content.includes('youtu')) {
                     const m = item.content.match(/(?:youtu\.be\/|youtube\.com\/(?:.*v=|.*\/))([^&?]*)/);
@@ -410,9 +440,15 @@
                 }
 
                 if(player && player.loadVideoById) {
-                    player.loadVideoById(videoId);
+                    player.loadVideoById({
+                        videoId: videoId,
+                        startSeconds: isVideoCompleted ? 0 : lastPlaybackPosition // [MỚI] Bắt đầu từ vị trí cũ
+                    });
                 } else {
-                    setTimeout(() => { if(player && player.loadVideoById) player.loadVideoById(videoId); }, 1000);
+                    setTimeout(() => { 
+                        if(player && player.loadVideoById) 
+                            player.loadVideoById({ videoId, startSeconds: isVideoCompleted ? 0 : lastPlaybackPosition }); 
+                    }, 1000);
                 }
             
             // --- TRƯỜNG HỢP 2: PDF ---
@@ -465,24 +501,69 @@
         };
 
         // --- VIDEO TRACKING HELPER ---
+        // --- VIDEO TRACKING HELPER ---
         function onPlayerStateChange(event) {
             // YT.PlayerState.PLAYING = 1
-            if (event.data == 1) {
-                if(!isVideoCompleted) {
-                    timerInterval = setInterval(() => {
+            if (event.data == YT.PlayerState.PLAYING) {
+                timerInterval = setInterval(async () => {
+                    const currentTime = player.getCurrentTime();
+                    
+                    if(!isVideoCompleted) {
                         watchedSeconds++;
                         updateTimerUI();
                         if (watchedSeconds >= requiredSeconds) {
-                            clearInterval(timerInterval);
                             isVideoCompleted = true;
-                            document.getElementById('videoCompletedOverlay').classList.remove('hidden');
+                            window.showToast("Bạn đã hoàn thành thời gian xem tối thiểu!", "success");
                             markAsCompleted(currentItemIndex);
                         }
-                    }, 1000);
+                    }
+
+                    // [MỚI] Lưu vị trí xem mỗi 5 giây vào Firebase để hôm sau Resume
+                    if (watchedSeconds % 5 === 0) {
+                        saveCurrentPlayback(currentTime, watchedSeconds);
+                    }
+                }, 1000);
+            } 
+            // YT.PlayerState.ENDED = 0
+            else if (event.data == YT.PlayerState.ENDED) {
+                if(timerInterval) clearInterval(timerInterval);
+                
+                // [MỚI] Tự động chuyển bài nếu đã xem đủ thời gian
+                if (isVideoCompleted) {
+                    if (currentItemIndex < flatItems.length - 1) {
+                        window.showToast("Đang chuyển sang bài tiếp theo...", "success");
+                        setTimeout(() => window.playItem(currentItemIndex + 1), 2000);
+                    } else {
+                        window.showToast("Chúc mừng! Bạn đã hoàn thành bài học cuối cùng.", "success");
+                        document.getElementById('videoCompletedOverlay').classList.remove('hidden');
+                    }
+                } else {
+                    const remain = Math.ceil((requiredSeconds - watchedSeconds) / 60);
+                    alert(`Bạn chưa hoàn thành yêu cầu. Vui lòng xem thêm ít nhất ${remain} phút nữa để được tính xanh bài học.`);
                 }
             } else {
                 if(timerInterval) clearInterval(timerInterval);
             }
+        }
+
+        // [MỚI] Hàm lưu vị trí xem vào DB
+        async function saveCurrentPlayback(position, watched) {
+            const user = auth.currentUser;
+            const item = flatItems[currentItemIndex];
+            if (!user || !item) return;
+
+            const progressRef = doc(db, "user_progress", `${user.uid}_${courseId}`);
+            const itemKey = `item_${item.id || currentItemIndex}`;
+            
+            await setDoc(progressRef, {
+                playbackPositions: {
+                    [itemKey]: {
+                        position: position,
+                        watchedSeconds: watched,
+                        updatedAt: new Date().toISOString()
+                    }
+                }
+            }, { merge: true });
         }
 
         function updateTimerUI() {
@@ -550,9 +631,17 @@
             flatItems.forEach((_, idx) => {
                 const itemEl = document.querySelector(`.lesson-item[data-index="${idx}"]`);
                 if(itemEl) {
+                    // [MỚI] Logic Khóa bài học: Khóa tất cả bài sau bài chưa hoàn thành đầu tiên
+                    const isLocked = idx > 0 && !completedItems.has(idx - 1);
+                    if (isLocked) {
+                        itemEl.classList.add('locked');
+                    } else {
+                        itemEl.classList.remove('locked');
+                    }
+
                     if(completedItems.has(idx)) {
                         itemEl.classList.add('text-brand');
-                        if(!itemEl.querySelector('.fa-check')) {
+                        if(!itemEl.querySelector('.fa-circle-check')) {
                             const check = document.createElement('i');
                             check.className = 'fa-solid fa-circle-check text-brand ml-auto text-xs';
                             itemEl.appendChild(check);
@@ -560,6 +649,7 @@
                     }
                 }
             });
+            updateNavButtons(); // Cập nhật nút Next/Prev theo trạng thái khóa
         }
 
         async function loadUserProgress() {
@@ -577,9 +667,22 @@
         }
         
         // --- HELPER UI ---
+        // --- HELPER UI ---
         function updateNavButtons() {
             document.getElementById('btnPrev').disabled = currentItemIndex <= 0;
-            document.getElementById('btnNext').disabled = currentItemIndex >= flatItems.length - 1;
+            
+            // [MỚI] Nút Next bị vô hiệu hóa nếu chưa xong bài hiện tại
+            const btnNext = document.getElementById('btnNext');
+            const isCurrentDone = completedItems.has(currentItemIndex);
+            
+            btnNext.disabled = currentItemIndex >= flatItems.length - 1 || !isCurrentDone;
+            
+            if (currentItemIndex < flatItems.length - 1 && !isCurrentDone) {
+                btnNext.title = "Vui lòng xem xong bài này để tiếp tục";
+            } else {
+                btnNext.title = "";
+            }
+
             document.getElementById('btnPrev').onclick = () => window.playItem(currentItemIndex - 1);
             document.getElementById('btnNext').onclick = () => window.playItem(currentItemIndex + 1);
         }
