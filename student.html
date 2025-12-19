@@ -345,21 +345,24 @@
 
         // --- AUTH & LOAD DATA ---
         // --- AUTH & LOAD DATA (ĐÃ SỬA LỖI HIỂN THỊ NÚT VÀO HỌC) ---
+        // --- AUTH & LOAD DATA (TỐI ƯU TỐC ĐỘ - PARALLEL LOADING) ---
         onAuthStateChanged(auth, async (user) => {
             if (user) {
                 if (ADMIN_EMAILS.includes(user.email)) { window.location.href = "dashboard.html"; return; }
                 
-                // 1. Tải các thông tin độc lập
-                loadSiteLogo(); 
-                loadUserProfile(user); 
-                loadStudentClasses(user); 
-                loadPendingTasks(user);
-                loadExamHistory(user);
+                // Gom nhóm các tác vụ để chạy song song
+                const p1 = loadSiteLogo();
+                const p2 = loadUserProfile(user);
+                const p3 = loadStudentClasses(user);
+                const p4 = loadPendingTasks(user); // Load bài tập
+                const p5 = loadExamHistory(user);  // Load lịch sử
 
-                // 2. [QUAN TRỌNG] Đợi tải xong danh sách đã mua -> Rồi mới tải Market
-                // Điều này đảm bảo loadMarket biết chính xác khóa nào đã mua để hiện nút "Vào học"
-                await loadMyPurchased(user); 
-                loadMarket(); 
+                // Chuỗi quan trọng: Phải tải "Đã mua" xong mới tải "Cửa hàng" (để hiện đúng nút Vào học)
+                // Nhưng chuỗi này sẽ chạy song song với các việc ở trên (p1 -> p5)
+                const pCritical = loadMyPurchased(user).then(() => loadMarket());
+
+                // Kích hoạt tất cả cùng lúc -> Thời gian chờ chỉ bằng tác vụ lâu nhất (thay vì tổng cộng dồn)
+                await Promise.all([p1, p2, p3, p4, p5, pCritical]);
                 
             } else { window.location.href = "index.html"; }
         });
