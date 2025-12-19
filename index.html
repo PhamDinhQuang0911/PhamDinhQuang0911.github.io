@@ -485,34 +485,39 @@
 
         const googleProvider = new GoogleAuthProvider();
 
-        onAuthStateChanged(auth, (user) => {
+        onAuthStateChanged(auth, async (user) => { // Thêm từ khóa async
             if (user) {
-                // DANH SÁCH ADMIN (Để phân quyền)
+                // --- TRƯỜNG HỢP 1: ĐÃ ĐĂNG NHẬP -> CHUYỂN HƯỚNG NGAY (KHÔNG TẢI GIAO DIỆN INDEX) ---
                 const ADMIN_EMAILS = ["phamngockhanh.942001@gmail.com", "phamngockhanh.942002@gmail.com", "admin@gmail.com", "phamdinhquang0911@gmail.com"];
                 
-                // 1. ƯU TIÊN CAO NHẤT: Kiểm tra xem có Link đề thi đang chờ không?
+                // Ưu tiên: Chuyển đến đề thi đang chờ (nếu có)
                 const pendingUrl = sessionStorage.getItem('pendingExamUrl');
-                
                 if (pendingUrl) {
-                    console.log("Phát hiện đề thi đang chờ, đang chuyển hướng...");
-                    // Xóa link khỏi bộ nhớ để không bị lặp lại
                     sessionStorage.removeItem('pendingExamUrl');
-                    // Chuyển ngay lập tức đến trang đề thi
                     window.location.href = pendingUrl;
                     return; 
                 }
 
-                // 2. Nếu không có đề thi chờ -> Điều hướng bình thường
+                // Điều hướng theo vai trò
                 if (ADMIN_EMAILS.includes(user.email)) {
-                    window.location.href = "dashboard.html"; // Giáo viên
+                    window.location.href = "dashboard.html"; 
                 } else {
-                    window.location.href = "student.html";   // Học sinh
+                    window.location.href = "student.html";   
                 }
             } else {
-                // 3. Nếu chưa đăng nhập: Kiểm tra xem có yêu cầu mở form Đăng ký không?
+                // --- TRƯỜNG HỢP 2: KHÁCH VÃNG LAI -> KÍCH HOẠT TẢI SONG SONG ---
+                console.log("Khách vãng lai: Bắt đầu tải giao diện...");
+                
+                // Gom các tác vụ lại để chạy cùng lúc
+                const task1 = loadHeroSettings();      // Tải Banner/Logo
+                const task2 = renderCoursesFromDB();   // Tải Khóa học
+                
+                // Chờ cả 2 xong mới thôi (Tối ưu tốc độ)
+                await Promise.all([task1, task2]);
+
+                // Xử lý Logic mở form đăng ký nếu có link giới thiệu
                 const urlParams = new URLSearchParams(window.location.search);
                 if (urlParams.get('mode') === 'register') {
-                    // Đợi 0.5s để giao diện tải xong rồi mở Modal
                     setTimeout(() => {
                         if(window.toggleRegisterModal) window.toggleRegisterModal(true);
                     }, 500);
@@ -918,10 +923,7 @@
             }
         });
 
-        // INIT
-        loadHeroSettings();
-        renderCoursesFromDB();
-        // --- LOGIC THANH TOÁN & VIETQR ---
+         // --- LOGIC THANH TOÁN & VIETQR ---
         // --- LOGIC THANH TOÁN & VIETQR (ĐÃ FIX LỖI) ---
         let currentPayingCourse = null;
         let dynamicBankConfig = null;
