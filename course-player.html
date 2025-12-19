@@ -359,7 +359,8 @@
                 window.location.href = 'index.html';
             } else if(courseId) {
                 loadLogo();
-                loadCourse(courseId);
+                await loadCourse(courseId);
+                loadUserProgress(); // [NEW] Tải tiến độ cũ
             } else {
                 window.location.href = 'student.html';
             }
@@ -512,6 +513,9 @@
             }
             updateNavButtons();
             if(window.innerWidth < 768) toggleSidebar();
+            
+            // [NEW] Đánh dấu đã học
+            markAsCompleted(index); 
         };
 
         function updateNavButtons() {
@@ -568,7 +572,108 @@
                 }
             }
         };
-        
+        // --- LOGIC TIẾN ĐỘ HỌC TẬP (REAL-TIME PROGRESS) ---
+        let completedItems = new Set(); // Lưu các ID bài đã học
+
+        // 1. Hàm đánh dấu đã học (Gọi khi bấm playItem)
+        async function markAsCompleted(itemIndex) {
+            if (completedItems.has(itemIndex)) return; // Đã học rồi thì thôi
+            
+            completedItems.add(itemIndex);
+            updateStats(); // Cập nhật giao diện ngay
+            
+            // Lưu vào Firebase (Debounce để tránh spam request)
+            if (window.saveProgressTimeout) clearTimeout(window.saveProgressTimeout);
+            window.saveProgressTimeout = setTimeout(() => saveProgressToDB(), 2000);
+        }
+
+        // 2. Tính toán và hiển thị
+        function updateStats() {
+            const total = flatItems.length;
+            const completed = completedItems.size;
+            const percent = total === 0 ? 0 : Math.round((completed / total) * 100);
+
+            // Cập nhật DOM
+            document.getElementById('totalCount').innerText = `${total} bài`;
+            document.getElementById('completedCount').innerText = completed;
+            document.getElementById('progressText').innerText = `${percent}%`;
+            document.getElementById('progressBar').style.width = `${percent}%`;
+            
+            // Cập nhật style cho item trong danh sách
+            flatItems.forEach((_, idx) => {
+                const itemEl = document.querySelector(`.lesson-item[data-index="${idx}"]`);
+                if(itemEl) {
+                    if(completedItems.has(idx)) {
+                        itemEl.classList.add('text-brand');
+                        const icon = itemEl.querySelector('i');
+                        if(icon) icon.classList.replace('text-gray-400', 'text-brand'); // Đổi màu icon
+                        // Thêm dấu tích xanh nếu chưa có
+                        if(!itemEl.querySelector('.fa-check')) {
+                            const check = document.createElement('i');
+                            check.className = 'fa-solid fa-circle-check text-brand ml-auto text-xs';
+                            itemEl.appendChild(check);
+                        }
+                    }
+                }
+            });
+        }
+
+        // 3. Lưu xuống Database (Quan trọng để đồng bộ với trang Student)
+        async function saveProgressToDB() {
+            const user = auth.currentUser;
+            if (!user || !courseId) return;
+
+            const total = flatItems.length;
+            const completed = completedItems.size;
+            const percent = total === 0 ? 0 : Math.round((completed / total) * 100);
+
+            try {
+                // Cách 1: Lưu vào collection 'user_progress' riêng biệt (Khuyên dùng)
+                const progressRef = doc(db, "user_progress", `${user.uid}_${courseId}`);
+                await setDoc(progressRef, {
+                    uid: user.uid,
+                    courseId: courseId,
+                    completedItems: Array.from(completedItems),
+                    progress: percent,
+                    lastUpdated: new Date().toISOString()
+                }, { merge: true });
+
+                // Cách 2: Cập nhật ngược lại vào đơn hàng 'orders' (để trang Student hiện đúng ngay)
+                // Tìm đơn hàng của khóa này
+                const qOrder = query(collection(db, "orders"), 
+                    where("userId", "==", user.uid), 
+                    where("courseId", "==", courseId)
+                );
+                const snapOrder = await getDocs(qOrder);
+                if (!snapOrder.empty) {
+                    const orderDoc = snapOrder.docs[0];
+                    await updateDoc(doc(db, "orders", orderDoc.id), {
+                        progress: percent // Trường này sẽ được student.html đọc
+                    });
+                }
+                console.log("Đã lưu tiến độ:", percent + "%");
+            } catch (e) {
+                console.error("Lỗi lưu tiến độ:", e);
+            }
+        }
+
+        // 4. Tải tiến độ cũ khi vào trang
+        async function loadUserProgress() {
+            const user = auth.currentUser;
+            if (!user || !courseId) return;
+            
+            try {
+                const progressRef = doc(db, "user_progress", `${user.uid}_${courseId}`);
+                const snap = await getDoc(progressRef);
+                if (snap.exists()) {
+                    const data = snap.data();
+                    if (data.completedItems && Array.isArray(data.completedItems)) {
+                        completedItems = new Set(data.completedItems);
+                        updateStats(); // Vẽ lại giao diện
+                    }
+                }
+            } catch (e) { console.error(e); }
+        }
     </script>
 </body>
 </html>
