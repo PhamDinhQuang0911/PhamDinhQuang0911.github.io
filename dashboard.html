@@ -447,21 +447,31 @@
                 currentUser = user;
                 currentUserUid = user.uid;
                 
+                // 1. Cập nhật giao diện tĩnh ngay lập tức (Không cần chờ data)
                 document.getElementById('sidebarName').textContent = user.displayName || user.email;
                 document.getElementById('sidebarRole').textContent = 'Quản trị viên';
-                document.getElementById('sidebarAvatar').src = user.photoURL || `https://ui-avatars.com/api/?name=${user.email}&background=random`;
-                if(document.getElementById('mobileAvatar')) document.getElementById('mobileAvatar').src = user.photoURL || `https://ui-avatars.com/api/?name=${user.email}&background=random`;
+                const avatarUrl = user.photoURL || `https://ui-avatars.com/api/?name=${user.email}&background=random`;
+                document.getElementById('sidebarAvatar').src = avatarUrl;
+                if(document.getElementById('mobileAvatar')) document.getElementById('mobileAvatar').src = avatarUrl;
 
-                loadClasses();
-                loadFileManager();
+                // 2. KÍCH HOẠT TẢI DỮ LIỆU SONG SONG (QUAN TRỌNG)
+                // Thay vì gọi từng hàm lẻ tẻ, ta gom chúng lại
+                const task1 = loadClasses();      // Tải danh sách lớp
+                const task2 = loadFileManager();  // Tải ngân hàng đề (đã tối ưu ở Bước 1)
                 
+                // Đợi tất cả hoàn thành để đảm bảo dữ liệu đồng bộ
+                await Promise.all([task1, task2]);
+                
+                // 3. Gán sự kiện (Sau khi đã có data)
                 const createBtn = document.getElementById('createClassBtn');
                 if(createBtn) createBtn.onclick = handleCreateClass;
                 
+                // 4. Điều hướng View (Nếu có param trên URL)
                 const params = new URLSearchParams(window.location.search);
                 const view = params.get('view');
                 if (view && ['classes', 'exambank'].includes(view)) {
-                    setTimeout(() => switchView(view), 100);
+                    // Không cần setTimeout nữa vì data đã sẵn sàng
+                    switchView(view);
                 }
             } else {
                 window.location.href = "index.html";
@@ -956,7 +966,30 @@
         };
         
         // --- LOGIC FILE EXPLORER (GIỮ NGUYÊN) ---
-        async function loadFileManager() { try { const qFolders = query(collection(db, "folders"), where("teacherId", "==", currentUserUid), limit(100)); const snapFolders = await getDocs(qFolders); folderData = []; snapFolders.forEach(d => folderData.push({id: d.id, ...d.data()})); const qExams = query(collection(db, "exams"), where("teacherId", "==", currentUserUid), limit(100)); const snapExams = await getDocs(qExams); examData = []; snapExams.forEach(d => examData.push({id: d.id, ...d.data()})); renderExplorer(); } catch (e) { console.error(e); } }
+        // --- LOGIC FILE EXPLORER (ĐÃ TỐI ƯU SONG SONG) ---
+        async function loadFileManager() { 
+            try { 
+                // Tạo 2 truy vấn cùng lúc
+                const qFolders = query(collection(db, "folders"), where("teacherId", "==", currentUserUid), limit(100)); 
+                const qExams = query(collection(db, "exams"), where("teacherId", "==", currentUserUid), limit(100)); 
+                
+                // Bắn request song song và đợi cả 2 trả về
+                const [snapFolders, snapExams] = await Promise.all([
+                    getDocs(qFolders),
+                    getDocs(qExams)
+                ]);
+                
+                // Xử lý dữ liệu Folders
+                folderData = []; 
+                snapFolders.forEach(d => folderData.push({id: d.id, ...d.data()})); 
+                
+                // Xử lý dữ liệu Exams
+                examData = []; 
+                snapExams.forEach(d => examData.push({id: d.id, ...d.data()})); 
+                
+                renderExplorer(); 
+            } catch (e) { console.error(e); } 
+        }
         function renderExplorer() { 
             const container = document.getElementById('explorerGrid'); 
             container.innerHTML = ''; 
