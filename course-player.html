@@ -139,7 +139,26 @@
                 <p class="font-bold">Chọn bài học để bắt đầu</p>
             </div>
 
-            <iframe id="mainFrame" class="w-full h-full hidden bg-black z-20" frameborder="0" allowfullscreen></iframe>
+            <div id="videoPlayerContainer" class="hidden w-full h-full bg-black z-20 relative group">
+                <div id="ytPlayer" class="w-full h-full"></div> <div id="videoTimerOverlay" class="absolute top-4 right-4 bg-black/80 text-white px-4 py-2 rounded-full text-xs font-bold backdrop-blur-md border border-white/10 flex items-center gap-3 shadow-lg z-30 transition-opacity duration-500">
+                    <div class="flex items-center gap-2">
+                        <i class="fa-solid fa-clock text-orange-500 animate-pulse"></i>
+                        <span class="text-gray-300">Yêu cầu xem:</span>
+                    </div>
+                    <span id="timeRemaining" class="text-orange-400 text-sm font-mono">--:--</span>
+                </div>
+
+                <div id="videoCompletedOverlay" class="hidden absolute inset-0 bg-black/90 flex-col items-center justify-center z-40 text-white animate-fade-in">
+                    <div class="w-20 h-20 bg-green-500 rounded-full flex items-center justify-center mb-4 animate-bounce shadow-lg shadow-green-500/50">
+                        <i class="fa-solid fa-check text-4xl"></i>
+                    </div>
+                    <h3 class="text-2xl font-bold">Hoàn thành bài học!</h3>
+                    <p class="text-gray-400 mt-2 text-sm">Tiến độ của bạn đã được ghi nhận.</p>
+                    <button onclick="document.getElementById('videoCompletedOverlay').classList.add('hidden')" class="mt-6 px-6 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-xs font-bold uppercase tracking-wider transition-all border border-white/10">Xem lại</button>
+                </div>
+            </div>
+
+            <iframe id="pdfFrame" class="w-full h-full hidden bg-white z-20" frameborder="0"></iframe>
 
             <div id="quizContainer" class="hidden w-full h-full flex flex-col items-center justify-center bg-darker text-white p-6 text-center z-20">
                 <div class="relative mb-8">
@@ -194,17 +213,41 @@
         const auth = getAuth(app);
         const db = getFirestore(app);
 
-        // KHAI BÁO BIẾN TOÀN CỤC (QUAN TRỌNG ĐỂ KHÔNG BỊ LỖI REFERENCE)
+        // --- BIẾN TOÀN CỤC ---
         let courseData = null;
         let flatItems = [];
         let currentItemIndex = -1;
         let completedItems = new Set();
         let leaderboardCache = null;
         
+        // BIẾN VIDEO PLAYER (YOUTUBE)
+        let player = null;
+        let timerInterval = null;
+        let watchedSeconds = 0;
+        let requiredSeconds = 0;
+        let isVideoCompleted = false;
+
         const urlParams = new URLSearchParams(window.location.search);
         const courseId = urlParams.get('id');
 
-        // --- AUTH & INIT ---
+        // --- 1. LOAD YOUTUBE IFRAME API ---
+        const tag = document.createElement('script');
+        tag.src = "https://www.youtube.com/iframe_api";
+        const firstScriptTag = document.getElementsByTagName('script')[0];
+        firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+
+        // Hàm này được YouTube gọi tự động khi API tải xong
+        window.onYouTubeIframeAPIReady = () => {
+            player = new YT.Player('ytPlayer', {
+                height: '100%',
+                width: '100%',
+                videoId: '',
+                playerVars: { 'playsinline': 1, 'rel': 0, 'modestbranding': 1, 'iv_load_policy': 3 },
+                events: { 'onStateChange': onPlayerStateChange }
+            });
+        };
+
+        // --- 2. AUTH & INIT ---
         onAuthStateChanged(auth, async (user) => {
             if(!user) {
                 sessionStorage.setItem('redirect_after_login', window.location.href);
@@ -218,7 +261,6 @@
             }
         });
 
-        // 1. TẢI LOGO
         async function loadLogo() {
             try {
                 const docSnap = await getDoc(doc(db, "site_settings", "homepage_hero"));
@@ -230,7 +272,6 @@
             } catch(e) {}
         }
 
-        // 2. TẢI KHÓA HỌC
         async function loadCourse(id) {
             try {
                 const snap = await getDoc(doc(db, "public_courses", id));
@@ -245,7 +286,7 @@
             } catch(e) { console.error(e); }
         }
 
-        // 3. RENDER CẤU TRÚC
+        // --- 3. RENDER CẤU TRÚC ---
         function renderCurriculum(list) {
             const container = document.getElementById('curriculumList');
             container.innerHTML = '';
@@ -316,12 +357,13 @@
             });
         }
 
-        // 4. TRÌNH PHÁT (PLAYER)
-        window.playItem = (index) => {
+        // --- 4. PLAYER & LOGIC XỬ LÝ (QUAN TRỌNG) ---
+        window.playItem = async (index) => {
             if(index < 0 || index >= flatItems.length) return;
             currentItemIndex = index;
             const item = flatItems[index];
 
+            // Update UI Active
             document.querySelectorAll('.lesson-item').forEach(el => el.classList.remove('active'));
             const activeEl = document.querySelector(`.lesson-item[data-index="${index}"]`);
             if(activeEl) {
@@ -331,46 +373,168 @@
 
             document.getElementById('lessonTitle').innerText = item.title;
             document.getElementById('emptyState').classList.add('hidden');
-            const frame = document.getElementById('mainFrame');
-            const quiz = document.getElementById('quizContainer');
             
-            frame.classList.add('hidden'); quiz.classList.add('hidden'); frame.src = "";
+            // Ẩn tất cả container trước
+            const vidContainer = document.getElementById('videoPlayerContainer');
+            const pdfFrame = document.getElementById('pdfFrame');
+            const quizContainer = document.getElementById('quizContainer');
+            
+            vidContainer.classList.add('hidden');
+            pdfFrame.classList.add('hidden');
+            quizContainer.classList.add('hidden');
+            document.getElementById('videoCompletedOverlay').classList.add('hidden'); // Reset overlay
 
+            // Dừng timer cũ nếu có
+            if(timerInterval) clearInterval(timerInterval);
+
+            // --- TRƯỜNG HỢP 1: VIDEO (CÓ TÍNH GIỜ) ---
             if(item.type === 'video') {
-                frame.classList.remove('hidden');
-                let url = item.content;
-                if(url && url.includes('youtu')) {
-                    const m = url.match(/(?:youtu\.be\/|youtube\.com\/(?:.*v=|.*\/))([^&?]*)/);
-                    if(m && m[1]) url = `https://www.youtube.com/embed/${m[1]}?autoplay=1&rel=0`;
+                vidContainer.classList.remove('hidden');
+                
+                // Lấy thời gian yêu cầu (Mặc định 10 phút nếu không có cài đặt)
+                // Lưu ý: Dữ liệu từ course-manager lưu là 'minWatchTime'
+                const minMinutes = parseInt(item.minWatchTime) || 10;
+                requiredSeconds = minMinutes * 60;
+                
+                // Nếu đã học rồi thì coi như xong (watched = required)
+                isVideoCompleted = completedItems.has(index);
+                watchedSeconds = isVideoCompleted ? requiredSeconds : 0;
+                
+                updateTimerUI();
+
+                // Load Video ID
+                let videoId = '';
+                if(item.content && item.content.includes('youtu')) {
+                    const m = item.content.match(/(?:youtu\.be\/|youtube\.com\/(?:.*v=|.*\/))([^&?]*)/);
+                    if(m && m[1]) videoId = m[1];
                 }
-                frame.src = url;
+
+                if(player && player.loadVideoById) {
+                    player.loadVideoById(videoId);
+                } else {
+                    setTimeout(() => { if(player && player.loadVideoById) player.loadVideoById(videoId); }, 1000);
+                }
+            
+            // --- TRƯỜNG HỢP 2: PDF ---
             } else if(item.type === 'pdf') {
-                frame.classList.remove('hidden');
+                pdfFrame.classList.remove('hidden');
                 let url = item.content;
                 if(url && url.includes('drive.google.com')) url = url.replace(/\/view.*/, '/preview');
-                frame.src = url;
+                pdfFrame.src = url;
+                
+                // PDF: Tự động hoàn thành sau 10 giây xem
+                if(!completedItems.has(index)) {
+                     setTimeout(() => markAsCompleted(index), 10000);
+                }
+
+            // --- TRƯỜNG HỢP 3: QUIZ (CÓ CHECK ĐIỂM) ---
             } else if(item.type === 'quiz') {
-                quiz.classList.remove('hidden');
-                document.getElementById('btnStartQuiz').onclick = () => {
-                    if(item.examId) window.location.href = `exam.html?id=${item.examId}&mode=course&courseId=${courseId}`;
-                    else alert("Chưa có đề thi!");
-                };
+                quizContainer.classList.remove('hidden');
+                
+                const minScore = parseFloat(item.minScore) || 5;
+                const btnStart = document.getElementById('btnStartQuiz');
+                
+                // Kiểm tra điểm số
+                try {
+                    const qResult = query(collection(db, "results"), where("studentId", "==", auth.currentUser.uid), where("examId", "==", item.examId));
+                    const snap = await getDocs(qResult);
+                    let bestScore = -1;
+                    snap.forEach(d => { if(d.data().score > bestScore) bestScore = d.data().score; });
+
+                    if (bestScore >= minScore) {
+                        btnStart.innerHTML = `<i class="fa-solid fa-check-circle mr-2"></i> Đã đạt (${bestScore} điểm)`;
+                        btnStart.className = "px-8 py-3 bg-green-600 text-white font-bold rounded-xl shadow-lg cursor-default opacity-80";
+                        markAsCompleted(index);
+                        btnStart.onclick = null; // Disable click nếu muốn
+                        // Vẫn cho làm lại nếu thích
+                        btnStart.onclick = () => window.location.href = `exam.html?id=${item.examId}&mode=course&courseId=${courseId}`;
+                    } else {
+                        const statusText = bestScore === -1 ? "Chưa làm" : `Cao nhất: ${bestScore}đ (Chưa đạt)`;
+                        btnStart.innerHTML = `Làm bài ngay <br><span class="text-xs font-normal opacity-80">(Yêu cầu: ${minScore}đ - ${statusText})</span>`;
+                        btnStart.className = "px-8 py-3 bg-brand text-white font-bold rounded-xl hover:bg-teal-600 transition-all shadow-lg";
+                        btnStart.onclick = () => {
+                            if(item.examId) window.location.href = `exam.html?id=${item.examId}&mode=course&courseId=${courseId}`;
+                            else alert("Chưa có đề thi!");
+                        };
+                    }
+                } catch(e) { console.error("Lỗi check quiz:", e); }
             }
+            
             updateNavButtons();
             if(window.innerWidth < 768) toggleSidebar();
-            
-            // Đánh dấu đã học
-            markAsCompleted(index);
         };
 
-        // --- LOGIC TIẾN ĐỘ HỌC TẬP ---
+        // --- VIDEO TRACKING HELPER ---
+        function onPlayerStateChange(event) {
+            // YT.PlayerState.PLAYING = 1
+            if (event.data == 1) {
+                if(!isVideoCompleted) {
+                    timerInterval = setInterval(() => {
+                        watchedSeconds++;
+                        updateTimerUI();
+                        if (watchedSeconds >= requiredSeconds) {
+                            clearInterval(timerInterval);
+                            isVideoCompleted = true;
+                            document.getElementById('videoCompletedOverlay').classList.remove('hidden');
+                            markAsCompleted(currentItemIndex);
+                        }
+                    }, 1000);
+                }
+            } else {
+                if(timerInterval) clearInterval(timerInterval);
+            }
+        }
+
+        function updateTimerUI() {
+            const overlay = document.getElementById('videoTimerOverlay');
+            const timeText = document.getElementById('timeRemaining');
+            
+            if (isVideoCompleted) {
+                overlay.classList.add('opacity-0'); // Ẩn đi khi xong
+                return;
+            }
+            overlay.classList.remove('opacity-0');
+
+            const remaining = Math.max(0, requiredSeconds - watchedSeconds);
+            const m = Math.floor(remaining / 60);
+            const s = remaining % 60;
+            
+            timeText.innerText = `${m}:${s < 10 ? '0'+s : s}`;
+            
+            // Hiệu ứng khi sắp xong (< 1 phút)
+            if(remaining < 60) timeText.className = "text-red-400 text-sm font-mono animate-pulse font-black";
+            else timeText.className = "text-orange-400 text-sm font-mono font-bold";
+        }
+
+        // --- COMMON LOGIC ---
         async function markAsCompleted(itemIndex) {
             if (completedItems.has(itemIndex)) return;
             completedItems.add(itemIndex);
             updateStats();
             
-            if (window.saveProgressTimeout) clearTimeout(window.saveProgressTimeout);
-            window.saveProgressTimeout = setTimeout(() => saveProgressToDB(), 2000);
+            // Lưu DB
+            const user = auth.currentUser;
+            if (!user || !courseId) return;
+            const percent = flatItems.length === 0 ? 0 : Math.round((completedItems.size / flatItems.length) * 100);
+
+            try {
+                // 1. Lưu chi tiết vào user_progress
+                const progressRef = doc(db, "user_progress", `${user.uid}_${courseId}`);
+                await setDoc(progressRef, {
+                    uid: user.uid,
+                    courseId: courseId,
+                    completedItems: Array.from(completedItems),
+                    progress: percent,
+                    lastUpdated: new Date().toISOString()
+                }, { merge: true });
+
+                // 2. Cập nhật vào orders (để hiển thị bên ngoài list khóa học)
+                const qOrder = query(collection(db, "orders"), where("userId", "==", user.uid), where("courseId", "==", courseId));
+                const snapOrder = await getDocs(qOrder);
+                if (!snapOrder.empty) {
+                    await updateDoc(doc(db, "orders", snapOrder.docs[0].id), { progress: percent });
+                }
+            } catch (e) { console.error("Lỗi lưu:", e); }
         }
 
         function updateStats() {
@@ -385,42 +549,17 @@
             
             flatItems.forEach((_, idx) => {
                 const itemEl = document.querySelector(`.lesson-item[data-index="${idx}"]`);
-                if(itemEl && completedItems.has(idx)) {
-                    itemEl.classList.add('text-brand');
-                    if(!itemEl.querySelector('.fa-check')) {
-                        const check = document.createElement('i');
-                        check.className = 'fa-solid fa-circle-check text-brand ml-auto text-xs';
-                        itemEl.appendChild(check);
+                if(itemEl) {
+                    if(completedItems.has(idx)) {
+                        itemEl.classList.add('text-brand');
+                        if(!itemEl.querySelector('.fa-check')) {
+                            const check = document.createElement('i');
+                            check.className = 'fa-solid fa-circle-check text-brand ml-auto text-xs';
+                            itemEl.appendChild(check);
+                        }
                     }
                 }
             });
-        }
-
-        async function saveProgressToDB() {
-            const user = auth.currentUser;
-            if (!user || !courseId) return;
-            const total = flatItems.length;
-            const completed = completedItems.size;
-            const percent = total === 0 ? 0 : Math.round((completed / total) * 100);
-
-            try {
-                // Lưu vào collection user_progress
-                const progressRef = doc(db, "user_progress", `${user.uid}_${courseId}`);
-                await setDoc(progressRef, {
-                    uid: user.uid,
-                    courseId: courseId,
-                    completedItems: Array.from(completedItems),
-                    progress: percent,
-                    lastUpdated: new Date().toISOString()
-                }, { merge: true });
-
-                // Cập nhật ngược vào orders để trang student.html hiển thị
-                const qOrder = query(collection(db, "orders"), where("userId", "==", user.uid), where("courseId", "==", courseId));
-                const snapOrder = await getDocs(qOrder);
-                if (!snapOrder.empty) {
-                    await updateDoc(doc(db, "orders", snapOrder.docs[0].id), { progress: percent });
-                }
-            } catch (e) { console.error("Lỗi lưu tiến độ:", e); }
         }
 
         async function loadUserProgress() {
@@ -431,132 +570,23 @@
                 const snap = await getDoc(progressRef);
                 if (snap.exists()) {
                     const data = snap.data();
-                    if (data.completedItems) {
-                        completedItems = new Set(data.completedItems);
-                        updateStats();
-                    }
+                    if (data.completedItems) completedItems = new Set(data.completedItems);
+                    updateStats();
                 }
-            } catch (e) { console.error(e); }
+            } catch (e) {}
         }
-
-        // --- LOGIC LEADERBOARD ---
-        window.openLeaderboard = async () => {
-            const modal = document.getElementById('leaderboardModal');
-            modal.classList.remove('hidden');
-            setTimeout(() => { modal.classList.remove('opacity-0'); modal.querySelector('div').classList.remove('scale-95'); }, 10);
-            if (leaderboardCache) renderLeaderboard(leaderboardCache);
-            else await loadLeaderboardData();
-        };
-
-        window.closeLeaderboard = () => {
-            const modal = document.getElementById('leaderboardModal');
-            modal.classList.add('opacity-0');
-            modal.querySelector('div').classList.add('scale-95');
-            setTimeout(() => modal.classList.add('hidden'), 300);
-        };
-
-        async function loadLeaderboardData() {
-            if (!courseData || !courseData.curriculum) return;
-            // 1. Lấy danh sách Exam ID
-            const examIds = [];
-            courseData.curriculum.forEach(c => c.lessons?.forEach(l => l.items?.forEach(i => {
-                if(i.type === 'quiz' && i.examId) examIds.push(i.examId);
-            })));
-
-            if (examIds.length === 0) { renderLeaderboard([]); return; }
-
-            try {
-                // 2. Tải kết quả (Cần Rules cho phép đọc)
-                const q = query(collection(db, "results"));
-                const snap = await getDocs(q);
-                const userScores = {};
-
-                snap.forEach(doc => {
-                    const data = doc.data();
-                    if (examIds.includes(data.examId)) {
-                        if (!userScores[data.studentId]) {
-                            userScores[data.studentId] = { 
-                                name: data.studentName || "Ẩn danh", 
-                                avatar: `https://ui-avatars.com/api/?name=${data.studentName}&background=random`,
-                                score: 0 
-                            };
-                        }
-                        if (data.score) userScores[data.studentId].score += parseFloat(data.score);
-                    }
-                });
-
-                const ranking = Object.entries(userScores)
-                    .map(([uid, info]) => ({ uid, ...info }))
-                    .sort((a, b) => b.score - a.score);
-
-                leaderboardCache = ranking;
-                renderLeaderboard(ranking);
-            } catch (e) {
-                console.error("Lỗi tải BXH:", e);
-                document.getElementById('leaderboardList').innerHTML = `<div class="text-center text-red-500 py-4 text-sm">Cần cấp quyền Firestore Rules để xem bảng xếp hạng.</div>`;
-            }
-        }
-
-        function renderLeaderboard(ranking) {
-            const listEl = document.getElementById('leaderboardList');
-            const myRankEl = document.getElementById('myRank');
-            const currentUserUid = auth.currentUser ? auth.currentUser.uid : null;
-
-            if (ranking.length === 0) {
-                listEl.innerHTML = `<div class="flex flex-col items-center justify-center py-10 text-gray-400 opacity-60"><i class="fa-solid fa-trophy text-4xl mb-2"></i><p class="text-sm">Chưa có dữ liệu xếp hạng</p></div>`;
-                myRankEl.innerText = "--";
-                return;
-            }
-
-            let html = '';
-            let myRank = "--";
-
-            ranking.forEach((user, index) => {
-                const rank = index + 1;
-                const isMe = user.uid === currentUserUid;
-                if (isMe) myRank = `#${rank}`;
-
-                let rankBadge = `<span class="w-6 h-6 flex items-center justify-center text-xs font-bold text-gray-500 bg-gray-100 rounded-full">${rank}</span>`;
-                let rowClass = "bg-white border-gray-100";
-                if (rank === 1) { rankBadge = `<i class="fa-solid fa-crown text-yellow-500 text-xl animate-bounce"></i>`; rowClass = "bg-yellow-50 border-yellow-200 shadow-sm"; }
-                else if (rank === 2) rankBadge = `<i class="fa-solid fa-medal text-gray-400 text-lg"></i>`;
-                else if (rank === 3) rankBadge = `<i class="fa-solid fa-medal text-orange-400 text-lg"></i>`;
-
-                if (isMe) rowClass += " border-brand bg-teal-50 ring-1 ring-brand";
-
-                html += `
-                <div class="flex items-center gap-3 p-3 rounded-xl border ${rowClass} transition-all hover:shadow-md">
-                    <div class="w-8 flex justify-center shrink-0">${rankBadge}</div>
-                    <img src="${user.avatar}" class="w-10 h-10 rounded-full border-2 border-white shadow-sm object-cover">
-                    <div class="flex-1 min-w-0">
-                        <div class="text-sm font-bold text-gray-800 truncate flex items-center gap-1">${user.name} ${isMe ? '<span class="text-[10px] bg-brand text-white px-1.5 rounded">Bạn</span>' : ''}</div>
-                        <div class="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Học viên</div>
-                    </div>
-                    <div class="text-right">
-                        <div class="text-brand font-black text-lg leading-none">${user.score.toFixed(1)}</div>
-                        <div class="text-[9px] text-gray-400 font-bold uppercase">Điểm</div>
-                    </div>
-                </div>`;
-            });
-            listEl.innerHTML = html;
-            myRankEl.innerText = myRank;
-        }
-
-        // Helpers
+        
+        // --- HELPER UI ---
         function updateNavButtons() {
             document.getElementById('btnPrev').disabled = currentItemIndex <= 0;
             document.getElementById('btnNext').disabled = currentItemIndex >= flatItems.length - 1;
             document.getElementById('btnPrev').onclick = () => window.playItem(currentItemIndex - 1);
             document.getElementById('btnNext').onclick = () => window.playItem(currentItemIndex + 1);
         }
-        
         window.toggleCollapse = (id, headerEl) => {
-            const body = document.getElementById(id);
-            const icon = headerEl.querySelector('.fa-chevron-right');
-            body.classList.toggle('hidden');
-            icon.classList.toggle('rotate-90');
+            document.getElementById(id).classList.toggle('hidden');
+            headerEl.querySelector('.fa-chevron-right').classList.toggle('rotate-90');
         };
-
         window.toggleSidebar = () => {
             const sb = document.getElementById('sidebar');
             const overlay = document.getElementById('mobileOverlay');
@@ -568,6 +598,64 @@
                 else { sb.classList.add('-translate-x-full'); overlay.classList.add('hidden'); }
             }
         };
+
+        // --- LEADERBOARD ---
+        window.openLeaderboard = async () => {
+            document.getElementById('leaderboardModal').classList.remove('hidden');
+            setTimeout(() => { document.getElementById('leaderboardModal').classList.remove('opacity-0'); document.querySelector('#leaderboardModal > div').classList.remove('scale-95'); }, 10);
+            if (!leaderboardCache) await loadLeaderboardData();
+            else renderLeaderboard(leaderboardCache);
+        };
+        window.closeLeaderboard = () => {
+            document.getElementById('leaderboardModal').classList.add('opacity-0');
+            document.querySelector('#leaderboardModal > div').classList.add('scale-95');
+            setTimeout(() => document.getElementById('leaderboardModal').classList.add('hidden'), 300);
+        };
+        async function loadLeaderboardData() {
+            if (!courseData) return;
+            const examIds = [];
+            flatItems.forEach(i => { if(i.type === 'quiz' && i.examId) examIds.push(i.examId); });
+            if (examIds.length === 0) { renderLeaderboard([]); return; }
+            
+            try {
+                const q = query(collection(db, "results"));
+                const snap = await getDocs(q);
+                const scores = {};
+                snap.forEach(d => {
+                    const r = d.data();
+                    if(examIds.includes(r.examId)) {
+                        if(!scores[r.studentId]) scores[r.studentId] = { name: r.studentName || "Ẩn danh", avatar: `https://ui-avatars.com/api/?name=${r.studentName}&background=random`, score: 0, uid: r.studentId };
+                        scores[r.studentId].score += parseFloat(r.score || 0);
+                    }
+                });
+                leaderboardCache = Object.values(scores).sort((a,b) => b.score - a.score);
+                renderLeaderboard(leaderboardCache);
+            } catch(e) { console.error(e); }
+        }
+        function renderLeaderboard(ranking) {
+            const list = document.getElementById('leaderboardList');
+            const myRankEl = document.getElementById('myRank');
+            const myUid = auth.currentUser?.uid;
+            
+            if(ranking.length === 0) { list.innerHTML = '<div class="text-center py-10 text-gray-400">Chưa có xếp hạng</div>'; return; }
+            
+            let html = ''; let myRank = '--';
+            ranking.forEach((u, i) => {
+                const rank = i + 1;
+                if(u.uid === myUid) myRank = `#${rank}`;
+                let badge = `<span class="w-6 h-6 flex items-center justify-center text-xs font-bold bg-gray-100 text-gray-500 rounded-full">${rank}</span>`;
+                if(rank===1) badge = '🥇'; if(rank===2) badge = '🥈'; if(rank===3) badge = '🥉';
+                
+                html += `<div class="flex items-center gap-3 p-3 rounded-xl border ${u.uid === myUid ? 'border-brand bg-teal-50' : 'border-gray-100 bg-white'}">
+                    <div class="w-8 text-center text-lg">${badge}</div>
+                    <img src="${u.avatar}" class="w-8 h-8 rounded-full border">
+                    <div class="flex-1 font-bold text-sm text-gray-800">${u.name}</div>
+                    <div class="text-brand font-black">${u.score.toFixed(1)}</div>
+                </div>`;
+            });
+            list.innerHTML = html;
+            myRankEl.innerText = myRank;
+        }
     </script>
 </body>
 </html>
