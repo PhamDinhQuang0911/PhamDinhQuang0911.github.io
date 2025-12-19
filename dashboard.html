@@ -447,30 +447,26 @@
                 currentUser = user;
                 currentUserUid = user.uid;
                 
-                // 1. Cập nhật giao diện tĩnh ngay lập tức (Không cần chờ data)
+                // 1. Cập nhật giao diện tĩnh NGAY LẬP TỨC
                 document.getElementById('sidebarName').textContent = user.displayName || user.email;
                 document.getElementById('sidebarRole').textContent = 'Quản trị viên';
                 const avatarUrl = user.photoURL || `https://ui-avatars.com/api/?name=${user.email}&background=random`;
                 document.getElementById('sidebarAvatar').src = avatarUrl;
                 if(document.getElementById('mobileAvatar')) document.getElementById('mobileAvatar').src = avatarUrl;
 
-                // 2. KÍCH HOẠT TẢI DỮ LIỆU SONG SONG (QUAN TRỌNG)
-                // Thay vì gọi từng hàm lẻ tẻ, ta gom chúng lại
-                const task1 = loadClasses();      // Tải danh sách lớp
-                const task2 = loadFileManager();  // Tải ngân hàng đề (đã tối ưu ở Bước 1)
+                // 2. KÍCH HOẠT TẢI DỮ LIỆU NGẦM (KHÔNG DÙNG AWAIT)
+                // Giao diện sẽ hiện ra ngay, còn dữ liệu sẽ tự điền vào sau
+                loadClasses();      
+                loadFileManager();  
                 
-                // Đợi tất cả hoàn thành để đảm bảo dữ liệu đồng bộ
-                await Promise.all([task1, task2]);
-                
-                // 3. Gán sự kiện (Sau khi đã có data)
+                // 3. Gán sự kiện
                 const createBtn = document.getElementById('createClassBtn');
                 if(createBtn) createBtn.onclick = handleCreateClass;
                 
-                // 4. Điều hướng View (Nếu có param trên URL)
+                // 4. Điều hướng View
                 const params = new URLSearchParams(window.location.search);
                 const view = params.get('view');
                 if (view && ['classes', 'exambank'].includes(view)) {
-                    // Không cần setTimeout nữa vì data đã sẵn sàng
                     switchView(view);
                 }
             } else {
@@ -556,12 +552,22 @@
         }
 
         async function loadClasses() {
+            const list = document.getElementById('classList'); 
+            if(!list) return;
+
+            // HIỆN SKELETON (Giao diện giả lập)
+            list.innerHTML = `
+                <div class="bg-white p-5 rounded-xl border border-gray-200 h-[140px] animate-pulse"><div class="w-10 h-10 bg-gray-200 rounded-lg mb-4"></div><div class="h-4 bg-gray-200 rounded w-3/4 mb-2"></div><div class="h-3 bg-gray-200 rounded w-1/2"></div></div>
+                <div class="bg-white p-5 rounded-xl border border-gray-200 h-[140px] animate-pulse"><div class="w-10 h-10 bg-gray-200 rounded-lg mb-4"></div><div class="h-4 bg-gray-200 rounded w-3/4 mb-2"></div><div class="h-3 bg-gray-200 rounded w-1/2"></div></div>
+                <div class="bg-white p-5 rounded-xl border border-gray-200 h-[140px] animate-pulse"><div class="w-10 h-10 bg-gray-200 rounded-lg mb-4"></div><div class="h-4 bg-gray-200 rounded w-3/4 mb-2"></div><div class="h-3 bg-gray-200 rounded w-1/2"></div></div>
+            `;
+
             try {
                 const q = query(collection(db, "classes"), where("teacherId", "==", currentUserUid), limit(100));
                 const snap = await getDocs(q);
-                const list = document.getElementById('classList'); 
-                if(!list) return;
-                list.innerHTML = '';
+                
+                list.innerHTML = ''; // Xóa skeleton
+                
                 snap.forEach(d => {
                     const cl = d.data();
                     const card = document.createElement('div');
