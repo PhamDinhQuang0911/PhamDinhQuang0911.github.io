@@ -686,6 +686,40 @@
             document.getElementById('btnPrev').onclick = () => window.playItem(currentItemIndex - 1);
             document.getElementById('btnNext').onclick = () => window.playItem(currentItemIndex + 1);
         }
+        // --- XỬ LÝ CHỐNG RỜI TAB (ANTI-CHEAT) ---
+        
+        // Hàm này chạy khi học sinh bấm nút "Tiếp tục học ngay"
+        window.resumeLearning = () => {
+            document.getElementById('resumePromptModal').classList.add('hidden');
+            if (player && player.playVideo) {
+                player.playVideo();
+            }
+        };
+
+        // Lắng nghe sự kiện chuyển Tab hoặc ẩn trình duyệt
+        document.addEventListener("visibilitychange", () => {
+            if (document.hidden) {
+                // Khi học sinh rời Tab: Tạm dừng video ngay lập tức
+                if (player && player.pauseVideo) {
+                    player.pauseVideo();
+                    console.log("Học sinh đã rời tab - Tạm dừng video");
+                }
+            } else {
+                // Khi học sinh quay lại Tab:
+                const item = flatItems[currentItemIndex];
+                // Chỉ hiện thông báo nếu bài học đang là Video và chưa hoàn thành
+                if (item && item.type === 'video' && !isVideoCompleted) {
+                    document.getElementById('resumePromptModal').classList.remove('hidden');
+                }
+            }
+        });
+
+        // Chống gian lận bằng cách mất tiêu điểm cửa sổ (Blur)
+        window.addEventListener("blur", () => {
+            if (player && player.pauseVideo && !isVideoCompleted) {
+                player.pauseVideo();
+            }
+        });
         window.toggleCollapse = (id, headerEl) => {
             document.getElementById(id).classList.toggle('hidden');
             headerEl.querySelector('.fa-chevron-right').classList.toggle('rotate-90');
@@ -760,5 +794,18 @@
             myRankEl.innerText = myRank;
         }
     </script>
+    <div id="resumePromptModal" class="hidden fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+        <div class="bg-white rounded-2xl p-8 max-w-sm w-full text-center shadow-2xl transform transition-all">
+            <div class="w-20 h-20 bg-teal-100 text-teal-600 rounded-full flex items-center justify-center mx-auto mb-6">
+                <i class="fa-solid fa-circle-play text-4xl"></i>
+            </div>
+            <h3 class="text-2xl font-extrabold text-gray-900 mb-2">Học tiếp thôi nào!</h3>
+            <p class="text-gray-500 mb-8 text-sm leading-relaxed">Hệ thống nhận thấy bạn vừa rời khỏi trang học tập. Hãy tập trung để hoàn thành bài giảng nhé!</p>
+            <button onclick="window.resumeLearning()" class="w-full py-4 bg-brand text-white font-bold rounded-xl hover:bg-teal-800 transition-all shadow-lg shadow-teal-700/30 flex items-center justify-center gap-2">
+                <span>Tiếp tục học ngay</span>
+                <i class="fa-solid fa-arrow-right"></i>
+            </button>
+        </div>
+    </div>
 </body>
 </html>
