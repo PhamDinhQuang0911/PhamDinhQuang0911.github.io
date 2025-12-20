@@ -1200,6 +1200,12 @@ window.toggleCollapse = (cIdx, type, lIdx = null) => {
 let courseQuizDefaults = { minScore: 5, viewLimit: 0, viewPrice: 0 };
 
 // 1. Cập nhật thời gian video
+// --- LOGIC 3: CÀI ĐẶT VIDEO & QUIZ (HỖ TRỢ CẤU HÌNH CHUNG/RIÊNG) ---
+
+// Biến lưu cấu hình chung (Load từ DB khi mở giáo án)
+let courseQuizDefaults = { minScore: 5, viewLimit: 0, viewPrice: 0 };
+
+// 1. Cập nhật thời gian video
 document.getElementById('videoMinTime').oninput = (e) => {
     if(activeItemIdx > -1) currentCurriculum[activeChapIdx].lessons[activeLesIdx].items[activeItemIdx].minWatchTime = e.target.value;
 };
@@ -1213,11 +1219,11 @@ window.toggleQuizMode = () => {
     
     // Lưu trạng thái checkbox vào item hiện tại
     if (activeItemIdx > -1) {
-        currentCurriculum[activeChapIdx].lessons[activeLesIdx].items[activeItemIdx].useCustomConfig = isCustom;
+        const item = currentCurriculum[activeChapIdx].lessons[activeLesIdx].items[activeItemIdx];
+        item.useCustomConfig = isCustom;
         
-        // Nếu chuyển sang Custom: Copy giá trị hiện tại vào Item để làm mốc sửa
+        // Nếu vừa BẬT chế độ riêng: Copy giá trị hiện tại vào Item để làm mốc sửa
         if(isCustom) {
-            const item = currentCurriculum[activeChapIdx].lessons[activeLesIdx].items[activeItemIdx];
             item.minScore = document.getElementById('quizMinScore').value;
             item.viewLimit = document.getElementById('quizViewLimit').value;
             item.viewPrice = document.getElementById('quizViewPrice').value;
@@ -1225,9 +1231,9 @@ window.toggleQuizMode = () => {
     }
 
     if (isCustom) {
-        // Mode Custom: Sáng lên, hiển thị thông báo
-        area.classList.remove('opacity-50', 'bg-gray-50'); // Bỏ mờ, bỏ nền xám
-        area.classList.add('bg-orange-50'); // Thêm nền cam nhạt
+        // Mode Custom: Sáng lên
+        area.classList.remove('opacity-50', 'pointer-events-none', 'bg-gray-50'); 
+        area.classList.add('bg-orange-50');
         txt.innerHTML = `<span class="text-orange-600 font-bold"><i class="fa-solid fa-pen"></i> Đang chỉnh sửa riêng cho đề này.</span>`;
         
         inputs.forEach(id => {
@@ -1235,8 +1241,8 @@ window.toggleQuizMode = () => {
             document.getElementById(id).classList.add('bg-white', 'text-gray-800');
         });
     } else {
-        // Mode Global: Mờ đi, hiển thị thông báo
-        area.classList.add('opacity-50', 'bg-gray-50');
+        // Mode Global: Mờ đi
+        area.classList.add('opacity-50', 'pointer-events-none', 'bg-gray-50');
         area.classList.remove('bg-orange-50');
         txt.innerHTML = `<span class="text-blue-600 font-bold"><i class="fa-solid fa-globe"></i> Đang dùng cấu hình chung.</span> (Sửa ở đây sẽ áp dụng cho toàn bộ bài học)`;
         
@@ -1249,6 +1255,113 @@ window.toggleQuizMode = () => {
             if(id === 'quizViewLimit') document.getElementById(id).value = courseQuizDefaults.viewLimit || '';
             if(id === 'quizViewPrice') document.getElementById(id).value = courseQuizDefaults.viewPrice || '';
         });
+    }
+};
+
+// 3. Hàm lưu giá trị nhập liệu
+const updateQuizConfig = () => {
+    const isCustom = document.getElementById('quizCustomConfig').checked;
+    const valMinScore = document.getElementById('quizMinScore').value;
+    const valViewLimit = document.getElementById('quizViewLimit').value;
+    const valViewPrice = document.getElementById('quizViewPrice').value;
+
+    if (isCustom) {
+        // Mode CUSTOM: Chỉ lưu vào Item hiện tại
+        if(activeItemIdx > -1) {
+            const item = currentCurriculum[activeChapIdx].lessons[activeLesIdx].items[activeItemIdx];
+            item.minScore = valMinScore;
+            item.viewLimit = valViewLimit;
+            item.viewPrice = valViewPrice;
+        }
+    } else {
+        // Mode GLOBAL: Lưu vào biến toàn cục của khóa học
+        courseQuizDefaults.minScore = valMinScore;
+        courseQuizDefaults.viewLimit = valViewLimit;
+        courseQuizDefaults.viewPrice = valViewPrice;
+    }
+};
+
+document.getElementById('quizMinScore').oninput = updateQuizConfig;
+document.getElementById('quizViewLimit').oninput = updateQuizConfig;
+document.getElementById('quizViewPrice').oninput = updateQuizConfig;
+
+// 4. [CẬP NHẬT] Hàm mở trình soạn thảo để Load cả Config Global
+window.openCurriculumEditor = async (courseId) => {
+    currentCourseId = courseId;
+    activeChapIdx = -1; activeLesIdx = -1; activeItemIdx = -1;
+    document.getElementById('curriculumModal').classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+    document.getElementById('editorWelcome').classList.remove('hidden');
+    document.getElementById('editorForm').classList.add('hidden');
+
+    try {
+        const d = await getDoc(doc(db, "public_courses", courseId));
+        if(d.exists()) {
+            const data = d.data();
+            document.getElementById('editorCourseTitle').innerText = data.title;
+            currentCurriculum = data.curriculum || [];
+            
+            // [MỚI] Load cấu hình chung từ DB, nếu chưa có thì tạo mặc định
+            if(data.quizDefaults) {
+                courseQuizDefaults = data.quizDefaults;
+            } else {
+                courseQuizDefaults = { minScore: 5, viewLimit: 0, viewPrice: 0 };
+            }
+            
+            normalizeCurriculumData();
+            renderCurriculumTree();
+        }
+    } catch(e) { window.showToast(e.message, 'error'); }
+};
+
+// 5. Cập nhật hàm selectItem
+window.selectItem = (cIdx, lIdx, iIdx) => {
+    activeChapIdx = cIdx; activeLesIdx = lIdx; activeItemIdx = iIdx;
+    const data = currentCurriculum[cIdx].lessons[lIdx].items[iIdx];
+    
+    renderCurriculumTree(); 
+    document.getElementById('editorWelcome').classList.add('hidden');
+    document.getElementById('editorForm').classList.remove('hidden');
+    
+    document.getElementById('editItemTitle').value = data.title;
+    document.getElementById('isPreview').checked = data.isPreview || false;
+    document.getElementById('isPublished').checked = data.isPublished !== false;
+    window.setItemType(data.type);
+
+    if(data.type === 'video') {
+        document.getElementById('videoUrlInput').value = data.content || '';
+        document.getElementById('videoMinTime').value = data.minWatchTime || 10; 
+        window.previewVideo(data.content || '');
+    } else if (data.type === 'pdf') {
+        if(data.content && data.content.includes('drive.google.com')) {
+            document.querySelector('input[name="pdfSource"][value="drive"]').checked = true;
+            document.getElementById('driveUrlInput').value = data.content;
+        } else {
+            document.querySelector('input[name="pdfSource"][value="upload"]').checked = true;
+            if(data.content) document.getElementById('pdfFrame').src = data.content;
+        }
+        window.togglePdfSource();
+    } else if(data.type === 'quiz') {
+        document.getElementById('selectedExamTitle').innerText = data.examTitle || 'Chưa chọn đề';
+        document.getElementById('selectedExamInfo').classList.toggle('hidden', !data.examId);
+        
+        // [LOGIC HIỂN THỊ] 
+        const isCustom = data.useCustomConfig || false;
+        document.getElementById('quizCustomConfig').checked = isCustom;
+        
+        // Load giá trị vào input trước khi kích hoạt giao diện
+        if (isCustom) {
+            document.getElementById('quizMinScore').value = data.minScore !== undefined ? data.minScore : 5;
+            document.getElementById('quizViewLimit').value = data.viewLimit || '';
+            document.getElementById('quizViewPrice').value = data.viewPrice || '';
+        } else {
+            document.getElementById('quizMinScore').value = courseQuizDefaults.minScore;
+            document.getElementById('quizViewLimit').value = courseQuizDefaults.viewLimit || '';
+            document.getElementById('quizViewPrice').value = courseQuizDefaults.viewPrice || '';
+        }
+        
+        // Kích hoạt giao diện
+        window.toggleQuizMode(); 
     }
 };
 
