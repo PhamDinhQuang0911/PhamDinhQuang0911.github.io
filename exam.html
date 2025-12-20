@@ -1169,5 +1169,91 @@
         document.getElementById('prevBtnMob').onclick = () => { if(currentIndex > 0) renderQuestion(currentIndex - 1); };
         document.getElementById('nextBtnMob').onclick = () => { if(currentIndex < currentQuestions.length - 1) renderQuestion(currentIndex + 1); };
     </script>
+    <style>
+        /* Lớp phủ màu đen tuyệt đối */
+        #anti-screenshot-overlay {
+            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+            background-color: #000; z-index: 9999999; display: none;
+            cursor: not-allowed;
+        }
+        /* CSS dành riêng cho máy in: Ẩn toàn bộ body khi nhấn Ctrl+P */
+        @media print {
+            body { display: none !important; }
+        }
+        /* Hiệu ứng làm mờ khi mất focus (chống Snipping Tool) */
+        .blur-content {
+            filter: blur(20px) grayscale(100%) !important;
+            transition: filter 0.05s linear;
+        }
+    </style>
+
+    <div id="anti-screenshot-overlay"></div>
+
+    <script>
+        (function() {
+            const overlay = document.getElementById('anti-screenshot-overlay');
+            const body = document.body;
+            let isWarningShown = false;
+
+            // 1. HÀM KÍCH HOẠT MÀN HÌNH ĐEN
+            function activeBlackScreen() {
+                overlay.style.display = 'block';
+                // Tự động tắt sau 0.8 giây
+                setTimeout(() => {
+                    overlay.style.display = 'none';
+                }, 800);
+            }
+
+            // 2. CHẶN PHÍM TẮT CHỤP MÀN HÌNH & F12
+            document.addEventListener('keydown', (e) => {
+                // Danh sách phím cần chặn: F12, PrintScreen, Ctrl+P, Ctrl+S, Ctrl+Shift+I/C/J
+                if (
+                    e.key === 'F12' || 
+                    e.key === 'PrintScreen' ||
+                    (e.ctrlKey && (e.key === 'p' || e.key === 's' || e.key === 'u')) ||
+                    (e.ctrlKey && e.shiftKey && (e.key === 'i' || e.key === 'c' || e.key === 'j' || e.key === 's')) ||
+                    (e.metaKey && e.shiftKey) // Mac OS Command+Shift+...
+                ) {
+                    activeBlackScreen(); // Bật màn hình đen ngay lập tức
+                    e.preventDefault();
+                    e.stopPropagation();
+                    
+                    // Xóa clipboard nếu có thể
+                    if (navigator.clipboard) { navigator.clipboard.writeText(''); }
+                    
+                    return false;
+                }
+            });
+
+            // 3. XỬ LÝ PHÍM PRINTSCREEN (Sự kiện Keyup)
+            document.addEventListener('keyup', (e) => {
+                if (e.key === 'PrintScreen') {
+                    activeBlackScreen(); 
+                    if (navigator.clipboard) { navigator.clipboard.writeText(''); }
+                    if(!isWarningShown) {
+                        alert('Cảnh báo: Nội dung bản quyền. Hành động chụp màn hình đã bị chặn.');
+                        isWarningShown = true;
+                        setTimeout(()=> isWarningShown = false, 5000);
+                    }
+                }
+            });
+
+            // 4. CHỐNG SNIPPING TOOL / LIGHTSHOT (Khi mất tiêu điểm cửa sổ)
+            // Khi người dùng bấm Alt+Tab hoặc click sang Tool chụp ảnh, Web sẽ bị mờ đi
+            window.addEventListener('blur', () => {
+                // Chỉ kích hoạt hiệu ứng này
+                overlay.style.display = 'block'; 
+                body.classList.add('blur-content'); 
+            });
+
+            window.addEventListener('focus', () => {
+                overlay.style.display = 'none'; 
+                body.classList.remove('blur-content'); 
+            });
+
+            // 5. CHẶN CHUỘT PHẢI
+            document.addEventListener('contextmenu', e => e.preventDefault());
+        })();
+    </script>
 </body>
 </html>
