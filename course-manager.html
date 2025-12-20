@@ -257,20 +257,30 @@
                             <div id="pdfPreviewArea" class="h-[300px] md:h-[500px] bg-gray-800 rounded-xl overflow-hidden shadow-lg hidden"><iframe id="pdfFrame" class="w-full h-full" src=""></iframe></div>
                         </div>
 
-                        <div id="panelQuiz" class="content-panel hidden max-w-4xl mx-auto text-center py-10">
-                            <div class="bg-white p-8 rounded-2xl shadow-sm border border-orange-100">
-                                <h3 class="text-xl font-bold text-gray-800 mb-6">Bài tập trắc nghiệm</h3>
-                                <div id="selectedExamInfo" class="hidden mb-6 bg-orange-50 p-4 rounded-xl border border-orange-200 text-left">
-                                    <div class="text-xs font-bold text-orange-600 uppercase mb-1">Đề thi đã chọn:</div>
-                                    <div id="selectedExamTitle" class="font-bold text-gray-800 text-lg">...</div>
-                                </div>
-                                <div class="mb-8 text-left">
-                                    <label class="block text-sm font-bold text-gray-700 mb-2">Điểm đạt tối thiểu (Thang 10)</label>
-                                    <div class="relative"><input type="number" id="quizMinScore" value="5" min="0" max="10" step="0.5" class="w-full pl-4 pr-12 py-3 border border-gray-300 rounded-xl font-bold text-gray-800" placeholder="5"><span class="absolute right-4 top-3 text-gray-400 text-sm font-bold">Điểm</span></div>
+                        <div class="mb-8 text-left grid grid-cols-1 md:grid-cols-3 gap-4">
+                                    <div>
+                                        <label class="block text-xs font-bold text-gray-500 uppercase mb-2">Điểm tối thiểu</label>
+                                        <div class="relative">
+                                            <input type="number" id="quizMinScore" value="5" min="0" max="10" step="0.5" class="w-full pl-3 pr-8 py-3 border border-gray-300 rounded-xl font-bold text-gray-800 outline-none focus:border-orange-500">
+                                            <span class="absolute right-3 top-3.5 text-gray-400 text-xs font-bold">Điểm</span>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs font-bold text-gray-500 uppercase mb-2" title="Để trống = Vô hạn">Giới hạn xem giải</label>
+                                        <div class="relative">
+                                            <input type="number" id="quizViewLimit" min="0" class="w-full pl-3 pr-8 py-3 border border-gray-300 rounded-xl font-bold text-gray-800 outline-none focus:border-orange-500" placeholder="∞">
+                                            <span class="absolute right-3 top-3.5 text-gray-400 text-xs font-bold">Lần</span>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs font-bold text-gray-500 uppercase mb-2" title="Để trống = Miễn phí">Giá xem (QPoint)</label>
+                                        <div class="relative">
+                                            <input type="number" id="quizViewPrice" min="0" class="w-full pl-3 pr-8 py-3 border border-gray-300 rounded-xl font-bold text-orange-600 outline-none focus:border-orange-500" placeholder="0">
+                                            <span class="absolute right-3 top-3.5 text-gray-400 text-xs font-bold">QP</span>
+                                        </div>
+                                    </div>
                                 </div>
                                 <button onclick="window.openExamSelector()" class="px-6 py-3 bg-orange-600 text-white rounded-xl font-bold hover:bg-orange-700 shadow-lg transition-all"><i class="fa-solid fa-folder-open mr-2"></i> Chọn từ Ngân hàng đề</button>
-                            </div>
-                        </div>
                     </div>
 
                     <div class="bg-white border-t border-gray-100 p-4 flex gap-6 text-sm font-bold text-gray-600 shrink-0">
@@ -1176,11 +1186,18 @@ document.getElementById('videoMinTime').oninput = (e) => {
 };
 
 // 2. [MỚI] Cập nhật điểm tối thiểu cho Quiz
-document.getElementById('quizMinScore').oninput = (e) => {
+// 2. [CẬP NHẬT] Hàm cập nhật chung cho cấu hình Quiz
+const updateQuizConfig = () => {
     if(activeItemIdx > -1) {
-        currentCurriculum[activeChapIdx].lessons[activeLesIdx].items[activeItemIdx].minScore = e.target.value;
+        const item = currentCurriculum[activeChapIdx].lessons[activeLesIdx].items[activeItemIdx];
+        item.minScore = document.getElementById('quizMinScore').value;
+        item.viewLimit = document.getElementById('quizViewLimit').value;
+        item.viewPrice = document.getElementById('quizViewPrice').value;
     }
 };
+document.getElementById('quizMinScore').oninput = updateQuizConfig;
+document.getElementById('quizViewLimit').oninput = updateQuizConfig;
+document.getElementById('quizViewPrice').oninput = updateQuizConfig;
 
 // 3. Cập nhật hàm selectItem để load dữ liệu vào Form
 window.selectItem = (cIdx, lIdx, iIdx) => {
@@ -1201,7 +1218,7 @@ window.selectItem = (cIdx, lIdx, iIdx) => {
     // Bind dữ liệu riêng từng loại
     if(data.type === 'video') {
         document.getElementById('videoUrlInput').value = data.content || '';
-        document.getElementById('videoMinTime').value = data.minWatchTime || 10; // Load thời gian
+        document.getElementById('videoMinTime').value = data.minWatchTime || 10; 
         window.previewVideo(data.content || '');
     } else if (data.type === 'pdf') {
         if(data.content && data.content.includes('drive.google.com')) {
@@ -1216,8 +1233,10 @@ window.selectItem = (cIdx, lIdx, iIdx) => {
         document.getElementById('selectedExamTitle').innerText = data.examTitle || 'Chưa chọn đề';
         document.getElementById('selectedExamInfo').classList.toggle('hidden', !data.examId);
         
-        // [MỚI] Load điểm tối thiểu (Mặc định 5 nếu chưa có)
+        // [CẬP NHẬT] Load đầy đủ thông số Quiz
         document.getElementById('quizMinScore').value = data.minScore !== undefined ? data.minScore : 5;
+        document.getElementById('quizViewLimit').value = data.viewLimit || ''; // Rỗng là vô hạn
+        document.getElementById('quizViewPrice').value = data.viewPrice || ''; // Rỗng là miễn phí
     }
 };
 
