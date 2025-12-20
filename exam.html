@@ -941,15 +941,49 @@
             });
             const score = parseFloat((correct * (10/currentQuestions.length)).toFixed(2));
 
+            // [LOGIC MỚI] Kiểm tra điểm tối thiểu (Mặc định 5 nếu không cài đặt)
+            const passScore = examData.passScore !== undefined ? Number(examData.passScore) : 5;
+            const isPassed = score >= passScore;
+
             try {
+                // Lưu thêm trường isPassed vào database
                 await addDoc(collection(db, "results"), {
-                    examId, studentId: currentUser.uid, studentName: currentUser.displayName||currentUser.email,
-                    score, answers: userAnswers, cheatCount, correctCount: correct, totalQuestions: currentQuestions.length,
+                    examId, 
+                    studentId: currentUser.uid, 
+                    studentName: currentUser.displayName || currentUser.email,
+                    score, 
+                    answers: userAnswers, 
+                    cheatCount, 
+                    correctCount: correct, 
+                    totalQuestions: currentQuestions.length,
+                    isPassed: isPassed, // <--- Quan trọng: Lưu trạng thái Đạt/Trượt
+                    passScoreSnapshot: passScore, // Lưu lại mốc điểm chuẩn tại thời điểm thi
                     submittedAt: new Date().toISOString()
                 });
                 
                 document.getElementById('scoreDisplay').textContent = score;
                 document.getElementById('correctCount').textContent = `${correct}/${currentQuestions.length}`;
+
+                // [LOGIC MỚI] Thay đổi giao diện dựa trên kết quả Đạt hay Trượt
+                const resultTitle = document.getElementById('resultTitle');
+                const resultMsg = document.getElementById('resultMsg');
+                const resultIcon = document.getElementById('resultIcon');
+                const scoreDisplay = document.getElementById('scoreDisplay');
+
+                if (isPassed) {
+                    resultTitle.textContent = "Chúc mừng! Bạn đã vượt qua";
+                    resultTitle.className = "text-2xl font-extrabold text-green-600 mb-2";
+                    resultMsg.textContent = `Bạn đã đạt ${score} điểm (Điểm chuẩn: ${passScore})`;
+                    resultIcon.innerHTML = "🎉"; // Icon pháo hoa
+                    scoreDisplay.className = "text-6xl font-black text-green-600"; // Màu xanh
+                } else {
+                    resultTitle.textContent = "Chưa đạt yêu cầu";
+                    resultTitle.className = "text-2xl font-extrabold text-red-600 mb-2";
+                    resultMsg.textContent = `Cần tối thiểu ${passScore} điểm để qua bài. Hãy ôn tập thêm!`;
+                    resultIcon.innerHTML = "fighting"; // Icon cố lên (hoặc icon buồn)
+                    resultIcon.textContent = "😓"; 
+                    scoreDisplay.className = "text-6xl font-black text-red-500"; // Màu đỏ
+                }
                 
                 if (examData.showScore === 'immediate' || (examData.showScore === 'after_exam' && timeLeft <= 0)) {
                     document.getElementById('scoreSection').classList.remove('hidden');
