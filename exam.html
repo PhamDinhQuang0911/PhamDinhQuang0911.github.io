@@ -941,8 +941,20 @@
             });
             const score = parseFloat((correct * (10/currentQuestions.length)).toFixed(2));
 
-            // [LOGIC MỚI] Kiểm tra điểm tối thiểu (Mặc định 5 nếu không cài đặt)
-            const passScore = examData.passScore !== undefined ? Number(examData.passScore) : 5;
+            // [LOGIC ƯU TIÊN] Xác định điểm chuẩn (Pass Score)
+            // 1. Nếu có trên URL (từ khóa học) -> Lấy từ URL
+            // 2. Nếu không -> Lấy từ cài đặt gốc của đề thi
+            // 3. Nếu không có cả hai -> Mặc định là 5
+            const urlParams = new URLSearchParams(window.location.search);
+            const coursePassScore = urlParams.get('coursePassScore');
+            
+            let passScore;
+            if (coursePassScore) {
+                passScore = Number(coursePassScore); // Ưu tiên khóa học (VD: 5 điểm)
+            } else {
+                passScore = examData.passScore !== undefined ? Number(examData.passScore) : 5; // Mặc định (VD: 8 điểm)
+            }
+
             const isPassed = score >= passScore;
 
             try {
@@ -988,8 +1000,26 @@
                 if (examData.showScore === 'immediate' || (examData.showScore === 'after_exam' && timeLeft <= 0)) {
                     document.getElementById('scoreSection').classList.remove('hidden');
                 }
-                if (examData.showResult === 'immediate' || (examData.showResult === 'after_exam' && timeLeft <= 0)) {
-                    document.getElementById('btnViewSolution').classList.remove('hidden');
+                // Logic hiển thị nút Xem lời giải:
+                // 1. Phải thỏa mãn cài đặt hiển thị (showResult)
+                // 2. VÀ (Phải Đạt điểm chuẩn HOẶC là admin/giáo viên test)
+                // Lưu ý: Nếu muốn khắt khe, học sinh BẮT BUỘC phải qua điểm sàn mới được xem giải
+                const canView = (examData.showResult === 'immediate' || (examData.showResult === 'after_exam' && timeLeft <= 0));
+                
+                if (canView) {
+                    const btnView = document.getElementById('btnViewSolution');
+                    if (isPassed) {
+                        btnView.classList.remove('hidden');
+                        btnView.onclick = viewDetailSolutions;
+                    } else {
+                        // Nếu chưa đạt: Ẩn nút hoặc Hiện nút nhưng báo lỗi khi bấm
+                        // Ở đây tôi chọn cách hiện nút nhưng khóa lại để kích thích học sinh làm lại
+                        btnView.classList.remove('hidden');
+                        btnView.classList.replace('bg-orange-100', 'bg-gray-200');
+                        btnView.classList.replace('text-orange-600', 'text-gray-500');
+                        btnView.innerHTML = `<i class="fa-solid fa-lock mr-2"></i> Đạt ${passScore}đ để xem lời giải`;
+                        btnView.onclick = () => window.customAlert(`Bạn cần đạt tối thiểu ${passScore} điểm để mở khóa lời giải chi tiết. Hãy thử lại nhé!`, 'warning');
+                    }
                 }
                 
                 document.getElementById('resultModal').classList.remove('hidden');
