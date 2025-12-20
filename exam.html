@@ -927,19 +927,60 @@
             isExamActive = false;
             clearInterval(timerInterval);
             
-            let correct = 0;
+            // [LOGIC TÍNH ĐIỂM MỚI] Cộng dồn điểm từng câu (theo cấu hình Editor)
+            let totalScore = 0;
+            let correct = 0; 
             const normalize = (s) => String(s).replace(/\$| /g,'').toLowerCase().trim();
             
-            currentQuestions.forEach((q,i) => {
-                const u = userAnswers[i];
-                if(q.type==='mc' && u===q.correct) correct++;
-                if(q.type==='short' && q.answer && u && normalize(u)===normalize(q.answer)) correct++;
-                if(q.type==='tf' && u && q.statements) {
-                    let matches=0; q.statements.forEach((s,si) => { if(u[si]===s.isTrue) matches++; });
-                    if(matches === q.statements.length) correct++;
+            // 1. Tính tổng điểm đã được cấu hình cứng (để biết còn dư bao nhiêu cho các câu không cấu hình)
+            let configuredPoints = 0;
+            let unconfiguredCount = 0;
+            
+            currentQuestions.forEach(q => {
+                if (q.point && parseFloat(q.point) > 0) {
+                    configuredPoints += parseFloat(q.point);
+                } else {
+                    unconfiguredCount++;
                 }
             });
-            const score = parseFloat((correct * (10/currentQuestions.length)).toFixed(2));
+
+            // 2. Tính điểm mặc định cho các câu chưa cấu hình (chia đều phần điểm còn lại)
+            // Nếu tổng điểm cấu hình > 10 hoặc bằng 0 thì fallback về chia đều toàn bộ
+            let defaultPointPerQuestion = 0;
+            if (unconfiguredCount > 0) {
+                const remainingScore = Math.max(0, 10 - configuredPoints);
+                defaultPointPerQuestion = remainingScore / unconfiguredCount;
+            } else if (configuredPoints === 0) {
+                // Trường hợp đặc biệt: Không câu nào có điểm -> Chia đều 10
+                defaultPointPerQuestion = 10 / currentQuestions.length;
+            }
+
+            // 3. Duyệt từng câu để chấm
+            currentQuestions.forEach((q, i) => {
+                const u = userAnswers[i];
+                let isCorrect = false;
+
+                // --- Kiểm tra đúng sai ---
+                if (q.type === 'mc' && u === q.correct) isCorrect = true;
+                else if (q.type === 'short' && q.answer && u && normalize(u) === normalize(q.answer)) isCorrect = true;
+                else if (q.type === 'tf' && u && q.statements) {
+                    // Logic chấm ĐÚNG/SAI: Phải đúng hết các ý con
+                    let matches = 0; 
+                    q.statements.forEach((s, si) => { if (u[si] === s.isTrue) matches++; });
+                    if (matches === q.statements.length) isCorrect = true;
+                }
+                // (Nếu có tự luận essay thì cần giáo viên chấm sau, tạm thời tính 0 hoặc tính đúng nếu có logic khác)
+
+                if (isCorrect) {
+                    correct++;
+                    // Cộng điểm: Ưu tiên điểm riêng, nếu không có thì dùng điểm mặc định
+                    let thisPoint = (q.point && parseFloat(q.point) > 0) ? parseFloat(q.point) : defaultPointPerQuestion;
+                    totalScore += thisPoint;
+                }
+            });
+
+            // Làm tròn 2 chữ số thập phân
+            const score = parseFloat(totalScore.toFixed(2));
 
             // [LOGIC ƯU TIÊN] Xác định điểm chuẩn (Pass Score)
             // 1. Nếu có trên URL (từ khóa học) -> Lấy từ URL
