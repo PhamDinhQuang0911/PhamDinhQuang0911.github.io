@@ -205,7 +205,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
-        import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, query, where, getDocs } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, query, where, getDocs, increment } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
         // CẤU HÌNH FIREBASE
         const firebaseConfig = {
@@ -521,61 +521,78 @@
                     });
 
                     if (isPassed) {
-                        // --- TRƯỜNG HỢP ĐÃ ĐẠT: MỞ KHÓA ---
+                        // --- TRƯỜNG HỢP: ĐÃ ĐẠT ---
                         
-                        // 1. Nút thông báo Đạt (Bấm để làm lại)
+                        // A. Tạo Container để 2 nút nằm cạnh nhau (nếu chưa có)
+                        // Chúng ta cần gom btnStart và btnSolution vào 1 div flex
+                        let btnContainer = document.getElementById('quizActionButtons');
+                        if (!btnContainer) {
+                            btnContainer = document.createElement('div');
+                            btnContainer.id = 'quizActionButtons';
+                            btnContainer.className = "flex flex-wrap items-center justify-center gap-3 w-full mt-4";
+                            // Chèn container vào trước nút btnStart hiện tại
+                            btnStart.parentNode.insertBefore(btnContainer, btnStart);
+                            // Di chuyển btnStart vào trong container
+                            btnContainer.appendChild(btnStart);
+                        }
+
+                        // B. Cấu hình nút "Đã đạt" (Màu xanh)
                         btnStart.innerHTML = `<i class="fa-solid fa-check-circle mr-2"></i> Đã đạt (${bestScore}đ)`;
-                        btnStart.className = "px-6 py-3 bg-green-600 text-white font-bold rounded-xl shadow-lg hover:bg-green-700 transition-all mr-3";
-                        // Cho phép làm lại nhưng vẫn gửi kèm mode=practice để không bị tính giới hạn lượt làm
+                        btnStart.className = "px-6 py-3 bg-green-600 text-white font-bold rounded-xl shadow-lg hover:bg-green-700 transition-all flex-1 md:flex-none whitespace-nowrap";
                         btnStart.onclick = () => window.location.href = `exam.html?id=${item.examId}&mode=course&courseId=${courseId}&mode=practice&coursePassScore=${minScore}`;
                         
                         markAsCompleted(index);
 
-                        // 2. [TÍNH NĂNG MỚI] Nút "Xem lời giải"
-                        // Kiểm tra xem đã có nút này chưa để tránh tạo trùng khi render lại
+                        // C. Xử lý nút "Xem lời giải" (Màu vàng)
                         let btnSolution = document.getElementById('btnViewSolution');
                         if (!btnSolution) {
                             btnSolution = document.createElement('button');
                             btnSolution.id = 'btnViewSolution';
-                            btnStart.parentNode.appendChild(btnSolution);
+                            btnContainer.appendChild(btnSolution);
                         }
 
-                        // Lấy cấu hình từ bài học
-                        const viewLimit = parseInt(item.viewLimit) || 0; // 0 = Vô hạn
-                        const viewPrice = parseInt(item.viewPrice) || 0; // 0 = Miễn phí
+                        // Lấy cấu hình
+                        const viewLimit = parseInt(item.viewLimit) || 0; 
+                        const viewPrice = parseInt(item.viewPrice) || 0;
                         
-                        // Lấy thông tin đã xem từ DB user_progress
+                        // Lấy số lượt đã xem
                         const progRef = doc(db, "user_progress", `${auth.currentUser.uid}_${courseId}`);
                         const progSnap = await getDoc(progRef);
                         let viewedCount = 0;
-                        // Cấu trúc lưu: quizUsage -> { [itemId]: { viewCount: 1, ... } }
                         if(progSnap.exists() && progSnap.data().quizUsage && progSnap.data().quizUsage[item.id]) {
                             viewedCount = progSnap.data().quizUsage[item.id].viewCount || 0;
                         }
 
-                        // Render nội dung nút
-                        let btnText = 'Xem lời giải';
-                        let btnSub = '';
-                        if (viewPrice > 0) btnSub += ` -${viewPrice} QP`;
-                        if (viewLimit > 0) btnSub += ` (${viewedCount}/${viewLimit})`;
+                        // Tính số lượt còn lại
+                        const remainingViews = viewLimit > 0 ? (viewLimit - viewedCount) : '∞';
                         
-                        btnSolution.innerHTML = `<i class="fa-solid fa-lightbulb mr-2"></i> ${btnText} <span class="text-xs bg-white/20 px-1.5 rounded ml-1 font-mono">${btnSub}</span>`;
+                        // Tạo nội dung nút (Hiển thị giá và số lượt còn lại)
+                        let btnContent = `<span>Xem lời giải</span>`;
+                        let badges = '';
                         
-                        // Logic khóa nút nếu hết lượt
+                        if (viewPrice > 0) badges += `<span class="bg-black/20 px-1.5 py-0.5 rounded text-xs ml-1">-${viewPrice} QP</span>`;
+                        
+                        if (viewLimit > 0) {
+                            if (remainingViews > 0) badges += `<span class="bg-blue-600 px-1.5 py-0.5 rounded text-xs ml-1">Còn ${remainingViews} lượt</span>`;
+                            else badges += `<span class="bg-red-500 px-1.5 py-0.5 rounded text-xs ml-1">Hết lượt</span>`;
+                        } else {
+                            badges += `<span class="bg-green-600/50 px-1.5 py-0.5 rounded text-xs ml-1">Vô hạn</span>`;
+                        }
+
+                        btnSolution.innerHTML = `<i class="fa-solid fa-lightbulb mr-1"></i> ${btnContent} ${badges}`;
+
+                        // Logic khóa/mở nút
                         if (viewLimit > 0 && viewedCount >= viewLimit) {
-                            btnSolution.className = "px-6 py-3 bg-gray-400 text-white font-bold rounded-xl shadow cursor-not-allowed opacity-80";
-                            btnSolution.innerHTML = `<i class="fa-solid fa-lock mr-2"></i> Hết lượt xem giải`;
+                            // HẾT LƯỢT
+                            btnSolution.className = "px-6 py-3 bg-gray-400 text-white font-bold rounded-xl shadow cursor-not-allowed opacity-80 flex-1 md:flex-none whitespace-nowrap";
                             btnSolution.onclick = () => window.showToast("Bạn đã hết lượt xem lời giải bài này!", "error");
                         } else {
-                            btnSolution.className = "px-6 py-3 bg-yellow-500 text-white font-bold rounded-xl shadow-lg hover:bg-yellow-600 transition-all animate-bounce-in";
-                            // Gắn hàm xử lý click
+                            // CÒN LƯỢT
+                            btnSolution.className = "px-6 py-3 bg-yellow-500 text-white font-bold rounded-xl shadow-lg hover:bg-yellow-600 transition-all animate-bounce-in flex-1 md:flex-none whitespace-nowrap";
+                            
                             btnSolution.onclick = async () => {
-                                // A. Xác nhận trừ điểm (nếu có phí)
+                                // 1. Trừ điểm (nếu có phí)
                                 if (viewPrice > 0) {
-                                    const confirmMsg = `Xem lời giải sẽ tốn ${viewPrice} QPoint.\n(Bạn đã xem ${viewedCount}${viewLimit>0?'/'+viewLimit:''} lần).\nBạn có chắc chắn muốn xem?`;
-                                    if (!confirm(confirmMsg)) return; 
-
-                                    // Kiểm tra điểm user
                                     const userRef = doc(db, "users", auth.currentUser.uid);
                                     const uSnap = await getDoc(userRef);
                                     const currentQP = uSnap.data().qPoints || 0;
@@ -584,12 +601,14 @@
                                         return window.showToast(`Bạn không đủ QPoint! (Cần ${viewPrice}, có ${currentQP})`, "error");
                                     }
 
-                                    // Trừ điểm
+                                    const confirmMsg = `Xem lời giải tốn ${viewPrice} QPoint.\n(Bạn còn ${remainingViews} lượt xem).\nĐồng ý?`;
+                                    if (!confirm(confirmMsg)) return;
+
                                     await updateDoc(userRef, { qPoints: increment(-viewPrice) });
                                     window.showToast(`Đã trừ ${viewPrice} QPoint!`, "info");
                                 }
 
-                                // B. Tăng lượt xem (Transaction lưu vào user_progress)
+                                // 2. Tăng lượt xem & Chuyển hướng
                                 await setDoc(progRef, {
                                     quizUsage: {
                                         [item.id]: {
@@ -599,35 +618,36 @@
                                     }
                                 }, { merge: true });
 
-                                // C. Chuyển hướng sang xem lời giải (mode=review để vào thẳng)
-                                // Thêm coursePassScore để exam.html biết điểm chuẩn
                                 window.location.href = `exam.html?id=${item.examId}&mode=review&courseId=${courseId}&coursePassScore=${minScore}`;
                             };
                         }
 
                     } else {
-                        // Nếu chưa đạt thì xóa nút xem giải (nếu có) để tránh lỗi giao diện
+                        // TRƯỜNG HỢP: CHƯA ĐẠT
+                        // Reset lại vị trí nút btnStart nếu nó đang nằm trong container (để tránh lỗi giao diện khi user làm lại bài)
+                        const btnContainer = document.getElementById('quizActionButtons');
+                        if (btnContainer) {
+                            // Đưa btnStart ra ngoài và xóa container
+                            btnContainer.parentNode.insertBefore(btnStart, btnContainer);
+                            btnContainer.remove();
+                        }
+                        // Xóa nút xem giải cũ
                         const oldBtn = document.getElementById('btnViewSolution');
                         if(oldBtn) oldBtn.remove();
-                        // --- TRƯỜNG HỢP CHƯA ĐẠT: CHẶN BÀI SAU ---
+
                         const statusText = bestScore === -1 ? "Chưa làm" : `Cao nhất: ${bestScore}đ (Chưa đạt)`;
                         const btnColor = bestScore === -1 ? "bg-brand hover:bg-teal-600" : "bg-orange-500 hover:bg-orange-600";
                         
                         btnStart.innerHTML = `Làm bài ngay <br><span class="text-xs font-normal opacity-90">(Yêu cầu: ${minScore}đ - ${statusText})</span>`;
-                        btnStart.className = `px-8 py-3 ${btnColor} text-white font-bold rounded-xl transition-all shadow-lg`;
+                        btnStart.className = `px-8 py-3 ${btnColor} text-white font-bold rounded-xl transition-all shadow-lg w-auto`;
                         
-                        // Nếu lỡ có trong danh sách hoàn thành (do lỗi cũ) thì xóa đi để chặn lại
                         if(completedItems.has(index)) {
                             completedItems.delete(index);
                             updateStats(); 
                         }
 
                         btnStart.onclick = () => {
-                            if(item.examId) {
-                                // [LOGIC MỚI] Gửi kèm điểm tối thiểu của bài học này sang Exam
-                                const passScore = item.minScore || 5; 
-                                window.location.href = `exam.html?id=${item.examId}&mode=course&courseId=${courseId}&mode=practice&coursePassScore=${passScore}`;
-                            }
+                            if(item.examId) window.location.href = `exam.html?id=${item.examId}&mode=course&courseId=${courseId}&mode=practice&coursePassScore=${minScore}`;
                             else alert("Chưa có đề thi!");
                         };
                     }
