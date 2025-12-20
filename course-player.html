@@ -395,11 +395,25 @@
         window.playItem = async (index) => {
             if(index < 0 || index >= flatItems.length) return;
             
-            // [CẢI TIẾN] Chặn nếu bài trước chưa xong (Trừ bài đầu tiên)
+            // [LOGIC MỚI] Chặn bài học tiếp theo (Phân biệt Video và Bài tập)
             if (index > 0 && !completedItems.has(index - 1)) {
                 const itemBefore = flatItems[index-1];
-                const minMin = parseInt(itemBefore.minWatchTime) || 10;
-                window.showToast(`Thầy yêu cầu bạn xem xong bài trước (tối thiểu ${minMin} phút) mới có thể sang bài mới.`, 'error');
+                
+                // Trường hợp 1: Bài trước là Bài tập (Quiz) -> Kiểm tra điểm
+                if (itemBefore.type === 'quiz') {
+                    const reqScore = itemBefore.minScore || 5;
+                    window.showToast(`⛔ Bạn chưa đạt điểm tối thiểu (${reqScore} điểm) ở bài tập trước. Vui lòng làm lại để mở khóa!`, 'error');
+                } 
+                // Trường hợp 2: Bài trước là Video/PDF -> Kiểm tra thời gian
+                else {
+                    const minMin = parseInt(itemBefore.minWatchTime) || 10;
+                    // Nếu là PDF thì thông báo khác chút (vì PDF thường chỉ cần xem 10s)
+                    if(itemBefore.type === 'pdf') {
+                        window.showToast(`⛔ Bạn cần xem hết tài liệu trước để tiếp tục.`, 'error');
+                    } else {
+                        window.showToast(`⛔ Bạn cần xem bài trước tối thiểu ${minMin} phút để tiếp tục.`, 'error');
+                    }
+                }
                 return;
             }
 
@@ -485,33 +499,52 @@
                      setTimeout(() => markAsCompleted(index), 10000);
                 }
 
-            // --- TRƯỜNG HỢP 3: QUIZ (CÓ CHECK ĐIỂM) ---
             } else if(item.type === 'quiz') {
                 quizContainer.classList.remove('hidden');
                 
                 const minScore = parseFloat(item.minScore) || 5;
                 const btnStart = document.getElementById('btnStartQuiz');
                 
-                // Kiểm tra điểm số
+                // Kiểm tra kết quả từ Database
                 try {
                     const qResult = query(collection(db, "results"), where("studentId", "==", auth.currentUser.uid), where("examId", "==", item.examId));
                     const snap = await getDocs(qResult);
+                    
                     let bestScore = -1;
-                    snap.forEach(d => { if(d.data().score > bestScore) bestScore = d.data().score; });
+                    let isPassed = false; // Cờ quan trọng: Đạt hay chưa
 
-                    if (bestScore >= minScore) {
+                    snap.forEach(d => { 
+                        const data = d.data();
+                        if(data.score > bestScore) bestScore = data.score;
+                        // Kiểm tra nếu có lần nào isPassed = true hoặc điểm >= điểm chuẩn
+                        if (data.isPassed === true || data.score >= minScore) isPassed = true;
+                    });
+
+                    if (isPassed) {
+                        // --- TRƯỜNG HỢP ĐÃ ĐẠT: MỞ KHÓA ---
                         btnStart.innerHTML = `<i class="fa-solid fa-check-circle mr-2"></i> Đã đạt (${bestScore} điểm)`;
-                        btnStart.className = "px-8 py-3 bg-green-600 text-white font-bold rounded-xl shadow-lg cursor-default opacity-80";
+                        btnStart.className = "px-8 py-3 bg-green-600 text-white font-bold rounded-xl shadow-lg hover:bg-green-700 transition-all";
+                        
+                        // Đánh dấu hoàn thành để mở khóa bài sau
                         markAsCompleted(index);
-                        btnStart.onclick = null; // Disable click nếu muốn
-                        // Vẫn cho làm lại nếu thích
-                        btnStart.onclick = () => window.location.href = `exam.html?id=${item.examId}&mode=course&courseId=${courseId}`;
+                        
+                        // Vẫn cho làm lại để cải thiện điểm
+                        btnStart.onclick = () => window.location.href = `exam.html?id=${item.examId}&mode=course&courseId=${courseId}&mode=practice`;
                     } else {
+                        // --- TRƯỜNG HỢP CHƯA ĐẠT: CHẶN BÀI SAU ---
                         const statusText = bestScore === -1 ? "Chưa làm" : `Cao nhất: ${bestScore}đ (Chưa đạt)`;
-                        btnStart.innerHTML = `Làm bài ngay <br><span class="text-xs font-normal opacity-80">(Yêu cầu: ${minScore}đ - ${statusText})</span>`;
-                        btnStart.className = "px-8 py-3 bg-brand text-white font-bold rounded-xl hover:bg-teal-600 transition-all shadow-lg";
+                        const btnColor = bestScore === -1 ? "bg-brand hover:bg-teal-600" : "bg-orange-500 hover:bg-orange-600";
+                        
+                        btnStart.innerHTML = `Làm bài ngay <br><span class="text-xs font-normal opacity-90">(Yêu cầu: ${minScore}đ - ${statusText})</span>`;
+                        btnStart.className = `px-8 py-3 ${btnColor} text-white font-bold rounded-xl transition-all shadow-lg`;
+                        
+                        // Nếu lỡ có trong danh sách hoàn thành (do lỗi cũ) thì xóa đi để chặn lại
+                        if(completedItems.has(index)) {
+                            completedItems.delete(index);
+                            updateStats(); 
+                        }
+
                         btnStart.onclick = () => {
-                            // Thêm &mode=practice để bỏ qua giới hạn lượt làm khi học từ khóa học
                             if(item.examId) window.location.href = `exam.html?id=${item.examId}&mode=course&courseId=${courseId}&mode=practice`;
                             else alert("Chưa có đề thi!");
                         };
