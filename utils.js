@@ -1,8 +1,56 @@
 /**
+ * utils.js - Các hàm tiện ích cho LMS
+ * Cập nhật: Thêm chức năng vẽ hình TikZ qua Server VPS
+ */
+
+// ============================================================================
+// CẤU HÌNH SERVER VẼ HÌNH
+// ============================================================================
+// Đường dẫn API Quick Tunnel mới (Cập nhật theo yêu cầu của bạn)
+const TIKZ_API_URL = "https://modern-brisbane-self-descending.trycloudflare.com/compile"; 
+
+// ============================================================================
+// CÁC HÀM XỬ LÝ (EXPORT)
+// ============================================================================
+
+/**
+ * Hàm gửi code TikZ lên Server VPS để lấy link ảnh
+ * @param {string} tikzCode - Mã nguồn LaTeX/TikZ
+ * @returns {Promise<string>} - Trả về URL của ảnh SVG trên Cloudflare R2
+ */
+export const compileTikZToImage = async (tikzCode) => {
+  try {
+    // Gửi yêu cầu POST lên server
+    const response = await fetch(TIKZ_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ code: tikzCode })
+    });
+
+    const data = await response.json();
+
+    // Kiểm tra nếu server báo lỗi (ví dụ: code sai cú pháp)
+    if (!response.ok) {
+      throw new Error(data.log || data.error || "Lỗi biên dịch không xác định từ Server");
+    }
+
+    // Thành công: Trả về link ảnh (https://pub-....r2.dev/tikz/xyz.svg)
+    return data.url;
+
+  } catch (error) {
+    console.error("Lỗi khi gọi Server vẽ hình:", error);
+    // Ném lỗi ra ngoài để giao diện hiển thị thông báo cho người dùng
+    throw error;
+  }
+};
+
+/**
  * Chuyển đổi môi trường array sang matrix.
  * Môi trường matrix giúp hiển thị tốt hơn trong các cột hẹp (như bảng Đúng/Sai)
  * vì nó không ép buộc chiều rộng cột cố định như array.
- * * @param {string} content - Nội dung LaTeX gốc
+ * @param {string} content - Nội dung LaTeX gốc
  * @returns {string} - Nội dung LaTeX đã chuyển đổi
  */
 export const convertArrayToMatrix = (content) => {
