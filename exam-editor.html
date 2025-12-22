@@ -393,6 +393,21 @@
         import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
         import { getFirestore, doc, getDoc, setDoc, collection, query, where, getDocs, addDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
         import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js";
+        // --- CẤU HÌNH API VẼ HÌNH ---
+        const TIKZ_API_URL = "https://modern-brisbane-self-descending.trycloudflare.com/compile"; 
+
+        const compileTikZToImage = async (tikzCode) => {
+          try {
+            const response = await fetch(TIKZ_API_URL, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ code: tikzCode })
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.log || data.error || "Lỗi server");
+            return data.url;
+          } catch (error) { console.error("API Error:", error); throw error; }
+        };
 
         const firebaseConfig = { apiKey: "AIzaSyCqAX3x1MbJ3do7m3EaH9JA4kFuVhlAc78", authDomain: "lms-thitracnghiem.firebaseapp.com", projectId: "lms-thitracnghiem", storageBucket: "lms-thitracnghiem.firebasestorage.app", messagingSenderId: "760187217240", appId: "1:760187217240:web:d043cd5808c349f87a712d" };
         const app = initializeApp(firebaseConfig); const auth = getAuth(app); const db = getFirestore(app); const storage = getStorage(app);
@@ -856,13 +871,13 @@
                 processed = before + newContent + arg2.remaining;
             }
 
-            const tikzRegex = /\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\}/g;
-            processed = processed.replace(tikzRegex, (match) => {
-                 const uid = `img_${Date.now()}_${Math.random().toString(36).substr(2,9)}`; 
-                 // type: 'tikz'
-                 pendingImageUploads.push({id:uid, originalPath:"standalone_tikz", questionIdx:questionIndex, type: 'tikz'}); 
-                 return getPlaceholderHTML(uid, "Hình TikZ (Bấm để thay ảnh)");
-            });
+            pendingImageUploads.push({
+                     id: uid, 
+                     originalPath: "standalone_tikz", 
+                     questionIdx: questionIndex, 
+                     type: 'tikz',
+                     contentCode: cleanTikzCode(match)  // <--- QUAN TRỌNG: Dòng này giúp lưu mã để gửi VPS
+                 });
 
             const centerRegex = /\\begin\{center\}\s*([\s\S]*?)\\includegraphics\s*(?:\[.*?\])?\s*\{(.*?)\}([\s\S]*?)\\end\{center\}/g;
             processed = processed.replace(centerRegex, (match, preText, imgPath, postText) => {
@@ -1343,6 +1358,82 @@
                 grid.appendChild(btn);
             });
         };
+        // --- LOGIC XỬ LÝ MỚI ---
+        
+        // 1. Hàm kết thúc import (Dùng chung cho cả 2 chế độ)
+        window.finishImportProcess = () => {
+            sortQuestionsByType(); 
+            renderPreviewList(); 
+            window.showToast("Đã nhập câu hỏi thành công!"); 
+            
+            if(window.MathJax) MathJax.typesetPromise();
+            setTimeout(() => { 
+                if(window.renderTikz) window.renderTikz(); // Chỉ chạy nếu TikZJax còn
+                window.autoScaleTables(); 
+            }, 500);
+            
+            // Check hiển thị modal ảnh thường / panel ảnh thiếu
+            if (pendingImageUploads.some(i => i.type === 'normal')) renderBatchImageModal();
+            if (pendingImageUploads.some(i => i.type === 'tikz')) window.renderMissingImagesPanel();
+        };
+
+        // 2. Xử lý khi chọn "Thủ công" -> Chạy luồng cũ
+        window.handleManualImport = () => {
+            document.getElementById('importModeModal').classList.add('opacity-0', 'pointer-events-none');
+            window.finishImportProcess(); 
+        };
+
+        // 3. Xử lý khi chọn "Tự động" -> Gọi VPS
+        window.handleAutoCompileAll = async () => {
+            document.getElementById('importModeModal').classList.add('opacity-0', 'pointer-events-none');
+            const pm = document.getElementById('progressModal');
+            pm.classList.remove('opacity-0', 'pointer-events-none');
+
+            const tikzItems = pendingImageUploads.filter(i => i.type === 'tikz');
+            const total = tikzItems.length;
+            let current = 0;
+
+            const updateProgress = () => {
+                const pct = Math.round((current / total) * 100);
+                document.getElementById('compileProgressBar').style.width = `${pct}%`;
+                document.getElementById('compileProgressText').innerText = `${current}/${total}`;
+                document.getElementById('compilePercent').innerText = `${pct}%`;
+            };
+            updateProgress();
+
+            for (const item of tikzItems) {
+                try {
+                    // Gọi API
+                    const url = await compileTikZToImage(item.contentCode);
+                    
+                    // Tạo thẻ Img thay thế
+                    const imgTag = `<div class="group relative flex justify-center my-2 cursor-pointer" data-id="${item.id}"><img src="${url}" class="max-w-full h-auto rounded-lg shadow-md border-2 border-transparent group-hover:border-blue-400 transition-all" style="max-height:350px;"><div class="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 flex items-center justify-center rounded-lg transition-opacity gap-2"><button onclick="triggerBatchUpload('${item.id}')" class="bg-white text-blue-600 px-3 py-1 rounded text-xs font-bold hover:bg-gray-100">Thay ảnh khác</button></div></div>`;
+                    
+                    // Thay thế trong dữ liệu câu hỏi (Content & Solution)
+                    const regex = new RegExp(`<div[^>]*data-id=['"]${item.id}['"][^>]*>[\\s\\S]*?<\\/div>`, 'gi');
+                    window.questions.forEach(q => {
+                        if (q.content && q.content.includes(item.id)) q.content = q.content.replace(regex, imgTag);
+                        if (q.solution && q.solution.includes(item.id)) q.solution = q.solution.replace(regex, imgTag);
+                    });
+                    
+                    // Đánh dấu đã xong để xóa khỏi danh sách chờ
+                    item._done = true;
+                } catch (e) {
+                    console.error("Lỗi biên dịch item " + item.id, e);
+                }
+                current++;
+                updateProgress();
+            }
+
+            // Lọc bỏ những cái đã xong khỏi danh sách chờ
+            pendingImageUploads = pendingImageUploads.filter(i => !i._done);
+
+            setTimeout(() => {
+                pm.classList.add('opacity-0', 'pointer-events-none');
+                window.finishImportProcess(); // Render giao diện
+                window.showToast("Đã biên dịch xong!", "success");
+            }, 500);
+        };
         window.handleTexUpload = (input) => {
             const file = input.files[0]; if (!file) return;
             const reader = new FileReader();
@@ -1419,26 +1510,21 @@
                     window.questions.push({ type: qType, ...qData }); count++;
                 }
                 
-                sortQuestionsByType(); 
-                renderPreviewList(); 
-                window.showToast(`Đã nhập ${count} câu hỏi!`); 
-                input.value = "";
+                // --- [CODE MỚI] LOGIC KIỂM TRA VÀ HỎI NGƯỜI DÙNG ---
+                input.value = ""; // Reset ô input file
                 
-                if(window.MathJax) MathJax.typesetPromise();
-                setTimeout(() => {
-                    window.renderTikz();
-                    window.autoScaleTables();
-                }, 500);
-                
-                // --- LOGIC KÍCH HOẠT KÉP ---
-                // 1. Nếu có ảnh thường -> Hiện Modal to
-                if (pendingImageUploads.some(i => i.type === 'normal')) {
-                    renderBatchImageModal();
-                }
-                
-                // 2. Nếu có ảnh TikZ -> Hiện Panel nhỏ
-                if (pendingImageUploads.some(i => i.type === 'tikz')) {
-                    window.renderMissingImagesPanel();
+                // Đếm số lượng hình TikZ trong danh sách chờ
+                const tikzCount = pendingImageUploads.filter(i => i.type === 'tikz').length;
+
+                if (tikzCount > 0) {
+                    // TRƯỜNG HỢP A: Có hình TikZ -> Hiện Modal để bạn chọn (Tự động hay Thủ công)
+                    document.getElementById('detectTikzCount').innerText = tikzCount;
+                    const m = document.getElementById('importModeModal');
+                    m.classList.remove('opacity-0', 'pointer-events-none');
+                    m.querySelector('div').classList.add('scale-100');
+                } else {
+                    // TRƯỜNG HỢP B: Không có TikZ -> Chạy thẳng vào quy trình hiển thị (dùng hàm đã tạo ở Bước 3)
+                    window.finishImportProcess();
                 }
             };
             reader.readAsText(file);
@@ -1702,6 +1788,46 @@
         </div>
         <div class="p-2 bg-white text-[10px] text-center text-gray-400 border-t">
             Bấm vào số để đến vị trí ảnh
+        </div>
+    </div>
+    <div id="importModeModal" class="modal opacity-0 pointer-events-none fixed inset-0 z-[150] flex items-center justify-center bg-gray-900 bg-opacity-70 px-4">
+        <div class="bg-white rounded-2xl w-full max-w-lg shadow-2xl transform scale-95 transition-transform duration-300">
+            <div class="p-6 text-center">
+                <div class="w-16 h-16 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-4 text-3xl"><i class="fa-brands fa-searchengin"></i></div>
+                <h3 class="text-xl font-black text-gray-800 mb-2">Phát hiện <span id="detectTikzCount" class="text-blue-600">0</span> hình TikZ</h3>
+                <p class="text-gray-500 mb-6 text-sm">Hệ thống phát hiện mã nguồn hình vẽ trong file LaTeX.<br>Bạn muốn xử lý chúng như thế nào?</p>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <button onclick="handleAutoCompileAll()" class="group relative p-4 border-2 border-green-500 bg-green-50 rounded-xl hover:bg-green-100 transition-all text-left">
+                        <div class="flex items-center gap-3 mb-2">
+                            <span class="w-8 h-8 rounded-full bg-green-500 text-white flex items-center justify-center font-bold text-xs"><i class="fa-solid fa-bolt"></i></span>
+                            <span class="font-bold text-green-700">Tự động (VPS)</span>
+                        </div>
+                        <p class="text-xs text-gray-600">Gửi sang VPS vẽ và tự động chèn ảnh vào đề.</p>
+                        <span class="absolute top-2 right-2 text-[10px] bg-green-200 text-green-800 px-1.5 py-0.5 rounded font-bold">Mới</span>
+                    </button>
+                    <button onclick="handleManualImport()" class="p-4 border-2 border-gray-200 hover:border-blue-400 bg-white hover:bg-blue-50 rounded-xl transition-all text-left">
+                        <div class="flex items-center gap-3 mb-2">
+                            <span class="w-8 h-8 rounded-full bg-gray-200 text-gray-600 flex items-center justify-center font-bold text-xs"><i class="fa-regular fa-hand-point-up"></i></span>
+                            <span class="font-bold text-gray-700">Thủ công</span>
+                        </div>
+                        <p class="text-xs text-gray-500">Giữ nguyên ô chờ. Bạn tự tải ảnh lên sau.</p>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="progressModal" class="modal opacity-0 pointer-events-none fixed inset-0 z-[160] flex items-center justify-center bg-gray-900 bg-opacity-80 px-4">
+        <div class="bg-white rounded-2xl w-full max-w-md shadow-2xl p-6 text-center">
+            <div class="mb-4"><i class="fa-solid fa-circle-notch fa-spin text-4xl text-blue-600"></i></div>
+            <h3 class="font-bold text-gray-800 text-lg mb-1">Đang biên dịch hình vẽ...</h3>
+            <p class="text-gray-500 text-sm mb-4">Vui lòng giữ nguyên kết nối.</p>
+            <div class="w-full bg-gray-200 rounded-full h-4 mb-2 overflow-hidden">
+                <div id="compileProgressBar" class="bg-blue-600 h-4 rounded-full transition-all duration-300" style="width: 0%"></div>
+            </div>
+            <div class="flex justify-between text-xs font-bold text-gray-600">
+                <span id="compileProgressText">0/0</span><span id="compilePercent">0%</span>
+            </div>
         </div>
     </div>
 </body>
