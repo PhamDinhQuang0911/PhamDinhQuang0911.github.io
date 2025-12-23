@@ -553,9 +553,11 @@
         }
 
         // --- HÀM XỬ LÝ LIST ---
+        // --- HÀM XỬ LÝ LIST ---
         function processLatexLists(text) {
             let processed = text;
 
+            // Xử lý itemchoice: Thêm class list-none để bỏ dấu chấm đen mặc định
             processed = processed.replace(/\\begin\{itemchoice\}([\s\S]*?)\\end\{itemchoice\}/g, (match, body) => {
                 const items = body.split('\\itemch').filter(s => s.trim().length > 0);
                 const htmlItems = items.map(item => {
@@ -565,7 +567,7 @@
                         <div class="leading-relaxed">${content}</div>
                     </li>`;
                 }).join('');
-                return `<ul class="my-3 pl-2">${htmlItems}</ul>`;
+                return `<ul class="my-3 pl-2 list-none">${htmlItems}</ul>`;
             });
 
             const parseItems = (bodyStr) => {
@@ -646,15 +648,16 @@
             
             let processed = text;
 
-            // --- 1. XỬ LÝ TEXT CƠ BẢN (An toàn, không đụng chạm MathJax) ---
+            // --- 1. XỬ LÝ TEXT CƠ BẢN ---
             processed = processed.replace(/\\centering/g, "");
             processed = processed.replace(/\\%/g, "%");
-            // Thay thế in đậm/nghiêng bằng HTML chuẩn
             processed = processed.replace(/\\textbf\{([^}]+)\}/g, '<b class="font-bold">$1</b>');
             processed = processed.replace(/\\textit\{([^}]+)\}/g, '<i class="italic">$1</i>');
-            // Thay thế hfill bằng khoảng trắng rộng
             processed = processed.replace(/\\hfill/g, '<span style="display:inline-block; width: 2rem;"></span>');
             
+            // [FIX LỖI 2] Xóa lệnh \allowdisplaybreaks gây rác
+            processed = processed.replace(/\\allowdisplaybreaks(\[.*?\])?/g, "");
+
             // Xử lý dấu ngoặc kép kiểu LaTeX
             processed = processed.replace(/\\lq\\lq/g, '"').replace(/\\rq\\rq/g, '"');
             processed = processed.replace(/\\lq/g, '"').replace(/\\rq/g, '"');
@@ -677,21 +680,25 @@
             processed = processed.replace(/Ảnh canh giữa/g, '');
 
             // --- 4. BẢO VỆ HTML & MATHJAX ---
-            // Tách các phần tử đặc biệt ra để không bị replace nhầm
             const regex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?:\$[\s\S]*?\$)|<div[^>]*data-id=.*?>[\s\S]*?<\/div>|<img.*?>|<table[\s\S]*?<\/table>|<ul[\s\S]*?<\/ul>|<ol[\s\S]*?<\/ol>|<div class="grid[\s\S]*?<\/div>)/g;
             
             const parts = processed.split(regex);
             return parts.map(part => {
-                // Nếu là công thức toán hoặc HTML đã tạo -> Giữ nguyên
-                if (part.includes('data-id=') || 
+                // Kiểm tra xem phần này có phải là công thức Toán không
+                const isMath = part.trim().startsWith('$') || part.trim().startsWith('\\(') || part.trim().startsWith('\\[');
+
+                if (isMath || 
+                    part.includes('data-id=') || 
                     part.includes('<img') || 
                     part.includes('<ul') ||  
                     part.includes('<ol') ||  
                     part.includes('<table') || 
-                    part.includes('class="grid') || 
-                    part.trim().startsWith('$') || 
-                    part.trim().startsWith('\\(') || 
-                    part.trim().startsWith('\\[')) {
+                    part.includes('class="grid')) {
+                    
+                    // [FIX LỖI 1] Cứu công thức chứa <x bằng cách thêm khoảng trắng
+                    if (isMath) {
+                        return part.replace(/</g, ' < ');
+                    }
                     return part;
                 }
                 else {
