@@ -553,7 +553,6 @@
         }
 
         // --- HÀM XỬ LÝ LIST ---
-        // --- HÀM XỬ LÝ LIST (ĐÃ FIX LỖI HIỂN THỊ) ---
         function processLatexLists(text) {
             let processed = text;
 
@@ -566,8 +565,7 @@
                         <div class="leading-relaxed">${content}</div>
                     </li>`;
                 }).join('');
-                // [FIX] Thêm class list-none để bỏ dấu chấm đen mặc định
-                return `<ul class="my-3 pl-2 list-none">${htmlItems}</ul>`;
+                return `<ul class="my-3 pl-2">${htmlItems}</ul>`;
             });
 
             const parseItems = (bodyStr) => {
@@ -648,16 +646,15 @@
             
             let processed = text;
 
-            // --- 1. XỬ LÝ TEXT CƠ BẢN ---
+            // --- 1. XỬ LÝ TEXT CƠ BẢN (An toàn, không đụng chạm MathJax) ---
             processed = processed.replace(/\\centering/g, "");
             processed = processed.replace(/\\%/g, "%");
+            // Thay thế in đậm/nghiêng bằng HTML chuẩn
             processed = processed.replace(/\\textbf\{([^}]+)\}/g, '<b class="font-bold">$1</b>');
             processed = processed.replace(/\\textit\{([^}]+)\}/g, '<i class="italic">$1</i>');
+            // Thay thế hfill bằng khoảng trắng rộng
             processed = processed.replace(/\\hfill/g, '<span style="display:inline-block; width: 2rem;"></span>');
             
-            // [FIX 2] Xóa lệnh \allowdisplaybreaks gây rác
-            processed = processed.replace(/\\allowdisplaybreaks(\[.*?\])?/g, "");
-
             // Xử lý dấu ngoặc kép kiểu LaTeX
             processed = processed.replace(/\\lq\\lq/g, '"').replace(/\\rq\\rq/g, '"');
             processed = processed.replace(/\\lq/g, '"').replace(/\\rq/g, '"');
@@ -680,10 +677,12 @@
             processed = processed.replace(/Ảnh canh giữa/g, '');
 
             // --- 4. BẢO VỆ HTML & MATHJAX ---
+            // Tách các phần tử đặc biệt ra để không bị replace nhầm
             const regex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?:\$[\s\S]*?\$)|<div[^>]*data-id=.*?>[\s\S]*?<\/div>|<img.*?>|<table[\s\S]*?<\/table>|<ul[\s\S]*?<\/ul>|<ol[\s\S]*?<\/ol>|<div class="grid[\s\S]*?<\/div>)/g;
             
             const parts = processed.split(regex);
             return parts.map(part => {
+                // Nếu là công thức toán hoặc HTML đã tạo -> Giữ nguyên
                 if (part.includes('data-id=') || 
                     part.includes('<img') || 
                     part.includes('<ul') ||  
@@ -696,11 +695,8 @@
                     return part;
                 }
                 else {
-                    // [FIX 1] Xử lý lỗi cắt ngắn công thức <x
-                    // Thêm khoảng trắng quanh dấu < để trình duyệt không hiểu lầm là thẻ HTML
-                    let cleanPart = part.replace(/</g, ' < ');
-                    
-                    cleanPart = cleanPart.replace(/\}/g, '');
+                    // Nếu là văn bản thường -> Xử lý xuống dòng và xóa dấu } thừa
+                    let cleanPart = part.replace(/\}/g, '');
                     return cleanPart.replace(/\\\\/g, '<br>').replace(/\n/g, '<br>');
                 }
             }).join('');
