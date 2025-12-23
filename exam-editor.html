@@ -35,10 +35,7 @@
         ignoreHtmlClass: 'tex2jax_ignore',
         processHtmlClass: 'tex2jax_process'
       },
-      chtml: {
-        scale: 1.1,
-        minScale: 0.8
-      },
+      // Đã xóa phần chtml scale để font chữ hiển thị tự nhiên, sắc nét
       startup: { typeset: false }
     };
     </script>
@@ -49,7 +46,7 @@
         body { font-family: 'Nunito', sans-serif; background-color: #F8F9FA; }
         .font-handwriting { font-family: 'Pacifico', cursive; }
         .sidebar-item.active { background-color: #EFF6FF; color: #1D4ED8; font-weight: 700; border-right: 3px solid #1D4ED8; }
-        .preview-item { transition: all 0.2s; border: 1px solid #E5E7EB; cursor: pointer; background: white; }
+         { transition: all 0.2s; border: 1px solid #E5E7EB; cursor: pointer; background: white; }
         .preview-item:hover { border-color: #3B82F6; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); }
         .preview-item.active { border-color: #3B82F6; ring: 2px solid #DBEAFE; background-color: #F0F9FF; }
         .group-header { position: sticky; top: 0; background-color: #F9FAFB; z-index: 20; padding-top: 10px; padding-bottom: 5px; border-bottom: 1px solid #E5E7EB; }
@@ -59,26 +56,32 @@
         .palette-btn:hover { border-color: #3B82F6; color: #3B82F6; }
         .palette-btn.active { background-color: #3B82F6; color: white; border-color: #3B82F6; }
         
-        /* --- CẬP NHẬT MỚI: TỐI ƯU MATHJAX --- */
-        mjx-container {
-            overflow-x: auto !important;
-            overflow-y: hidden;
-            max-width: 100%;
-            padding: 2px 0;
-            vertical-align: middle !important;
+        /* --- BẢN SỬA LỖI: HIỂN THỊ MATHJAX CHUẨN --- */
+        /* 1. Tăng khoảng cách dòng cho văn bản chứa công thức để không bị dính */
+        .preview-item, #editorArea, .question-content {
+            line-height: 1.6 !important; 
+            font-size: 15px;
+            color: #1f2937;
         }
-        mjx-math {
-            font-family: 'Times New Roman', serif !important;
-            color: #1e293b;
+
+        /* 2. Xử lý MathJax Inline (Công thức cùng dòng) */
+        mjx-container:not([display="true"]) {
+            margin: 0 2px !important; 
         }
+
+        /* 3. Xử lý MathJax Display (Công thức riêng dòng) */
         mjx-container[display="true"] {
             display: block !important;
             margin: 1em 0 !important;
-            padding: 8px;
-            background: #f8fafc;
-            border-radius: 6px;
-            border: 1px dashed #e2e8f0;
-            overflow-x: auto;
+            overflow-x: auto; /* Chỉ cuộn ngang khi là công thức dài */
+            overflow-y: visible !important; /* QUAN TRỌNG: Không bao giờ cắt ngọn công thức */
+            padding: 0.5rem 0;
+            max-width: 100%;
+        }
+
+        /* 4. Ẩn phần hỗ trợ đọc màn hình để tránh rác giao diện */
+        mjx-assistive-mml {
+            display: none !important; 
         }
         
         .form-input { width: 100%; padding: 0.5rem 0.75rem; border-radius: 0.5rem; border: 1px solid #E5E7EB; outline: none; transition: all 0.2s; font-size: 0.9rem; }
@@ -643,56 +646,43 @@
             
             let processed = text;
 
-            // --- CẬP NHẬT MỚI: XỬ LÝ ĐỊNH DẠNG VĂN BẢN ---
-            // 1. Xóa \centering
+            // --- 1. XỬ LÝ TEXT CƠ BẢN (An toàn, không đụng chạm MathJax) ---
             processed = processed.replace(/\\centering/g, "");
-            
-            // 2. Xử lý \% -> %
             processed = processed.replace(/\\%/g, "%");
-            
-            // 3. Xử lý in đậm \textbf{...} -> <b>...</b>
+            // Thay thế in đậm/nghiêng bằng HTML chuẩn
             processed = processed.replace(/\\textbf\{([^}]+)\}/g, '<b class="font-bold">$1</b>');
-            
-            // 4. Xử lý in nghiêng \textit{...} -> <i>...</i>
             processed = processed.replace(/\\textit\{([^}]+)\}/g, '<i class="italic">$1</i>');
+            // Thay thế hfill bằng khoảng trắng rộng
+            processed = processed.replace(/\\hfill/g, '<span style="display:inline-block; width: 2rem;"></span>');
             
-            // 5. Xử lý \hfill -> Khoảng trắng 1.5cm
-            processed = processed.replace(/\\hfill/g, '<span style="display:inline-block; width: 1.5cm;"></span>');
-            // ----------------------------------------------
-
-            // Yêu cầu 1: Đổi \lq\lq và \rq\rq thành dấu ngoặc kép "
+            // Xử lý dấu ngoặc kép kiểu LaTeX
             processed = processed.replace(/\\lq\\lq/g, '"').replace(/\\rq\\rq/g, '"');
-            processed = processed.replace(/\\lq/g, '"').replace(/\\rq/g, '"'); // Xử lý cả ngoặc đơn nếu có
+            processed = processed.replace(/\\lq/g, '"').replace(/\\rq/g, '"');
 
-            // Yêu cầu 2: Đổi \wideparen{...} thành cung tròn \overset{\frown}{...}
+            // Xử lý cung tròn
             processed = processed.replace(/\\wideparen\{([^}]+)\}/g, '\\overset{\\frown}{$1}');
 
-            // Yêu cầu 3: Loại bỏ \hspace{...}, \vspace{...}, \hspace*{...}
+            // Loại bỏ các lệnh space không cần thiết trong văn bản
             processed = processed.replace(/\\(h|v)space\*?\{[^}]+\}/g, '');
 
-            // [BƯỚC 1] Fix lỗi Array -> Matrix
+            // --- 2. XỬ LÝ CẤU TRÚC (Matrix, Tabular, List) ---
             processed = convertArrayToMatrix(processed);
-
-            // [LƯU Ý]: Bỏ hàm processNestedTikz cũ đi vì giờ ta dùng placeholder ở trên rồi
-            // processed = processNestedTikz(processed); -> BỎ DÒNG NÀY
-
-            // 3. Xử lý Bảng biểu (Tabular)
             processed = processTabular(processed);
-
-            // 4. Xử lý các danh sách liệt kê
             processed = processLatexLists(processed);
 
-            // 5. Dọn rác text
+            // --- 3. DỌN DẸP RÁC ---
             processed = processed.replace(/^\s*\}\s*$/gm, ''); 
             processed = processed.replace(/\}\s*$/g, '');
             processed = processed.replace(/Ảnh minh họa \(immini\)/g, ''); 
             processed = processed.replace(/Ảnh canh giữa/g, '');
 
-            // 6. Bảo vệ HTML
+            // --- 4. BẢO VỆ HTML & MATHJAX ---
+            // Tách các phần tử đặc biệt ra để không bị replace nhầm
             const regex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?:\$[\s\S]*?\$)|<div[^>]*data-id=.*?>[\s\S]*?<\/div>|<img.*?>|<table[\s\S]*?<\/table>|<ul[\s\S]*?<\/ul>|<ol[\s\S]*?<\/ol>|<div class="grid[\s\S]*?<\/div>)/g;
             
             const parts = processed.split(regex);
             return parts.map(part => {
+                // Nếu là công thức toán hoặc HTML đã tạo -> Giữ nguyên
                 if (part.includes('data-id=') || 
                     part.includes('<img') || 
                     part.includes('<ul') ||  
@@ -705,6 +695,7 @@
                     return part;
                 }
                 else {
+                    // Nếu là văn bản thường -> Xử lý xuống dòng và xóa dấu } thừa
                     let cleanPart = part.replace(/\}/g, '');
                     return cleanPart.replace(/\\\\/g, '<br>').replace(/\n/g, '<br>');
                 }
