@@ -10,19 +10,30 @@
     
     <script>
     // --- CẤU HÌNH MATHJAX (ĐỒNG BỘ VỚI EDITOR) ---
+    // --- CẤU HÌNH MATHJAX (ĐÃ FIX LỖI HIỂN THỊ) ---
     window.MathJax = {
+      loader: { load: ['[tex]/noerrors', '[tex]/noundefined'] },
       tex: {
         inlineMath: [['$', '$'], ['\\(', '\\)']],
         displayMath: [['$$', '$$'], ['\\[', '\\]']],
         processEscapes: true,
+        packages: {'[+]': ['noerrors', 'noundefined']},
         macros: {
           heva: ["\\left\\{\\begin{aligned}#1\\end{aligned}\\right.", 1],
           hoac: ["\\left[\\begin{aligned}#1\\end{aligned}\\right.", 1],
           tich: "\\cdot",
-          deg: "^\\circ"
+          deg: "^\\circ",
+          R: "\\mathbb{R}",
+          N: "\\mathbb{N}",
+          Z: "\\mathbb{Z}",
+          vectors: ["\\overrightarrow{#1}", 1],
+          mtx: ["\\left[\\begin{matrix}#1\\end{matrix}\\right]", 1]
         }
       },
-      svg: { fontCache: 'global' },
+      options: {
+        ignoreHtmlClass: 'tex2jax_ignore',
+        processHtmlClass: 'tex2jax_process'
+      },
       startup: { typeset: false }
     };
     </script>
@@ -61,7 +72,32 @@
 
         /* CSS ẢNH & MATHJAX */
         #questionContent img, #answerOptions img, .solution-box img { max-width: 100% !important; height: auto !important; display: block; margin: 10px auto; border-radius: 8px; }
-        mjx-container { display: inline-block !important; overflow: visible !important; }
+        
+        /* --- CẬP NHẬT MỚI: TỐI ƯU MATHJAX (Đồng bộ Editor) --- */
+        /* 1. Tăng dòng và cỡ chữ */
+        #questionContent, .solution-box, #answerOptions {
+            line-height: 1.6 !important;
+            font-size: 16px; /* Cỡ chữ dễ đọc trên mobile */
+            text-align: justify;
+        }
+
+        /* 2. MathJax Inline */
+        mjx-container:not([display="true"]) {
+            margin: 0 2px !important;
+        }
+
+        /* 3. MathJax Display (Công thức riêng dòng) */
+        mjx-container[display="true"] {
+            display: block !important;
+            margin: 1em 0 !important;
+            overflow-x: auto; /* Cuộn ngang nếu dài */
+            overflow-y: visible !important; /* Không cắt ngọn công thức */
+            padding: 0.5rem 0;
+            max-width: 100%;
+        }
+
+        /* 4. Ẩn hỗ trợ đọc màn hình */
+        mjx-assistive-mml { display: none !important; }
         
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
@@ -434,19 +470,33 @@
             return processed;
         }
         // --- HÀM FORMAT THÔNG MINH: BIẾN MÃ EDITOR THÀNH MÃ HỌC SINH ---
+        // --- HÀM FORMAT THÔNG MINH (ĐÃ FIX LỖI HIỂN THỊ TEXT & MATH) ---
         window.formatContent = (text) => {
             if (text === null || text === undefined) return "";
             
             let processed = text;
 
-            // 1. DỌN DẸP LATEX VÀ KÝ TỰ RÁC
+            // --- 1. XỬ LÝ TEXT CƠ BẢN (Bold, Italic, %, Centering) ---
+            // Phần này quan trọng để hiển thị đúng văn bản trước khi vào MathJax
+            processed = processed.replace(/\\centering/g, "");
+            processed = processed.replace(/\\%/g, "%");
+            processed = processed.replace(/\\textbf\{([^}]+)\}/g, '<b class="font-bold">$1</b>');
+            processed = processed.replace(/\\textit\{([^}]+)\}/g, '<i class="italic">$1</i>');
+            processed = processed.replace(/\\hfill/g, '<span style="display:inline-block; width: 2rem;"></span>');
+
+            // --- 2. DỌN DẸP LATEX CŨ ---
             processed = processed.replace(/\\lq\\lq/g, '"').replace(/\\rq\\rq/g, '"');
             processed = processed.replace(/\\lq/g, '"').replace(/\\rq/g, '"');
             processed = processed.replace(/\\(h|v)space\*?\{[^}]+\}/g, ''); 
             processed = processed.replace(/\\(no)?indent/g, '');
             processed = processed.replace(/\\wideparen\{([^}]+)\}/g, '\\overset{\\frown}{$1}');
 
-            // 2. XỬ LÝ ẢNH & PLACEHOLDER
+            // --- 3. FIX LỖI ARRAY -> MATRIX (Để hiển thị đẹp trên mobile) ---
+            processed = processed.replace(/\\begin\{array\}\s*\{[^{}]*?\}/g, '\\begin{matrix}');
+            processed = processed.replace(/\\begin\{array\}/g, '\\begin{matrix}');
+            processed = processed.replace(/\\end\{array\}/g, '\\end{matrix}');
+
+            // --- 4. XỬ LÝ ẢNH & PLACEHOLDER ---
             processed = processed.replace(/<div[^>]*class="[^"]*image-placeholder[^"]*"[^>]*>[\s\S]*?<\/div>/g, '');
             processed = processed.replace(
                 /<div[^>]*class="[^"]*group relative[^"]*"[^>]*>[\s\S]*?(<img[^>]+>)[\s\S]*?<\/div>/gi, 
@@ -454,20 +504,16 @@
             );
             processed = processed.replace(/Click đúp để tải file|hoặc Ctrl \+ V để dán ảnh|ẢNH TỪ IMMINI|VỊ TRÍ HÌNH TIKZ/gi, '');
 
-            // 3. Xử lý TikZ
+            // --- 5. CÁC XỬ LÝ NÂNG CAO (TikZ, Table, List) ---
             processed = processNestedTikz(processed);
-
-            // 4. Xử lý Bảng biểu (Scale)
             processed = processTabular(processed);
-
-            // 5. Xử lý danh sách (itemchoice, enumerate...) - [MỚI THÊM]
             processed = processLatexLists(processed);
 
-            // 6. Dọn rác cuối cùng
+            // --- 6. DỌN RÁC CUỐI CÙNG ---
             processed = processed.replace(/^\s*\}\s*$/gm, ''); 
             processed = processed.replace(/\}\s*$/g, '');
 
-            // 7. Phân tách HTML/LaTeX để hiển thị
+            // --- 7. BẢO VỆ HTML & MATHJAX ---
             const regex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?:\$[\s\S]*?\$)|<script type="text\/tikz">[\s\S]*?<\/script>|<div[^>]*class="js-scale-wrapper"[\s\S]*?<\/div>|<div class="flex justify-center my-3"><img[\s\S]*?<\/div>|<img.*?>|<ul[\s\S]*?<\/ul>|<ol[\s\S]*?<\/ol>|<div class="grid[\s\S]*?<\/div>)/g;
             
             const parts = processed.split(regex);
@@ -476,7 +522,7 @@
                 if (part.includes('<script type="text/tikz">') || 
                     part.includes('<img') || 
                     part.includes('js-scale-wrapper') || 
-                    part.includes('<ul') || // Bảo vệ danh sách
+                    part.includes('<ul') || 
                     part.includes('<ol') || 
                     part.includes('class="grid') ||
                     part.trim().startsWith('$') || 
