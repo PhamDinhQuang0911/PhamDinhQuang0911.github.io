@@ -554,10 +554,10 @@
 
         // --- HÀM XỬ LÝ LIST ---
         // --- HÀM XỬ LÝ LIST ---
+        // --- HÀM XỬ LÝ LIST (ĐÃ FIX BULLET) ---
         function processLatexLists(text) {
             let processed = text;
 
-            // Xử lý itemchoice: Thêm class list-none để bỏ dấu chấm đen mặc định
             processed = processed.replace(/\\begin\{itemchoice\}([\s\S]*?)\\end\{itemchoice\}/g, (match, body) => {
                 const items = body.split('\\itemch').filter(s => s.trim().length > 0);
                 const htmlItems = items.map(item => {
@@ -567,9 +567,11 @@
                         <div class="leading-relaxed">${content}</div>
                     </li>`;
                 }).join('');
+                // [FIX]: Thêm class 'list-none' để loại bỏ dấu chấm đen mặc định
                 return `<ul class="my-3 pl-2 list-none">${htmlItems}</ul>`;
             });
-
+            
+            // ... (Giữ nguyên các phần parseItems, regexCols, enumerate, itemize phía dưới)
             const parseItems = (bodyStr) => {
                 const rawItems = bodyStr.split(/\\item(?![a-zA-Z])/).filter(s => s.trim().length > 0);
                 return rawItems.map((item) => {
@@ -655,17 +657,13 @@
             processed = processed.replace(/\\textit\{([^}]+)\}/g, '<i class="italic">$1</i>');
             processed = processed.replace(/\\hfill/g, '<span style="display:inline-block; width: 2rem;"></span>');
             
-            // [FIX LỖI 2] Xóa lệnh \allowdisplaybreaks gây rác
+            // [FIX LỖI 2] Xóa lệnh \allowdisplaybreaks thừa
             processed = processed.replace(/\\allowdisplaybreaks(\[.*?\])?/g, "");
 
-            // Xử lý dấu ngoặc kép kiểu LaTeX
+            // Xử lý ký tự đặc biệt LaTeX
             processed = processed.replace(/\\lq\\lq/g, '"').replace(/\\rq\\rq/g, '"');
             processed = processed.replace(/\\lq/g, '"').replace(/\\rq/g, '"');
-
-            // Xử lý cung tròn
             processed = processed.replace(/\\wideparen\{([^}]+)\}/g, '\\overset{\\frown}{$1}');
-
-            // Loại bỏ các lệnh space không cần thiết trong văn bản
             processed = processed.replace(/\\(h|v)space\*?\{[^}]+\}/g, '');
 
             // --- 2. XỬ LÝ CẤU TRÚC (Matrix, Tabular, List) ---
@@ -679,31 +677,34 @@
             processed = processed.replace(/Ảnh minh họa \(immini\)/g, ''); 
             processed = processed.replace(/Ảnh canh giữa/g, '');
 
-            // --- 4. BẢO VỆ HTML & MATHJAX ---
-            const regex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?:\$[\s\S]*?\$)|<div[^>]*data-id=.*?>[\s\S]*?<\/div>|<img.*?>|<table[\s\S]*?<\/table>|<ul[\s\S]*?<\/ul>|<ol[\s\S]*?<\/ol>|<div class="grid[\s\S]*?<\/div>)/g;
+            // --- 4. BẢO VỆ HTML & MATHJAX (FINAL FIX) ---
+            // Regex này chia nội dung thành: 
+            // 1. Công thức Toán ($...$)
+            // 2. Script TikZ (<script...>)
+            // 3. Bất kỳ thẻ HTML nào (<...>) -> Để bảo vệ thẻ <b>, <img> không bị sửa
+            const regex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?:\$[\s\S]*?\$)|<script[\s\S]*?<\/script>|<[^>]+>)/g;
             
             const parts = processed.split(regex);
+            
             return parts.map(part => {
-                // Kiểm tra xem phần này có phải là công thức Toán không
                 const isMath = part.trim().startsWith('$') || part.trim().startsWith('\\(') || part.trim().startsWith('\\[');
+                const isScript = part.startsWith('<script');
+                const isTag = part.startsWith('<'); // Các thẻ HTML khác
 
-                if (isMath || 
-                    part.includes('data-id=') || 
-                    part.includes('<img') || 
-                    part.includes('<ul') ||  
-                    part.includes('<ol') ||  
-                    part.includes('<table') || 
-                    part.includes('class="grid')) {
-                    
+                if (isMath) {
                     // [FIX LỖI 1] Cứu công thức chứa <x bằng cách thêm khoảng trắng
-                    if (isMath) {
-                        return part.replace(/</g, ' < ');
-                    }
+                    // $x<1$ -> $x < 1$. Trình duyệt sẽ không hiểu lầm là thẻ nữa.
+                    return part.replace(/</g, ' < ');
+                } 
+                else if (isScript || isTag) {
+                    // Nếu là Script hoặc thẻ HTML (như <b>, <img>), giữ nguyên tuyệt đối
                     return part;
-                }
+                } 
                 else {
-                    // Nếu là văn bản thường -> Xử lý xuống dòng và xóa dấu } thừa
-                    let cleanPart = part.replace(/\}/g, '');
+                    // Nếu là văn bản thường:
+                    // Thay < bằng &lt; để hiển thị được dấu nhỏ hơn trong văn bản
+                    let cleanPart = part.replace(/</g, '&lt;');
+                    cleanPart = cleanPart.replace(/\}/g, '');
                     return cleanPart.replace(/\\\\/g, '<br>').replace(/\n/g, '<br>');
                 }
             }).join('');
