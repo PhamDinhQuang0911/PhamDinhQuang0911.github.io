@@ -185,10 +185,40 @@
                             </div>
                         </div>
                         <div class="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-gray-200">
-                            <h3 class="font-bold text-gray-800 mb-4 pb-3 border-b border-gray-100"><i class="fa-solid fa-square-poll-vertical text-green-600 mr-2"></i> Kết quả</h3>
+                            <h3 class="font-bold text-gray-800 mb-4 pb-3 border-b border-gray-100"><i class="fa-solid fa-square-poll-vertical text-green-600 mr-2"></i> Kết quả & Đáp án</h3>
                             <div class="space-y-4">
-                                <div><label class="form-group-title">Xem điểm</label><div class="grid grid-cols-3 gap-2 text-xs"><label><input type="radio" name="settingShowScore" value="immediate" checked> Ngay</label><label><input type="radio" name="settingShowScore" value="after_exam"> Hết giờ</label><label><input type="radio" name="settingShowScore" value="never"> Không</label></div></div>
-                                <div><label class="form-group-title">Xem đáp án</label><div class="grid grid-cols-3 gap-2 text-xs"><label><input type="radio" name="settingShowResult" value="immediate" checked> Ngay</label><label><input type="radio" name="settingShowResult" value="after_exam"> Hết giờ</label><label><input type="radio" name="settingShowResult" value="never"> Không</label></div></div>
+                                <div>
+                                    <label class="form-group-title">Học sinh xem điểm</label>
+                                    <div class="grid grid-cols-3 gap-2 text-xs">
+                                        <label class="cursor-pointer hover:text-blue-600"><input type="radio" name="settingShowScore" value="immediate" checked> Ngay nộp</label>
+                                        <label class="cursor-pointer hover:text-blue-600"><input type="radio" name="settingShowScore" value="after_exam"> Hết giờ</label>
+                                        <label class="cursor-pointer hover:text-blue-600"><input type="radio" name="settingShowScore" value="never"> Không</label>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label class="form-group-title">Xem lời giải chi tiết</label>
+                                    <div class="space-y-2 text-sm text-gray-700">
+                                        <label class="flex items-center gap-2 cursor-pointer"><input type="radio" name="settingShowResult" value="immediate" checked onchange="toggleResultOptions()"> <span>Ngay sau khi nộp</span></label>
+                                        <label class="flex items-center gap-2 cursor-pointer"><input type="radio" name="settingShowResult" value="after_exam" onchange="toggleResultOptions()"> <span>Khi hết giờ làm bài</span></label>
+                                        <label class="flex items-center gap-2 cursor-pointer"><input type="radio" name="settingShowResult" value="never" onchange="toggleResultOptions()"> <span>Không cho xem</span></label>
+                                        
+                                        <div class="flex items-center gap-2">
+                                            <label class="flex items-center gap-2 cursor-pointer whitespace-nowrap">
+                                                <input type="radio" name="settingShowResult" value="pass_score" onchange="toggleResultOptions()"> 
+                                                <span>Đạt điểm tối thiểu:</span>
+                                            </label>
+                                            <input type="number" id="settingPassScoreInput" class="form-input w-20 h-8 text-sm p-1 text-center font-bold text-blue-600" placeholder="5" value="5" disabled>
+                                        </div>
+
+                                        <div class="flex items-center gap-2">
+                                            <label class="flex items-center gap-2 cursor-pointer whitespace-nowrap">
+                                                <input type="radio" name="settingShowResult" value="fee_qpoint" onchange="toggleResultOptions()"> 
+                                                <span>Trả phí (Qpoint):</span>
+                                            </label>
+                                            <input type="number" id="settingFeeQpointInput" class="form-input w-20 h-8 text-sm p-1 text-center font-bold text-orange-600" placeholder="0" disabled>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -439,6 +469,23 @@
         window.formatContent = formatContent;
         window.autoScaleTables = autoScaleTables;
         window.convertArrayToMatrix = convertArrayToMatrix; 
+
+    // --- HÀM MỚI: BẬT/TẮT Ô NHẬP LIỆU KẾT QUẢ ---
+        window.toggleResultOptions = () => {
+            const val = document.querySelector('input[name="settingShowResult"]:checked').value;
+            const passInput = document.getElementById('settingPassScoreInput');
+            const feeInput = document.getElementById('settingFeeQpointInput');
+            
+            // Reset trạng thái
+            passInput.disabled = true; passInput.classList.add('bg-gray-100');
+            feeInput.disabled = true; feeInput.classList.add('bg-gray-100');
+
+            if (val === 'pass_score') {
+                passInput.disabled = false; passInput.classList.remove('bg-gray-100'); 
+            } else if (val === 'fee_qpoint') {
+                feeInput.disabled = false; feeInput.classList.remove('bg-gray-100'); 
+            }
+        };
 
         // CẤU HÌNH FIREBASE
         const firebaseConfig = { apiKey: "AIzaSyCqAX3x1MbJ3do7m3EaH9JA4kFuVhlAc78", authDomain: "lms-thitracnghiem.firebaseapp.com", projectId: "lms-thitracnghiem", storageBucket: "lms-thitracnghiem.firebasestorage.app", messagingSenderId: "760187217240", appId: "1:760187217240:web:d043cd5808c349f87a712d" };
@@ -825,7 +872,15 @@
                     document.getElementById('settingProctoring').checked = (data.proctoring === true);
                     document.getElementById('settingShuffle').checked = (data.shuffle !== false);
                     if(data.showScore) document.querySelector(`input[name="settingShowScore"][value="${data.showScore}"]`).checked = true;
-                    if(data.showResult) document.querySelector(`input[name="settingShowResult"][value="${data.showResult}"]`).checked = true;
+                    // Load chế độ xem lời giải
+                    if(data.showResult) {
+                        const radio = document.querySelector(`input[name="settingShowResult"][value="${data.showResult}"]`);
+                        if(radio) radio.checked = true;
+                    }
+                    // Load giá trị điểm sàn và phí (nếu có)
+                    document.getElementById('settingPassScoreInput').value = data.passScore || 5;
+                    document.getElementById('settingFeeQpointInput').value = data.feeQpoint || 0;
+                    window.toggleResultOptions(); // Kích hoạt trạng thái ẩn/hiện
                     const filterBtn = document.getElementById('filterBtnClass');
                     if(data.accessType) {
                         document.querySelector(`input[name="settingAccess"][value="${data.accessType}"]`).checked = true;
@@ -1263,8 +1318,14 @@
                 startTime: document.getElementById('settingStartTime').value, endTime: document.getElementById('settingEndTime').value,
                 password: document.getElementById('settingPassword').value, attempts: parseInt(document.getElementById('settingAttempts').value) || 0,
                 proctoring: document.getElementById('settingProctoring').checked, shuffle: document.getElementById('settingShuffle').checked,
-                showScore: document.querySelector('input[name="settingShowScore"]:checked').value, showResult: document.querySelector('input[name="settingShowResult"]:checked').value,
-                accessType: document.querySelector('input[name="settingAccess"]:checked').value, 
+                showScore: document.querySelector('input[name="settingShowScore"]:checked').value, 
+                showResult: document.querySelector('input[name="settingShowResult"]:checked').value,
+                
+                // Lưu thêm 2 trường mới (ép kiểu số cho an toàn)
+                passScore: parseFloat(document.getElementById('settingPassScoreInput').value) || 5,
+                feeQpoint: parseInt(document.getElementById('settingFeeQpointInput').value) || 0,
+
+                accessType: document.querySelector('input[name="settingAccess"]:checked').value,
                 allowedClassIds: Array.from(document.querySelectorAll('.class-checkbox:checked')).map(cb => cb.value)
             };
             try {
