@@ -1,5 +1,5 @@
 /**
- * utils.js - Thư viện dùng chung (Final Fix: Eqnarray + <x)
+ * utils.js - Thư viện dùng chung (Đã fix lỗi mất khung upload ảnh)
  */
 
 const TIKZ_API_URL = "https://surrey-decreased-let-detailed.trycloudflare.com/compile"; 
@@ -94,15 +94,6 @@ function processTabular(text) {
 
 function processLatexLists(text) {
     let processed = text;
-    // itemchoice
-    processed = processed.replace(/\\begin\{itemchoice\}([\s\S]*?)\\end\{itemchoice\}/g, (match, body) => {
-        const items = body.split('\\itemch').filter(s => s.trim().length > 0);
-        const htmlItems = items.map(item => {
-            let content = item.trim().replace(/\\\\/g, '<br>').replace(/\n/g, ' ');
-            return `<li class="flex items-start gap-2 mb-1"><span class="text-blue-600 font-bold shrink-0">•</span><div class="leading-relaxed">${content}</div></li>`;
-        }).join('');
-        return `<ul class="my-3 pl-2 list-none">${htmlItems}</ul>`;
-    });
     // Helper parse items
     const parseItems = (bodyStr) => {
         const rawItems = bodyStr.split(/\\item(?![a-zA-Z])/).filter(s => s.trim().length > 0);
@@ -116,6 +107,14 @@ function processLatexLists(text) {
             return { label, content };
         });
     };
+
+    // itemchoice
+    processed = processed.replace(/\\begin\{itemchoice\}([\s\S]*?)\\end\{itemchoice\}/g, (match, body) => {
+        const items = body.split('\\itemch').filter(s => s.trim().length > 0);
+        const htmlItems = items.map(item => `<li class="flex items-start gap-2 mb-1"><span class="text-blue-600 font-bold shrink-0">•</span><div class="leading-relaxed">${item.trim()}</div></li>`).join('');
+        return `<ul class="my-3 pl-2 list-none">${htmlItems}</ul>`;
+    });
+
     // ListEX
     const regexCols = /\\begin\{(?:listEX|enumEX)\}(?:\[(\d+)\]|\{(\d+)\}(?:\[(.*?)\])?)([\s\S]*?)\\end\{(?:listEX|enumEX)\}/g;
     processed = processed.replace(regexCols, (match, c1, c2, style, body) => {
@@ -130,6 +129,7 @@ function processLatexLists(text) {
         gridHtml += `</div>`;
         return gridHtml;
     });
+
     // Enumerate
     processed = processed.replace(/\\begin\{enumerate\}([\s\S]*?)\\end\{enumerate\}/g, (match, body) => {
         const items = parseItems(body);
@@ -138,6 +138,7 @@ function processLatexLists(text) {
         html += `</ol>`;
         return html;
     });
+
     // Itemize
     processed = processed.replace(/\\begin\{itemize\}([\s\S]*?)\\end\{itemize\}/g, (match, body) => {
         const items = parseItems(body);
@@ -174,7 +175,7 @@ export const autoScaleTables = () => {
 };
 
 /**
- * HÀM FORMAT CONTENT (BẢN FINAL: FIX EQNARRAY + <x)
+ * HÀM FORMAT CONTENT (BẢN FINAL: FIX EQNARRAY + <x + HIỆN KHUNG UPLOAD)
  */
 export const formatContent = (text) => {
     if (text === null || text === undefined) return "";
@@ -197,47 +198,33 @@ export const formatContent = (text) => {
     processed = processTabular(processed);    
     processed = processLatexLists(processed); 
 
-    // 3. Placeholder images
-    processed = processed.replace(/<div[^>]*class="[^"]*image-placeholder[^"]*"[^>]*>[\s\S]*?<\/div>/g, '');
+    // 3. Placeholder images & Clean
+    // [FIX] Đã xóa dòng lệnh xóa 'image-placeholder' tại đây để khung hiện ra cho Editor
+    
+    // Chỉ xóa các thẻ rác khác
     processed = processed.replace(/<div[^>]*class="[^"]*group relative[^"]*"[^>]*>[\s\S]*?(<img[^>]+>)[\s\S]*?<\/div>/gi, '<div class="flex justify-center my-3">$1</div>');
     processed = processed.replace(/Click đúp để tải file|hoặc Ctrl \+ V để dán ảnh|ẢNH TỪ IMMINI|VỊ TRÍ HÌNH TIKZ/gi, '');
     processed = processed.replace(/^\s*\}\s*$/gm, '').replace(/\}\s*$/g, '').replace(/Ảnh minh họa \(immini\)/g, '').replace(/Ảnh canh giữa/g, '');
 
     // 4. BẢO VỆ HTML & MATHJAX
-    // Regex này cực kỳ quan trọng: Nó bắt tất cả khối \begin...end, $...$, và thẻ HTML
-    
+    // White list HTML - Thêm 'i' vào div để không xóa placeholder
     const tagWhitelist = "script|style|div|span|p|br|img|table|tbody|thead|tr|td|th|ul|ol|li|b|i|u|strong|em|mark|label|input|button|a|h1|h2|h3|h4";
     
-    const regex = new RegExp(`(
-        \\\\begin\\{[a-zA-Z*]+\\}[\\s\\S]*?\\\\end\\{[a-zA-Z*]+\\}|
-        \\$\\$[\\s\\S]*?\\$\\$|
-        \\\\\\[[\\s\\S]*?\\\\\\]|
-        \\\\\\([\\s\\S]*?\\\\\\)|
-        (?:\\$[\\s\\S]*?\\$)|
-        <\\/?(?:${tagWhitelist})[^>]*>
-    )`, 'gi'); // Bỏ dấu xuống dòng trong Regex thật bằng cách viết liền
+    // REGEX: Bắt môi trường \begin, công thức toán và thẻ HTML
+    const regex = new RegExp(`(\\\\begin\\{[a-zA-Z*]+\\}[\\s\\S]*?\\\\end\\{[a-zA-Z*]+\\}|\\$\\$[\\s\\S]*?\\$\\$|\\\\\\[[\\s\\S]*?\\\\\\]|\\\\\\([\\s\\S]*?\\\\\\)|(?:\\$[\\s\\S]*?\\$)|<\\/?(?:${tagWhitelist})[^>]*>)`, 'gi');
     
-    // Lưu ý: Regex trên cần viết liền một dòng trong JS thực tế để tránh lỗi khoảng trắng
-    // Dưới đây là phiên bản Regex một dòng chuẩn:
-    const regexOneLine = new RegExp(`(\\\\begin\\{[a-zA-Z*]+\\}[\\s\\S]*?\\\\end\\{[a-zA-Z*]+\\}|\\$\\$[\\s\\S]*?\\$\\$|\\\\\\[[\\s\\S]*?\\\\\\]|\\\\\\([\\s\\S]*?\\\\\\)|(?:\\$[\\s\\S]*?\\$)|<\\/?(?:${tagWhitelist})[^>]*>)`, 'gi');
-
-    const parts = processed.split(regexOneLine);
+    const parts = processed.split(regex);
     
     return parts.map(part => {
         const trimmed = part.trim();
-        // Kiểm tra xem là Toán, Tag HTML hay Text thường
-        // Thêm điều kiện bắt đầu bằng \begin hoặc \end
         const isMath = trimmed.startsWith('$') || trimmed.startsWith('\\(') || trimmed.startsWith('\\[') || trimmed.startsWith('\\begin') || trimmed.startsWith('\\end');
         const isTag = part.startsWith('<') && part.endsWith('>');
 
         if (isMath) {
-            // FIX: Cứu công thức chứa <x bằng cách thêm khoảng trắng
-            // Quan trọng: Không replace \n thành <br> ở đây để giữ cấu trúc eqnarray
-            return part.replace(/</g, ' < '); 
+            return part.replace(/</g, ' < '); // FIX <x
         } else if (isTag) {
-            return part; // Giữ nguyên tag HTML
+            return part; // Giữ nguyên thẻ
         } else {
-            // Text thường: Mã hóa < thành &lt;, xóa dấu } thừa và break line
             let cleanPart = part.replace(/</g, '&lt;'); 
             cleanPart = cleanPart.replace(/\}/g, '');
             return cleanPart.replace(/\\\\/g, '<br>').replace(/\n/g, '<br>');
