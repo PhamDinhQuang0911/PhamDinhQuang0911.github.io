@@ -396,6 +396,7 @@
         };
         window.addEventListener('resize', window.autoScaleTables);
         // 3. Hàm xử lý danh sách (itemchoice, enumerate, listEX...)
+        // 3. Hàm xử lý danh sách (ĐÃ CẬP NHẬT ĐỒNG BỘ VỚI EDITOR)
         function processLatexLists(text) {
             let processed = text;
 
@@ -409,7 +410,8 @@
                         <div class="leading-relaxed">${content}</div>
                     </li>`;
                 }).join('');
-                return `<ul class="my-3 pl-2">${htmlItems}</ul>`;
+                // Thêm list-none để xóa chấm đen
+                return `<ul class="my-3 pl-2 list-none">${htmlItems}</ul>`;
             });
 
             // Hàm phụ tách item
@@ -425,7 +427,7 @@
                             content = content.substring(closeBracket + 1).trim();
                         }
                     }
-                    content = processTabular(content); // Xử lý nếu có bảng lồng bên trong
+                    content = processTabular(content);
                     return { label, content };
                 });
             };
@@ -445,10 +447,10 @@
                 return gridHtml;
             });
 
-            // Xử lý enumerate (Đánh số 1, 2, 3...)
+            // Xử lý enumerate (1, 2, 3...) - Dùng list-decimal và padding chuẩn
             processed = processed.replace(/\\begin\{enumerate\}([\s\S]*?)\\end\{enumerate\}/g, (match, body) => {
                 const items = parseItems(body);
-                let html = `<ol class="list-decimal pl-6 space-y-1 my-2">`;
+                let html = `<ol class="list-decimal pl-8 space-y-1 my-2">`;
                 items.forEach(it => {
                     html += it.label ? `<li class="list-none -ml-4"><span class="font-bold mr-1">${it.label}</span>${it.content}</li>` : `<li>${it.content}</li>`;
                 });
@@ -456,10 +458,10 @@
                 return html;
             });
 
-            // Xử lý itemize (Gạch đầu dòng)
+            // Xử lý itemize (Bullet) - Dùng list-disc và padding chuẩn
             processed = processed.replace(/\\begin\{itemize\}([\s\S]*?)\\end\{itemize\}/g, (match, body) => {
                 const items = parseItems(body);
-                let html = `<ul class="list-disc pl-6 space-y-1 my-2">`;
+                let html = `<ul class="list-disc pl-8 space-y-1 my-2">`;
                 items.forEach(it => {
                     html += it.label ? `<li class="list-none -ml-4"><span class="font-bold mr-1">${it.label}</span>${it.content}</li>` : `<li>${it.content}</li>`;
                 });
@@ -471,18 +473,21 @@
         }
         // --- HÀM FORMAT THÔNG MINH: BIẾN MÃ EDITOR THÀNH MÃ HỌC SINH ---
         // --- HÀM FORMAT THÔNG MINH (ĐÃ FIX LỖI HIỂN THỊ TEXT & MATH) ---
+        // --- HÀM FORMAT THÔNG MINH (ĐÃ FIX LỖI HIỂN THỊ TEXT & MATH) ---
         window.formatContent = (text) => {
             if (text === null || text === undefined) return "";
             
             let processed = text;
 
-            // --- 1. XỬ LÝ TEXT CƠ BẢN (Bold, Italic, %, Centering) ---
-            // Phần này quan trọng để hiển thị đúng văn bản trước khi vào MathJax
+            // --- 1. XỬ LÝ TEXT CƠ BẢN ---
             processed = processed.replace(/\\centering/g, "");
             processed = processed.replace(/\\%/g, "%");
             processed = processed.replace(/\\textbf\{([^}]+)\}/g, '<b class="font-bold">$1</b>');
             processed = processed.replace(/\\textit\{([^}]+)\}/g, '<i class="italic">$1</i>');
             processed = processed.replace(/\\hfill/g, '<span style="display:inline-block; width: 2rem;"></span>');
+            
+            // [FIX LỖI] Xóa lệnh \allowdisplaybreaks
+            processed = processed.replace(/\\allowdisplaybreaks(\[.*?\])?/g, "");
 
             // --- 2. DỌN DẸP LATEX CŨ ---
             processed = processed.replace(/\\lq\\lq/g, '"').replace(/\\rq\\rq/g, '"');
@@ -491,7 +496,7 @@
             processed = processed.replace(/\\(no)?indent/g, '');
             processed = processed.replace(/\\wideparen\{([^}]+)\}/g, '\\overset{\\frown}{$1}');
 
-            // --- 3. FIX LỖI ARRAY -> MATRIX (Để hiển thị đẹp trên mobile) ---
+            // --- 3. FIX LỖI ARRAY -> MATRIX ---
             processed = processed.replace(/\\begin\{array\}\s*\{[^{}]*?\}/g, '\\begin{matrix}');
             processed = processed.replace(/\\begin\{array\}/g, '\\begin{matrix}');
             processed = processed.replace(/\\end\{array\}/g, '\\end{matrix}');
@@ -504,7 +509,7 @@
             );
             processed = processed.replace(/Click đúp để tải file|hoặc Ctrl \+ V để dán ảnh|ẢNH TỪ IMMINI|VỊ TRÍ HÌNH TIKZ/gi, '');
 
-            // --- 5. CÁC XỬ LÝ NÂNG CAO (TikZ, Table, List) ---
+            // --- 5. CÁC XỬ LÝ NÂNG CAO ---
             processed = processNestedTikz(processed);
             processed = processTabular(processed);
             processed = processLatexLists(processed);
@@ -514,24 +519,34 @@
             processed = processed.replace(/\}\s*$/g, '');
 
             // --- 7. BẢO VỆ HTML & MATHJAX ---
+            // Regex tách phần tử đặc biệt
             const regex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?:\$[\s\S]*?\$)|<script type="text\/tikz">[\s\S]*?<\/script>|<div[^>]*class="js-scale-wrapper"[\s\S]*?<\/div>|<div class="flex justify-center my-3"><img[\s\S]*?<\/div>|<img.*?>|<ul[\s\S]*?<\/ul>|<ol[\s\S]*?<\/ol>|<div class="grid[\s\S]*?<\/div>)/g;
             
             const parts = processed.split(regex);
             
             return parts.map(part => {
-                if (part.includes('<script type="text/tikz">') || 
+                // Kiểm tra xem có phải là công thức Toán không
+                const isMath = part.trim().startsWith('$') || part.trim().startsWith('\\(') || part.trim().startsWith('\\[');
+
+                if (isMath || 
+                    part.includes('<script type="text/tikz">') || 
                     part.includes('<img') || 
                     part.includes('js-scale-wrapper') || 
                     part.includes('<ul') || 
                     part.includes('<ol') || 
-                    part.includes('class="grid') ||
-                    part.trim().startsWith('$') || 
-                    part.trim().startsWith('\\(') || 
-                    part.trim().startsWith('\\[')) {
+                    part.includes('class="grid')) {
+                    
+                    // [FIX LỖI] Cứu công thức chứa <x bằng cách thêm khoảng trắng
+                    // $x<1$ -> $x < 1$. MathJax hiểu, trình duyệt không hiểu nhầm là thẻ.
+                    if (isMath) {
+                        return part.replace(/</g, ' < ');
+                    }
                     return part;
                 }
                 else {
-                    let cleanPart = part.replace(/\}/g, '');
+                    // Nếu là văn bản thường, thay < bằng &lt; để an toàn
+                    let cleanPart = part.replace(/</g, '&lt;');
+                    cleanPart = cleanPart.replace(/\}/g, '');
                     return cleanPart.replace(/\\\\/g, '<br>').replace(/\n/g, '<br>');
                 }
             }).join('');
