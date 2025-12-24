@@ -1,5 +1,5 @@
 /**
- * utils.js - Thư viện dùng chung (Đã fix lỗi Eqnarray, <x và Style)
+ * utils.js - Thư viện dùng chung (Đã Fix lỗi <x và Export Helper)
  */
 
 const TIKZ_API_URL = "https://surrey-decreased-let-detailed.trycloudflare.com/compile"; 
@@ -17,14 +17,41 @@ export const compileTikZToImage = async (tikzCode) => {
   } catch (error) { console.error("API Error:", error); throw error; }
 };
 
-// ============================================================================
-// 2. CÁC HÀM HỖ TRỢ NỘI BỘ
-// ============================================================================
+// --- CÁC HÀM EXPORT (ĐỂ EDITOR DÙNG LẠI) ---
 
-function cleanTikzCode(code) {
+export function cleanTikzCode(code) {
     let cleaned = code.replace(/\\resizebox\{[^}]+\}\{[^}]+\}\{\s*(\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\})\s*\}/g, "$1");
     return cleaned.replace(/\\begin\{center\}/g, "").replace(/\\end\{center\}/g, "");
 }
+
+export function extractNextBrace(text) {
+    if (!text) return null;
+    const start = text.indexOf('{');
+    if (start === -1) return null;
+    
+    let depth = 1;
+    let end = -1;
+    
+    for (let i = start + 1; i < text.length; i++) {
+        if (text[i] === '{') depth++;
+        else if (text[i] === '}') depth--;
+        
+        if (depth === 0) {
+            end = i;
+            break;
+        }
+    }
+    
+    if (end === -1) return null;
+    
+    return {
+        content: text.substring(start + 1, end),
+        remaining: text.substring(end + 1),
+        fullMatch: text.substring(start, end + 1)
+    };
+}
+
+// --- CÁC HÀM XỬ LÝ HIỂN THỊ (NỘI BỘ) ---
 
 function processNestedTikz(text) {
     if (!text) return "";
@@ -115,6 +142,7 @@ function processLatexLists(text) {
         return `<ul class="my-3 pl-2 list-none">${htmlItems}</ul>`;
     });
 
+    // Enumerate
     processed = processed.replace(/\\begin\{enumerate\}([\s\S]*?)\\end\{enumerate\}/g, (match, body) => {
         const items = parseItems(body);
         let html = `<ol class="list-decimal pl-8 space-y-1 my-2">`;
@@ -123,6 +151,7 @@ function processLatexLists(text) {
         return html;
     });
 
+    // Itemize
     processed = processed.replace(/\\begin\{itemize\}([\s\S]*?)\\end\{itemize\}/g, (match, body) => {
         const items = parseItems(body);
         let html = `<ul class="list-disc pl-8 space-y-1 my-2">`;
@@ -133,8 +162,6 @@ function processLatexLists(text) {
 
     return processed;
 }
-
-// --- CÁC HÀM EXPORT CHO BÊN NGOÀI ---
 
 export const convertArrayToMatrix = (content) => {
   if (!content) return "";
@@ -158,6 +185,9 @@ export const autoScaleTables = () => {
     });
 };
 
+/**
+ * HÀM XỬ LÝ CHÍNH: FORMAT NỘI DUNG (FINAL FIX)
+ */
 export const formatContent = (text) => {
     if (text === null || text === undefined) return "";
     let processed = text;
@@ -179,68 +209,30 @@ export const formatContent = (text) => {
     processed = processTabular(processed);    
     processed = processLatexLists(processed); 
 
-    // 3. Placeholder
+    // 3. Placeholder images
     processed = processed.replace(/<div[^>]*class="[^"]*image-placeholder[^"]*"[^>]*>[\s\S]*?<\/div>/g, '');
     processed = processed.replace(/<div[^>]*class="[^"]*group relative[^"]*"[^>]*>[\s\S]*?(<img[^>]+>)[\s\S]*?<\/div>/gi, '<div class="flex justify-center my-3">$1</div>');
     processed = processed.replace(/Click đúp để tải file|hoặc Ctrl \+ V để dán ảnh|ẢNH TỪ IMMINI|VỊ TRÍ HÌNH TIKZ/gi, '');
     processed = processed.replace(/^\s*\}\s*$/gm, '').replace(/\}\s*$/g, '').replace(/Ảnh minh họa \(immini\)/g, '').replace(/Ảnh canh giữa/g, '');
 
-    // 4. BẢO VỆ HTML & MATHJAX (Bao gồm cả eqnarray)
-    // White list HTML
+    // 4. FIX LỖI CẮT NGẮN CÔNG THỨC <x
     const tagWhitelist = "script|style|div|span|p|br|img|table|tbody|thead|tr|td|th|ul|ol|li|b|i|u|strong|em|mark|label|input|button|a|h1|h2|h3|h4";
-    
-    // REGEX QUAN TRỌNG:
-    // 1. \\\\begin\\{[a-zA-Z*]+\\}...\\\\end\\{[a-zA-Z*]+\\} : Bắt các khối LaTeX môi trường (như eqnarray, align, cases...)
-    // 2. \\$\\$...\\$\\$ : Bắt khối $$...$$
-    // 3. \\\\[...\\\\] : Bắt khối \[...\]
-    // 4. \\\\(...\\\\) : Bắt khối \(...\)
-    // 5. \\$...\\$ : Bắt khối $...$
-    // 6. <...>: Bắt thẻ HTML hợp lệ
-    
-    const regex = new RegExp(`(
-        \\\\begin\\{[a-zA-Z*]+\\}[\\s\\S]*?\\\\end\\{[a-zA-Z*]+\\}|
-        \\$\\$[\\s\\S]*?\\$\\$|
-        \\\\\\[[\\s\\S]*?\\\\\\]|
-        \\\\\\([\\s\\S]*?\\\\\\)|
-        (?:\\$[\\s\\S]*?\\$)|
-        <\\/?(?:${tagWhitelist})[^>]*>
-    )`, 'gi');
+    const regex = new RegExp(`(\\$\\$[\\s\\S]*?\\$\\$|\\\\\\[[\\s\\S]*?\\\\\\]|\\\\\\([\\s\\S]*?\\\\\\)|(?:\\$[\\s\\S]*?\\$)|<\\/?(?:${tagWhitelist})[^>]*>)`, 'gi');
     
     const parts = processed.split(regex);
     
     return parts.map(part => {
-        // Kiểm tra xem là Toán, Tag HTML hay Text thường
-        const partTrim = part.trim();
-        const isMath = partTrim.startsWith('$') || partTrim.startsWith('\\(') || partTrim.startsWith('\\[') || partTrim.startsWith('\\begin');
+        const isMath = part.trim().startsWith('$') || part.trim().startsWith('\\(') || part.trim().startsWith('\\[');
         const isTag = part.startsWith('<') && part.endsWith('>');
 
         if (isMath) {
-            // FIX: Cứu công thức chứa <x bằng cách thêm khoảng trắng
-            // FIX: Giữ nguyên eqnarray, không bị xóa {}
-            return part.replace(/</g, ' < '); 
+            return part.replace(/</g, ' < '); // FIX: Thêm khoảng trắng cứu công thức
         } else if (isTag) {
             return part; // Giữ nguyên tag HTML
         } else {
-            // Text thường: Mã hóa < thành &lt;, xóa dấu } thừa và break line
-            let cleanPart = part.replace(/</g, '&lt;'); 
+            let cleanPart = part.replace(/</g, '&lt;'); // FIX: Mã hóa text thường
             cleanPart = cleanPart.replace(/\}/g, '');
             return cleanPart.replace(/\\\\/g, '<br>').replace(/\n/g, '<br>');
         }
     }).join('');
 };
-
-// CÁC HÀM EXPORT BỔ SUNG (CHO EXAM-EDITOR)
-export function cleanTikzCode(code) { return code; } // Hàm giả, vì logic đã nhúng vào processNestedTikz
-export function extractNextBrace(text) {
-    if (!text) return null;
-    const start = text.indexOf('{');
-    if (start === -1) return null;
-    let depth = 1, end = -1;
-    for (let i = start + 1; i < text.length; i++) {
-        if (text[i] === '{') depth++;
-        else if (text[i] === '}') depth--;
-        if (depth === 0) { end = i; break; }
-    }
-    if (end === -1) return null;
-    return { content: text.substring(start + 1, end), remaining: text.substring(end + 1), fullMatch: text.substring(start, end + 1) };
-}
