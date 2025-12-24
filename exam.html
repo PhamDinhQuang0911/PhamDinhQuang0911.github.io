@@ -306,7 +306,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
-        import { getFirestore, doc, getDoc, collection, query, where, getDocs, addDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+import { getFirestore, doc, getDoc, collection, query, where, getDocs, addDoc, updateDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
         
         // --- [QUAN TRỌNG] IMPORT LOGIC TỪ UTILS.JS ---
         // Giúp hiển thị đồng bộ 100% với Editor (Fix lỗi <x, eqnarray...)
@@ -705,16 +705,56 @@
                     document.getElementById('scoreSection').classList.remove('hidden');
                 }
                 
-                const canView = (examData.showResult === 'immediate' || (examData.showResult === 'after_exam' && timeLeft <= 0));
-                if (canView) {
-                    const btnView = document.getElementById('btnViewSolution');
-                    if (isPassed) {
-                        btnView.classList.remove('hidden'); btnView.onclick = viewDetailSolutions;
+                // --- LOGIC HIỂN THỊ LỜI GIẢI (ĐÃ CẬP NHẬT) ---
+                const btnView = document.getElementById('btnViewSolution');
+                const urlParamsCheck = new URLSearchParams(window.location.search);
+                // Kiểm tra xem có phải học sinh đến từ khóa học không (Ưu tiên)
+                const isCourseStudent = urlParamsCheck.get('courseId') || urlParamsCheck.getAll('mode').includes('course');
+                
+                let showResultType = examData.showResult;
+                // Nếu là học sinh khóa học -> Bỏ qua các hạn chế "Trả phí" hay "Điểm sàn" -> Coi như là 'immediate'
+                if(isCourseStudent && (showResultType === 'pass_score' || showResultType === 'fee_qpoint')) {
+                    showResultType = 'immediate';
+                }
+
+                // Kiểm tra điều kiện thời gian
+                const isTimeOk = (showResultType !== 'after_exam' || timeLeft <= 0);
+
+                if (showResultType === 'never') {
+                    // Không bao giờ cho xem
+                    btnView.classList.add('hidden');
+                } 
+                else if (showResultType === 'pass_score') {
+                    // Chế độ: Đạt điểm tối thiểu
+                    const reqScore = examData.passScore || 5;
+                    if (score >= reqScore) {
+                        btnView.classList.remove('hidden');
+                        btnView.onclick = viewDetailSolutions;
                     } else {
                         btnView.classList.remove('hidden');
-                        btnView.classList.replace('bg-orange-100', 'bg-gray-200'); btnView.classList.replace('text-orange-600', 'text-gray-500');
-                        btnView.innerHTML = `<i class="fa-solid fa-lock mr-2"></i> Đạt ${passScore}đ để xem lời giải`;
-                        btnView.onclick = () => window.customAlert(`Bạn cần đạt tối thiểu ${passScore} điểm để mở khóa lời giải chi tiết. Hãy thử lại nhé!`, 'warning');
+                        btnView.classList.replace('bg-orange-100', 'bg-gray-200');
+                        btnView.classList.replace('text-orange-600', 'text-gray-500');
+                        btnView.innerHTML = `<i class="fa-solid fa-lock mr-2"></i> Đạt ${reqScore}đ để xem`;
+                        btnView.onclick = () => window.customAlert(`Bạn cần đạt tối thiểu ${reqScore} điểm để mở khóa lời giải. Hãy làm lại nhé!`, 'warning');
+                    }
+                } 
+                else if (showResultType === 'fee_qpoint') {
+                    // Chế độ: Trả phí Qpoint
+                    const fee = examData.feeQpoint || 0;
+                    btnView.classList.remove('hidden');
+                    // Style nút đặc biệt cho trả phí
+                    btnView.className = "w-full py-3 rounded-xl bg-gradient-to-r from-yellow-400 to-orange-500 text-white font-bold hover:shadow-lg transition-all";
+                    btnView.innerHTML = `<i class="fa-solid fa-unlock-keyhole mr-2"></i> Mở khóa lời giải (${fee} Qpoint)`;
+                    btnView.onclick = () => window.handlePayAndShowSolution(fee);
+                } 
+                else {
+                    // Chế độ: Ngay lập tức (immediate) hoặc Hết giờ (after_exam)
+                    if (isTimeOk) {
+                        btnView.classList.remove('hidden');
+                        btnView.onclick = viewDetailSolutions;
+                    } else {
+                        // Chưa đến giờ xem
+                        btnView.classList.add('hidden');
                     }
                 }
                 
@@ -813,6 +853,42 @@
         document.getElementById('nextBtn').onclick = () => { if(currentIndex < currentQuestions.length - 1) renderQuestion(currentIndex + 1); };
         document.getElementById('prevBtnMob').onclick = () => { if(currentIndex > 0) renderQuestion(currentIndex - 1); };
         document.getElementById('nextBtnMob').onclick = () => { if(currentIndex < currentQuestions.length - 1) renderQuestion(currentIndex + 1); };
+        // --- HÀM XỬ LÝ THANH TOÁN QPOINT ĐỂ XEM GIẢI ---
+        window.handlePayAndShowSolution = async (fee) => {
+            if(!currentUser) return;
+            
+            // 1. Xác nhận
+            const confirm = await window.customConfirm(`Bạn cần trả ${fee} Qpoint để xem lời giải chi tiết. Đồng ý thanh toán?`);
+            if(!confirm) return;
+
+            try {
+                // 2. Kiểm tra số dư
+                const userRef = doc(db, "users", currentUser.uid);
+                const userSnap = await getDoc(userRef);
+                
+                if(!userSnap.exists()) return;
+                const userData = userSnap.data();
+                const currentQpoint = userData.qpoint || 0;
+
+                if(currentQpoint < fee) {
+                    // Thiếu tiền
+                    window.customAlert("Bạn không đủ Qpoint! Hãy học bài, xem quảng cáo để kiếm thêm hoặc nạp tiền.", "error");
+                } else {
+                    // Đủ tiền -> Trừ tiền
+                    await updateDoc(userRef, {
+                        qpoint: currentQpoint - fee
+                    });
+                    
+                    window.showToast(`Thanh toán thành công! Còn lại: ${currentQpoint - fee} Qpoint`);
+                    
+                    // Mở khóa xem giải
+                    viewDetailSolutions();
+                }
+            } catch(e) {
+                console.error(e);
+                window.customAlert("Lỗi giao dịch: " + e.message, "error");
+            }
+        };
     </script>
    </body>
 </html>
