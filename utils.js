@@ -1,5 +1,6 @@
 /**
- * utils.js - Thư viện dùng chung (Đã fix lỗi hiển thị <x và Style)
+ * utils.js - Thư viện dùng chung cho Editor và Exam
+ * Chứa logic xử lý hiển thị LaTeX, TikZ, và HTML cleanup (Đã fix lỗi hiển thị <x)
  */
 
 // 1. CẤU HÌNH API
@@ -18,7 +19,10 @@ export const compileTikZToImage = async (tikzCode) => {
   } catch (error) { console.error("API Error:", error); throw error; }
 };
 
-// 2. CÁC HÀM XỬ LÝ (HELPER)
+// ============================================================================
+// 2. CÁC HÀM XỬ LÝ NỘI BỘ (HELPER)
+// ============================================================================
+
 function cleanTikzCode(code) {
     let cleaned = code.replace(/\\resizebox\{[^}]+\}\{[^}]+\}\{\s*(\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\})\s*\}/g, "$1");
     return cleaned.replace(/\\begin\{center\}/g, "").replace(/\\end\{center\}/g, "");
@@ -174,13 +178,13 @@ export const formatContent = (text) => {
     processed = processTabular(processed);    
     processed = processLatexLists(processed); 
 
-    // Placeholder
+    // Placeholder images
     processed = processed.replace(/<div[^>]*class="[^"]*image-placeholder[^"]*"[^>]*>[\s\S]*?<\/div>/g, '');
     processed = processed.replace(/<div[^>]*class="[^"]*group relative[^"]*"[^>]*>[\s\S]*?(<img[^>]+>)[\s\S]*?<\/div>/gi, '<div class="flex justify-center my-3">$1</div>');
     processed = processed.replace(/Click đúp để tải file|hoặc Ctrl \+ V để dán ảnh|ẢNH TỪ IMMINI|VỊ TRÍ HÌNH TIKZ/gi, '');
     processed = processed.replace(/^\s*\}\s*$/gm, '').replace(/\}\s*$/g, '').replace(/Ảnh minh họa \(immini\)/g, '').replace(/Ảnh canh giữa/g, '');
 
-    // FIX LỖI <x
+    // FIX LỖI CẮT NGẮN CÔNG THỨC <x
     const tagWhitelist = "script|style|div|span|p|br|img|table|tbody|thead|tr|td|th|ul|ol|li|b|i|u|strong|em|mark|label|input|button|a|h1|h2|h3|h4";
     const regex = new RegExp(`(\\$\\$[\\s\\S]*?\\$\\$|\\\\\\[[\\s\\S]*?\\\\\\]|\\\\\\([\\s\\S]*?\\\\\\)|(?:\\$[\\s\\S]*?\\$)|<\\/?(?:${tagWhitelist})[^>]*>)`, 'gi');
     
@@ -191,11 +195,11 @@ export const formatContent = (text) => {
         const isTag = part.startsWith('<') && part.endsWith('>');
 
         if (isMath) {
-            return part.replace(/</g, ' < '); // Thêm khoảng trắng cứu công thức
+            return part.replace(/</g, ' < '); // FIX: Thêm khoảng trắng
         } else if (isTag) {
             return part; 
         } else {
-            let cleanPart = part.replace(/</g, '&lt;'); // Mã hóa text thường
+            let cleanPart = part.replace(/</g, '&lt;'); // FIX: Mã hóa text thường
             cleanPart = cleanPart.replace(/\}/g, '');
             return cleanPart.replace(/\\\\/g, '<br>').replace(/\n/g, '<br>');
         }
