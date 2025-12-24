@@ -1,5 +1,5 @@
 /**
- * utils.js - Thư viện dùng chung (Đã fix lỗi Eqnarray, <x và Style)
+ * utils.js - Thư viện dùng chung (Final Fix: Eqnarray + <x)
  */
 
 const TIKZ_API_URL = "https://surrey-decreased-let-detailed.trycloudflare.com/compile"; 
@@ -17,7 +17,7 @@ export const compileTikZToImage = async (tikzCode) => {
   } catch (error) { console.error("API Error:", error); throw error; }
 };
 
-// --- CÁC HÀM EXPORT (ĐỂ EDITOR DÙNG LẠI) ---
+// --- CÁC HÀM EXPORT HỖ TRỢ ---
 
 export function cleanTikzCode(code) {
     let cleaned = code.replace(/\\resizebox\{[^}]+\}\{[^}]+\}\{\s*(\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\})\s*\}/g, "$1");
@@ -46,7 +46,9 @@ function processNestedTikz(text) {
     while (true) {
         const startIdx = remaining.indexOf("\\begin{tikzpicture}");
         if (startIdx === -1) { result += remaining; break; }
-        result += remaining.substring(0, startIdx); remaining = remaining.substring(startIdx);
+        
+        result += remaining.substring(0, startIdx);
+        remaining = remaining.substring(startIdx);
         
         const openTag = "\\begin{tikzpicture}"; 
         const closeTag = "\\end{tikzpicture}";
@@ -92,6 +94,15 @@ function processTabular(text) {
 
 function processLatexLists(text) {
     let processed = text;
+    // itemchoice
+    processed = processed.replace(/\\begin\{itemchoice\}([\s\S]*?)\\end\{itemchoice\}/g, (match, body) => {
+        const items = body.split('\\itemch').filter(s => s.trim().length > 0);
+        const htmlItems = items.map(item => {
+            let content = item.trim().replace(/\\\\/g, '<br>').replace(/\n/g, ' ');
+            return `<li class="flex items-start gap-2 mb-1"><span class="text-blue-600 font-bold shrink-0">•</span><div class="leading-relaxed">${content}</div></li>`;
+        }).join('');
+        return `<ul class="my-3 pl-2 list-none">${htmlItems}</ul>`;
+    });
     // Helper parse items
     const parseItems = (bodyStr) => {
         const rawItems = bodyStr.split(/\\item(?![a-zA-Z])/).filter(s => s.trim().length > 0);
@@ -105,17 +116,6 @@ function processLatexLists(text) {
             return { label, content };
         });
     };
-
-    // itemchoice
-    processed = processed.replace(/\\begin\{itemchoice\}([\s\S]*?)\\end\{itemchoice\}/g, (match, body) => {
-        const items = body.split('\\itemch').filter(s => s.trim().length > 0);
-        const htmlItems = items.map(item => {
-            let content = item.trim().replace(/\\\\/g, '<br>').replace(/\n/g, ' ');
-            return `<li class="flex items-start gap-2 mb-1"><span class="text-blue-600 font-bold shrink-0">•</span><div class="leading-relaxed">${content}</div></li>`;
-        }).join('');
-        return `<ul class="my-3 pl-2 list-none">${htmlItems}</ul>`;
-    });
-
     // ListEX
     const regexCols = /\\begin\{(?:listEX|enumEX)\}(?:\[(\d+)\]|\{(\d+)\}(?:\[(.*?)\])?)([\s\S]*?)\\end\{(?:listEX|enumEX)\}/g;
     processed = processed.replace(regexCols, (match, c1, c2, style, body) => {
@@ -130,21 +130,19 @@ function processLatexLists(text) {
         gridHtml += `</div>`;
         return gridHtml;
     });
-
     // Enumerate
     processed = processed.replace(/\\begin\{enumerate\}([\s\S]*?)\\end\{enumerate\}/g, (match, body) => {
         const items = parseItems(body);
         let html = `<ol class="list-decimal pl-8 space-y-1 my-2">`;
-        items.forEach(it => { html += it.label ? `<li class="list-none -ml-4"><span class="font-bold mr-1">${it.label}</span>${it.content}</li>` : `<li>${it.content}</li>`; });
+        items.forEach(it => { html += `<li class="pl-1">${it.content}</li>`; });
         html += `</ol>`;
         return html;
     });
-
     // Itemize
     processed = processed.replace(/\\begin\{itemize\}([\s\S]*?)\\end\{itemize\}/g, (match, body) => {
         const items = parseItems(body);
         let html = `<ul class="list-disc pl-8 space-y-1 my-2">`;
-        items.forEach(it => { html += it.label ? `<li class="list-none -ml-4"><span class="font-bold mr-1">${it.label}</span>${it.content}</li>` : `<li>${it.content}</li>`; });
+        items.forEach(it => { html += `<li class="pl-1">${it.content}</li>`; });
         html += `</ul>`;
         return html;
     });
@@ -176,7 +174,7 @@ export const autoScaleTables = () => {
 };
 
 /**
- * HÀM FORMAT CONTENT (ĐÃ FIX EQNARRAY & LỖI <x)
+ * HÀM FORMAT CONTENT (BẢN FINAL: FIX EQNARRAY + <x)
  */
 export const formatContent = (text) => {
     if (text === null || text === undefined) return "";
@@ -205,18 +203,10 @@ export const formatContent = (text) => {
     processed = processed.replace(/Click đúp để tải file|hoặc Ctrl \+ V để dán ảnh|ẢNH TỪ IMMINI|VỊ TRÍ HÌNH TIKZ/gi, '');
     processed = processed.replace(/^\s*\}\s*$/gm, '').replace(/\}\s*$/g, '').replace(/Ảnh minh họa \(immini\)/g, '').replace(/Ảnh canh giữa/g, '');
 
-    // 4. BẢO VỆ HTML & MATHJAX (BAO GỒM EQNARRAY)
+    // 4. BẢO VỆ HTML & MATHJAX
+    // Regex này cực kỳ quan trọng: Nó bắt tất cả khối \begin...end, $...$, và thẻ HTML
     
-    // Danh sách thẻ HTML được phép (Whitelist)
     const tagWhitelist = "script|style|div|span|p|br|img|table|tbody|thead|tr|td|th|ul|ol|li|b|i|u|strong|em|mark|label|input|button|a|h1|h2|h3|h4";
-    
-    // REGEX QUAN TRỌNG:
-    // 1. \\\\begin\\{[a-zA-Z*]+\\}...\\\\end\\{[a-zA-Z*]+\\} : Bắt tất cả môi trường LaTeX (như eqnarray, align, cases...)
-    // 2. \\$\\$...\\$\\$ : Bắt khối $$...$$
-    // 3. \\\\[...\\\\] : Bắt khối \[...\]
-    // 4. \\\\(...\\\\) : Bắt khối \(...\)
-    // 5. \\$...\\$ : Bắt khối $...$
-    // 6. <...>: Bắt thẻ HTML hợp lệ
     
     const regex = new RegExp(`(
         \\\\begin\\{[a-zA-Z*]+\\}[\\s\\S]*?\\\\end\\{[a-zA-Z*]+\\}|
@@ -225,19 +215,24 @@ export const formatContent = (text) => {
         \\\\\\([\\s\\S]*?\\\\\\)|
         (?:\\$[\\s\\S]*?\\$)|
         <\\/?(?:${tagWhitelist})[^>]*>
-    )`, 'gi');
+    )`, 'gi'); // Bỏ dấu xuống dòng trong Regex thật bằng cách viết liền
     
-    const parts = processed.split(regex);
+    // Lưu ý: Regex trên cần viết liền một dòng trong JS thực tế để tránh lỗi khoảng trắng
+    // Dưới đây là phiên bản Regex một dòng chuẩn:
+    const regexOneLine = new RegExp(`(\\\\begin\\{[a-zA-Z*]+\\}[\\s\\S]*?\\\\end\\{[a-zA-Z*]+\\}|\\$\\$[\\s\\S]*?\\$\\$|\\\\\\[[\\s\\S]*?\\\\\\]|\\\\\\([\\s\\S]*?\\\\\\)|(?:\\$[\\s\\S]*?\\$)|<\\/?(?:${tagWhitelist})[^>]*>)`, 'gi');
+
+    const parts = processed.split(regexOneLine);
     
     return parts.map(part => {
         const trimmed = part.trim();
-        // Kiểm tra xem là Toán (bao gồm cả \begin{...}), Tag HTML hay Text thường
-        const isMath = trimmed.startsWith('$') || trimmed.startsWith('\\(') || trimmed.startsWith('\\[') || trimmed.startsWith('\\begin');
+        // Kiểm tra xem là Toán, Tag HTML hay Text thường
+        // Thêm điều kiện bắt đầu bằng \begin hoặc \end
+        const isMath = trimmed.startsWith('$') || trimmed.startsWith('\\(') || trimmed.startsWith('\\[') || trimmed.startsWith('\\begin') || trimmed.startsWith('\\end');
         const isTag = part.startsWith('<') && part.endsWith('>');
 
         if (isMath) {
             // FIX: Cứu công thức chứa <x bằng cách thêm khoảng trắng
-            // FIX: Giữ nguyên eqnarray, không bị xóa {}
+            // Quan trọng: Không replace \n thành <br> ở đây để giữ cấu trúc eqnarray
             return part.replace(/</g, ' < '); 
         } else if (isTag) {
             return part; // Giữ nguyên tag HTML
