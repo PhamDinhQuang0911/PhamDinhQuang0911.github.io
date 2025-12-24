@@ -2,7 +2,7 @@
  * utils.js - Thư viện dùng chung (Đã fix lỗi mất khung upload ảnh)
  */
 
-const TIKZ_API_URL = "https://surrey-decreased-let-detailed.trycloudflare.com/compile"; 
+const TIKZ_API_URL = "https://identity-ministries-wait-walk.trycloudflare.com/compile"; 
 
 export const compileTikZToImage = async (tikzCode) => {
   try {
