@@ -1,10 +1,9 @@
 /**
- * utils.js - Thư viện dùng chung cho Editor và Exam
- * Chứa logic xử lý hiển thị LaTeX, TikZ, và HTML cleanup (Đã fix lỗi hiển thị <x)
+ * utils.js - Thư viện dùng chung (Đã fix lỗi hiển thị <x và Style)
  */
 
-// 1. CẤU HÌNH API (Lưu ý: URL Tunnel này thay đổi mỗi lần chạy tool, hãy cập nhật khi cần)
-const TIKZ_API_URL = "https://surrey-decreased-let-detailed.trycloudflare.com/compile"; 
+// 1. CẤU HÌNH API
+const TIKZ_API_URL = "https://modern-brisbane-self-descending.trycloudflare.com/compile"; 
 
 export const compileTikZToImage = async (tikzCode) => {
   try {
@@ -19,47 +18,31 @@ export const compileTikZToImage = async (tikzCode) => {
   } catch (error) { console.error("API Error:", error); throw error; }
 };
 
-// ============================================================================
-// 2. CÁC HÀM XỬ LÝ NỘI BỘ (HELPER)
-// ============================================================================
-
+// 2. CÁC HÀM XỬ LÝ (HELPER)
 function cleanTikzCode(code) {
-    let cleaned = code;
-    const resizeRegex = /\\resizebox\{[^}]+\}\{[^}]+\}\{\s*(\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\})\s*\}/g;
-    cleaned = cleaned.replace(resizeRegex, "$1");
-    cleaned = cleaned.replace(/\\begin\{center\}/g, "").replace(/\\end\{center\}/g, "");
-    return cleaned;
+    let cleaned = code.replace(/\\resizebox\{[^}]+\}\{[^}]+\}\{\s*(\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\})\s*\}/g, "$1");
+    return cleaned.replace(/\\begin\{center\}/g, "").replace(/\\end\{center\}/g, "");
 }
 
 function processNestedTikz(text) {
     if (!text) return "";
-    let result = "";
-    let remaining = String(text);
-    
+    let result = "", remaining = String(text);
     while (true) {
         const startIdx = remaining.indexOf("\\begin{tikzpicture}");
         if (startIdx === -1) { result += remaining; break; }
-        
-        result += remaining.substring(0, startIdx);
-        remaining = remaining.substring(startIdx);
-        
-        let depth = 0; let endIdx = -1;
-        const openTag = "\\begin{tikzpicture}"; const closeTag = "\\end{tikzpicture}";
-        let searchPos = openTag.length; depth = 1;
-
+        result += remaining.substring(0, startIdx); remaining = remaining.substring(startIdx);
+        let depth = 0, endIdx = -1, pos = "\\begin{tikzpicture}".length; depth = 1;
         while (depth > 0) {
-            const nextOpen = remaining.indexOf(openTag, searchPos);
-            const nextClose = remaining.indexOf(closeTag, searchPos);
-            if (nextClose === -1) { endIdx = remaining.length; depth = 0; break; }
-            if (nextOpen !== -1 && nextOpen < nextClose) { depth++; searchPos = nextOpen + openTag.length; } 
-            else { depth--; searchPos = nextClose + closeTag.length; if (depth === 0) endIdx = searchPos; }
+            const no = remaining.indexOf("\\begin{tikzpicture}", pos);
+            const nc = remaining.indexOf("\\end{tikzpicture}", pos);
+            if (nc === -1) { endIdx = remaining.length; depth = 0; break; }
+            if (no !== -1 && no < nc) { depth++; pos = no + 19; } 
+            else { depth--; pos = nc + 17; if (depth === 0) endIdx = pos; }
         }
-        
-        let rawTikz = remaining.substring(0, endIdx);
-        let finalTikz = cleanTikzCode(rawTikz);
-        if (!finalTikz.includes("\\usetikzlibrary")) finalTikz = "\\usetikzlibrary{calc,intersections,arrows.meta}\n" + finalTikz;
-
-        result += `<div class="flex justify-center my-4 overflow-x-auto"><script type="text/tikz">${finalTikz}<\/script></div>`;
+        let raw = remaining.substring(0, endIdx);
+        let final = cleanTikzCode(raw);
+        if (!final.includes("\\usetikzlibrary")) final = "\\usetikzlibrary{calc,intersections,arrows.meta}\n" + final;
+        result += `<div class="flex justify-center my-4 overflow-x-auto"><script type="text/tikz">${final}<\/script></div>`;
         remaining = remaining.substring(endIdx);
     }
     return result;
@@ -69,12 +52,10 @@ function processTabular(text) {
     if (!text) return "";
     let processed = text.replace(/\\begin\{table\}(\[.*?\])?/g, '').replace(/\\end\{table\}/g, '');
     const regex = /\\begin\{tabular\}(\{|\[).*?(\}|\])([\s\S]*?)\\end\{tabular\}/g;
-    
     return processed.replace(regex, (match, open, close, body) => {
         const rows = body.split('\\\\').filter(r => r.trim().length > 0);
         let html = '<div class="my-3 w-full js-scale-wrapper" style="position: relative; width: 100%;">';
         html += '<table class="js-scale-table border-collapse border border-gray-300 bg-white text-sm origin-top-left" style="min-width: max-content;">';
-        
         rows.forEach((row, rIdx) => {
             let cleanRow = row.replace(/\\hline/g, '').trim();
             if(cleanRow.length === 0) return;
@@ -90,8 +71,7 @@ function processTabular(text) {
 
 function processLatexLists(text) {
     let processed = text;
-
-    // Xử lý itemchoice (Trắc nghiệm đúng sai) - Thêm list-none để xóa chấm đen thừa
+    // itemchoice
     processed = processed.replace(/\\begin\{itemchoice\}([\s\S]*?)\\end\{itemchoice\}/g, (match, body) => {
         const items = body.split('\\itemch').filter(s => s.trim().length > 0);
         const htmlItems = items.map(item => {
@@ -100,25 +80,20 @@ function processLatexLists(text) {
         }).join('');
         return `<ul class="my-3 pl-2 list-none">${htmlItems}</ul>`;
     });
-
+    // Helper parse items
     const parseItems = (bodyStr) => {
         const rawItems = bodyStr.split(/\\item(?![a-zA-Z])/).filter(s => s.trim().length > 0);
         return rawItems.map((item) => {
-            let content = item.trim();
-            let label = null;
+            let content = item.trim(), label = null;
             if (content.startsWith('[')) {
-                const closeBracket = content.indexOf(']');
-                if (closeBracket > -1) {
-                    label = content.substring(1, closeBracket);
-                    content = content.substring(closeBracket + 1).trim();
-                }
+                const cb = content.indexOf(']');
+                if (cb > -1) { label = content.substring(1, cb); content = content.substring(cb + 1).trim(); }
             }
             content = processTabular(content);
             return { label, content };
         });
     };
-
-    // Xử lý listEX, enumEX (Chia cột)
+    // ListEX
     const regexCols = /\\begin\{(?:listEX|enumEX)\}(?:\[(\d+)\]|\{(\d+)\}(?:\[(.*?)\])?)([\s\S]*?)\\end\{(?:listEX|enumEX)\}/g;
     processed = processed.replace(regexCols, (match, c1, c2, style, body) => {
         const cols = c1 || c2 || 1;
@@ -132,8 +107,7 @@ function processLatexLists(text) {
         gridHtml += `</div>`;
         return gridHtml;
     });
-
-    // Xử lý enumerate (1, 2, 3...)
+    // Enumerate
     processed = processed.replace(/\\begin\{enumerate\}([\s\S]*?)\\end\{enumerate\}/g, (match, body) => {
         const items = parseItems(body);
         let html = `<ol class="list-decimal pl-8 space-y-1 my-2">`;
@@ -141,8 +115,7 @@ function processLatexLists(text) {
         html += `</ol>`;
         return html;
     });
-
-    // Xử lý itemize (Bullet)
+    // Itemize
     processed = processed.replace(/\\begin\{itemize\}([\s\S]*?)\\end\{itemize\}/g, (match, body) => {
         const items = parseItems(body);
         let html = `<ul class="list-disc pl-8 space-y-1 my-2">`;
@@ -150,14 +123,10 @@ function processLatexLists(text) {
         html += `</ul>`;
         return html;
     });
-
     return processed;
 }
 
-// ============================================================================
 // 3. CÁC HÀM EXPORT CHO BÊN NGOÀI SỬ DỤNG
-// ============================================================================
-
 export const convertArrayToMatrix = (content) => {
   if (!content) return "";
   let processed = content.replace(/\\begin\{array\}\s*\{[^{}]*?\}/g, '\\begin{matrix}');
@@ -182,75 +151,52 @@ export const autoScaleTables = () => {
     });
 };
 
-/**
- * HÀM XỬ LÝ HIỂN THỊ CHÍNH (ĐÃ FIX LỖI CẮT NGẮN CÔNG THỨC <x)
- */
 export const formatContent = (text) => {
     if (text === null || text === undefined) return "";
     let processed = text;
 
-    // 1. XỬ LÝ TEXT CƠ BẢN
+    // Cleanup Text
     processed = processed.replace(/\\centering/g, "");
     processed = processed.replace(/\\%/g, "%");
     processed = processed.replace(/\\textbf\{([^}]+)\}/g, '<b class="font-bold">$1</b>');
     processed = processed.replace(/\\textit\{([^}]+)\}/g, '<i class="italic">$1</i>');
     processed = processed.replace(/\\hfill/g, '<span style="display:inline-block; width: 2rem;"></span>');
-    processed = processed.replace(/\\allowdisplaybreaks(\[.*?\])?/g, ""); // Xóa lệnh rác
-
-    // 2. XỬ LÝ KÝ TỰ LATEX
+    processed = processed.replace(/\\allowdisplaybreaks(\[.*?\])?/g, "");
     processed = processed.replace(/\\lq\\lq/g, '"').replace(/\\rq\\rq/g, '"');
     processed = processed.replace(/\\lq/g, '"').replace(/\\rq/g, '"');
     processed = processed.replace(/\\wideparen\{([^}]+)\}/g, '\\overset{\\frown}{$1}');
     processed = processed.replace(/\\(h|v)space\*?\{[^}]+\}/g, '');
     processed = processed.replace(/\\(no)?indent/g, '');
 
-    // 3. XỬ LÝ CẤU TRÚC
+    // Structure
     processed = convertArrayToMatrix(processed);
     processed = processNestedTikz(processed); 
     processed = processTabular(processed);    
     processed = processLatexLists(processed); 
 
-    // 4. XỬ LÝ ẢNH PLACEHOLDER (Của Editor)
+    // Placeholder
     processed = processed.replace(/<div[^>]*class="[^"]*image-placeholder[^"]*"[^>]*>[\s\S]*?<\/div>/g, '');
-    processed = processed.replace(
-        /<div[^>]*class="[^"]*group relative[^"]*"[^>]*>[\s\S]*?(<img[^>]+>)[\s\S]*?<\/div>/gi, 
-        '<div class="flex justify-center my-3">$1</div>'
-    );
+    processed = processed.replace(/<div[^>]*class="[^"]*group relative[^"]*"[^>]*>[\s\S]*?(<img[^>]+>)[\s\S]*?<\/div>/gi, '<div class="flex justify-center my-3">$1</div>');
     processed = processed.replace(/Click đúp để tải file|hoặc Ctrl \+ V để dán ảnh|ẢNH TỪ IMMINI|VỊ TRÍ HÌNH TIKZ/gi, '');
+    processed = processed.replace(/^\s*\}\s*$/gm, '').replace(/\}\s*$/g, '').replace(/Ảnh minh họa \(immini\)/g, '').replace(/Ảnh canh giữa/g, '');
 
-    // 5. DỌN RÁC CUỐI CÙNG
-    processed = processed.replace(/^\s*\}\s*$/gm, ''); 
-    processed = processed.replace(/\}\s*$/g, '');
-    processed = processed.replace(/Ảnh minh họa \(immini\)/g, ''); 
-    processed = processed.replace(/Ảnh canh giữa/g, '');
-
-    // 6. BẢO VỆ HTML & SỬA LỖI <x TRONG MATH
-    // Danh sách thẻ HTML hợp lệ cần giữ nguyên (Whitelist)
+    // FIX LỖI <x
     const tagWhitelist = "script|style|div|span|p|br|img|table|tbody|thead|tr|td|th|ul|ol|li|b|i|u|strong|em|mark|label|input|button|a|h1|h2|h3|h4";
-    
-    // Regex tìm: Công thức Toán HOẶC Thẻ HTML hợp lệ
     const regex = new RegExp(`(\\$\\$[\\s\\S]*?\\$\\$|\\\\\\[[\\s\\S]*?\\\\\\]|\\\\\\([\\s\\S]*?\\\\\\)|(?:\\$[\\s\\S]*?\\$)|<\\/?(?:${tagWhitelist})[^>]*>)`, 'gi');
     
     const parts = processed.split(regex);
     
     return parts.map(part => {
-        // Kiểm tra xem phần này có phải là công thức Toán không
         const isMath = part.trim().startsWith('$') || part.trim().startsWith('\\(') || part.trim().startsWith('\\[');
-        const isTag = part.startsWith('<') && part.endsWith('>'); // Thẻ HTML
+        const isTag = part.startsWith('<') && part.endsWith('>');
 
         if (isMath) {
-            // [FIX QUAN TRỌNG] Cứu công thức chứa <x bằng cách thêm khoảng trắng
-            // $x<1$ -> $x < 1$. MathJax hiểu, còn trình duyệt thì không nhầm là thẻ.
-            return part.replace(/</g, ' < ');
-        } 
-        else if (isTag) {
-            return part; // Giữ nguyên thẻ HTML xịn
-        } 
-        else {
-            // Nếu là văn bản thường: Mã hóa dấu < thành &lt; để hiển thị đúng
-            let cleanPart = part.replace(/</g, '&lt;');
+            return part.replace(/</g, ' < '); // Thêm khoảng trắng cứu công thức
+        } else if (isTag) {
+            return part; 
+        } else {
+            let cleanPart = part.replace(/</g, '&lt;'); // Mã hóa text thường
             cleanPart = cleanPart.replace(/\}/g, '');
-            // Xử lý xuống dòng cho văn bản
             return cleanPart.replace(/\\\\/g, '<br>').replace(/\n/g, '<br>');
         }
     }).join('');
