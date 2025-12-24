@@ -308,9 +308,19 @@
         import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
         import { getFirestore, doc, getDoc, collection, query, where, getDocs, addDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
         
+        // --- [QUAN TRỌNG] IMPORT LOGIC TỪ UTILS.JS ---
+        // Giúp hiển thị đồng bộ 100% với Editor (Fix lỗi <x, eqnarray...)
+        import { formatContent, autoScaleTables } from "./utils.js"; 
+
+        // Gán vào window để HTML gọi được
+        window.formatContent = formatContent;
+        window.autoScaleTables = autoScaleTables;
+
+        // CẤU HÌNH FIREBASE (GIỮ NGUYÊN KEY CỦA BẠN)
         const firebaseConfig = { apiKey: "AIzaSyCqAX3x1MbJ3do7m3EaH9JA4kFuVhlAc78", authDomain: "lms-thitracnghiem.firebaseapp.com", projectId: "lms-thitracnghiem", storageBucket: "lms-thitracnghiem.firebasestorage.app", messagingSenderId: "760187217240", appId: "1:760187217240:web:d043cd5808c349f87a712d" };
         const app = initializeApp(firebaseConfig); const auth = getAuth(app); const db = getFirestore(app);
 
+        // --- GLOBAL VARIABLES ---
         let currentUser, examData, examId;
         let currentQuestions = [], userAnswers = {}, flaggedQuestions = {};
         let currentIndex = 0, timerInterval, timeLeft = 0, cheatCount = 0, isExamActive = false;
@@ -318,282 +328,48 @@
         
         const dom = { lobby: document.getElementById('lobbyScreen'), header: document.getElementById('examHeader'), main: document.getElementById('examMain'), content: document.getElementById('questionContent'), options: document.getElementById('answerOptions'), palette: document.getElementById('questionPalette'), timer: document.getElementById('timer'), badge: document.getElementById('questionTypeBadge') };
         
-        // MODAL HELPERS
+        // --- MODAL HELPERS ---
         let modalResolve = null;
         const modalEl = document.getElementById('customModal'), modalBox = document.getElementById('customModalBox'), modalTitle = document.getElementById('modalTitle'), modalMsg = document.getElementById('modalMessage'), btnConfirm = document.getElementById('btnConfirm'), btnCancel = document.getElementById('btnCancel');
         window.closeCustomModal = () => { modalEl.classList.add('opacity-0', 'pointer-events-none'); modalBox.classList.remove('scale-100'); modalBox.classList.add('scale-95'); if(modalResolve) { modalResolve(null); modalResolve = null; } };
         window.customAlert = (msg, type='info') => { return new Promise(resolve => { modalTitle.innerText=type==='error'?'Lỗi':'Thông báo'; modalMsg.innerText=msg; btnCancel.classList.add('hidden'); btnConfirm.innerText="Đã hiểu"; modalEl.classList.remove('opacity-0','pointer-events-none'); modalBox.classList.add('scale-100'); btnConfirm.onclick=()=>{resolve(true);closeCustomModal();}; }); };
         window.customConfirm = (msg) => { return new Promise(resolve => { modalTitle.innerText="Xác nhận"; modalMsg.innerText=msg; btnCancel.classList.remove('hidden'); btnConfirm.innerText="Đồng ý"; modalEl.classList.remove('opacity-0','pointer-events-none'); modalBox.classList.add('scale-100'); btnConfirm.onclick=()=>{resolve(true);closeCustomModal();}; btnCancel.onclick=()=>{resolve(false);closeCustomModal();}; }); };
 
-        // --- CÁC HÀM XỬ LÝ NỘI DUNG ---
-        function cleanTikzCode(code) { 
-            let c = code.replace(/\\resizebox\{[^}]+\}\{[^}]+\}\{\s*(\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\})\s*\}/g, "$1"); 
-            return c.replace(/\\begin\{center\}/g, "").replace(/\\end\{center\}/g, ""); 
-        }
-
-        function processNestedTikz(text) {
-            if (!text) return ""; 
-            let res = "", rem = String(text);
-            while (true) {
-                const start = rem.indexOf("\\begin{tikzpicture}"); 
-                if (start === -1) { res += rem; break; }
-                res += rem.substring(0, start); rem = rem.substring(start);
-                let d = 0, end = -1, pos = "\\begin{tikzpicture}".length; d = 1;
-                while (d > 0) { 
-                    const no = rem.indexOf("\\begin{tikzpicture}", pos);
-                    const nc = rem.indexOf("\\end{tikzpicture}", pos); 
-                    if (nc === -1) { end = rem.length; d = 0; break; } 
-                    if (no !== -1 && no < nc) { d++; pos = no + 19; } 
-                    else { d--; pos = nc + 17; if (d === 0) end = pos; } 
-                }
-                let raw = rem.substring(0, end);
-                let final = cleanTikzCode(raw); 
-                if (!final.includes("\\usetikzlibrary")) final = "\\usetikzlibrary{calc,intersections,arrows.meta}\n" + final;
-                res += `<div class="flex justify-center my-4 overflow-x-auto"><script type="text/tikz">${final}<\/script></div>`; 
-                rem = rem.substring(end);
-            }
-            return res;
-        }
-        // 1. Hàm xử lý bảng biểu (Giống hệt Editor: hỗ trợ Scale)
-        // 1. Hàm xử lý bảng biểu (Tự động Scale)
-        function processTabular(text) {
-            if (!text) return "";
-            // Loại bỏ môi trường table bao ngoài
-            let processed = text.replace(/\\begin\{table\}(\[.*?\])?/g, '').replace(/\\end\{table\}/g, '');
-            const regex = /\\begin\{tabular\}(\{|\[).*?(\}|\])([\s\S]*?)\\end\{tabular\}/g;
-            return processed.replace(regex, (match, open, close, body) => {
-                const rows = body.split('\\\\').filter(r => r.trim().length > 0);
-                let html = '<div class="my-3 w-full js-scale-wrapper" style="position: relative; width: 100%;">';
-                html += '<table class="js-scale-table border-collapse border border-gray-300 bg-white text-sm origin-top-left" style="min-width: max-content;">';
-                rows.forEach((row, rIdx) => {
-                    let cleanRow = row.replace(/\\hline/g, '').trim();
-                    if(cleanRow.length === 0) return;
-                    const cols = cleanRow.split('&');
-                    html += `<tr class="${rIdx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}">`;
-                    cols.forEach(col => { html += `<td class="border border-gray-300 px-3 py-2 align-middle">${col.trim()}</td>`; });
-                    html += '</tr>';
-                });
-                html += '</table></div>';
-                return html;
-            });
-        }
-
-        // 2. Hàm tính toán Scale bảng
-        window.autoScaleTables = () => {
-            document.querySelectorAll('.js-scale-wrapper').forEach(wrap => {
-                const table = wrap.querySelector('table');
-                if (!table) return;
-                table.style.transform = 'none'; table.style.width = 'auto'; wrap.style.height = 'auto';
-                const containerWidth = wrap.offsetWidth;
-                const tableWidth = table.scrollWidth;
-                if (tableWidth > containerWidth) {
-                    const scale = containerWidth / tableWidth;
-                    table.style.transform = `scale(${scale})`;
-                    wrap.style.height = `${table.scrollHeight * scale}px`;
-                    wrap.style.overflow = 'hidden'; 
-                }
-            });
+        // --- HÀM VẼ TIKZ (LOCAL) ---
+        // Giúp vẽ lại hình khi chuyển câu hỏi
+        window.renderTikz = () => {
+            const scripts = document.querySelectorAll('script[type="text/tikz"]');
+            if (scripts.length === 0) return;
+            // Xóa script cũ
+            const oldScript = document.querySelector('script[src*="tikzjax.js"]');
+            if (oldScript) oldScript.remove();
+            // Thêm script mới để kích hoạt vẽ lại
+            const newScript = document.createElement('script');
+            newScript.src = "https://tikzjax.com/v1/tikzjax.js?v=" + Date.now();
+            document.head.appendChild(newScript);
         };
-        window.addEventListener('resize', window.autoScaleTables);
-        // 3. Hàm xử lý danh sách (itemchoice, enumerate, listEX...)
-        // 3. Hàm xử lý danh sách (ĐÃ CẬP NHẬT ĐỒNG BỘ VỚI EDITOR)
-        function processLatexLists(text) {
-            let processed = text;
 
-            // Xử lý itemchoice (Trắc nghiệm đúng sai)
-            processed = processed.replace(/\\begin\{itemchoice\}([\s\S]*?)\\end\{itemchoice\}/g, (match, body) => {
-                const items = body.split('\\itemch').filter(s => s.trim().length > 0);
-                const htmlItems = items.map(item => {
-                    let content = item.trim().replace(/\\\\/g, '<br>').replace(/\n/g, ' ');
-                    return `<li class="flex items-start gap-2 mb-1">
-                        <span class="text-blue-600 font-bold shrink-0">•</span> 
-                        <div class="leading-relaxed">${content}</div>
-                    </li>`;
-                }).join('');
-                // Thêm list-none để xóa chấm đen
-                return `<ul class="my-3 pl-2 list-none">${htmlItems}</ul>`;
-            });
-
-            // Hàm phụ tách item
-            const parseItems = (bodyStr) => {
-                const rawItems = bodyStr.split(/\\item(?![a-zA-Z])/).filter(s => s.trim().length > 0);
-                return rawItems.map((item) => {
-                    let content = item.trim();
-                    let label = null;
-                    if (content.startsWith('[')) {
-                        const closeBracket = content.indexOf(']');
-                        if (closeBracket > -1) {
-                            label = content.substring(1, closeBracket);
-                            content = content.substring(closeBracket + 1).trim();
-                        }
-                    }
-                    content = processTabular(content);
-                    return { label, content };
-                });
-            };
-
-            // Xử lý listEX, enumEX (Chia cột)
-            const regexCols = /\\begin\{(?:listEX|enumEX)\}(?:\[(\d+)\]|\{(\d+)\}(?:\[(.*?)\])?)([\s\S]*?)\\end\{(?:listEX|enumEX)\}/g;
-            processed = processed.replace(regexCols, (match, c1, c2, style, body) => {
-                const cols = c1 || c2 || 1;
-                const items = parseItems(body);
-                let gridHtml = `<div class="grid grid-cols-1 md:grid-cols-${cols} gap-4 my-3">`;
-                items.forEach((it, idx) => {
-                    let displayLabel = it.label;
-                    if (!displayLabel && match.includes('enumEX')) displayLabel = String.fromCharCode(97 + idx) + ')';
-                    gridHtml += `<div class="flex gap-2">${displayLabel ? `<span class="font-bold text-gray-700 shrink-0">${displayLabel}</span>` : `<span class="text-gray-400 shrink-0">•</span>`}<div>${it.content}</div></div>`;
-                });
-                gridHtml += `</div>`;
-                return gridHtml;
-            });
-
-            // Xử lý enumerate (1, 2, 3...) - Dùng list-decimal và padding chuẩn
-            processed = processed.replace(/\\begin\{enumerate\}([\s\S]*?)\\end\{enumerate\}/g, (match, body) => {
-                const items = parseItems(body);
-                let html = `<ol class="list-decimal pl-8 space-y-1 my-2">`;
-                items.forEach(it => {
-                    html += it.label ? `<li class="list-none -ml-4"><span class="font-bold mr-1">${it.label}</span>${it.content}</li>` : `<li>${it.content}</li>`;
-                });
-                html += `</ol>`;
-                return html;
-            });
-
-            // Xử lý itemize (Bullet) - Dùng list-disc và padding chuẩn
-            processed = processed.replace(/\\begin\{itemize\}([\s\S]*?)\\end\{itemize\}/g, (match, body) => {
-                const items = parseItems(body);
-                let html = `<ul class="list-disc pl-8 space-y-1 my-2">`;
-                items.forEach(it => {
-                    html += it.label ? `<li class="list-none -ml-4"><span class="font-bold mr-1">${it.label}</span>${it.content}</li>` : `<li>${it.content}</li>`;
-                });
-                html += `</ul>`;
-                return html;
-            });
-
-            return processed;
-        }
-        // --- HÀM FORMAT THÔNG MINH: BIẾN MÃ EDITOR THÀNH MÃ HỌC SINH ---
-        // --- HÀM FORMAT THÔNG MINH (ĐÃ FIX LỖI HIỂN THỊ TEXT & MATH) ---
-        // --- HÀM FORMAT THÔNG MINH (ĐÃ FIX LỖI HIỂN THỊ TEXT & MATH) ---
-        window.formatContent = (text) => {
-            if (text === null || text === undefined) return "";
-            
-            let processed = text;
-
-            // --- 1. XỬ LÝ TEXT CƠ BẢN ---
-            processed = processed.replace(/\\centering/g, "");
-            processed = processed.replace(/\\%/g, "%");
-            processed = processed.replace(/\\textbf\{([^}]+)\}/g, '<b class="font-bold">$1</b>');
-            processed = processed.replace(/\\textit\{([^}]+)\}/g, '<i class="italic">$1</i>');
-            processed = processed.replace(/\\hfill/g, '<span style="display:inline-block; width: 2rem;"></span>');
-            
-            // [FIX LỖI] Xóa lệnh \allowdisplaybreaks
-            processed = processed.replace(/\\allowdisplaybreaks(\[.*?\])?/g, "");
-
-            // --- 2. DỌN DẸP LATEX CŨ ---
-            processed = processed.replace(/\\lq\\lq/g, '"').replace(/\\rq\\rq/g, '"');
-            processed = processed.replace(/\\lq/g, '"').replace(/\\rq/g, '"');
-            processed = processed.replace(/\\(h|v)space\*?\{[^}]+\}/g, ''); 
-            processed = processed.replace(/\\(no)?indent/g, '');
-            processed = processed.replace(/\\wideparen\{([^}]+)\}/g, '\\overset{\\frown}{$1}');
-
-            // --- 3. FIX LỖI ARRAY -> MATRIX ---
-            processed = processed.replace(/\\begin\{array\}\s*\{[^{}]*?\}/g, '\\begin{matrix}');
-            processed = processed.replace(/\\begin\{array\}/g, '\\begin{matrix}');
-            processed = processed.replace(/\\end\{array\}/g, '\\end{matrix}');
-
-            // --- 4. XỬ LÝ ẢNH & PLACEHOLDER ---
-            processed = processed.replace(/<div[^>]*class="[^"]*image-placeholder[^"]*"[^>]*>[\s\S]*?<\/div>/g, '');
-            processed = processed.replace(
-                /<div[^>]*class="[^"]*group relative[^"]*"[^>]*>[\s\S]*?(<img[^>]+>)[\s\S]*?<\/div>/gi, 
-                '<div class="flex justify-center my-3">$1</div>'
-            );
-            processed = processed.replace(/Click đúp để tải file|hoặc Ctrl \+ V để dán ảnh|ẢNH TỪ IMMINI|VỊ TRÍ HÌNH TIKZ/gi, '');
-
-            // --- 5. CÁC XỬ LÝ NÂNG CAO ---
-            processed = processNestedTikz(processed);
-            processed = processTabular(processed);
-            processed = processLatexLists(processed);
-
-            // --- 6. DỌN RÁC CUỐI CÙNG ---
-            processed = processed.replace(/^\s*\}\s*$/gm, ''); 
-            processed = processed.replace(/\}\s*$/g, '');
-
-            // --- 7. BẢO VỆ HTML & MATHJAX ---
-            // Regex tách phần tử đặc biệt
-            const regex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?:\$[\s\S]*?\$)|<script type="text\/tikz">[\s\S]*?<\/script>|<div[^>]*class="js-scale-wrapper"[\s\S]*?<\/div>|<div class="flex justify-center my-3"><img[\s\S]*?<\/div>|<img.*?>|<ul[\s\S]*?<\/ul>|<ol[\s\S]*?<\/ol>|<div class="grid[\s\S]*?<\/div>)/g;
-            
-            const parts = processed.split(regex);
-            
-            return parts.map(part => {
-                // Kiểm tra xem có phải là công thức Toán không
-                const isMath = part.trim().startsWith('$') || part.trim().startsWith('\\(') || part.trim().startsWith('\\[');
-
-                if (isMath || 
-                    part.includes('<script type="text/tikz">') || 
-                    part.includes('<img') || 
-                    part.includes('js-scale-wrapper') || 
-                    part.includes('<ul') || 
-                    part.includes('<ol') || 
-                    part.includes('class="grid')) {
-                    
-                    // [FIX LỖI] Cứu công thức chứa <x bằng cách thêm khoảng trắng
-                    // $x<1$ -> $x < 1$. MathJax hiểu, trình duyệt không hiểu nhầm là thẻ.
-                    if (isMath) {
-                        return part.replace(/</g, ' < ');
-                    }
-                    return part;
-                }
-                else {
-                    // Nếu là văn bản thường, thay < bằng &lt; để an toàn
-                    let cleanPart = part.replace(/</g, '&lt;');
-                    cleanPart = cleanPart.replace(/\}/g, '');
-                    return cleanPart.replace(/\\\\/g, '<br>').replace(/\n/g, '<br>');
-                }
-            }).join('');
-        };
-        
-        function autoScaleMath() {
-            document.querySelectorAll('mjx-container').forEach(node => {
-                const parent = node.parentElement;
-                if(parent && parent.offsetWidth > 0 && node.offsetWidth > parent.offsetWidth) {
-                    const scale = (parent.offsetWidth / node.offsetWidth) * 0.95;
-                    node.style.transform = `scale(${scale})`;
-                    node.style.transformOrigin = 'left center';
-                    node.style.marginRight = `-${node.offsetWidth - (node.offsetWidth * scale)}px`;
-                }
-            });
-        }
-
-        // [FILE: exam.html] - Tìm onAuthStateChanged và thay thế
-
-        // --- 1. KIỂM TRA ĐĂNG NHẬP & TẢI ĐỀ (ĐÃ FIX) ---
-       // --- 1. KIỂM TRA ĐĂNG NHẬP & TẢI ĐỀ (ĐÃ SỬA TÊN HÀM ĐÚNG) ---
+        // --- AUTH & LOAD DATA ---
         onAuthStateChanged(auth, async (user) => {
             const urlParams = new URLSearchParams(window.location.search);
             examId = urlParams.get('id');
 
             if (user) {
-                currentUser = user; // Gán user để dùng cho việc nộp bài/xem lịch sử
-                
-                // Tải Logo
+                currentUser = user; 
                 if(typeof loadSiteLogo === 'function') loadSiteLogo(); 
 
                 if (examId) {
-                    // [QUAN TRỌNG] Gọi đúng tên hàm là loadLobbyData
                     loadLobbyData(examId); 
                 } else {
-                    alert("Không tìm thấy ID đề thi!");
+                    window.customAlert("Không tìm thấy ID đề thi!", "error");
                     window.location.href = "student.html";
                 }
             } else {
-                // Nếu chưa đăng nhập
                 if (examId) sessionStorage.setItem('pendingExamUrl', window.location.href);
-                if(typeof showLoginRequestModal === 'function') showLoginRequestModal();
+                showLoginRequestModal();
             }
         });
 
-        // 2. Hiển thị thông báo yêu cầu đăng ký (Tạo Modal bằng JS để không phải sửa HTML nhiều)
-        // --- HÀM HIỂN THỊ MODAL YÊU CẦU ĐĂNG NHẬP (ĐÃ FIX MÀU NÚT) ---
         function showLoginRequestModal() {
             const modalHtml = `
                 <div class="fixed inset-0 bg-gray-900/90 z-[100] flex items-center justify-center p-4 backdrop-blur-sm">
@@ -602,117 +378,62 @@
                             <i class="fa-solid fa-user-lock"></i>
                         </div>
                         <h3 class="text-xl font-black text-gray-800 mb-2">Yêu cầu tài khoản</h3>
-                        <p class="text-gray-500 mb-6 text-sm">Em cần đăng nhập hoặc đăng ký để làm bài thi này và lưu kết quả vào hệ thống.</p>
-                        
-                        <div class="space-y-3">
-                            <button onclick="window.location.href='index.html?mode=register'" 
-                                class="w-full py-3.5 bg-[#0F766E] hover:bg-[#0D6E66] text-white font-bold rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 transform hover:scale-[1.02]">
-                                <i class="fa-solid fa-user-plus"></i> Đăng ký tài khoản ngay
-                            </button>
-                            
-                            <button onclick="window.location.href='index.html'" 
-                                class="w-full py-3.5 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-all border border-gray-200">
-                                Đã có tài khoản? Đăng nhập
-                            </button>
-                        </div>
+                        <p class="text-gray-500 mb-6 text-sm">Em cần đăng nhập để làm bài.</p>
+                        <button onclick="window.location.href='index.html'" class="w-full py-3 bg-blue-600 text-white font-bold rounded-xl">Đăng nhập ngay</button>
                     </div>
-                </div>
-            `;
+                </div>`;
             document.body.insertAdjacentHTML('beforeend', modalHtml);
         }
-        // --- 3. HÀM TẢI THÔNG TIN MÀN HÌNH CHỜ (LOBBY) ---
-        // --- CẬP NHẬT HÀM LOAD LOBBY (ĐÃ SỬA TÊN BIẾN) ---
-        // --- HÀM TẢI MÀN HÌNH CHỜ & XỬ LÝ LỜI GIẢI (FULL LOGIC) ---
+
         async function loadLobbyData(id) {
             try {
-                // 1. Tải thông tin đề thi
                 const docSnap = await getDoc(doc(db, "exams", id));
-                if (!docSnap.exists()) {
-                    document.getElementById('lobbyTitle').innerText = "Đề thi không tồn tại!";
-                    return;
-                }
+                if (!docSnap.exists()) { document.getElementById('lobbyTitle').innerText = "Đề thi không tồn tại!"; return; }
                 examData = { id: docSnap.id, ...docSnap.data() }; 
                 
-                // 2. [MỚI] Tải lịch sử làm bài (Để biết đã làm chưa)
                 const q = query(collection(db, "results"), where("examId","==",id), where("studentId","==",currentUser.uid));
                 const snap = await getDocs(q);
                 window.examHistory = [];
                 snap.forEach(d => window.examHistory.push(d.data()));
-                // Sắp xếp mới nhất lên đầu
                 window.examHistory.sort((a,b)=>new Date(b.submittedAt)-new Date(a.submittedAt));
                 const att = window.examHistory.length;
 
-                // 3. [MỚI] KIỂM TRA CHẾ ĐỘ XEM LẠI (REVIEW MODE)
-                // Logic: Nếu link có ?mode=review -> Kiểm tra lịch sử -> Vào thẳng lời giải
+                // Check Review Mode
                 const urlParams = new URLSearchParams(window.location.search);
                 if (urlParams.get('mode') === 'review') {
                     if (att > 0) {
-                        console.log("Đang vào chế độ xem lời giải...");
-                        // Chuẩn bị dữ liệu
                         currentQuestions = examData.questions || [];
                         userAnswers = window.examHistory[0].answers || {};
-                        
-                        // Ẩn màn hình chờ ngay
                         document.getElementById('lobbyScreen').classList.add('hidden');
-                        
-                        // Vào màn hình lời giải
                         viewDetailSolutions(); 
-                        return; // <--- DỪNG TẠI ĐÂY (Bỏ qua check thời gian)
+                        return; 
                     } else {
                         window.customAlert("Bạn chưa làm bài này nên không thể xem lời giải!", "error");
-                        // Code sẽ chạy tiếp xuống dưới để hiện nút "Bắt đầu làm bài"
                     }
                 }
 
-                // 4. Điền thông tin lên giao diện Lobby
-                // 4. Điền thông tin lên giao diện Lobby
                 document.getElementById('lobbyTitle').innerText = examData.title || "Bài thi";
                 document.getElementById('lobbyDuration').innerText = examData.duration || '--';
-                
-                const qCount = examData.questions ? examData.questions.length : 0;
-                if(document.getElementById('lobbyQCount')) document.getElementById('lobbyQCount').innerText = qCount;
                 if(document.getElementById('lobbyAttempts')) document.getElementById('lobbyAttempts').innerText = att;
                 if(document.getElementById('lobbyMaxAttempts')) document.getElementById('lobbyMaxAttempts').innerText = examData.attempts || '∞';
 
-                // --- 5. LOGIC KIỂM TRA ĐIỀU KIỆN VÀO THI ---
-                // --- 5. LOGIC KIỂM TRA ĐIỀU KIỆN VÀO THI ---
                 let ok = true, msg = "Sẵn sàng", color = "text-green-600";
-                
-                // [FIX LOGIC] Lấy tất cả giá trị 'mode' trong URL (vì có thể có cả 'course' và 'practice')
                 const modes = urlParams.getAll('mode');
-                // Nếu có cờ 'practice' HOẶC 'course' thì đều tính là chế độ luyện tập
                 const isPracticeMode = modes.includes('practice') || modes.includes('course');
 
-                // 5.1 Check thời gian mở/đóng đề
                 const now = new Date();
                 if(examData.startTime && now < new Date(examData.startTime)) { 
                     ok=false; msg="Chưa đến giờ mở đề"; color="text-orange-500"; 
                     document.getElementById('lobbyTimeRange').classList.remove('hidden'); 
                     document.getElementById('lobbyTimeText').textContent=new Date(examData.startTime).toLocaleString('vi-VN'); 
                 }
-                if(examData.endTime && now > new Date(examData.endTime)) { 
-                    ok=false; msg="Đề thi đã đóng"; color="text-red-500"; 
-                }
+                if(examData.endTime && now > new Date(examData.endTime)) { ok=false; msg="Đề thi đã đóng"; color="text-red-500"; }
+                if(!isPracticeMode && examData.attempts > 0 && att >= examData.attempts) { ok=false; msg="Hết lượt làm bài"; color="text-red-500"; }
+                if(isPracticeMode) { msg = "Chế độ luyện tập"; color = "text-blue-600"; if(document.getElementById('lobbyMaxAttempts')) document.getElementById('lobbyMaxAttempts').innerText = '∞ (Luyện tập)'; }
 
-                // 5.2 Check số lượt: Chỉ chặn nếu KHÔNG PHẢI chế độ luyện tập/khóa học
-                if(!isPracticeMode && examData.attempts > 0 && att >= examData.attempts) { 
-                    ok=false; msg="Hết lượt làm bài"; color="text-red-500"; 
-                }
-
-                // 5.3 Cập nhật giao diện thông báo nếu đang trong chế độ luyện tập
-                if(isPracticeMode) {
-                    msg = "Chế độ luyện tập (Không giới hạn lượt làm)";
-                    color = "text-blue-600";
-                    if(document.getElementById('lobbyMaxAttempts')) {
-                        document.getElementById('lobbyMaxAttempts').innerText = '∞ (Luyện tập)';
-                    }
-                }
-
-                // Cập nhật trạng thái UI
                 const stat = document.getElementById('lobbyStatusBadge');
                 if(stat) { stat.textContent = msg; stat.className = `font-bold ${color}`; }
 
-                // Kích hoạt nút Bắt đầu
                 const btnStart = document.getElementById('btnStartExam');
                 if(btnStart) {
                     if(ok) {
@@ -727,43 +448,30 @@
                         btnStart.innerHTML = `<i class="fa-solid fa-ban"></i> ${msg}`;
                     }
                 }
-
-            } catch (error) {
-                console.error("Lỗi tải đề:", error);
-                document.getElementById('lobbyTitle').innerText = "Lỗi tải dữ liệu. Vui lòng F5!";
-                document.getElementById('lobbyTitle').classList.add('text-red-500');
-            }
+            } catch (error) { console.error("Lỗi tải đề:", error); document.getElementById('lobbyTitle').innerText = "Lỗi tải dữ liệu!"; }
         }
-        // --- 2. HÀM TẢI LOGO (THAY THẾ ICON MŨ) ---
+
         async function loadSiteLogo() {
             try {
                 const docSnap = await getDoc(doc(db, "site_settings", "homepage_hero"));
                 if (docSnap.exists() && docSnap.data().logo) {
                     const logoUrl = docSnap.data().logo;
-                    
-                    // 1. Thay logo ở Màn hình chờ (Lobby)
                     const lobbyIconContainer = document.querySelector('#lobbyScreen .w-20.h-20');
                     if (lobbyIconContainer) {
-                        // Thay thế toàn bộ khối icon mũ bằng ảnh logo
                         lobbyIconContainer.className = "w-24 h-24 mx-auto mb-6 flex items-center justify-center";
                         lobbyIconContainer.innerHTML = `<img src="${logoUrl}" class="w-full h-full object-contain drop-shadow-md">`;
                     }
-
-                    // 2. Thay logo ở Header (Khi làm bài)
                     const headerLogoContainer = document.getElementById('headerLogoContainer');
                     if (headerLogoContainer) {
-                        headerLogoContainer.innerHTML = `
-                            <img src="${logoUrl}" class="h-10 w-10 object-contain rounded-lg bg-white shadow-sm border border-gray-100 p-0.5">
-                            <span class="font-black text-xl text-[#0F766E] tracking-tight hidden md:block">Thầy Choang</span>
-                        `;
+                        headerLogoContainer.innerHTML = `<img src="${logoUrl}" class="h-10 w-10 object-contain rounded-lg bg-white shadow-sm border border-gray-100 p-0.5"><span class="font-black text-xl text-[#0F766E] tracking-tight hidden md:block">Thầy Choang</span>`;
                     }
                 }
             } catch (e) { console.warn("Không tải được logo:", e); }
         }
+
         window.requestStart = () => { if(examData.password) document.getElementById('passwordModal').classList.remove('hidden'); else startExam(); }
         window.verifyPassword = () => { if(document.getElementById('examPasswordInput').value===examData.password) { document.getElementById('passwordModal').classList.add('hidden'); startExam(); } else window.customAlert("Sai mật khẩu","error"); }
 
-        // Hàm hỗ trợ trộn mảng ngẫu nhiên
         function shuffleArray(array) {
             for (let i = array.length - 1; i > 0; i--) {
                 const j = Math.floor(Math.random() * (i + 1));
@@ -776,56 +484,34 @@
             dom.lobby.classList.add('hidden');
             dom.header.classList.remove('hidden'); dom.main.classList.remove('hidden');
             
-            // 1. LOGIC TRỘN ĐỀ THÔNG MINH (THEO NHÓM + ĐẢO ĐÁP ÁN)
-            let rawQuestions = JSON.parse(JSON.stringify(examData.questions || [])); // Clone deep để không ảnh hưởng dữ liệu gốc
-            
+            let rawQuestions = JSON.parse(JSON.stringify(examData.questions || []));
             if(examData.shuffle) {
-                // Phân loại câu hỏi
                 const groups = { mc: [], tf: [], short: [], essay: [] };
                 rawQuestions.forEach(q => { if(groups[q.type]) groups[q.type].push(q); });
-
-                // Trộn thứ tự câu trong từng nhóm
-                shuffleArray(groups.mc);
-                shuffleArray(groups.tf);
-                shuffleArray(groups.short);
-                shuffleArray(groups.essay);
-
-                // Trộn đáp án A,B,C,D cho câu Trắc nghiệm
+                shuffleArray(groups.mc); shuffleArray(groups.tf); shuffleArray(groups.short); shuffleArray(groups.essay);
                 groups.mc.forEach(q => {
                     if (q.options && q.options.length > 0) {
-                        // Tạo mảng tạm chứa nội dung và index cũ: [{txt: "Nội dung A", idx: 0}, ...]
                         let mapped = q.options.map((opt, i) => ({ txt: opt, originalIdx: i }));
-                        shuffleArray(mapped); // Trộn mảng tạm
-                        
-                        // Cập nhật lại options mới
+                        shuffleArray(mapped);
                         q.options = mapped.map(m => m.txt);
-                        // Tìm xem đáp án đúng (correct) giờ chạy đi đâu rồi cập nhật lại index mới
                         q.correct = mapped.findIndex(m => m.originalIdx === q.correct);
                     }
                 });
-
-                // Gộp lại theo thứ tự cố định: TN -> ĐS -> Điền -> Tự luận
                 currentQuestions = [...groups.mc, ...groups.tf, ...groups.short, ...groups.essay];
             } else {
                 currentQuestions = rawQuestions;
             }
             
-            // 2. KHỞI TẠO TIMER (Logic mới ở bước sau)
             const durationMinutes = examData.duration || 45;
             timeLeft = durationMinutes * 60;
-            
             if(timeLeft > 0) {
-                // Tính thời điểm kết thúc tuyệt đối (Timestamp) để chống việc browser ngủ đông
                 window.endTimeStamp = Date.now() + (timeLeft * 1000);
                 runTimer(); 
-            } else {
-                dom.timer.textContent = "∞";
-            }
+            } else { dom.timer.textContent = "∞"; }
             
-            // 3. KHỞI TẠO GIÁM SÁT (Cheat Detection)
             if(examData.proctoring) {
                 document.getElementById('cheatWarning').classList.remove('hidden');
-                initProctoring(); // Gọi hàm giám sát riêng
+                initProctoring(); 
             }
             
             isExamActive = true;
@@ -834,45 +520,19 @@
         }
 
         function runTimer() {
-            updateTimer(); // Cập nhật ngay lập tức
-            
+            updateTimer();
             timerInterval = setInterval(() => {
-                // Tính lại timeLeft dựa trên thời gian thực tế so với mốc đích
                 const now = Date.now();
                 const diff = Math.ceil((window.endTimeStamp - now) / 1000);
-                
                 timeLeft = diff;
-
-                if (timeLeft <= 0) {
-                    timeLeft = 0;
-                    updateTimer();
-                    clearInterval(timerInterval);
-                    submitReal(true); // Nộp bài tự động
-                } else {
-                    updateTimer();
-                }
+                if (timeLeft <= 0) { timeLeft = 0; updateTimer(); clearInterval(timerInterval); submitReal(true); } 
+                else { updateTimer(); }
             }, 1000);
         }
         function initProctoring() {
-            const handleCheat = () => {
-                if (isExamActive) {
-                    cheatCount++;
-                    document.getElementById('cheatCount').textContent = cheatCount;
-                    // Có thể thêm logic: Nếu cheat > 5 lần thì tự nộp bài
-                }
-            };
-
-            // Bắt sự kiện rời tab hoặc ẩn trình duyệt
-            document.addEventListener("visibilitychange", () => {
-                if (document.visibilityState === 'hidden') {
-                    handleCheat();
-                }
-            });
-
-            // Bắt sự kiện mất tiêu điểm (Alt+Tab hoặc bấm sang ứng dụng khác)
-            window.addEventListener("blur", () => {
-                handleCheat();
-            });
+            const handleCheat = () => { if (isExamActive) { cheatCount++; document.getElementById('cheatCount').textContent = cheatCount; } };
+            document.addEventListener("visibilitychange", () => { if (document.visibilityState === 'hidden') handleCheat(); });
+            window.addEventListener("blur", () => { handleCheat(); });
         }
         function updateTimer() { const m=Math.floor(timeLeft/60), s=timeLeft%60; dom.timer.textContent=`${m<10?'0'+m:m}:${s<10?'0'+s:s}`; if(timeLeft<300) dom.timer.parentElement.classList.add('bg-red-50','text-red-600'); }
 
@@ -880,10 +540,9 @@
             currentIndex = idx;
             const q = currentQuestions[idx];
             document.getElementById('currentQNum').textContent = idx + 1;
+            dom.badge.textContent = q.type==='mc'?'TRẮC NGHIỆM':(q.type==='tf'?'ĐÚNG/SAI':(q.type==='short'?'TRẢ LỜI NGẮN':'TỰ LUẬN'));
             
-            const badge = dom.badge;
-            badge.textContent = q.type==='mc'?'TRẮC NGHIỆM':(q.type==='tf'?'ĐÚNG/SAI':(q.type==='short'?'TRẢ LỜI NGẮN':'TỰ LUẬN'));
-            
+            // [GỌI HÀM TỪ UTILS]
             dom.content.innerHTML = window.formatContent(q.content);
             dom.options.innerHTML = '';
 
@@ -927,8 +586,8 @@
 
             if(window.MathJax) {
                 MathJax.typesetPromise([dom.content, dom.options]).then(() => {
-                    autoScaleMath();
-                    // THÊM DÒNG NÀY:
+                    // [UPDATE] Gọi hàm vẽ hình và scale bảng sau khi MathJax render
+                    window.renderTikz();
                     window.autoScaleTables(); 
                 }).catch(()=>{});
             }
@@ -945,13 +604,12 @@
                 else {
                     const a = userAnswers[i];
                     let done = (a!==undefined && a!==null && a!=="");
-                    if(q.type==='tf' && typeof a==='object') done = Object.keys(a).length>0;
+                    if(q.type==='tf' && typeof a==='object') done = Object.keys(a).length === (q.statements?.length||0);
                     if(done) btn.classList.add('answered');
                 }
                 btn.onclick = () => renderQuestion(i);
                 dom.palette.appendChild(btn);
             });
-            
             document.getElementById('prevBtnMob').disabled = currentIndex===0;
             document.getElementById('nextBtnMob').disabled = currentIndex===currentQuestions.length-1;
             document.getElementById('prevBtnMob').classList.toggle('opacity-50', currentIndex===0);
@@ -985,140 +643,76 @@
         }
 
         async function submitReal(auto=false) {
-            isExamActive = false;
-            clearInterval(timerInterval);
+            isExamActive = false; clearInterval(timerInterval);
             
-            // [LOGIC TÍNH ĐIỂM MỚI] Cộng dồn điểm từng câu (theo cấu hình Editor)
-            let totalScore = 0;
-            let correct = 0; 
+            // LOGIC CHẤM ĐIỂM (GIỮ NGUYÊN)
+            let totalScore = 0; let correct = 0; 
             const normalize = (s) => String(s).replace(/\$| /g,'').toLowerCase().trim();
             
-            // 1. Tính tổng điểm đã được cấu hình cứng (để biết còn dư bao nhiêu cho các câu không cấu hình)
-            let configuredPoints = 0;
-            let unconfiguredCount = 0;
+            let configuredPoints = 0; let unconfiguredCount = 0;
+            currentQuestions.forEach(q => { if (q.point && parseFloat(q.point) > 0) configuredPoints += parseFloat(q.point); else unconfiguredCount++; });
             
-            currentQuestions.forEach(q => {
-                if (q.point && parseFloat(q.point) > 0) {
-                    configuredPoints += parseFloat(q.point);
-                } else {
-                    unconfiguredCount++;
-                }
-            });
-
-            // 2. Tính điểm mặc định cho các câu chưa cấu hình (chia đều phần điểm còn lại)
-            // Nếu tổng điểm cấu hình > 10 hoặc bằng 0 thì fallback về chia đều toàn bộ
             let defaultPointPerQuestion = 0;
             if (unconfiguredCount > 0) {
                 const remainingScore = Math.max(0, 10 - configuredPoints);
                 defaultPointPerQuestion = remainingScore / unconfiguredCount;
-            } else if (configuredPoints === 0) {
-                // Trường hợp đặc biệt: Không câu nào có điểm -> Chia đều 10
-                defaultPointPerQuestion = 10 / currentQuestions.length;
-            }
+            } else if (configuredPoints === 0) { defaultPointPerQuestion = 10 / currentQuestions.length; }
 
-            // 3. Duyệt từng câu để chấm
             currentQuestions.forEach((q, i) => {
                 const u = userAnswers[i];
                 let isCorrect = false;
-
-                // --- Kiểm tra đúng sai ---
                 if (q.type === 'mc' && u === q.correct) isCorrect = true;
                 else if (q.type === 'short' && q.answer && u && normalize(u) === normalize(q.answer)) isCorrect = true;
                 else if (q.type === 'tf' && u && q.statements) {
-                    // Logic chấm ĐÚNG/SAI: Phải đúng hết các ý con
-                    let matches = 0; 
-                    q.statements.forEach((s, si) => { if (u[si] === s.isTrue) matches++; });
+                    let matches = 0; q.statements.forEach((s, si) => { if (u[si] === s.isTrue) matches++; });
                     if (matches === q.statements.length) isCorrect = true;
                 }
-                // (Nếu có tự luận essay thì cần giáo viên chấm sau, tạm thời tính 0 hoặc tính đúng nếu có logic khác)
-
-                if (isCorrect) {
-                    correct++;
-                    // Cộng điểm: Ưu tiên điểm riêng, nếu không có thì dùng điểm mặc định
-                    let thisPoint = (q.point && parseFloat(q.point) > 0) ? parseFloat(q.point) : defaultPointPerQuestion;
-                    totalScore += thisPoint;
-                }
+                if (isCorrect) { correct++; totalScore += (q.point && parseFloat(q.point) > 0) ? parseFloat(q.point) : defaultPointPerQuestion; }
             });
 
-            // Làm tròn 2 chữ số thập phân
             const score = parseFloat(totalScore.toFixed(2));
-
-            // [LOGIC ƯU TIÊN] Xác định điểm chuẩn (Pass Score)
-            // 1. Nếu có trên URL (từ khóa học) -> Lấy từ URL
-            // 2. Nếu không -> Lấy từ cài đặt gốc của đề thi
-            // 3. Nếu không có cả hai -> Mặc định là 5
             const urlParams = new URLSearchParams(window.location.search);
             const coursePassScore = urlParams.get('coursePassScore');
-            
-            let passScore;
-            if (coursePassScore) {
-                passScore = Number(coursePassScore); // Ưu tiên khóa học (VD: 5 điểm)
-            } else {
-                passScore = examData.passScore !== undefined ? Number(examData.passScore) : 5; // Mặc định (VD: 8 điểm)
-            }
-
+            let passScore = coursePassScore ? Number(coursePassScore) : (examData.passScore !== undefined ? Number(examData.passScore) : 5);
             const isPassed = score >= passScore;
 
             try {
-                // Lưu thêm trường isPassed vào database
                 await addDoc(collection(db, "results"), {
-                    examId, 
-                    studentId: currentUser.uid, 
-                    studentName: currentUser.displayName || currentUser.email,
-                    score, 
-                    answers: userAnswers, 
-                    cheatCount, 
-                    correctCount: correct, 
-                    totalQuestions: currentQuestions.length,
-                    isPassed: isPassed, // <--- Quan trọng: Lưu trạng thái Đạt/Trượt
-                    passScoreSnapshot: passScore, // Lưu lại mốc điểm chuẩn tại thời điểm thi
-                    submittedAt: new Date().toISOString()
+                    examId, studentId: currentUser.uid, studentName: currentUser.displayName || currentUser.email,
+                    score, answers: userAnswers, cheatCount, correctCount: correct, totalQuestions: currentQuestions.length,
+                    isPassed: isPassed, passScoreSnapshot: passScore, submittedAt: new Date().toISOString()
                 });
                 
                 document.getElementById('scoreDisplay').textContent = score;
                 document.getElementById('correctCount').textContent = `${correct}/${currentQuestions.length}`;
-
-                // [LOGIC MỚI] Thay đổi giao diện dựa trên kết quả Đạt hay Trượt
+                
                 const resultTitle = document.getElementById('resultTitle');
                 const resultMsg = document.getElementById('resultMsg');
                 const resultIcon = document.getElementById('resultIcon');
                 const scoreDisplay = document.getElementById('scoreDisplay');
 
                 if (isPassed) {
-                    resultTitle.textContent = "Chúc mừng! Bạn đã vượt qua";
-                    resultTitle.className = "text-2xl font-extrabold text-green-600 mb-2";
+                    resultTitle.textContent = "Chúc mừng! Bạn đã vượt qua"; resultTitle.className = "text-2xl font-extrabold text-green-600 mb-2";
                     resultMsg.textContent = `Bạn đã đạt ${score} điểm (Điểm chuẩn: ${passScore})`;
-                    resultIcon.innerHTML = "🎉"; // Icon pháo hoa
-                    scoreDisplay.className = "text-6xl font-black text-green-600"; // Màu xanh
+                    resultIcon.innerHTML = "🎉"; scoreDisplay.className = "text-6xl font-black text-green-600";
                 } else {
-                    resultTitle.textContent = "Chưa đạt yêu cầu";
-                    resultTitle.className = "text-2xl font-extrabold text-red-600 mb-2";
+                    resultTitle.textContent = "Chưa đạt yêu cầu"; resultTitle.className = "text-2xl font-extrabold text-red-600 mb-2";
                     resultMsg.textContent = `Cần tối thiểu ${passScore} điểm để qua bài. Hãy ôn tập thêm!`;
-                    resultIcon.innerHTML = "fighting"; // Icon cố lên (hoặc icon buồn)
-                    resultIcon.textContent = "😓"; 
-                    scoreDisplay.className = "text-6xl font-black text-red-500"; // Màu đỏ
+                    resultIcon.innerHTML = "😓"; scoreDisplay.className = "text-6xl font-black text-red-500";
                 }
                 
                 if (examData.showScore === 'immediate' || (examData.showScore === 'after_exam' && timeLeft <= 0)) {
                     document.getElementById('scoreSection').classList.remove('hidden');
                 }
-                // Logic hiển thị nút Xem lời giải:
-                // 1. Phải thỏa mãn cài đặt hiển thị (showResult)
-                // 2. VÀ (Phải Đạt điểm chuẩn HOẶC là admin/giáo viên test)
-                // Lưu ý: Nếu muốn khắt khe, học sinh BẮT BUỘC phải qua điểm sàn mới được xem giải
-                const canView = (examData.showResult === 'immediate' || (examData.showResult === 'after_exam' && timeLeft <= 0));
                 
+                const canView = (examData.showResult === 'immediate' || (examData.showResult === 'after_exam' && timeLeft <= 0));
                 if (canView) {
                     const btnView = document.getElementById('btnViewSolution');
                     if (isPassed) {
-                        btnView.classList.remove('hidden');
-                        btnView.onclick = viewDetailSolutions;
+                        btnView.classList.remove('hidden'); btnView.onclick = viewDetailSolutions;
                     } else {
-                        // Nếu chưa đạt: Ẩn nút hoặc Hiện nút nhưng báo lỗi khi bấm
-                        // Ở đây tôi chọn cách hiện nút nhưng khóa lại để kích thích học sinh làm lại
                         btnView.classList.remove('hidden');
-                        btnView.classList.replace('bg-orange-100', 'bg-gray-200');
-                        btnView.classList.replace('text-orange-600', 'text-gray-500');
+                        btnView.classList.replace('bg-orange-100', 'bg-gray-200'); btnView.classList.replace('text-orange-600', 'text-gray-500');
                         btnView.innerHTML = `<i class="fa-solid fa-lock mr-2"></i> Đạt ${passScore}đ để xem lời giải`;
                         btnView.onclick = () => window.customAlert(`Bạn cần đạt tối thiểu ${passScore} điểm để mở khóa lời giải chi tiết. Hãy thử lại nhé!`, 'warning');
                     }
@@ -1194,32 +788,22 @@
             
             if(window.MathJax) {
                 MathJax.typesetPromise([list]).then(() => {
-                    autoScaleMath();
-                    window.autoScaleTables(); // <--- THÊM DÒNG NÀY
+                    // [UPDATE] Vẽ hình và Scale bảng ở phần Lời giải
+                    window.renderTikz();
+                    window.autoScaleTables(); 
                 }).catch(()=>{});
             }
         }
 
-        // --- [CHỨC NĂNG MỚI] Quay lại đúng ngữ cảnh (Khóa học hoặc Dashboard) ---
         window.returnToContext = () => {
             const urlParams = new URLSearchParams(window.location.search);
             const courseId = urlParams.get('courseId');
-            
-            // Kiểm tra xem có phải đang làm bài từ khóa học không
-            // (Kiểm tra cả tham số mode và sự tồn tại của courseId)
             const modes = urlParams.getAll('mode');
             const isCourseContext = modes.includes('course') || modes.includes('practice') || !!courseId;
-
-            if (isCourseContext && courseId) {
-                // Nếu từ khóa học -> Quay lại Course Player
-                window.location.href = `course-player.html?id=${courseId}`;
-            } else {
-                // Nếu làm tự do -> Về Dashboard
-                window.location.href = 'dashboard.html';
-            }
+            if (isCourseContext && courseId) { window.location.href = `course-player.html?id=${courseId}`; } 
+            else { window.location.href = 'dashboard.html'; }
         };
 
-        // Cập nhật text nút bấm cho hợp lý (Optional)
         const urlParamsTest = new URLSearchParams(window.location.search);
         if (urlParamsTest.get('courseId') && document.getElementById('btnBackContext')) {
             document.getElementById('btnBackContext').innerText = "Quay lại bài học";
