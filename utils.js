@@ -3,9 +3,6 @@
  * Chứa logic xử lý hiển thị LaTeX, TikZ, và HTML cleanup
  */
 
-// ============================================================================
-// 1. CẤU HÌNH API
-// ============================================================================
 const TIKZ_API_URL = "https://surrey-decreased-let-detailed.trycloudflare.com/compile"; 
 
 export const compileTikZToImage = async (tikzCode) => {
@@ -21,46 +18,11 @@ export const compileTikZToImage = async (tikzCode) => {
   } catch (error) { console.error("API Error:", error); throw error; }
 };
 
-// ============================================================================
-// 2. CÁC HÀM HỖ TRỢ NỘI BỘ (HELPER FUNCTIONS)
-// ============================================================================
+// --- CÁC HÀM HỖ TRỢ (HELPER FUNCTIONS) ---
 
 function cleanTikzCode(code) {
     let cleaned = code.replace(/\\resizebox\{[^}]+\}\{[^}]+\}\{\s*(\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\})\s*\}/g, "$1");
     return cleaned.replace(/\\begin\{center\}/g, "").replace(/\\end\{center\}/g, "");
-}
-
-function processNestedTikz(text) {
-    if (!text) return "";
-    let result = "", remaining = String(text);
-    while (true) {
-        const startIdx = remaining.indexOf("\\begin{tikzpicture}");
-        if (startIdx === -1) { result += remaining; break; }
-        
-        result += remaining.substring(0, startIdx);
-        remaining = remaining.substring(startIdx);
-        
-        let depth = 0, endIdx = -1, pos = "\\begin{tikzpicture}".length; depth = 1;
-        while (depth > 0) {
-            const nextOpen = remaining.indexOf(openTag, searchPos);
-            const nextClose = remaining.indexOf(closeTag, searchPos);
-            if (nextClose === -1) { endIdx = remaining.length; depth = 0; break; }
-            if (nextOpen !== -1 && nextOpen < nextClose) { depth++; searchPos = nextOpen + openTag.length; } 
-            else { depth--; searchPos = nextClose + closeTag.length; if (depth === 0) endIdx = searchPos; }
-        }
-        
-        // Khai báo biến openTag/closeTag/searchPos bên trong để tránh lỗi scope
-        const openTag = "\\begin{tikzpicture}"; 
-        const closeTag = "\\end{tikzpicture}";
-        
-        let rawTikz = remaining.substring(0, endIdx);
-        let finalTikz = cleanTikzCode(rawTikz);
-        if (!finalTikz.includes("\\usetikzlibrary")) finalTikz = "\\usetikzlibrary{calc,intersections,arrows.meta}\n" + finalTikz;
-
-        result += `<div class="flex justify-center my-4 overflow-x-auto"><script type="text/tikz">${finalTikz}<\/script></div>`;
-        remaining = remaining.substring(endIdx);
-    }
-    return result;
 }
 
 function processTabular(text) {
@@ -84,6 +46,50 @@ function processTabular(text) {
         html += '</table></div>';
         return html;
     });
+}
+
+function processNestedTikz(text) {
+    if (!text) return "";
+    let result = "";
+    let remaining = String(text);
+    
+    while (true) {
+        const startIdx = remaining.indexOf("\\begin{tikzpicture}");
+        if (startIdx === -1) { result += remaining; break; }
+        
+        result += remaining.substring(0, startIdx);
+        remaining = remaining.substring(startIdx);
+        
+        let depth = 1;
+        let endIdx = -1;
+        const openTag = "\\begin{tikzpicture}"; 
+        const closeTag = "\\end{tikzpicture}";
+        let searchPos = openTag.length; // [FIX] Khai báo searchPos ở đây
+
+        while (depth > 0) {
+            const nextOpen = remaining.indexOf(openTag, searchPos);
+            const nextClose = remaining.indexOf(closeTag, searchPos);
+            
+            if (nextClose === -1) { endIdx = remaining.length; depth = 0; break; }
+            
+            if (nextOpen !== -1 && nextOpen < nextClose) { 
+                depth++; 
+                searchPos = nextOpen + openTag.length; 
+            } else { 
+                depth--; 
+                searchPos = nextClose + closeTag.length; 
+                if (depth === 0) endIdx = searchPos; 
+            }
+        }
+        
+        let rawTikz = remaining.substring(0, endIdx);
+        let finalTikz = cleanTikzCode(rawTikz);
+        if (!finalTikz.includes("\\usetikzlibrary")) finalTikz = "\\usetikzlibrary{calc,intersections,arrows.meta}\n" + finalTikz;
+
+        result += `<div class="flex justify-center my-4 overflow-x-auto"><script type="text/tikz">${finalTikz}<\/script></div>`;
+        remaining = remaining.substring(endIdx);
+    }
+    return result;
 }
 
 function processLatexLists(text) {
@@ -157,9 +163,7 @@ function processLatexLists(text) {
     return processed;
 }
 
-// ============================================================================
-// 3. CÁC HÀM EXPORT (DÙNG CHO BÊN NGOÀI)
-// ============================================================================
+// --- CÁC HÀM EXPORT ---
 
 export const convertArrayToMatrix = (content) => {
   if (!content) return "";
@@ -185,9 +189,6 @@ export const autoScaleTables = () => {
     });
 };
 
-/**
- * HÀM XỬ LÝ CHÍNH: FORMAT NỘI DUNG (ĐÃ FIX LỖI CẮT NGẮN CÔNG THỨC <x)
- */
 export const formatContent = (text) => {
     if (text === null || text === undefined) return "";
     let processed = text;
@@ -198,63 +199,41 @@ export const formatContent = (text) => {
     processed = processed.replace(/\\textbf\{([^}]+)\}/g, '<b class="font-bold">$1</b>');
     processed = processed.replace(/\\textit\{([^}]+)\}/g, '<i class="italic">$1</i>');
     processed = processed.replace(/\\hfill/g, '<span style="display:inline-block; width: 2rem;"></span>');
-    processed = processed.replace(/\\allowdisplaybreaks(\[.*?\])?/g, ""); // Xóa lệnh thừa
-
-    // 2. Ký tự đặc biệt LaTeX
+    processed = processed.replace(/\\allowdisplaybreaks(\[.*?\])?/g, "");
     processed = processed.replace(/\\lq\\lq/g, '"').replace(/\\rq\\rq/g, '"');
     processed = processed.replace(/\\lq/g, '"').replace(/\\rq/g, '"');
     processed = processed.replace(/\\wideparen\{([^}]+)\}/g, '\\overset{\\frown}{$1}');
     processed = processed.replace(/\\(h|v)space\*?\{[^}]+\}/g, '');
     processed = processed.replace(/\\(no)?indent/g, '');
 
-    // 3. Xử lý Cấu trúc (Array, TikZ, Table, List)
+    // 2. Structure
     processed = convertArrayToMatrix(processed);
     processed = processNestedTikz(processed); 
     processed = processTabular(processed);    
     processed = processLatexLists(processed); 
 
-    // 4. Xử lý Placeholder (Cho Editor) và Ảnh
+    // 3. Placeholder images
     processed = processed.replace(/<div[^>]*class="[^"]*image-placeholder[^"]*"[^>]*>[\s\S]*?<\/div>/g, '');
-    processed = processed.replace(
-        /<div[^>]*class="[^"]*group relative[^"]*"[^>]*>[\s\S]*?(<img[^>]+>)[\s\S]*?<\/div>/gi, 
-        '<div class="flex justify-center my-3">$1</div>'
-    );
+    processed = processed.replace(/<div[^>]*class="[^"]*group relative[^"]*"[^>]*>[\s\S]*?(<img[^>]+>)[\s\S]*?<\/div>/gi, '<div class="flex justify-center my-3">$1</div>');
     processed = processed.replace(/Click đúp để tải file|hoặc Ctrl \+ V để dán ảnh|ẢNH TỪ IMMINI|VỊ TRÍ HÌNH TIKZ/gi, '');
+    processed = processed.replace(/^\s*\}\s*$/gm, '').replace(/\}\s*$/g, '').replace(/Ảnh minh họa \(immini\)/g, '').replace(/Ảnh canh giữa/g, '');
 
-    // 5. Dọn rác
-    processed = processed.replace(/^\s*\}\s*$/gm, ''); 
-    processed = processed.replace(/\}\s*$/g, '');
-    processed = processed.replace(/Ảnh minh họa \(immini\)/g, ''); 
-    processed = processed.replace(/Ảnh canh giữa/g, '');
-
-    // ============================================================
-    // 6. FIX LỖI QUAN TRỌNG: CẮT NGẮN CÔNG THỨC <x
-    // ============================================================
-    
-    // Danh sách thẻ HTML được phép (Whitelist)
+    // 4. FIX LỖI <x
     const tagWhitelist = "script|style|div|span|p|br|img|table|tbody|thead|tr|td|th|ul|ol|li|b|i|u|strong|em|mark|label|input|button|a|h1|h2|h3|h4";
-    
-    // Regex tìm: Toán OR Thẻ HTML hợp lệ
     const regex = new RegExp(`(\\$\\$[\\s\\S]*?\\$\\$|\\\\\\[[\\s\\S]*?\\\\\\]|\\\\\\([\\s\\S]*?\\\\\\)|(?:\\$[\\s\\S]*?\\$)|<\\/?(?:${tagWhitelist})[^>]*>)`, 'gi');
     
     const parts = processed.split(regex);
     
     return parts.map(part => {
-        // Kiểm tra xem là Toán, Tag HTML hay Text thường
         const isMath = part.trim().startsWith('$') || part.trim().startsWith('\\(') || part.trim().startsWith('\\[');
         const isTag = part.startsWith('<') && part.endsWith('>');
 
         if (isMath) {
-            // Nếu là Toán: Thêm khoảng trắng quanh dấu < để không bị hiểu nhầm là thẻ
-            return part.replace(/</g, ' < ');
-        } 
-        else if (isTag) {
-            // Nếu là thẻ HTML xịn: Giữ nguyên
+            return part.replace(/</g, ' < '); // Thêm khoảng trắng cứu công thức
+        } else if (isTag) {
             return part; 
-        } 
-        else {
-            // Nếu là Text thường: Mã hóa dấu < thành &lt;
-            let cleanPart = part.replace(/</g, '&lt;');
+        } else {
+            let cleanPart = part.replace(/</g, '&lt;'); // Mã hóa text thường
             cleanPart = cleanPart.replace(/\}/g, '');
             return cleanPart.replace(/\\\\/g, '<br>').replace(/\n/g, '<br>');
         }
