@@ -1,5 +1,5 @@
 /**
- * utils.js - Thư viện dùng chung (Đã Fix lỗi <x và Export Helper)
+ * utils.js - Thư viện dùng chung (Đã fix lỗi Eqnarray, <x và Style)
  */
 
 const TIKZ_API_URL = "https://surrey-decreased-let-detailed.trycloudflare.com/compile"; 
@@ -28,69 +28,41 @@ export function extractNextBrace(text) {
     if (!text) return null;
     const start = text.indexOf('{');
     if (start === -1) return null;
-    
-    let depth = 1;
-    let end = -1;
-    
+    let depth = 1, end = -1;
     for (let i = start + 1; i < text.length; i++) {
         if (text[i] === '{') depth++;
         else if (text[i] === '}') depth--;
-        
-        if (depth === 0) {
-            end = i;
-            break;
-        }
+        if (depth === 0) { end = i; break; }
     }
-    
     if (end === -1) return null;
-    
-    return {
-        content: text.substring(start + 1, end),
-        remaining: text.substring(end + 1),
-        fullMatch: text.substring(start, end + 1)
-    };
+    return { content: text.substring(start + 1, end), remaining: text.substring(end + 1), fullMatch: text.substring(start, end + 1) };
 }
 
-// --- CÁC HÀM XỬ LÝ HIỂN THỊ (NỘI BỘ) ---
+// --- CÁC HÀM XỬ LÝ NỘI BỘ ---
 
 function processNestedTikz(text) {
     if (!text) return "";
-    let result = "";
-    let remaining = String(text);
-    
+    let result = "", remaining = String(text);
     while (true) {
         const startIdx = remaining.indexOf("\\begin{tikzpicture}");
         if (startIdx === -1) { result += remaining; break; }
+        result += remaining.substring(0, startIdx); remaining = remaining.substring(startIdx);
         
-        result += remaining.substring(0, startIdx);
-        remaining = remaining.substring(startIdx);
-        
-        let depth = 1;
-        let endIdx = -1;
         const openTag = "\\begin{tikzpicture}"; 
         const closeTag = "\\end{tikzpicture}";
-        let searchPos = openTag.length;
+        let depth = 1, endIdx = -1, searchPos = openTag.length;
 
         while (depth > 0) {
             const nextOpen = remaining.indexOf(openTag, searchPos);
             const nextClose = remaining.indexOf(closeTag, searchPos);
-            
             if (nextClose === -1) { endIdx = remaining.length; depth = 0; break; }
-            
-            if (nextOpen !== -1 && nextOpen < nextClose) { 
-                depth++; 
-                searchPos = nextOpen + openTag.length; 
-            } else { 
-                depth--; 
-                searchPos = nextClose + closeTag.length; 
-                if (depth === 0) endIdx = searchPos; 
-            }
+            if (nextOpen !== -1 && nextOpen < nextClose) { depth++; searchPos = nextOpen + openTag.length; } 
+            else { depth--; searchPos = nextClose + closeTag.length; if (depth === 0) endIdx = searchPos; }
         }
         
         let rawTikz = remaining.substring(0, endIdx);
         let finalTikz = cleanTikzCode(rawTikz);
         if (!finalTikz.includes("\\usetikzlibrary")) finalTikz = "\\usetikzlibrary{calc,intersections,arrows.meta}\n" + finalTikz;
-
         result += `<div class="flex justify-center my-4 overflow-x-auto"><script type="text/tikz">${finalTikz}<\/script></div>`;
         remaining = remaining.substring(endIdx);
     }
@@ -101,12 +73,10 @@ function processTabular(text) {
     if (!text) return "";
     let processed = text.replace(/\\begin\{table\}(\[.*?\])?/g, '').replace(/\\end\{table\}/g, '');
     const regex = /\\begin\{tabular\}(\{|\[).*?(\}|\])([\s\S]*?)\\end\{tabular\}/g;
-    
     return processed.replace(regex, (match, open, close, body) => {
         const rows = body.split('\\\\').filter(r => r.trim().length > 0);
         let html = '<div class="my-3 w-full js-scale-wrapper" style="position: relative; width: 100%;">';
         html += '<table class="js-scale-table border-collapse border border-gray-300 bg-white text-sm origin-top-left" style="min-width: max-content;">';
-        
         rows.forEach((row, rIdx) => {
             let cleanRow = row.replace(/\\hline/g, '').trim();
             if(cleanRow.length === 0) return;
@@ -122,31 +92,50 @@ function processTabular(text) {
 
 function processLatexLists(text) {
     let processed = text;
-
+    // Helper parse items
     const parseItems = (bodyStr) => {
         const rawItems = bodyStr.split(/\\item(?![a-zA-Z])/).filter(s => s.trim().length > 0);
         return rawItems.map((item) => {
-            let content = item.trim();
+            let content = item.trim(), label = null;
             if (content.startsWith('[')) {
                 const cb = content.indexOf(']');
-                if (cb > -1) content = content.substring(cb + 1).trim();
+                if (cb > -1) { label = content.substring(1, cb); content = content.substring(cb + 1).trim(); }
             }
             content = processTabular(content);
-            return { content };
+            return { label, content };
         });
     };
 
+    // itemchoice
     processed = processed.replace(/\\begin\{itemchoice\}([\s\S]*?)\\end\{itemchoice\}/g, (match, body) => {
         const items = body.split('\\itemch').filter(s => s.trim().length > 0);
-        const htmlItems = items.map(item => `<li class="flex items-start gap-2 mb-1"><span class="text-blue-600 font-bold shrink-0">•</span><div class="leading-relaxed">${item.trim()}</div></li>`).join('');
+        const htmlItems = items.map(item => {
+            let content = item.trim().replace(/\\\\/g, '<br>').replace(/\n/g, ' ');
+            return `<li class="flex items-start gap-2 mb-1"><span class="text-blue-600 font-bold shrink-0">•</span><div class="leading-relaxed">${content}</div></li>`;
+        }).join('');
         return `<ul class="my-3 pl-2 list-none">${htmlItems}</ul>`;
+    });
+
+    // ListEX
+    const regexCols = /\\begin\{(?:listEX|enumEX)\}(?:\[(\d+)\]|\{(\d+)\}(?:\[(.*?)\])?)([\s\S]*?)\\end\{(?:listEX|enumEX)\}/g;
+    processed = processed.replace(regexCols, (match, c1, c2, style, body) => {
+        const cols = c1 || c2 || 1;
+        const items = parseItems(body);
+        let gridHtml = `<div class="grid grid-cols-1 md:grid-cols-${cols} gap-4 my-3">`;
+        items.forEach((it, idx) => {
+            let displayLabel = it.label;
+            if (!displayLabel && match.includes('enumEX')) displayLabel = String.fromCharCode(97 + idx) + ')';
+            gridHtml += `<div class="flex gap-2">${displayLabel ? `<span class="font-bold text-gray-700 shrink-0">${displayLabel}</span>` : `<span class="text-gray-400 shrink-0">•</span>`}<div>${it.content}</div></div>`;
+        });
+        gridHtml += `</div>`;
+        return gridHtml;
     });
 
     // Enumerate
     processed = processed.replace(/\\begin\{enumerate\}([\s\S]*?)\\end\{enumerate\}/g, (match, body) => {
         const items = parseItems(body);
         let html = `<ol class="list-decimal pl-8 space-y-1 my-2">`;
-        items.forEach(it => { html += `<li class="pl-1">${it.content}</li>`; });
+        items.forEach(it => { html += it.label ? `<li class="list-none -ml-4"><span class="font-bold mr-1">${it.label}</span>${it.content}</li>` : `<li>${it.content}</li>`; });
         html += `</ol>`;
         return html;
     });
@@ -155,13 +144,14 @@ function processLatexLists(text) {
     processed = processed.replace(/\\begin\{itemize\}([\s\S]*?)\\end\{itemize\}/g, (match, body) => {
         const items = parseItems(body);
         let html = `<ul class="list-disc pl-8 space-y-1 my-2">`;
-        items.forEach(it => { html += `<li class="pl-1">${it.content}</li>`; });
+        items.forEach(it => { html += it.label ? `<li class="list-none -ml-4"><span class="font-bold mr-1">${it.label}</span>${it.content}</li>` : `<li>${it.content}</li>`; });
         html += `</ul>`;
         return html;
     });
-
     return processed;
 }
+
+// --- CÁC HÀM EXPORT CHO BÊN NGOÀI ---
 
 export const convertArrayToMatrix = (content) => {
   if (!content) return "";
@@ -186,13 +176,13 @@ export const autoScaleTables = () => {
 };
 
 /**
- * HÀM XỬ LÝ CHÍNH: FORMAT NỘI DUNG (FINAL FIX)
+ * HÀM FORMAT CONTENT (ĐÃ FIX EQNARRAY & LỖI <x)
  */
 export const formatContent = (text) => {
     if (text === null || text === undefined) return "";
     let processed = text;
 
-    // 1. Clean Text
+    // 1. Clean Text & LaTeX
     processed = processed.replace(/\\centering/g, "");
     processed = processed.replace(/\\%/g, "%");
     processed = processed.replace(/\\textbf\{([^}]+)\}/g, '<b class="font-bold">$1</b>');
@@ -215,22 +205,45 @@ export const formatContent = (text) => {
     processed = processed.replace(/Click đúp để tải file|hoặc Ctrl \+ V để dán ảnh|ẢNH TỪ IMMINI|VỊ TRÍ HÌNH TIKZ/gi, '');
     processed = processed.replace(/^\s*\}\s*$/gm, '').replace(/\}\s*$/g, '').replace(/Ảnh minh họa \(immini\)/g, '').replace(/Ảnh canh giữa/g, '');
 
-    // 4. FIX LỖI CẮT NGẮN CÔNG THỨC <x
+    // 4. BẢO VỆ HTML & MATHJAX (BAO GỒM EQNARRAY)
+    
+    // Danh sách thẻ HTML được phép (Whitelist)
     const tagWhitelist = "script|style|div|span|p|br|img|table|tbody|thead|tr|td|th|ul|ol|li|b|i|u|strong|em|mark|label|input|button|a|h1|h2|h3|h4";
-    const regex = new RegExp(`(\\$\\$[\\s\\S]*?\\$\\$|\\\\\\[[\\s\\S]*?\\\\\\]|\\\\\\([\\s\\S]*?\\\\\\)|(?:\\$[\\s\\S]*?\\$)|<\\/?(?:${tagWhitelist})[^>]*>)`, 'gi');
+    
+    // REGEX QUAN TRỌNG:
+    // 1. \\\\begin\\{[a-zA-Z*]+\\}...\\\\end\\{[a-zA-Z*]+\\} : Bắt tất cả môi trường LaTeX (như eqnarray, align, cases...)
+    // 2. \\$\\$...\\$\\$ : Bắt khối $$...$$
+    // 3. \\\\[...\\\\] : Bắt khối \[...\]
+    // 4. \\\\(...\\\\) : Bắt khối \(...\)
+    // 5. \\$...\\$ : Bắt khối $...$
+    // 6. <...>: Bắt thẻ HTML hợp lệ
+    
+    const regex = new RegExp(`(
+        \\\\begin\\{[a-zA-Z*]+\\}[\\s\\S]*?\\\\end\\{[a-zA-Z*]+\\}|
+        \\$\\$[\\s\\S]*?\\$\\$|
+        \\\\\\[[\\s\\S]*?\\\\\\]|
+        \\\\\\([\\s\\S]*?\\\\\\)|
+        (?:\\$[\\s\\S]*?\\$)|
+        <\\/?(?:${tagWhitelist})[^>]*>
+    )`, 'gi');
     
     const parts = processed.split(regex);
     
     return parts.map(part => {
-        const isMath = part.trim().startsWith('$') || part.trim().startsWith('\\(') || part.trim().startsWith('\\[');
+        const trimmed = part.trim();
+        // Kiểm tra xem là Toán (bao gồm cả \begin{...}), Tag HTML hay Text thường
+        const isMath = trimmed.startsWith('$') || trimmed.startsWith('\\(') || trimmed.startsWith('\\[') || trimmed.startsWith('\\begin');
         const isTag = part.startsWith('<') && part.endsWith('>');
 
         if (isMath) {
-            return part.replace(/</g, ' < '); // FIX: Thêm khoảng trắng cứu công thức
+            // FIX: Cứu công thức chứa <x bằng cách thêm khoảng trắng
+            // FIX: Giữ nguyên eqnarray, không bị xóa {}
+            return part.replace(/</g, ' < '); 
         } else if (isTag) {
             return part; // Giữ nguyên tag HTML
         } else {
-            let cleanPart = part.replace(/</g, '&lt;'); // FIX: Mã hóa text thường
+            // Text thường: Mã hóa < thành &lt;, xóa dấu } thừa và break line
+            let cleanPart = part.replace(/</g, '&lt;'); 
             cleanPart = cleanPart.replace(/\}/g, '');
             return cleanPart.replace(/\\\\/g, '<br>').replace(/\n/g, '<br>');
         }
