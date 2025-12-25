@@ -565,43 +565,38 @@
                 
                 if (examData.showScore === 'immediate' || (examData.showScore === 'after_exam' && timeLeft <= 0)) { document.getElementById('scoreSection').classList.remove('hidden'); }
                 
-                // --- LOGIC HIỂN THỊ LỜI GIẢI (FIX: ƯU TIÊN CÀI ĐẶT TỪ KHÓA HỌC) ---
+                // --- LOGIC HIỂN THỊ LỜI GIẢI (FIX: ĐỒNG BỘ THAM SỐ KHÓA HỌC) ---
                 const btnView = document.getElementById('btnViewSolution');
                 const urlParamsCheck = new URLSearchParams(window.location.search);
                 const isCourseContext = urlParamsCheck.get('courseId') || urlParamsCheck.getAll('mode').includes('course');
                 
-                // 1. Mặc định lấy cài đặt gốc từ Đề thi (Exam Editor)
-                let finalMode = examData.showResult; // immediate, after_exam, never, pass_score, fee_qpoint
-                let finalPassScore = examData.passScore || 5;
-                let finalFee = examData.feeQpoint || 0;
+                // 1. Lấy cài đặt gốc từ Đề thi làm cơ sở
+                let finalMode = examData.showResult; 
+                let finalPassScore = parseFloat(examData.passScore) || 5;
+                let finalFee = parseInt(examData.feeQpoint) || 0;
 
-                // 2. Kiểm tra xem Khóa học có áp đặt cài đặt riêng không (Override)
+                // 2. GHI ĐÈ cài đặt nếu học sinh làm bài từ Khóa học (Dựa trên ảnh quizMinScore bạn gửi)
                 if (isCourseContext) {
-                    // Lấy tham số từ URL (do Course Player truyền sang dựa trên cấu hình trong Course Manager)
-                    const courseMinScore = urlParamsCheck.get('minScore');   // quizMinScore
-                    const courseViewPrice = urlParamsCheck.get('viewPrice'); // quizViewPrice
+                    // Đọc tham số minScore hoặc quizMinScore (phòng hờ cả 2 trường hợp)
+                    const cMin = urlParamsCheck.get('minScore') || urlParamsCheck.get('quizMinScore');
+                    const cPrice = urlParamsCheck.get('viewPrice') || urlParamsCheck.get('quizViewPrice');
 
-                    // ƯU TIÊN 1: Nếu khóa học yêu cầu Điểm tối thiểu (quizMinScore có giá trị)
-                    if (courseMinScore !== null && courseMinScore !== "" && !isNaN(courseMinScore)) {
+                    if (cMin !== null && cMin !== "" && !isNaN(cMin)) {
                         finalMode = 'pass_score';
-                        finalPassScore = parseFloat(courseMinScore);
-                    }
-                    // ƯU TIÊN 2: Nếu khóa học yêu cầu Trả phí (và không yêu cầu điểm)
-                    else if (courseViewPrice !== null && courseViewPrice !== "" && parseInt(courseViewPrice) > 0) {
+                        finalPassScore = parseFloat(cMin);
+                    } else if (cPrice !== null && cPrice !== "" && parseInt(cPrice) > 0) {
                         finalMode = 'fee_qpoint';
-                        finalFee = parseInt(courseViewPrice);
+                        finalFee = parseInt(cPrice);
                     }
-                    // Lưu ý: Nếu khóa học để trống cả 2 thông số trên -> Sẽ tự động dùng cài đặt gốc của đề thi
                 }
 
-                // 3. Thực thi Logic hiển thị dựa trên finalMode đã chốt
+                // 3. Thực thi Logic dựa trên thông số cuối cùng
                 const isTimeOk = (finalMode !== 'after_exam' || timeLeft <= 0);
 
                 if (finalMode === 'never') {
                     btnView.classList.add('hidden');
                 } 
                 else if (finalMode === 'pass_score') {
-                    // Chế độ: Đạt điểm tối thiểu (Của Khóa học hoặc Đề thi)
                     if (score >= finalPassScore) {
                         btnView.classList.remove('hidden');
                         btnView.classList.replace('bg-gray-200', 'bg-orange-100');
@@ -613,18 +608,16 @@
                         btnView.classList.replace('bg-orange-100', 'bg-gray-200');
                         btnView.classList.replace('text-orange-600', 'text-gray-500');
                         btnView.innerHTML = `<i class="fa-solid fa-lock mr-2"></i> Đạt ${finalPassScore}đ để xem`;
-                        btnView.onclick = () => window.customAlert(`Bạn cần đạt tối thiểu ${finalPassScore} điểm để mở khóa lời giải. Hãy làm lại nhé!`, 'warning');
+                        btnView.onclick = () => window.customAlert(`Nội dung khóa học yêu cầu bạn phải đạt tối thiểu ${finalPassScore} điểm để mở khóa lời giải. Hãy cố gắng làm bài tốt hơn nhé!`, 'warning');
                     }
                 } 
                 else if (finalMode === 'fee_qpoint') {
-                    // Chế độ: Trả phí Qpoint
                     btnView.classList.remove('hidden');
                     btnView.className = "w-full py-3 rounded-xl bg-gradient-to-r from-yellow-400 to-orange-500 text-white font-bold hover:shadow-lg transition-all";
                     btnView.innerHTML = `<i class="fa-solid fa-unlock-keyhole mr-2"></i> Mở khóa lời giải (${finalFee} Qpoint)`;
                     btnView.onclick = () => window.handlePayAndShowSolution(finalFee);
                 } 
                 else {
-                    // Chế độ: Ngay lập tức (immediate) hoặc Hết giờ (after_exam)
                     if (isTimeOk) {
                         btnView.classList.remove('hidden');
                         btnView.classList.replace('bg-gray-200', 'bg-orange-100');
