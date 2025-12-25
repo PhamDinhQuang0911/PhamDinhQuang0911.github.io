@@ -1018,64 +1018,64 @@ function renderCurriculumTree() {
         // --- EXAM SELECTOR ---
         window.openExamSelector = () => { document.getElementById('examSelectorModal').classList.remove('hidden'); loadExamManager(null); };
         // --- HÀM TẢI QUẢN LÝ ĐỀ THI (ĐÃ FIX LỖI HIỂN THỊ ĐỀ NGOÀI GỐC) ---
+        // --- HÀM TẢI NGÂN HÀNG ĐỀ THI (PHIÊN BẢN QUÉT TOÀN BỘ - FIX LỖI HIỂN THỊ) ---
         window.loadExamManager = async (folderId) => {
             const container = document.getElementById('selectorContent');
             const breadcrumb = document.getElementById('selectorBreadcrumb');
             
-            // Hiển thị Loading
-            container.innerHTML = '<div class="col-span-full text-center py-10 text-gray-400 flex flex-col items-center"><i class="fa-solid fa-spinner fa-spin text-2xl mb-2"></i><span>Đang tải dữ liệu...</span></div>';
+            // 1. UI Loading
+            container.innerHTML = '<div class="col-span-full text-center py-12 text-gray-400 flex flex-col items-center"><i class="fa-solid fa-spinner fa-spin text-3xl mb-3 text-brand"></i><span class="font-bold">Đang tải dữ liệu...</span></div>';
             
-            // Cập nhật Breadcrumb (Thanh điều hướng)
+            // 2. Breadcrumb
             breadcrumb.innerHTML = folderId 
-                ? `<span class="text-gray-400 cursor-pointer hover:text-brand" onclick="loadExamManager(null)"><i class="fa-solid fa-home"></i></span> <span class="text-gray-300">/</span> <span class="font-bold text-gray-700">Thư mục chi tiết</span>`
+                ? `<span class="text-gray-400 cursor-pointer hover:text-brand" onclick="loadExamManager(null)"><i class="fa-solid fa-home"></i> Gốc</span> <span class="text-gray-300 mx-2">/</span> <span class="font-bold text-gray-700">Thư mục</span>`
                 : `<span class="font-bold text-brand"><i class="fa-solid fa-home"></i> Ngân hàng đề thi (Gốc)</span>`;
 
             try {
-                // 1. TẢI THƯ MỤC CON
+                // 3. TẢI DỮ LIỆU
+                // - Folders: Luôn tải theo parentId (để hiển thị thư mục con)
                 const qF = query(collection(db, "folders"), where("parentId", "==", folderId || null));
                 
-                // 2. TẢI ĐỀ THI
+                // - Exams: 
+                //   + Nếu đang trong thư mục: Tải chính xác theo folderId
+                //   + Nếu đang ở Gốc: Tải TOÀN BỘ exams về rồi lọc bằng JS (Để bắt được cả null, undefined, "")
                 let qE;
                 if (folderId) {
-                    // Nếu đang trong thư mục cụ thể: Tìm chính xác folderId đó
                     qE = query(collection(db, "exams"), where("folderId", "==", folderId));
                 } else {
-                    // [FIX QUAN TRỌNG] Nếu ở Gốc: Tải toàn bộ collection "exams"
-                    // Cách này đảm bảo lấy được cả những đề thi KHÔNG CÓ trường folderId (đề mới tạo/đề cũ)
-                    qE = collection(db, "exams");
+                    qE = query(collection(db, "exams")); // Tải hết để lọc client (Chắc chắn không sót)
                 }
 
-                // Chạy song song 2 luồng tải để tối ưu tốc độ
                 const [snapF, snapE] = await Promise.all([getDocs(qF), getDocs(qE)]);
 
                 container.innerHTML = '';
-                
-                // --- HIỂN THỊ THƯ MỤC ---
+                let hasItem = false;
+
+                // 4. RENDER THƯ MỤC (FOLDERS)
                 snapF.forEach(d => {
+                    hasItem = true;
                     const el = document.createElement('div');
-                    el.className = "bg-white p-4 rounded-xl border hover:border-brand cursor-pointer flex flex-col items-center gap-2 aspect-square justify-center shadow-sm transition-all hover:bg-teal-50";
+                    el.className = "bg-white p-4 rounded-xl border border-gray-200 hover:border-brand cursor-pointer flex flex-col items-center gap-3 aspect-square justify-center shadow-sm transition-all hover:bg-teal-50 group";
                     el.onclick = () => loadExamManager(d.id);
                     el.innerHTML = `
-                        <i class="fa-solid fa-folder text-4xl text-yellow-400 drop-shadow-sm"></i>
-                        <div class="text-xs font-bold text-gray-700 text-center truncate w-full px-2">${d.data().name}</div>
+                        <i class="fa-solid fa-folder text-5xl text-yellow-400 drop-shadow-sm group-hover:scale-110 transition-transform"></i>
+                        <div class="text-xs font-bold text-gray-700 text-center truncate w-full px-1">${d.data().name}</div>
                     `;
                     container.appendChild(el);
                 });
 
-                // --- HIỂN THỊ ĐỀ THI ---
-                let hasItem = false; // Biến kiểm tra xem có item nào được vẽ không
-                
+                // 5. RENDER ĐỀ THI (EXAMS)
                 snapE.forEach(d => {
                     const e = d.data();
                     let shouldShow = false;
 
-                    // [BỘ LỌC CLIENT] Kiểm tra đề thi có thuộc view hiện tại không
                     if (folderId) {
-                        // Nếu đang trong thư mục: Query đã lọc sẵn rồi -> Hiện luôn
+                        // Đang trong thư mục con -> Query đã lọc rồi -> Hiện luôn
                         shouldShow = true;
                     } else {
-                        // Nếu đang ở Gốc: Chỉ hiện đề khi folderId bị thiếu, bị null, hoặc là chuỗi rỗng
-                        if (!e.folderId || e.folderId === "" || e.folderId === null) {
+                        // Đang ở Gốc -> Chỉ hiện đề KHÔNG thuộc thư mục nào
+                        // Logic: folderId không tồn tại HOẶC là null HOẶC là rỗng
+                        if (!e.folderId || e.folderId === "null" || e.folderId === "") {
                             shouldShow = true;
                         }
                     }
@@ -1083,9 +1083,9 @@ function renderCurriculumTree() {
                     if (shouldShow) {
                         hasItem = true;
                         const el = document.createElement('div');
-                        el.className = "bg-white p-4 rounded-xl border hover:border-orange-500 cursor-pointer flex flex-col items-center gap-2 aspect-square justify-center shadow-sm group relative transition-all hover:shadow-md";
+                        el.className = "bg-white p-4 rounded-xl border border-gray-200 hover:border-orange-500 cursor-pointer flex flex-col items-center gap-3 aspect-square justify-center shadow-sm group relative transition-all hover:shadow-md";
                         el.onclick = () => {
-                            // Logic chọn đề thi vào bài học
+                            // Logic chọn đề
                             if(activeItemIdx > -1) {
                                 const item = currentCurriculum[activeChapIdx].lessons[activeLesIdx].items[activeItemIdx];
                                 item.examId = d.id;
@@ -1096,27 +1096,35 @@ function renderCurriculumTree() {
                                 window.showToast(`Đã chọn: ${e.title}`);
                             }
                         };
+                        
+                        // Icon và màu sắc
+                        const qCount = e.questionCount || 0;
+                        
                         el.innerHTML = `
-                            <i class="fa-solid fa-file-lines text-3xl text-gray-300 group-hover:text-orange-500 transition-colors"></i>
-                            <div class="text-xs font-bold text-gray-700 text-center line-clamp-2 w-full" title="${e.title}">${e.title}</div>
-                            <div class="absolute top-2 right-2 text-[10px] text-gray-400 bg-gray-100 px-1 rounded">${e.questionCount || 0} câu</div>
+                            <div class="relative">
+                                <i class="fa-solid fa-file-lines text-4xl text-gray-300 group-hover:text-orange-500 transition-colors"></i>
+                                <span class="absolute -top-2 -right-3 bg-gray-100 text-gray-500 text-[10px] font-bold px-1.5 py-0.5 rounded border border-gray-200">${qCount} câu</span>
+                            </div>
+                            <div class="text-xs font-bold text-gray-700 text-center line-clamp-2 w-full px-1 group-hover:text-orange-600 transition-colors" title="${e.title}">${e.title}</div>
                         `;
                         container.appendChild(el);
                     }
                 });
 
-                // Hiển thị thông báo nếu trống trơn
-                if (snapF.empty && !hasItem) {
+                // 6. Xử lý trống
+                if (!hasItem) {
                     container.innerHTML = `
-                        <div class="col-span-full text-center text-gray-300 py-10 flex flex-col items-center">
-                            <i class="fa-regular fa-folder-open text-3xl mb-2 opacity-50"></i>
-                            <span class="text-sm">Thư mục trống</span>
+                        <div class="col-span-full text-center text-gray-300 py-12 flex flex-col items-center select-none">
+                            <div class="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mb-3">
+                                <i class="fa-regular fa-folder-open text-3xl opacity-50"></i>
+                            </div>
+                            <span class="text-sm font-medium">Thư mục trống</span>
                         </div>`;
                 }
 
             } catch(e) { 
                 console.error(e);
-                container.innerHTML = `<div class="text-red-500 col-span-full text-center text-sm p-4 bg-red-50 rounded-xl">Lỗi tải dữ liệu: ${e.message}</div>`; 
+                container.innerHTML = `<div class="col-span-full bg-red-50 text-red-600 p-4 rounded-xl text-center text-sm font-bold"><i class="fa-solid fa-triangle-exclamation mr-2"></i>Lỗi tải dữ liệu: ${e.message}</div>`; 
             }
         };
 
