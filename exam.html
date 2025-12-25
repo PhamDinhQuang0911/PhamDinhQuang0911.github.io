@@ -320,37 +320,50 @@
         async function loadLobbyData(id) {
             try {
                 
-                const docSnap = await getDoc(doc(db, "exams", id));
+                // 1. Tải dữ liệu Đề thi gốc
+            const docSnap = await getDoc(doc(db, "exams", id));
             if (!docSnap.exists()) { document.getElementById('lobbyTitle').innerText = "Đề thi không tồn tại!"; return; }
             examData = { id: docSnap.id, ...docSnap.data() }; 
 
-            // [MÃ MỚI] GHI ĐÈ CẤU HÌNH TỪ KHÓA HỌC (NẾU CÓ)
+            // 2. [FIX] LOGIC ƯU TIÊN CẤU HÌNH KHÓA HỌC
+            // Kiểm tra xem học sinh có vào từ khóa học không
             const urlParamsCheck = new URLSearchParams(window.location.search);
             const courseIdOverride = urlParamsCheck.get('courseId');
+            
             if (courseIdOverride) {
                 try {
                     const cSnap = await getDoc(doc(db, "public_courses", courseIdOverride));
                     if (cSnap.exists()) {
                         const cData = cSnap.data();
-                        // Ưu tiên settings từ Khóa học (exam editor của khóa học)
-                        // Giả sử bạn lưu cấu hình xem lời giải trong khóa học là 'viewResultSetting'
+                        
+                        // --- QUAN TRỌNG: Ghi đè cấu hình xem lời giải ---
+                        // Kiểm tra các trường cấu hình trong khóa học và ghi đè vào examData
+                        
+                        // 1. Quy tắc hiển thị (immediate, after_exam, never, pass_score...)
+                        // Trong Course Manager, trường này thường là 'viewResultSetting' hoặc 'showResult'
                         if (cData.viewResultSetting) {
-                            console.log("Override view setting:", cData.viewResultSetting);
-                            examData.showResult = cData.viewResultSetting; // Ghi đè showResult gốc
+                            console.log("Áp dụng quy tắc xem lời giải từ Khóa học:", cData.viewResultSetting);
+                            examData.showResult = cData.viewResultSetting; 
+                        } else if (cData.showResult) {
+                            examData.showResult = cData.showResult;
                         }
-                        // Nếu khóa học có quy định điểm chuẩn riêng
-                        if (cData.passScore !== undefined && cData.passScore !== null) {
-                            examData.passScore = cData.passScore;
+
+                        // 2. Điểm chuẩn (nếu khóa học quy định điểm chuẩn riêng)
+                        if (cData.passScore !== undefined && cData.passScore !== null && cData.passScore !== "") {
+                            examData.passScore = Number(cData.passScore);
                         }
-                        // Nếu khóa học có quy định phí xem lời giải riêng
-                        if (cData.viewFee !== undefined) {
-                            examData.feeQpoint = cData.viewFee;
+
+                        // 3. Phí Qpoint (nếu khóa học quy định phí xem riêng)
+                        if (cData.viewFee !== undefined && cData.viewFee !== null && cData.viewFee !== "") {
+                            examData.feeQpoint = Number(cData.viewFee);
                         }
                     }
-                } catch (e) { console.error("Lỗi tải config khóa học:", e); }
+                } catch (e) { 
+                    console.error("Lỗi tải cấu hình khóa học:", e); 
+                }
             }
-            // [HẾT MÃ MỚI]
-            
+
+            // 3. Tiếp tục logic tải lịch sử làm bài như cũ
             const q = query(collection(db, "results"), where("examId","==",id), where("studentId","==",currentUser.uid));
                 const snap = await getDocs(q);
                 window.examHistory = [];
