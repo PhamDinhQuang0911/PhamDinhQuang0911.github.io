@@ -2,7 +2,7 @@
  * utils.js - Thư viện dùng chung (Đã tích hợp đầy đủ xử lý Ảnh & TikZ)
  */
 
-const TIKZ_API_URL = "https://surrey-decreased-let-detailed.trycloudflare.com/compile"; 
+const TIKZ_API_URL = "https://compile.qmath.io.vn/compile"; 
 
 export const compileTikZToImage = async (tikzCode) => {
   try {
