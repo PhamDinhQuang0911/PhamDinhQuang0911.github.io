@@ -749,14 +749,18 @@
         };
 
         async function uploadAndReplaceImage(file, batchId) {
+            // 1. Giữ nguyên phần nén và tạo form data
             const compressedBlob = await compressImage(file);
             
             const formData = new FormData();
             const fileName = `images/batch_${Date.now()}_${Math.random().toString(36).substr(2,6)}.jpg`;
-            sessionUploadedFiles.push(fileName); 
+            
+            // [QUAN TRỌNG] Tạm thời bỏ dòng này để tránh ảnh bị xóa khi bạn F5
+            // sessionUploadedFiles.push(fileName); 
 
             formData.append('file', compressedBlob, fileName);
 
+            // 2. Giữ nguyên phần Upload (PUT)
             const response = await fetch("https://upload-helper.phamngockhanh-942001.workers.dev/", {
                 method: 'PUT',
                 body: formData
@@ -766,9 +770,11 @@
             const data = await response.json();
             const url = data.url;
 
+            // 3. Xử lý xóa ảnh cũ (Giữ nguyên logic cũ của bạn)
             let targetQ = window.questions.find(q => (q.content && q.content.includes(batchId)) || (q.solution && q.solution.includes(batchId)));
             if (targetQ) {
                 const oldContent = targetQ.content.includes(batchId) ? targetQ.content : targetQ.solution;
+                // Regex tìm ảnh cũ để xóa trên Firebase (nếu có)
                 const regexOldImg = new RegExp(`<div[^>]*data-id=['"]${batchId}['"][^>]*>[\\s\\S]*?<img[^>]+src=['"]([^'"]+)['"][^>]*>[\\s\\S]*?<\\/div>`, 'i');
                 const match = oldContent.match(regexOldImg);
                 if (match && match[1] && match[1].includes('firebasestorage')) {
@@ -776,6 +782,7 @@
                 }
             }
             
+            // 4. Tạo mã HTML thẻ ảnh mới (Giữ nguyên giao diện của bạn)
             const imgTag = `
             <div class="group relative flex justify-center my-2 cursor-pointer"
                  onclick="triggerBatchUpload('${batchId}')" 
@@ -787,17 +794,33 @@
                 </div>
             </div>`;
             
-            const targetRegex = new RegExp(`<div[^>]*data-id=['"]${batchId}['"][^>]*>[\\s\\S]*?<\\/div>`, 'gi');
-
+            // 5. [SỬA LỖI] Thay thế bằng DOM Parser (Không dùng Regex nữa)
+            // Cách này đảm bảo thay thế chính xác khối div placeholder, không bị vỡ HTML
             window.questions.forEach(q => {
-                if (q.content && q.content.includes(batchId)) { q.content = q.content.replace(targetRegex, imgTag); }
-                if (q.solution && q.solution.includes(batchId)) { q.solution = q.solution.replace(targetRegex, imgTag); }
+                ['content', 'solution'].forEach(field => {
+                    if (q[field] && q[field].includes(batchId)) {
+                        // Tạo một div ảo để chứa nội dung HTML hiện tại
+                        const tempDiv = document.createElement('div');
+                        tempDiv.innerHTML = q[field];
+
+                        // Tìm chính xác thẻ div có data-id tương ứng
+                        const placeholderDiv = tempDiv.querySelector(`div[data-id="${batchId}"]`);
+                        
+                        if (placeholderDiv) {
+                            // Thay thế toàn bộ div cũ bằng chuỗi HTML ảnh mới
+                            placeholderDiv.outerHTML = imgTag;
+                            // Cập nhật lại nội dung câu hỏi
+                            q[field] = tempDiv.innerHTML;
+                        }
+                    }
+                });
             });
 
+            // 6. Cập nhật giao diện (Giữ nguyên)
             pendingImageUploads = pendingImageUploads.filter(item => item.id !== batchId);
             
             renderBatchImageModal();
-            window.renderMissingImagesPanel();
+            if(window.renderMissingImagesPanel) window.renderMissingImagesPanel();
             
             if (window.currentQIndex !== -1) loadQuestionToEditor(window.currentQIndex); 
             renderPreviewList(); 
