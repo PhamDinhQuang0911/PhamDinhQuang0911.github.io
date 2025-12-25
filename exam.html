@@ -317,50 +317,74 @@
             document.body.insertAdjacentHTML('beforeend', modalHtml);
         }
 
-        async function loadLobbyData(id) {
+async function loadLobbyData(id) {
             try {
                 // 1. Tải dữ liệu Đề thi gốc
                 const docSnap = await getDoc(doc(db, "exams", id));
                 if (!docSnap.exists()) { document.getElementById('lobbyTitle').innerText = "Đề thi không tồn tại!"; return; }
                 examData = { id: docSnap.id, ...docSnap.data() }; 
                 
-                // 2. [FIX] GHI ĐÈ CẤU HÌNH TỪ KHÓA HỌC (Nếu có)
+                // 2. [FIX CHÍNH XÁC] TÌM CẤU HÌNH TRONG CURRICULUM KHÓA HỌC
                 const urlParamsCheck = new URLSearchParams(window.location.search);
                 const courseIdOverride = urlParamsCheck.get('courseId');
                 
                 if (courseIdOverride) {
                     try {
-                        // Tải dữ liệu khóa học từ public_courses
                         const cSnap = await getDoc(doc(db, "public_courses", courseIdOverride));
                         if (cSnap.exists()) {
                             const cData = cSnap.data();
                             
-                            // Kiểm tra trường 'examSettingOverrides' được lưu từ Course Manager
-                            if (cData.examSettingOverrides) {
-                                const overrides = cData.examSettingOverrides;
-                                console.log("Áp dụng cấu hình khóa học:", overrides);
+                            // --- QUÉT MẢNG CURRICULUM ĐỂ TÌM ITEM ĐỀ THI ---
+                            let foundItem = null;
+                            if (cData.curriculum && Array.isArray(cData.curriculum)) {
+                                for (const chap of cData.curriculum) {
+                                    if (chap.lessons && Array.isArray(chap.lessons)) {
+                                        for (const les of chap.lessons) {
+                                            if (les.items && Array.isArray(les.items)) {
+                                                // Tìm item có examId trùng với id đề hiện tại
+                                                const match = les.items.find(it => it.type === 'quiz' && (it.examId === id || it.content === id));
+                                                if (match) {
+                                                    foundItem = match;
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                    }
+                                    if (foundItem) break;
+                                }
+                            }
 
-                                // a. Ghi đè Chế độ hiển thị (showResult)
-                                if (overrides.showResult) {
-                                    examData.showResult = overrides.showResult;
+                            // NẾU TÌM THẤY ITEM -> ÁP DỤNG CẤU HÌNH TỪ COURSE MANAGER
+                            if (foundItem) {
+                                console.log("Đã tìm thấy cấu hình từ Khóa học:", foundItem);
+
+                                // A. Ghi đè Điểm chuẩn (minScore)
+                                if (foundItem.minScore !== undefined && foundItem.minScore !== "" && foundItem.minScore !== null) {
+                                    examData.passScore = Number(foundItem.minScore);
+                                    // Mặc định ép về chế độ 'pass_score' nếu không có phí, để chặn xem giải
+                                    examData.showResult = 'pass_score'; 
                                 }
 
-                                // b. Ghi đè Điểm chuẩn (passScore)
-                                if (overrides.passScore !== undefined && overrides.passScore !== "" && overrides.passScore !== null) {
-                                    examData.passScore = Number(overrides.passScore);
+                                // B. Ghi đè Phí xem (viewPrice -> feeQpoint)
+                                if (foundItem.viewPrice !== undefined && foundItem.viewPrice !== "" && Number(foundItem.viewPrice) > 0) {
+                                    examData.feeQpoint = Number(foundItem.viewPrice);
+                                    // Nếu có phí -> Chuyển sang chế độ trả phí
+                                    examData.showResult = 'fee_qpoint';
                                 }
-
-                                // c. Ghi đè Phí xem lời giải (viewFee -> feeQpoint)
-                                if (overrides.viewFee !== undefined && overrides.viewFee !== "" && overrides.viewFee !== null) {
-                                    examData.feeQpoint = Number(overrides.viewFee);
+                                
+                                // C. Ghi đè Giới hạn lượt xem (viewLimit)
+                                // (Logic này cần xử lý thêm ở phần check view, nhưng tạm thời lưu vào examData)
+                                if (foundItem.viewLimit !== undefined && foundItem.viewLimit !== "") {
+                                    examData.viewLimit = Number(foundItem.viewLimit);
                                 }
                             }
                         }
                     } catch (e) { 
-                        console.error("Lỗi tải cấu hình khóa học:", e); 
+                        console.error("Lỗi khi tải cấu hình khóa học:", e); 
                     }
                 }
                 
+                // 3. Tải lịch sử làm bài (Giữ nguyên)
                 const q = query(collection(db, "results"), where("examId","==",id), where("studentId","==",currentUser.uid));
                 const snap = await getDocs(q);
                 window.examHistory = [];
