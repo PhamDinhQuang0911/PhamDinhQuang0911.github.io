@@ -748,15 +748,22 @@
             document.getElementById('batchImageModal').classList.add('opacity-0', 'pointer-events-none');
         };
 
+        // --- HÀM UPDATE: SỬA LỖI HIỂN THỊ & NGĂN TỰ ĐỘNG XÓA ẢNH ---
         async function uploadAndReplaceImage(file, batchId) {
+            // 1. Nén ảnh
             const compressedBlob = await compressImage(file);
-            
+            if (!compressedBlob || compressedBlob.size === 0) throw new Error("Lỗi nén ảnh (File rỗng)");
+
             const formData = new FormData();
+            // Đặt tên file rõ ràng hơn
             const fileName = `images/batch_${Date.now()}_${Math.random().toString(36).substr(2,6)}.jpg`;
-            sessionUploadedFiles.push(fileName); 
+            
+            // [QUAN TRỌNG] Tạm thời KHÔNG thêm vào sessionUploadedFiles để tránh bị xóa nhầm khi tắt tab
+            // sessionUploadedFiles.push(fileName); 
 
             formData.append('file', compressedBlob, fileName);
 
+            // 2. Upload lên Cloudflare Worker
             const response = await fetch("https://upload-helper.phamngockhanh-942001.workers.dev/", {
                 method: 'PUT',
                 body: formData
@@ -766,16 +773,10 @@
             const data = await response.json();
             const url = data.url;
 
-            let targetQ = window.questions.find(q => (q.content && q.content.includes(batchId)) || (q.solution && q.solution.includes(batchId)));
-            if (targetQ) {
-                const oldContent = targetQ.content.includes(batchId) ? targetQ.content : targetQ.solution;
-                const regexOldImg = new RegExp(`<div[^>]*data-id=['"]${batchId}['"][^>]*>[\\s\\S]*?<img[^>]+src=['"]([^'"]+)['"][^>]*>[\\s\\S]*?<\\/div>`, 'i');
-                const match = oldContent.match(regexOldImg);
-                if (match && match[1] && match[1].includes('firebasestorage')) {
-                    try { deleteObject(ref(storage, match[1])).catch(()=>{}); } catch(e){}
-                }
-            }
-            
+            if (!url) throw new Error("Server không trả về link ảnh");
+            console.log("Upload thành công:", url); // Log để kiểm tra
+
+            // 3. Tạo thẻ ảnh mới (HTML chuẩn)
             const imgTag = `
             <div class="group relative flex justify-center my-2 cursor-pointer"
                  onclick="triggerBatchUpload('${batchId}')" 
@@ -786,19 +787,48 @@
                     <span class="text-white font-bold text-sm"><i class="fa-solid fa-pen"></i> Thay ảnh</span>
                 </div>
             </div>`;
-            
-            const targetRegex = new RegExp(`<div[^>]*data-id=['"]${batchId}['"][^>]*>[\\s\\S]*?<\\/div>`, 'gi');
 
+            // 4. Thay thế vào nội dung câu hỏi (Dùng DOM Parser an toàn)
+            let replacedCount = 0;
             window.questions.forEach(q => {
-                if (q.content && q.content.includes(batchId)) { q.content = q.content.replace(targetRegex, imgTag); }
-                if (q.solution && q.solution.includes(batchId)) { q.solution = q.solution.replace(targetRegex, imgTag); }
+                ['content', 'solution'].forEach(field => {
+                    if (q[field] && q[field].includes(batchId)) {
+                        // Tạo DOM ảo để xử lý HTML
+                        const tempDiv = document.createElement('div');
+                        tempDiv.innerHTML = q[field];
+
+                        // Tìm chính xác thẻ div có data-id tương ứng
+                        const targetElement = tempDiv.querySelector(`div[data-id="${batchId}"]`);
+                        
+                        if (targetElement) {
+                            // Xóa ảnh cũ trên Firebase nếu có (chỉ xóa khi chắc chắn thay thế)
+                            const oldImg = targetElement.querySelector('img');
+                            if (oldImg && oldImg.src.includes('firebasestorage')) {
+                                try { deleteObject(ref(storage, oldImg.src)).catch(()=>{}); } catch(e){}
+                            }
+
+                            // Thay thế hoàn toàn thẻ cũ bằng thẻ ảnh mới
+                            targetElement.outerHTML = imgTag;
+
+                            // Cập nhật lại chuỗi HTML
+                            q[field] = tempDiv.innerHTML;
+                            replacedCount++;
+                        }
+                    }
+                });
             });
 
+            if (replacedCount === 0) console.warn(`Không tìm thấy vị trí chèn ảnh ID: ${batchId}`);
+
+            // 5. Cập nhật giao diện
+            // Xóa khỏi danh sách chờ upload
             pendingImageUploads = pendingImageUploads.filter(item => item.id !== batchId);
             
+            // Cập nhật các bảng điều khiển
             renderBatchImageModal();
-            window.renderMissingImagesPanel();
+            if (window.renderMissingImagesPanel) window.renderMissingImagesPanel();
             
+            // Reload Editor nếu đang mở câu hỏi đó
             if (window.currentQIndex !== -1) loadQuestionToEditor(window.currentQIndex); 
             renderPreviewList(); 
             
