@@ -1,8 +1,8 @@
 /**
- * utils.js - Thư viện dùng chung (Đã fix lỗi mất khung upload ảnh)
+ * utils.js - Thư viện dùng chung (Đã tích hợp đầy đủ xử lý Ảnh & TikZ)
  */
 
-const TIKZ_API_URL = "https://compile.qmath.io.vn/compile"; 
+const TIKZ_API_URL = "https://surrey-decreased-let-detailed.trycloudflare.com/compile"; 
 
 export const compileTikZToImage = async (tikzCode) => {
   try {
@@ -94,28 +94,25 @@ function processTabular(text) {
 
 function processLatexLists(text) {
     let processed = text;
-    // Helper parse items
     const parseItems = (bodyStr) => {
         const rawItems = bodyStr.split(/\\item(?![a-zA-Z])/).filter(s => s.trim().length > 0);
         return rawItems.map((item) => {
-            let content = item.trim(), label = null;
+            let content = item.trim();
             if (content.startsWith('[')) {
                 const cb = content.indexOf(']');
-                if (cb > -1) { label = content.substring(1, cb); content = content.substring(cb + 1).trim(); }
+                if (cb > -1) content = content.substring(cb + 1).trim();
             }
             content = processTabular(content);
-            return { label, content };
+            return { content };
         });
     };
 
-    // itemchoice
     processed = processed.replace(/\\begin\{itemchoice\}([\s\S]*?)\\end\{itemchoice\}/g, (match, body) => {
         const items = body.split('\\itemch').filter(s => s.trim().length > 0);
         const htmlItems = items.map(item => `<li class="flex items-start gap-2 mb-1"><span class="text-blue-600 font-bold shrink-0">•</span><div class="leading-relaxed">${item.trim()}</div></li>`).join('');
         return `<ul class="my-3 pl-2 list-none">${htmlItems}</ul>`;
     });
 
-    // ListEX
     const regexCols = /\\begin\{(?:listEX|enumEX)\}(?:\[(\d+)\]|\{(\d+)\}(?:\[(.*?)\])?)([\s\S]*?)\\end\{(?:listEX|enumEX)\}/g;
     processed = processed.replace(regexCols, (match, c1, c2, style, body) => {
         const cols = c1 || c2 || 1;
@@ -130,7 +127,6 @@ function processLatexLists(text) {
         return gridHtml;
     });
 
-    // Enumerate
     processed = processed.replace(/\\begin\{enumerate\}([\s\S]*?)\\end\{enumerate\}/g, (match, body) => {
         const items = parseItems(body);
         let html = `<ol class="list-decimal pl-8 space-y-1 my-2">`;
@@ -139,7 +135,6 @@ function processLatexLists(text) {
         return html;
     });
 
-    // Itemize
     processed = processed.replace(/\\begin\{itemize\}([\s\S]*?)\\end\{itemize\}/g, (match, body) => {
         const items = parseItems(body);
         let html = `<ul class="list-disc pl-8 space-y-1 my-2">`;
@@ -175,13 +170,13 @@ export const autoScaleTables = () => {
 };
 
 /**
- * HÀM FORMAT CONTENT (BẢN FINAL: FIX EQNARRAY + <x + HIỆN KHUNG UPLOAD)
+ * HÀM FORMAT CONTENT (FIX: EQNARRAY, <x, PLACEHOLDERS)
  */
 export const formatContent = (text) => {
     if (text === null || text === undefined) return "";
     let processed = text;
 
-    // 1. Clean Text & LaTeX
+    // 1. Clean Text
     processed = processed.replace(/\\centering/g, "");
     processed = processed.replace(/\\%/g, "%");
     processed = processed.replace(/\\textbf\{([^}]+)\}/g, '<b class="font-bold">$1</b>');
@@ -198,115 +193,37 @@ export const formatContent = (text) => {
     processed = processTabular(processed);    
     processed = processLatexLists(processed); 
 
-    // 3. Placeholder images & Clean
-    // [FIX] Đã xóa dòng lệnh xóa 'image-placeholder' tại đây để khung hiện ra cho Editor
-    
-    // Chỉ xóa các thẻ rác khác
-    processed = processed.replace(/<div[^>]*class="[^"]*group relative[^"]*"[^>]*>[\s\S]*?(<img[^>]+>)[\s\S]*?<\/div>/gi, '<div class="flex justify-center my-3">$1</div>');
+    // 3. Placeholder & Clean Rác
+    processed = processed.replace(/<div[^>]*class="[^"]*image-placeholder[^"]*"[^>]*>[\s\S]*?<\/div>/g, '');
+    processed = processed.replace(/<div[^>]*class="[^"]*group relative[^"]*"[^>]*>(?!<img)([\s\S]*?)<\/div>/gi, ''); 
     processed = processed.replace(/Click đúp để tải file|hoặc Ctrl \+ V để dán ảnh|ẢNH TỪ IMMINI|VỊ TRÍ HÌNH TIKZ/gi, '');
     processed = processed.replace(/^\s*\}\s*$/gm, '').replace(/\}\s*$/g, '').replace(/Ảnh minh họa \(immini\)/g, '').replace(/Ảnh canh giữa/g, '');
 
-    // 4. BẢO VỆ HTML & MATHJAX
-    // White list HTML - Thêm 'i' vào div để không xóa placeholder
+    // 4. Regex Bảo Vệ MathJax & HTML
     const tagWhitelist = "script|style|div|span|p|br|img|table|tbody|thead|tr|td|th|ul|ol|li|b|i|u|strong|em|mark|label|input|button|a|h1|h2|h3|h4";
-    
-    // REGEX: Bắt môi trường \begin, công thức toán và thẻ HTML
     const regex = new RegExp(`(\\\\begin\\{[a-zA-Z*]+\\}[\\s\\S]*?\\\\end\\{[a-zA-Z*]+\\}|\\$\\$[\\s\\S]*?\\$\\$|\\\\\\[[\\s\\S]*?\\\\\\]|\\\\\\([\\s\\S]*?\\\\\\)|(?:\\$[\\s\\S]*?\\$)|<\\/?(?:${tagWhitelist})[^>]*>)`, 'gi');
     
     const parts = processed.split(regex);
     
     return parts.map(part => {
         const trimmed = part.trim();
-        const isMath = trimmed.startsWith('$') || trimmed.startsWith('\\(') || trimmed.startsWith('\\[') || trimmed.startsWith('\\begin') || trimmed.startsWith('\\end');
+        const isMath = trimmed.startsWith('$') || trimmed.startsWith('\\(') || trimmed.startsWith('\\[') || trimmed.startsWith('\\begin');
         const isTag = part.startsWith('<') && part.endsWith('>');
 
         if (isMath) {
-            return part.replace(/</g, ' < '); // FIX <x
+            return part.replace(/</g, ' < '); // Fix lỗi <x
         } else if (isTag) {
-            return part; // Giữ nguyên thẻ
+            return part; // Giữ nguyên tag HTML
         } else {
-            let cleanPart = part.replace(/</g, '&lt;'); 
+            let cleanPart = part.replace(/</g, '&lt;'); // Mã hóa text thường
             cleanPart = cleanPart.replace(/\}/g, '');
             return cleanPart.replace(/\\\\/g, '<br>').replace(/\n/g, '<br>');
         }
     }).join('');
 };
+
 // ============================================================================
-// 5. CÁC HÀM XỬ LÝ ẢNH (NÉN & ĐÓNG DẤU TRANG)
-// ============================================================================
-
-export const compressImage = (file, quality = 0.7, maxWidth = 1000) => {
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.readAsDataURL(file);
-        reader.onload = (event) => {
-            const img = new Image();
-            img.src = event.target.result;
-            img.onload = () => {
-                const canvas = document.createElement('canvas');
-                let width = img.width;
-                let height = img.height;
-                if (width > maxWidth) {
-                    height *= maxWidth / width;
-                    width = maxWidth;
-                }
-                canvas.width = width;
-                canvas.height = height;
-                const ctx = canvas.getContext('2d');
-                ctx.drawImage(img, 0, 0, width, height);
-                canvas.toBlob((blob) => resolve(blob), 'image/jpeg', quality);
-            };
-            img.onerror = (err) => reject(err);
-        };
-        reader.onerror = (err) => reject(err);
-    });
-};
-
-export const watermarkImage = (file, text) => {
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.readAsDataURL(file);
-        reader.onload = (event) => {
-            const img = new Image();
-            img.src = event.target.result;
-            img.onload = () => {
-                const canvas = document.createElement('canvas');
-                const ctx = canvas.getContext('2d');
-                canvas.width = img.width;
-                canvas.height = img.height;
-
-                // Vẽ ảnh gốc
-                ctx.drawImage(img, 0, 0);
-
-                // Cấu hình đóng dấu (Góc trên phải, màu đỏ nổi bật)
-                const fontSize = Math.max(20, Math.floor(img.width / 25)); // Tự động chỉnh cỡ chữ
-                ctx.font = `bold ${fontSize}px Arial`;
-                ctx.fillStyle = "red";
-                ctx.textAlign = "right";
-                ctx.textBaseline = "top";
-                
-                // Vẽ nền trắng mờ dưới chữ để dễ đọc
-                const textWidth = ctx.measureText(text).width;
-                ctx.fillStyle = "rgba(255, 255, 255, 0.7)";
-                ctx.fillRect(canvas.width - textWidth - 20, 10, textWidth + 10, fontSize + 10);
-
-                // Vẽ chữ
-                ctx.fillStyle = "red";
-                ctx.fillText(text, canvas.width - 15, 15);
-
-                // Xuất file
-                canvas.toBlob((blob) => {
-                    // Tạo file mới với tên cũ
-                    const newFile = new File([blob], file.name, { type: 'image/jpeg' });
-                    resolve(newFile);
-                }, 'image/jpeg', 0.8);
-            };
-            img.onerror = (err) => reject(err);
-        };
-    });
-};
-// ============================================================================
-// 5. CÁC HÀM BỔ SUNG (RENDER TIKZ, XỬ LÝ ẢNH, WATERMARK)
+// 5. CÁC HÀM BỔ SUNG CHO EXAM (RENDER TIKZ, XỬ LÝ ẢNH, WATERMARK)
 // ============================================================================
 
 export const renderTikz = () => {
@@ -362,17 +279,18 @@ export const watermarkImage = (file, text) => {
                 // Vẽ ảnh gốc
                 ctx.drawImage(img, 0, 0);
 
-                // Cấu hình đóng dấu (Góc trên phải, màu đỏ)
+                // Cấu hình đóng dấu (Góc trên phải, màu đỏ nổi bật)
                 const fontSize = Math.max(20, Math.floor(img.width / 25));
                 ctx.font = `bold ${fontSize}px Arial`;
-                ctx.fillStyle = "red";
                 ctx.textAlign = "right";
                 ctx.textBaseline = "top";
                 
                 const textWidth = ctx.measureText(text).width;
+                // Nền trắng mờ
                 ctx.fillStyle = "rgba(255, 255, 255, 0.7)";
                 ctx.fillRect(canvas.width - textWidth - 20, 10, textWidth + 10, fontSize + 10);
 
+                // Chữ đỏ
                 ctx.fillStyle = "red";
                 ctx.fillText(text, canvas.width - 15, 15);
 
