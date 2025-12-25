@@ -750,29 +750,27 @@
 
         // --- HÀM ĐÃ SỬA LỖI HIỂN THỊ KHUNG TRẮNG ---
         // --- HÀM ĐÃ SỬA LỖI HIỂN THỊ (DOM PARSER) ---
+        // --- HÀM ĐÃ SỬA LỖI HIỂN THỊ (SỬ DỤNG DOM PARSER) ---
         async function uploadAndReplaceImage(file, batchId) {
             // 1. Nén ảnh (Giữ nguyên)
             const compressedBlob = await compressImage(file);
             
             const formData = new FormData();
-            // Đặt tên file đơn giản để tránh lỗi ký tự lạ
-            const fileName = `images/img_${Date.now()}_${Math.random().toString(36).substr(2,6)}.jpg`;
+            const fileName = `images/batch_${Date.now()}_${Math.random().toString(36).substr(2,6)}.jpg`;
             
-            // [QUAN TRỌNG] Bỏ dòng này để ảnh KHÔNG bị xóa khi bạn tải lại trang (F5)
+            // [QUAN TRỌNG] Tạm thời bỏ dòng này để ảnh KHÔNG bị xóa khi bạn tải lại trang
             // sessionUploadedFiles.push(fileName); 
 
             formData.append('file', compressedBlob, fileName);
 
-            // 2. Upload lên Cloudflare (Ưu tiên POST, Fallback PUT)
-            // Thêm timestamp ?t= để tránh bị cache cũ
-            let response = await fetch("https://upload-helper.phamngockhanh-942001.workers.dev/?t=" + Date.now(), {
+            // 2. Upload (Thêm cơ chế tự chuyển đổi POST/PUT để chắc chắn lên được)
+            let response = await fetch("https://upload-helper.phamngockhanh-942001.workers.dev/", {
                 method: 'POST',
                 body: formData
             });
 
-            // Nếu POST lỗi thì thử lại bằng PUT
             if (!response.ok) {
-                 console.warn("POST thất bại, thử lại bằng PUT...");
+                 console.warn("POST thất bại, thử lại PUT...");
                  response = await fetch("https://upload-helper.phamngockhanh-942001.workers.dev/", {
                     method: 'PUT',
                     body: formData
@@ -783,64 +781,58 @@
             const data = await response.json();
             const url = data.url;
 
-            if (!url) throw new Error("Server không trả về link ảnh");
-            console.log("Link ảnh đã tạo:", url);
-
-            // 3. Tạo thẻ ảnh mới (HTML chuẩn, có fallback lỗi)
+            // 3. Xử lý xóa ảnh cũ trên Firebase (Giữ nguyên logic của bạn)
+            // Đoạn này dùng regex tìm link ảnh cũ để xóa file rác, không ảnh hưởng hiển thị
+            let targetQ = window.questions.find(q => (q.content && q.content.includes(batchId)) || (q.solution && q.solution.includes(batchId)));
+            if (targetQ) {
+                const oldContent = targetQ.content.includes(batchId) ? targetQ.content : targetQ.solution;
+                const regexOldImg = new RegExp(`<div[^>]*data-id=['"]${batchId}['"][^>]*>[\\s\\S]*?<img[^>]+src=['"]([^'"]+)['"][^>]*>[\\s\\S]*?<\\/div>`, 'i');
+                const match = oldContent.match(regexOldImg);
+                if (match && match[1] && match[1].includes('firebasestorage')) {
+                    try { deleteObject(ref(storage, match[1])).catch(()=>{}); } catch(e){}
+                }
+            }
+            
+            // 4. Tạo thẻ ảnh mới
             const imgTag = `
             <div class="group relative flex justify-center my-2 cursor-pointer"
                  onclick="triggerBatchUpload('${batchId}')" 
                  data-id="${batchId}"
                  title="Bấm để thay đổi ảnh">
-                <img src="${url}" 
-                     class="max-w-full h-auto rounded-lg shadow-md border-2 border-transparent group-hover:border-blue-400 transition-all" 
-                     style="max-height:350px;"
-                     loading="lazy"
-                     onerror="this.src='https://placehold.co/600x400?text=Lỗi+Load+Ảnh'; this.style.border='2px solid red';">
+                <img src="${url}" class="max-w-full h-auto rounded-lg shadow-md border-2 border-transparent group-hover:border-blue-400 transition-all" style="max-height:350px;">
                 <div class="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 flex items-center justify-center rounded-lg transition-opacity">
                     <span class="text-white font-bold text-sm"><i class="fa-solid fa-pen"></i> Thay ảnh</span>
                 </div>
             </div>`;
-
-            // 4. [FIX CHÍNH] Thay thế bằng DOM Parser (Tuyệt đối không dùng Regex nữa)
-            let replacedCount = 0;
+            
+            // 5. [FIX CHÍNH] Thay thế bằng DOM Parser (Không dùng Regex replace)
+            // Logic: Biến chuỗi HTML thành đối tượng -> Tìm đúng thẻ div -> Thay thế -> Biến ngược lại thành chuỗi
             window.questions.forEach(q => {
                 ['content', 'solution'].forEach(field => {
                     if (q[field] && q[field].includes(batchId)) {
-                        // Tạo một khung ảo để chứa HTML hiện tại
+                        // Tạo khung ảo
                         const tempDiv = document.createElement('div');
                         tempDiv.innerHTML = q[field];
 
-                        // Tìm chính xác cái ô chứa ảnh bằng ID (Bất chấp lồng bao nhiêu div)
+                        // Tìm chính xác thẻ div có data-id (bất chấp nó lồng bao nhiêu div con)
                         const placeholderDiv = tempDiv.querySelector(`div[data-id="${batchId}"]`);
                         
                         if (placeholderDiv) {
-                            // Xóa ảnh cũ trên Firebase (nếu có bên trong placeholder)
-                            const oldImg = placeholderDiv.querySelector('img');
-                            if (oldImg && oldImg.src.includes('firebasestorage')) {
-                                try { deleteObject(ref(storage, oldImg.src)).catch(()=>{}); } catch(e){}
-                            }
-
-                            // Thay thế trọn gói thẻ div cũ bằng thẻ ảnh mới
+                            // Thay thế hoàn toàn thẻ div đó bằng thẻ ảnh mới
                             placeholderDiv.outerHTML = imgTag;
-
-                            // Cập nhật lại nội dung câu hỏi từ khung ảo
+                            // Cập nhật lại nội dung câu hỏi
                             q[field] = tempDiv.innerHTML;
-                            replacedCount++;
                         }
                     }
                 });
             });
 
-            if (replacedCount === 0) console.warn(`Không tìm thấy vị trí chèn ảnh ID: ${batchId}`);
-
-            // 5. Cập nhật giao diện ngay lập tức
+            // 6. Cập nhật giao diện
             pendingImageUploads = pendingImageUploads.filter(item => item.id !== batchId);
             
             renderBatchImageModal();
             if(window.renderMissingImagesPanel) window.renderMissingImagesPanel();
             
-            // Reload Editor để hiển thị ảnh ngay
             if (window.currentQIndex !== -1) loadQuestionToEditor(window.currentQIndex); 
             renderPreviewList(); 
             
