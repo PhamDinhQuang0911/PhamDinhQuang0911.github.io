@@ -749,11 +749,15 @@
         };
 
         // --- HÀM FIX: XÓA SẠCH CHỮ THỪA & DÒNG TRẮNG ---
+        // --- HÀM CẬP NHẬT: LƯU VÀO FOLDER "images/" & GIỮ NGUYÊN TÍNH NĂNG SẠCH ---
         async function uploadAndReplaceImage(file, batchId) {
             // 1. Nén ảnh
             const compressedBlob = await compressImage(file);
             const formData = new FormData();
-            const fileName = `img_${Date.now()}.jpg`;
+            
+            // [THAY ĐỔI] Thêm tiền tố "images/" để gom ảnh vào thư mục riêng
+            const fileName = `images/img_${Date.now()}_${Math.random().toString(36).substr(2,6)}.jpg`;
+            
             formData.append('file', compressedBlob, fileName);
 
             // 2. Upload
@@ -769,10 +773,10 @@
             const data = await response.json();
             const url = data.url;
 
-            // 3. Mã HTML ảnh đơn giản (Không overlay, không khung trắng)
+            // 3. Mã HTML ảnh đơn giản
             const simpleImgTag = `<div class="flex justify-center my-1"><img src="${url}" class="rounded-lg shadow-sm" style="max-height:350px;" loading="lazy"></div>`;
 
-            // 4. THAY THẾ BẰNG DOM (Quan trọng: Để xóa sạch chữ bên trong khung)
+            // 4. Thay thế & Xóa chữ thừa (Dùng DOM + Marker như cũ)
             let replacedCount = 0;
             window.questions.forEach(q => {
                 ['content', 'solution'].forEach(field => {
@@ -781,17 +785,15 @@
                         const tempDiv = document.createElement('div');
                         tempDiv.innerHTML = q[field];
 
-                        // Tìm chính xác thẻ khung bằng ID
+                        // Tìm thẻ khung
                         const placeholder = tempDiv.querySelector(`div[data-id="${batchId}"]`);
                         
                         if (placeholder) {
-                            // Thay thế TOÀN BỘ khung bằng ảnh (Bay màu hết chữ bên trong)
+                            // Xóa khung, thay bằng Marker
                             placeholder.outerHTML = "___IMAGE_MARKER___"; 
                             
-                            // Xử lý chuỗi để xóa dòng trắng thừa
-                            // Tìm: [xuống dòng thừa] + MARKER + [xuống dòng thừa]
+                            // Regex xóa sạch dòng trắng/br bao quanh marker
                             let newHTML = tempDiv.innerHTML;
-                            // Regex này tìm marker và ăn hết các dấu xuống dòng (\n), thẻ <br> hoặc khoảng trắng bao quanh nó
                             newHTML = newHTML.replace(/(\s*<br\s*\/?>\s*|\s+)*___IMAGE_MARKER___(\s*<br\s*\/?>\s*|\s+)*/gi, '\n' + simpleImgTag + '\n');
                             
                             q[field] = newHTML;
@@ -805,17 +807,14 @@
             const editorContent = document.getElementById('editContent');
             const editorSolution = document.getElementById('editSolution');
             
-            // Hàm helper để update text area
             const updateTextArea = (el) => {
                 if (el && el.value.includes(batchId)) {
-                    // Logic tương tự: DOM Parser để clean sạch
                     const tempDiv = document.createElement('div');
                     tempDiv.innerHTML = el.value;
                     const ph = tempDiv.querySelector(`div[data-id="${batchId}"]`);
                     if(ph) {
                         ph.outerHTML = "___IMAGE_MARKER___";
                         let txt = tempDiv.innerHTML;
-                        // Thay thế và xóa khoảng trắng
                         txt = txt.replace(/(\s*<br\s*\/?>\s*|\s+)*___IMAGE_MARKER___(\s*<br\s*\/?>\s*|\s+)*/gi, '\n' + simpleImgTag + '\n');
                         el.value = txt;
                     }
