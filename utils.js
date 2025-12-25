@@ -231,3 +231,77 @@ export const formatContent = (text) => {
         }
     }).join('');
 };
+// ============================================================================
+// 5. CÁC HÀM XỬ LÝ ẢNH (NÉN & ĐÓNG DẤU TRANG)
+// ============================================================================
+
+export const compressImage = (file, quality = 0.7, maxWidth = 1000) => {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = (event) => {
+            const img = new Image();
+            img.src = event.target.result;
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                let width = img.width;
+                let height = img.height;
+                if (width > maxWidth) {
+                    height *= maxWidth / width;
+                    width = maxWidth;
+                }
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, width, height);
+                canvas.toBlob((blob) => resolve(blob), 'image/jpeg', quality);
+            };
+            img.onerror = (err) => reject(err);
+        };
+        reader.onerror = (err) => reject(err);
+    });
+};
+
+export const watermarkImage = (file, text) => {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = (event) => {
+            const img = new Image();
+            img.src = event.target.result;
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                canvas.width = img.width;
+                canvas.height = img.height;
+
+                // Vẽ ảnh gốc
+                ctx.drawImage(img, 0, 0);
+
+                // Cấu hình đóng dấu (Góc trên phải, màu đỏ nổi bật)
+                const fontSize = Math.max(20, Math.floor(img.width / 25)); // Tự động chỉnh cỡ chữ
+                ctx.font = `bold ${fontSize}px Arial`;
+                ctx.fillStyle = "red";
+                ctx.textAlign = "right";
+                ctx.textBaseline = "top";
+                
+                // Vẽ nền trắng mờ dưới chữ để dễ đọc
+                const textWidth = ctx.measureText(text).width;
+                ctx.fillStyle = "rgba(255, 255, 255, 0.7)";
+                ctx.fillRect(canvas.width - textWidth - 20, 10, textWidth + 10, fontSize + 10);
+
+                // Vẽ chữ
+                ctx.fillStyle = "red";
+                ctx.fillText(text, canvas.width - 15, 15);
+
+                // Xuất file
+                canvas.toBlob((blob) => {
+                    // Tạo file mới với tên cũ
+                    const newFile = new File([blob], file.name, { type: 'image/jpeg' });
+                    resolve(newFile);
+                }, 'image/jpeg', 0.8);
+            };
+            img.onerror = (err) => reject(err);
+        };
+    });
+};
