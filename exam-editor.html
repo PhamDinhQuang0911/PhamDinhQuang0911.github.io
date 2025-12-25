@@ -749,76 +749,61 @@
         };
 
         // --- HÀM MỚI HOÀN TOÀN: ĐƠN GIẢN HÓA TỐI ĐA ---
+        // --- HÀM CẬP NHẬT: XÓA KHOẢNG TRẮNG THỪA KHI TẢI ẢNH ---
         async function uploadAndReplaceImage(file, batchId) {
             // 1. Nén ảnh
             const compressedBlob = await compressImage(file);
-            
             const formData = new FormData();
-            // Đặt tên file đơn giản
-            const fileName = `img_${Date.now()}.jpg`;
+            const fileName = `img_${Date.now()}.jpg`; // Tên file đơn giản
             formData.append('file', compressedBlob, fileName);
 
-            // 2. Upload (Giữ logic POST/PUT để đảm bảo lên được R2)
+            // 2. Upload
             let response = await fetch("https://upload-helper.phamngockhanh-942001.workers.dev/", {
                 method: 'POST', body: formData
             });
-
             if (!response.ok) {
                  response = await fetch("https://upload-helper.phamngockhanh-942001.workers.dev/", {
                     method: 'PUT', body: formData
                  });
             }
-
             if (!response.ok) throw new Error("Lỗi kết nối Server");
             const data = await response.json();
             const url = data.url;
 
-            if (!url) throw new Error("Không có link ảnh");
-            console.log("Link ảnh mới:", url);
+            // 3. TẠO MÃ ẢNH GỌN GÀNG (Giảm margin my-2 xuống my-1 hoặc bỏ hẳn nếu muốn sát rạt)
+            const simpleImgTag = `<div class="flex justify-center my-1"><img src="${url}" class="rounded-lg shadow-sm" style="max-height:350px;" loading="lazy"></div>`;
 
-            // 3. TẠO MÃ HTML ĐƠN GIẢN NHẤT (QUAN TRỌNG)
-            // Bỏ hết các class group, relative, absolute gây lỗi khung trắng
-            // Chỉ giữ lại div canh giữa và thẻ img
-            const simpleImgTag = `<div class="flex justify-center my-2"><img src="${url}" class="rounded-lg shadow-sm" style="max-height:350px;" loading="lazy"></div>`;
+            // 4. THAY THẾ + XÓA KHOẢNG TRẮNG THỪA
+            // Regex này tìm: [Khoảng trắng/Enter thừa] + [Khung Placeholder] + [Khoảng trắng/Enter thừa]
+            const regex = new RegExp(`\\s*<div[^>]*data-id=['"]${batchId}['"][^>]*>[\\s\\S]*?<\\/div>\\s*`, 'gi');
 
-            // 4. THAY THẾ TRỰC TIẾP VÀO DỮ LIỆU (String Replace)
-            // Tìm và thay thế đoạn text placeholder bằng đoạn HTML ảnh mới
-            // Regex này tìm: <div ... data-id="BATCH_ID" ... > ... </div>
-            const regex = new RegExp(`<div[^>]*data-id=['"]${batchId}['"][^>]*>[\\s\\S]*?<\\/div>`, 'gi');
-
-            let replacedCount = 0;
             window.questions.forEach(q => {
                 if (q.content && q.content.includes(batchId)) {
-                    q.content = q.content.replace(regex, simpleImgTag);
-                    replacedCount++;
+                    // Thay thế bằng ảnh + 1 ký tự xuống dòng duy nhất (\n) để không bị dính chùm vào chữ
+                    q.content = q.content.replace(regex, '\n' + simpleImgTag + '\n');
                 }
                 if (q.solution && q.solution.includes(batchId)) {
-                    q.solution = q.solution.replace(regex, simpleImgTag);
-                    replacedCount++;
+                    q.solution = q.solution.replace(regex, '\n' + simpleImgTag + '\n');
                 }
             });
 
-            // 5. Cập nhật ngay lập tức Editor nếu đang mở câu hỏi đó
-            // (Thao tác này giúp bạn thấy ảnh ngay mà không cần bấm qua lại)
+            // 5. Cập nhật Editor ngay lập tức
             const editorContent = document.getElementById('editContent');
             const editorSolution = document.getElementById('editSolution');
             
             if (editorContent && editorContent.value.includes(batchId)) {
-                editorContent.value = editorContent.value.replace(regex, simpleImgTag);
-                // Trigger sự kiện để lưu vào memory
+                editorContent.value = editorContent.value.replace(regex, '\n' + simpleImgTag + '\n');
                 window.autoSaveMemory(); 
             }
             if (editorSolution && editorSolution.value.includes(batchId)) {
-                editorSolution.value = editorSolution.value.replace(regex, simpleImgTag);
+                editorSolution.value = editorSolution.value.replace(regex, '\n' + simpleImgTag + '\n');
                 window.autoSaveMemory();
             }
 
-            // 6. Dọn dẹp giao diện
+            // 6. Dọn dẹp
             pendingImageUploads = pendingImageUploads.filter(item => item.id !== batchId);
             renderBatchImageModal();
             if(window.renderMissingImagesPanel) window.renderMissingImagesPanel();
-            
-            // Reload Preview bên trái
             renderPreviewList(); 
             
             return true;
@@ -1140,6 +1125,7 @@
             window.finishImportProcess(); 
         };
 
+        // --- HÀM CẬP NHẬT: XÓA KHOẢNG TRẮNG CHO TIKZ/VPS ---
         window.handleAutoCompileAll = async () => {
             document.getElementById('importModeModal').classList.add('opacity-0', 'pointer-events-none');
             const pm = document.getElementById('progressModal');
@@ -1160,11 +1146,15 @@
             for (const item of tikzItems) {
                 try {
                     const url = await compileTikZToImage(item.contentCode);
-                    const imgTag = `<div class="group relative flex justify-center my-2 cursor-pointer" data-id="${item.id}"><img src="${url}" class="max-w-full h-auto rounded-lg shadow-md border-2 border-transparent group-hover:border-blue-400 transition-all" style="max-height:350px;"><div class="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 flex items-center justify-center rounded-lg transition-opacity gap-2"><button onclick="triggerBatchUpload('${item.id}')" class="bg-white text-blue-600 px-3 py-1 rounded text-xs font-bold hover:bg-gray-100">Thay ảnh khác</button></div></div>`;
-                    const regex = new RegExp(`<div[^>]*data-id=['"]${item.id}['"][^>]*>[\\s\\S]*?<\\/div>`, 'gi');
+                    // Mã ảnh gọn
+                    const imgTag = `<div class="flex justify-center my-1"><img src="${url}" class="rounded-lg shadow-sm" style="max-height:350px;" loading="lazy"></div>`;
+                    
+                    // Regex xóa khoảng trắng thừa bao quanh
+                    const regex = new RegExp(`\\s*<div[^>]*data-id=['"]${item.id}['"][^>]*>[\\s\\S]*?<\\/div>\\s*`, 'gi');
+                    
                     window.questions.forEach(q => {
-                        if (q.content && q.content.includes(item.id)) q.content = q.content.replace(regex, imgTag);
-                        if (q.solution && q.solution.includes(item.id)) q.solution = q.solution.replace(regex, imgTag);
+                        if (q.content && q.content.includes(item.id)) q.content = q.content.replace(regex, '\n' + imgTag + '\n');
+                        if (q.solution && q.solution.includes(item.id)) q.solution = q.solution.replace(regex, '\n' + imgTag + '\n');
                     });
                     item._done = true;
                 } catch (e) {
