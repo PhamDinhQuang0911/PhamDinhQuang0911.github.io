@@ -395,9 +395,10 @@
             const q = currentQuestions[idx];
             document.getElementById('currentQNum').textContent = idx + 1;
             dom.badge.textContent = q.type==='mc'?'TRẮC NGHIỆM':(q.type==='tf'?'ĐÚNG/SAI':(q.type==='short'?'TRẢ LỜI NGẮN':'TỰ LUẬN'));
+            
             dom.content.innerHTML = window.formatContent(q.content);
             dom.options.innerHTML = '';
-            
+
             const fb = document.getElementById('flagBtn');
             fb.className = flaggedQuestions[idx] ? "text-red-500 text-2xl" : "text-gray-300 hover:text-red-500 text-2xl";
             fb.innerHTML = flaggedQuestions[idx] ? '<i class="fa-solid fa-flag"></i>' : '<i class="fa-regular fa-flag"></i>';
@@ -415,44 +416,87 @@
                     const val = userAnswers[idx]?userAnswers[idx][i]:null;
                     const div = document.createElement('div'); div.className = "bg-white border-2 border-gray-100 rounded-xl p-4 hover:border-orange-200 transition-all";
                     div.innerHTML = `<div class="font-medium text-gray-800 mb-2">${window.formatContent(stmt.text)}</div><div class="flex gap-4"><label class="flex-1 cursor-pointer hover:bg-green-50 p-2 rounded transition-colors"><input type="radio" name="tf-${idx}-${i}" value="true" ${val===true?'checked':''} class="mr-2 accent-green-600">Đúng</label><label class="flex-1 cursor-pointer hover:bg-red-50 p-2 rounded transition-colors"><input type="radio" name="tf-${idx}-${i}" value="false" ${val===false?'checked':''} class="mr-2 accent-red-600">Sai</label></div>`;
-                    div.querySelectorAll('input').forEach(inp => inp.onchange = (e) => { if(!userAnswers[idx]) userAnswers[idx]={}; userAnswers[idx][i]=(e.target.value==='true'); updatePalette(); });
+                    div.querySelectorAll('input').forEach(inp => inp.onchange = (e) => {
+                        if(!userAnswers[idx]) userAnswers[idx]={}; userAnswers[idx][i]=(e.target.value==='true'); updatePalette();
+                    });
                     dom.options.appendChild(div);
                 });
             } else if (q.type === 'short') {
                 const inp = document.createElement('input');
                 inp.className = "w-full p-4 border-2 rounded-xl font-bold text-lg outline-none focus:border-green-500 transition-all";
-                inp.placeholder = "Nhập đáp án...";
+                inp.placeholder = "Nhập đáp án của bạn...";
                 inp.value = userAnswers[idx] || '';
                 inp.onchange = (e) => { userAnswers[idx]=e.target.value; updatePalette(); };
                 dom.options.appendChild(inp);
             } else { 
-                // TỰ LUẬN (TEXT + ẢNH)
-                const wrapper = document.createElement('div'); wrapper.className = "space-y-3";
-                const ta = document.createElement('textarea');
-                ta.className = "w-full p-4 border-2 rounded-xl min-h-[150px] outline-none focus:border-purple-500 transition-all";
-                ta.placeholder = "Nhập bài làm hoặc tải ảnh...";
-                ta.id = `essay-text-${idx}`;
-                ta.value = (userAnswers[idx] || '').replace(/<img[^>]*>/g, '[Ảnh]'); 
-                ta.onchange = (e) => { const oldImgs = (userAnswers[idx] || '').match(/<img[^>]*>/g) || []; userAnswers[idx] = e.target.value + oldImgs.join(''); updatePalette(); };
-                
-                const uploadArea = document.createElement('div');
-                uploadArea.className = "border-2 border-dashed border-gray-300 rounded-xl p-4 bg-gray-50";
-                uploadArea.innerHTML = `<div class="flex items-center justify-between mb-3"><div class="text-sm font-bold text-gray-600"><i class="fa-solid fa-camera mr-2"></i>Chụp/Tải ảnh bài làm</div><label class="px-3 py-1.5 bg-white border border-gray-300 rounded-lg text-xs font-bold hover:bg-blue-50 cursor-pointer shadow-sm transition-all text-blue-600"><i class="fa-solid fa-plus mr-1"></i> Thêm ảnh<input type="file" accept="image/*" multiple capture="environment" class="hidden" onchange="handleStudentUpload(this, ${idx})"></label></div><div id="preview-area-${idx}" class="grid grid-cols-3 gap-2 empty:hidden"></div><div id="upload-actions-${idx}" class="hidden mt-3 pt-3 border-t border-gray-200 flex justify-end"><button onclick="autoNumberPages(${idx})" class="px-3 py-1.5 bg-orange-100 text-orange-600 rounded-lg text-xs font-bold hover:bg-orange-200 transition-colors"><i class="fa-solid fa-arrow-down-1-9 mr-1"></i> Đánh số & Lưu</button></div>`;
-                wrapper.appendChild(ta); wrapper.appendChild(uploadArea); dom.options.appendChild(wrapper);
+                // --- GIAO DIỆN TỰ LUẬN (TEXT ĐÃ BỎ, CHỈ CÒN ẢNH) ---
+                const wrapper = document.createElement('div');
+                // [FIX LỖI CHE MẤT] Thêm pb-24 để tạo khoảng trống cuộn trang lớn phía dưới
+                wrapper.className = "space-y-4 pb-24"; 
 
+                // 1. Hiển thị bài đã nộp (nếu có)
                 if (userAnswers[idx]) {
-                    const tempDiv = document.createElement('div'); tempDiv.innerHTML = userAnswers[idx];
-                    const imgs = tempDiv.querySelectorAll('img');
-                    if (imgs.length > 0) {
-                        const preview = uploadArea.querySelector(`#preview-area-${idx}`);
-                        imgs.forEach(img => { const d = document.createElement('div'); d.className = "relative group aspect-[3/4]"; d.innerHTML = `<img src="${img.src}" class="w-full h-full object-cover rounded-lg border shadow-sm"><div class="absolute inset-0 bg-black/10 rounded-lg"></div>`; preview.appendChild(d); });
-                        ta.value = userAnswers[idx].replace(/<img[^>]*>/g, '').trim(); 
-                    }
+                    const submittedDiv = document.createElement('div');
+                    submittedDiv.className = "bg-blue-50 p-4 rounded-xl border border-blue-200 mb-4";
+                    submittedDiv.innerHTML = `
+                        <div class="flex items-center gap-2 mb-2 text-blue-700 font-bold text-sm border-b border-blue-200 pb-2">
+                            <i class="fa-solid fa-check-circle"></i> Bài làm đã lưu:
+                        </div>
+                        <div class="submitted-content grid gap-2">${userAnswers[idx]}</div>
+                    `;
+                    wrapper.appendChild(submittedDiv);
                 }
+
+                // 2. Hai nút chức năng tách biệt
+                const actionGrid = document.createElement('div');
+                actionGrid.className = "grid grid-cols-2 gap-3";
+                actionGrid.innerHTML = `
+                    <label class="flex flex-col items-center justify-center p-4 border-2 border-dashed border-blue-300 rounded-xl bg-blue-50 text-blue-600 font-bold cursor-pointer hover:bg-blue-100 hover:shadow-md transition-all active:scale-95">
+                        <div class="w-10 h-10 bg-white rounded-full flex items-center justify-center shadow-sm mb-2 text-xl">
+                            <i class="fa-regular fa-image"></i>
+                        </div>
+                        <span class="text-xs uppercase tracking-wide">Chọn ảnh</span>
+                        <input type="file" accept="image/*" multiple class="hidden" onchange="handleStudentUpload(this, ${idx})">
+                    </label>
+                    
+                    <label class="flex flex-col items-center justify-center p-4 border-2 border-dashed border-purple-300 rounded-xl bg-purple-50 text-purple-600 font-bold cursor-pointer hover:bg-purple-100 hover:shadow-md transition-all active:scale-95">
+                        <div class="w-10 h-10 bg-white rounded-full flex items-center justify-center shadow-sm mb-2 text-xl">
+                            <i class="fa-solid fa-camera"></i>
+                        </div>
+                        <span class="text-xs uppercase tracking-wide">Chụp ảnh</span>
+                        <input type="file" accept="image/*" capture="environment" class="hidden" onchange="handleStudentUpload(this, ${idx})">
+                    </label>
+                `;
+                wrapper.appendChild(actionGrid);
+
+                // 3. Khu vực xem trước ảnh chuẩn bị nộp
+                const previewArea = document.createElement('div');
+                previewArea.id = `preview-area-${idx}`;
+                previewArea.className = "grid grid-cols-2 md:grid-cols-3 gap-3 mt-2 empty:hidden";
+                wrapper.appendChild(previewArea);
+
+                // 4. Nút Lưu (Chỉ hiện khi có ảnh mới)
+                const saveBtnArea = document.createElement('div');
+                saveBtnArea.id = `upload-actions-${idx}`;
+                saveBtnArea.className = "hidden mt-4 sticky bottom-20 z-10"; // Sticky để dễ bấm
+                saveBtnArea.innerHTML = `
+                    <button onclick="autoNumberPages(${idx})" class="w-full py-3 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-xl font-bold shadow-lg hover:shadow-xl transition-all transform active:scale-95 flex items-center justify-center gap-2">
+                        <i class="fa-solid fa-cloud-arrow-up"></i> Đóng dấu số trang & Nộp bài
+                    </button>
+                `;
+                wrapper.appendChild(saveBtnArea);
+
+                dom.options.appendChild(wrapper);
             }
 
-            if(window.MathJax) { MathJax.typesetPromise([dom.content, dom.options]).then(() => { if(window.renderTikz) window.renderTikz(); if(window.autoScaleTables) window.autoScaleTables(); }).catch(()=>{}); }
-            updatePalette(); closeAllSidebars();
+            if(window.MathJax) {
+                MathJax.typesetPromise([dom.content, dom.options]).then(() => {
+                    if(window.renderTikz) window.renderTikz();
+                    if(window.autoScaleTables) window.autoScaleTables(); 
+                }).catch(()=>{});
+            }
+            updatePalette();
+            closeAllSidebars();
         }
 
         function updatePalette() {
@@ -580,27 +624,54 @@
         window.removeStudentFile = (qIdx, fileIdx) => { window.tempStudentFiles[qIdx].splice(fileIdx, 1); renderStudentPreview(qIdx); if(window.tempStudentFiles[qIdx].length === 0) document.getElementById(`upload-actions-${qIdx}`).classList.add('hidden'); };
         
         window.autoNumberPages = async (qIdx) => {
-            const files = window.tempStudentFiles[qIdx]; if(!files || files.length === 0) return;
+            const files = window.tempStudentFiles[qIdx];
+            if(!files || files.length === 0) return;
+
             window.showToast("Đang xử lý ảnh và tải lên...", "info");
-            const uploadBtn = document.querySelector(`#upload-actions-${qIdx} button`); if(uploadBtn) { uploadBtn.disabled = true; uploadBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang tải lên...'; }
+            const uploadBtn = document.querySelector(`#upload-actions-${qIdx} button`);
+            if(uploadBtn) { uploadBtn.disabled = true; uploadBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang tải lên...'; }
+
             let htmlImgs = "";
             try {
                 for (let i = 0; i < files.length; i++) {
+                    // 1. Đóng dấu số trang
                     const markedFile = await watermarkImage(files[i], `Trang ${i + 1}/${files.length}`);
+                    
+                    // 2. Nén
                     const compressed = await compressImage(markedFile, 0.7, 1000);
-                    const formData = new FormData(); const fileName = `submissions/${currentUser.uid}_${Date.now()}_${i}.jpg`; formData.append('file', compressed, fileName);
+
+                    // 3. Upload
+                    const formData = new FormData();
+                    const fileName = `submissions/${currentUser.uid}_${Date.now()}_${i}.jpg`;
+                    formData.append('file', compressed, fileName);
+
                     const res = await fetch("https://upload-helper.phamngockhanh-942001.workers.dev/", { method: 'PUT', body: formData });
                     if(!res.ok) throw new Error("Lỗi upload ảnh");
                     const data = await res.json();
+                    
                     htmlImgs += `<img src="${data.url}" class="w-full max-w-md rounded-lg shadow-md my-2 border" loading="lazy">`;
                 }
-                const textArea = document.getElementById(`essay-text-${qIdx}`);
-                userAnswers[qIdx] = textArea.value + htmlImgs;
+
+                // [UPDATE QUAN TRỌNG] Lưu trực tiếp vào biến userAnswers (cộng dồn với ảnh cũ)
+                const currentContent = userAnswers[qIdx] || "";
+                userAnswers[qIdx] = currentContent + htmlImgs;
+                
+                // Dọn dẹp
                 window.tempStudentFiles[qIdx] = [];
-                document.getElementById(`preview-area-${qIdx}`).innerHTML = '<div class="col-span-3 text-green-600 text-xs font-bold text-center bg-green-50 p-2 rounded">✅ Đã tải ảnh lên thành công!</div>';
-                document.getElementById(`upload-actions-${qIdx}`).classList.add('hidden');
-                updatePalette(); window.showToast("Đã nộp ảnh thành công!", "success");
-            } catch (e) { console.error(e); window.customAlert("Lỗi tải ảnh: " + e.message, "error"); } finally { if(uploadBtn) { uploadBtn.disabled = false; uploadBtn.innerHTML = '<i class="fa-solid fa-arrow-down-1-9 mr-1"></i> Đánh số trang & Lưu'; } }
+                document.getElementById(`preview-area-${qIdx}`).innerHTML = ''; // Xóa preview
+                document.getElementById(`upload-actions-${qIdx}`).classList.add('hidden'); // Ẩn nút nộp
+                
+                // Load lại câu hỏi để hiển thị ảnh vừa nộp
+                renderQuestion(qIdx); 
+                
+                window.showToast("Đã nộp ảnh thành công!", "success");
+
+            } catch (e) {
+                console.error(e);
+                window.customAlert("Lỗi tải ảnh: " + e.message, "error");
+            } finally {
+                if(uploadBtn) { uploadBtn.disabled = false; uploadBtn.innerHTML = '<i class="fa-solid fa-cloud-arrow-up"></i> Đóng dấu số trang & Nộp bài'; }
+            }
         };
 
         window.fireConfetti = (score, maxScore = 10) => {
