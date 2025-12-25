@@ -750,21 +750,24 @@
 
         // --- HÀM UPDATE: SỬA LỖI HIỂN THỊ & NGĂN TỰ ĐỘNG XÓA ẢNH ---
         // --- HÀM FIX LỖI: CHÈN ẢNH AN TOÀN & GIỮ ẢNH TRÊN R2 ---
+       // --- HÀM FIX LỖI TOÀN DIỆN: CHÈN ẢNH AN TOÀN & GIỮ ẢNH TRÊN R2 ---
         async function uploadAndReplaceImage(file, batchId) {
             // 1. Nén ảnh
             const compressedBlob = await compressImage(file);
             if (!compressedBlob || compressedBlob.size === 0) throw new Error("Lỗi nén ảnh (File rỗng)");
 
             const formData = new FormData();
+            // Đặt tên file rõ ràng
             const fileName = `images/batch_${Date.now()}_${Math.random().toString(36).substr(2,6)}.jpg`;
             
-            // [QUAN TRỌNG] Bỏ dòng này để NGĂN CHẶN việc xóa ảnh khi tắt tab/rời trang
-            // sessionUploadedFiles.push(fileName); 
+            // [QUAN TRỌNG] Đã REMOVE dòng này để NGĂN CHẶN việc xóa ảnh khi tắt tab/rời trang
+            // sessionUploadedFiles.push(fileName); <--- DÒNG GÂY LỖI R2 TRỐNG RỖNG
 
             formData.append('file', compressedBlob, fileName);
 
-            // 2. Upload lên Cloudflare
-            const response = await fetch("https://upload-helper.phamngockhanh-942001.workers.dev/", {
+            // 2. Upload lên Cloudflare Worker
+            // Thêm timestamp để tránh cache
+            const response = await fetch("https://upload-helper.phamngockhanh-942001.workers.dev/?t=" + Date.now(), {
                 method: 'PUT',
                 body: formData
             });
@@ -774,7 +777,7 @@
             const url = data.url;
 
             if (!url) throw new Error("Server không trả về link ảnh");
-            console.log("Link ảnh đã tạo:", url); // Kiểm tra Console sẽ thấy link này
+            console.log("Link ảnh đã tạo (An toàn):", url); 
 
             // 3. Tạo thẻ ảnh mới (HTML chuẩn)
             const imgTag = `
@@ -788,7 +791,7 @@
                 </div>
             </div>`;
 
-            // 4. Thay thế vào nội dung câu hỏi (Dùng DOM Parser thay vì Regex)
+            // 4. Thay thế vào nội dung câu hỏi (Dùng DOM Parser an toàn tuyệt đối)
             let replacedCount = 0;
             window.questions.forEach(q => {
                 ['content', 'solution'].forEach(field => {
@@ -821,8 +824,10 @@
             if (replacedCount === 0) console.warn(`Không tìm thấy vị trí chèn ảnh ID: ${batchId}`);
 
             // 5. Cập nhật giao diện
+            // Xóa khỏi danh sách chờ upload
             pendingImageUploads = pendingImageUploads.filter(item => item.id !== batchId);
             
+            // Cập nhật các bảng điều khiển
             renderBatchImageModal();
             if (window.renderMissingImagesPanel) window.renderMissingImagesPanel();
             
