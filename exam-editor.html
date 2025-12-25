@@ -748,13 +748,12 @@
             document.getElementById('batchImageModal').classList.add('opacity-0', 'pointer-events-none');
         };
 
-        // --- HÀM MỚI HOÀN TOÀN: ĐƠN GIẢN HÓA TỐI ĐA ---
-        // --- HÀM CẬP NHẬT: XÓA KHOẢNG TRẮNG THỪA KHI TẢI ẢNH ---
+        // --- HÀM FIX: XÓA SẠCH CHỮ THỪA & DÒNG TRẮNG ---
         async function uploadAndReplaceImage(file, batchId) {
             // 1. Nén ảnh
             const compressedBlob = await compressImage(file);
             const formData = new FormData();
-            const fileName = `img_${Date.now()}.jpg`; // Tên file đơn giản
+            const fileName = `img_${Date.now()}.jpg`;
             formData.append('file', compressedBlob, fileName);
 
             // 2. Upload
@@ -770,35 +769,62 @@
             const data = await response.json();
             const url = data.url;
 
-            // 3. TẠO MÃ ẢNH GỌN GÀNG (Giảm margin my-2 xuống my-1 hoặc bỏ hẳn nếu muốn sát rạt)
+            // 3. Mã HTML ảnh đơn giản (Không overlay, không khung trắng)
             const simpleImgTag = `<div class="flex justify-center my-1"><img src="${url}" class="rounded-lg shadow-sm" style="max-height:350px;" loading="lazy"></div>`;
 
-            // 4. THAY THẾ + XÓA KHOẢNG TRẮNG THỪA
-            // Regex này tìm: [Khoảng trắng/Enter thừa] + [Khung Placeholder] + [Khoảng trắng/Enter thừa]
-            const regex = new RegExp(`\\s*<div[^>]*data-id=['"]${batchId}['"][^>]*>[\\s\\S]*?<\\/div>\\s*`, 'gi');
-
+            // 4. THAY THẾ BẰNG DOM (Quan trọng: Để xóa sạch chữ bên trong khung)
+            let replacedCount = 0;
             window.questions.forEach(q => {
-                if (q.content && q.content.includes(batchId)) {
-                    // Thay thế bằng ảnh + 1 ký tự xuống dòng duy nhất (\n) để không bị dính chùm vào chữ
-                    q.content = q.content.replace(regex, '\n' + simpleImgTag + '\n');
-                }
-                if (q.solution && q.solution.includes(batchId)) {
-                    q.solution = q.solution.replace(regex, '\n' + simpleImgTag + '\n');
-                }
+                ['content', 'solution'].forEach(field => {
+                    if (q[field] && q[field].includes(batchId)) {
+                        // Tạo DOM ảo
+                        const tempDiv = document.createElement('div');
+                        tempDiv.innerHTML = q[field];
+
+                        // Tìm chính xác thẻ khung bằng ID
+                        const placeholder = tempDiv.querySelector(`div[data-id="${batchId}"]`);
+                        
+                        if (placeholder) {
+                            // Thay thế TOÀN BỘ khung bằng ảnh (Bay màu hết chữ bên trong)
+                            placeholder.outerHTML = "___IMAGE_MARKER___"; 
+                            
+                            // Xử lý chuỗi để xóa dòng trắng thừa
+                            // Tìm: [xuống dòng thừa] + MARKER + [xuống dòng thừa]
+                            let newHTML = tempDiv.innerHTML;
+                            // Regex này tìm marker và ăn hết các dấu xuống dòng (\n), thẻ <br> hoặc khoảng trắng bao quanh nó
+                            newHTML = newHTML.replace(/(\s*<br\s*\/?>\s*|\s+)*___IMAGE_MARKER___(\s*<br\s*\/?>\s*|\s+)*/gi, '\n' + simpleImgTag + '\n');
+                            
+                            q[field] = newHTML;
+                            replacedCount++;
+                        }
+                    }
+                });
             });
 
             // 5. Cập nhật Editor ngay lập tức
             const editorContent = document.getElementById('editContent');
             const editorSolution = document.getElementById('editSolution');
             
-            if (editorContent && editorContent.value.includes(batchId)) {
-                editorContent.value = editorContent.value.replace(regex, '\n' + simpleImgTag + '\n');
-                window.autoSaveMemory(); 
-            }
-            if (editorSolution && editorSolution.value.includes(batchId)) {
-                editorSolution.value = editorSolution.value.replace(regex, '\n' + simpleImgTag + '\n');
-                window.autoSaveMemory();
-            }
+            // Hàm helper để update text area
+            const updateTextArea = (el) => {
+                if (el && el.value.includes(batchId)) {
+                    // Logic tương tự: DOM Parser để clean sạch
+                    const tempDiv = document.createElement('div');
+                    tempDiv.innerHTML = el.value;
+                    const ph = tempDiv.querySelector(`div[data-id="${batchId}"]`);
+                    if(ph) {
+                        ph.outerHTML = "___IMAGE_MARKER___";
+                        let txt = tempDiv.innerHTML;
+                        // Thay thế và xóa khoảng trắng
+                        txt = txt.replace(/(\s*<br\s*\/?>\s*|\s+)*___IMAGE_MARKER___(\s*<br\s*\/?>\s*|\s+)*/gi, '\n' + simpleImgTag + '\n');
+                        el.value = txt;
+                    }
+                }
+            };
+
+            updateTextArea(editorContent);
+            updateTextArea(editorSolution);
+            window.autoSaveMemory();
 
             // 6. Dọn dẹp
             pendingImageUploads = pendingImageUploads.filter(item => item.id !== batchId);
@@ -1126,6 +1152,7 @@
         };
 
         // --- HÀM CẬP NHẬT: XÓA KHOẢNG TRẮNG CHO TIKZ/VPS ---
+        // --- HÀM FIX: XÓA CHỮ THỪA CHO TIKZ ---
         window.handleAutoCompileAll = async () => {
             document.getElementById('importModeModal').classList.add('opacity-0', 'pointer-events-none');
             const pm = document.getElementById('progressModal');
@@ -1139,22 +1166,28 @@
                 const pct = Math.round((current / total) * 100);
                 document.getElementById('compileProgressBar').style.width = `${pct}%`;
                 document.getElementById('compileProgressText').innerText = `${current}/${total}`;
-                document.getElementById('compilePercent').innerText = `${pct}%`;
             };
             updateProgress();
 
             for (const item of tikzItems) {
                 try {
                     const url = await compileTikZToImage(item.contentCode);
-                    // Mã ảnh gọn
-                    const imgTag = `<div class="flex justify-center my-1"><img src="${url}" class="rounded-lg shadow-sm" style="max-height:350px;" loading="lazy"></div>`;
-                    
-                    // Regex xóa khoảng trắng thừa bao quanh
-                    const regex = new RegExp(`\\s*<div[^>]*data-id=['"]${item.id}['"][^>]*>[\\s\\S]*?<\\/div>\\s*`, 'gi');
+                    const simpleImgTag = `<div class="flex justify-center my-1"><img src="${url}" class="rounded-lg shadow-sm" style="max-height:350px;" loading="lazy"></div>`;
                     
                     window.questions.forEach(q => {
-                        if (q.content && q.content.includes(item.id)) q.content = q.content.replace(regex, '\n' + imgTag + '\n');
-                        if (q.solution && q.solution.includes(item.id)) q.solution = q.solution.replace(regex, '\n' + imgTag + '\n');
+                        ['content', 'solution'].forEach(field => {
+                            if (q[field] && q[field].includes(item.id)) {
+                                const tempDiv = document.createElement('div');
+                                tempDiv.innerHTML = q[field];
+                                const ph = tempDiv.querySelector(`div[data-id="${item.id}"]`);
+                                if(ph) {
+                                    ph.outerHTML = "___IMAGE_MARKER___";
+                                    let newHTML = tempDiv.innerHTML;
+                                    newHTML = newHTML.replace(/(\s*<br\s*\/?>\s*|\s+)*___IMAGE_MARKER___(\s*<br\s*\/?>\s*|\s+)*/gi, '\n' + simpleImgTag + '\n');
+                                    q[field] = newHTML;
+                                }
+                            }
+                        });
                     });
                     item._done = true;
                 } catch (e) {
