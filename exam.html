@@ -565,23 +565,76 @@
                 
                 if (examData.showScore === 'immediate' || (examData.showScore === 'after_exam' && timeLeft <= 0)) { document.getElementById('scoreSection').classList.remove('hidden'); }
                 
+                // --- LOGIC HIỂN THỊ LỜI GIẢI (FIX: ƯU TIÊN CÀI ĐẶT TỪ KHÓA HỌC) ---
                 const btnView = document.getElementById('btnViewSolution');
                 const urlParamsCheck = new URLSearchParams(window.location.search);
-                const isCourseStudent = urlParamsCheck.get('courseId') || urlParamsCheck.getAll('mode').includes('course');
-                let showResultType = examData.showResult;
-                if(isCourseStudent && (showResultType === 'pass_score' || showResultType === 'fee_qpoint')) showResultType = 'immediate';
-                const isTimeOk = (showResultType !== 'after_exam' || timeLeft <= 0);
+                const isCourseContext = urlParamsCheck.get('courseId') || urlParamsCheck.getAll('mode').includes('course');
+                
+                // 1. Mặc định lấy cài đặt gốc từ Đề thi (Exam Editor)
+                let finalMode = examData.showResult; // immediate, after_exam, never, pass_score, fee_qpoint
+                let finalPassScore = examData.passScore || 5;
+                let finalFee = examData.feeQpoint || 0;
 
-                if (showResultType === 'never') btnView.classList.add('hidden');
-                else if (showResultType === 'pass_score') {
-                    const reqScore = examData.passScore || 5;
-                    if (score >= reqScore) { btnView.classList.remove('hidden'); btnView.onclick = viewDetailSolutions; } 
-                    else { btnView.classList.remove('hidden'); btnView.classList.replace('bg-orange-100', 'bg-gray-200'); btnView.classList.replace('text-orange-600', 'text-gray-500'); btnView.innerHTML = `<i class="fa-solid fa-lock mr-2"></i> Đạt ${reqScore}đ để xem`; btnView.onclick = () => window.customAlert(`Bạn cần đạt tối thiểu ${reqScore} điểm để mở khóa lời giải. Hãy làm lại nhé!`, 'warning'); }
+                // 2. Kiểm tra xem Khóa học có áp đặt cài đặt riêng không (Override)
+                if (isCourseContext) {
+                    // Lấy tham số từ URL (do Course Player truyền sang dựa trên cấu hình trong Course Manager)
+                    const courseMinScore = urlParamsCheck.get('minScore');   // quizMinScore
+                    const courseViewPrice = urlParamsCheck.get('viewPrice'); // quizViewPrice
+
+                    // ƯU TIÊN 1: Nếu khóa học yêu cầu Điểm tối thiểu (quizMinScore có giá trị)
+                    if (courseMinScore !== null && courseMinScore !== "" && !isNaN(courseMinScore)) {
+                        finalMode = 'pass_score';
+                        finalPassScore = parseFloat(courseMinScore);
+                    }
+                    // ƯU TIÊN 2: Nếu khóa học yêu cầu Trả phí (và không yêu cầu điểm)
+                    else if (courseViewPrice !== null && courseViewPrice !== "" && parseInt(courseViewPrice) > 0) {
+                        finalMode = 'fee_qpoint';
+                        finalFee = parseInt(courseViewPrice);
+                    }
+                    // Lưu ý: Nếu khóa học để trống cả 2 thông số trên -> Sẽ tự động dùng cài đặt gốc của đề thi
+                }
+
+                // 3. Thực thi Logic hiển thị dựa trên finalMode đã chốt
+                const isTimeOk = (finalMode !== 'after_exam' || timeLeft <= 0);
+
+                if (finalMode === 'never') {
+                    btnView.classList.add('hidden');
                 } 
-                else if (showResultType === 'fee_qpoint') {
-                    const fee = examData.feeQpoint || 0; btnView.classList.remove('hidden'); btnView.className = "w-full py-3 rounded-xl bg-gradient-to-r from-yellow-400 to-orange-500 text-white font-bold hover:shadow-lg transition-all"; btnView.innerHTML = `<i class="fa-solid fa-unlock-keyhole mr-2"></i> Mở khóa lời giải (${fee} Qpoint)`; btnView.onclick = () => window.handlePayAndShowSolution(fee);
+                else if (finalMode === 'pass_score') {
+                    // Chế độ: Đạt điểm tối thiểu (Của Khóa học hoặc Đề thi)
+                    if (score >= finalPassScore) {
+                        btnView.classList.remove('hidden');
+                        btnView.classList.replace('bg-gray-200', 'bg-orange-100');
+                        btnView.classList.replace('text-gray-500', 'text-orange-600');
+                        btnView.innerHTML = `<i class="fa-solid fa-eye mr-2"></i> Xem lời giải chi tiết`;
+                        btnView.onclick = viewDetailSolutions;
+                    } else {
+                        btnView.classList.remove('hidden');
+                        btnView.classList.replace('bg-orange-100', 'bg-gray-200');
+                        btnView.classList.replace('text-orange-600', 'text-gray-500');
+                        btnView.innerHTML = `<i class="fa-solid fa-lock mr-2"></i> Đạt ${finalPassScore}đ để xem`;
+                        btnView.onclick = () => window.customAlert(`Bạn cần đạt tối thiểu ${finalPassScore} điểm để mở khóa lời giải. Hãy làm lại nhé!`, 'warning');
+                    }
                 } 
-                else { if (isTimeOk) { btnView.classList.remove('hidden'); btnView.onclick = viewDetailSolutions; } else { btnView.classList.add('hidden'); } }
+                else if (finalMode === 'fee_qpoint') {
+                    // Chế độ: Trả phí Qpoint
+                    btnView.classList.remove('hidden');
+                    btnView.className = "w-full py-3 rounded-xl bg-gradient-to-r from-yellow-400 to-orange-500 text-white font-bold hover:shadow-lg transition-all";
+                    btnView.innerHTML = `<i class="fa-solid fa-unlock-keyhole mr-2"></i> Mở khóa lời giải (${finalFee} Qpoint)`;
+                    btnView.onclick = () => window.handlePayAndShowSolution(finalFee);
+                } 
+                else {
+                    // Chế độ: Ngay lập tức (immediate) hoặc Hết giờ (after_exam)
+                    if (isTimeOk) {
+                        btnView.classList.remove('hidden');
+                        btnView.classList.replace('bg-gray-200', 'bg-orange-100');
+                        btnView.classList.replace('text-gray-500', 'text-orange-600');
+                        btnView.innerHTML = `<i class="fa-solid fa-eye mr-2"></i> Xem lời giải chi tiết`;
+                        btnView.onclick = viewDetailSolutions;
+                    } else {
+                        btnView.classList.add('hidden');
+                    }
+                }
                 
                 document.getElementById('resultModal').classList.remove('hidden');
                 setTimeout(() => { document.getElementById('resultModal').classList.remove('opacity-0'); document.getElementById('resultModalContent').classList.add('scale-100'); }, 50);
