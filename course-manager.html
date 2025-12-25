@@ -1017,14 +1017,15 @@ function renderCurriculumTree() {
 
         // --- EXAM SELECTOR ---
         window.openExamSelector = () => { document.getElementById('examSelectorModal').classList.remove('hidden'); loadExamManager(null); };
+        // --- HÀM TẢI QUẢN LÝ ĐỀ THI (ĐÃ FIX LỖI HIỂN THỊ ĐỀ NGOÀI GỐC) ---
         window.loadExamManager = async (folderId) => {
             const container = document.getElementById('selectorContent');
             const breadcrumb = document.getElementById('selectorBreadcrumb');
             
-            // UI Loading
+            // Hiển thị Loading
             container.innerHTML = '<div class="col-span-full text-center py-10 text-gray-400 flex flex-col items-center"><i class="fa-solid fa-spinner fa-spin text-2xl mb-2"></i><span>Đang tải dữ liệu...</span></div>';
             
-            // Breadcrumb UI
+            // Cập nhật Breadcrumb (Thanh điều hướng)
             breadcrumb.innerHTML = folderId 
                 ? `<span class="text-gray-400 cursor-pointer hover:text-brand" onclick="loadExamManager(null)"><i class="fa-solid fa-home"></i></span> <span class="text-gray-300">/</span> <span class="font-bold text-gray-700">Thư mục chi tiết</span>`
                 : `<span class="font-bold text-brand"><i class="fa-solid fa-home"></i> Ngân hàng đề thi (Gốc)</span>`;
@@ -1033,23 +1034,23 @@ function renderCurriculumTree() {
                 // 1. TẢI THƯ MỤC CON
                 const qF = query(collection(db, "folders"), where("parentId", "==", folderId || null));
                 
-                // 2. TẢI ĐỀ THI (LOGIC MỚI: QUÉT SẠCH MỌI TRƯỜNG HỢP)
+                // 2. TẢI ĐỀ THI
                 let qE;
                 if (folderId) {
-                    // Nếu đang trong thư mục: Tìm chính xác folderId đó
+                    // Nếu đang trong thư mục cụ thể: Tìm chính xác folderId đó
                     qE = query(collection(db, "exams"), where("folderId", "==", folderId));
                 } else {
-                    // [FIX QUAN TRỌNG] Nếu ở Gốc: Tải danh sách đề để lọc phía Client
-                    // Cách này đảm bảo bắt được cả đề cũ (không có folderId) và đề mới (folderId=null)
+                    // [FIX QUAN TRỌNG] Nếu ở Gốc: Tải toàn bộ collection "exams"
+                    // Cách này đảm bảo lấy được cả những đề thi KHÔNG CÓ trường folderId (đề mới tạo/đề cũ)
                     qE = collection(db, "exams");
                 }
 
-                // Chạy song song 2 luồng tải
+                // Chạy song song 2 luồng tải để tối ưu tốc độ
                 const [snapF, snapE] = await Promise.all([getDocs(qF), getDocs(qE)]);
-                
-                container.innerHTML = '';
 
-                // --- RENDER FOLDERS (THƯ MỤC) ---
+                container.innerHTML = '';
+                
+                // --- HIỂN THỊ THƯ MỤC ---
                 snapF.forEach(d => {
                     const el = document.createElement('div');
                     el.className = "bg-white p-4 rounded-xl border hover:border-brand cursor-pointer flex flex-col items-center gap-2 aspect-square justify-center shadow-sm transition-all hover:bg-teal-50";
@@ -1061,30 +1062,30 @@ function renderCurriculumTree() {
                     container.appendChild(el);
                 });
 
-                // --- RENDER EXAMS (ĐỀ THI) ---
-                let examCount = 0;
+                // --- HIỂN THỊ ĐỀ THI ---
+                let hasItem = false; // Biến kiểm tra xem có item nào được vẽ không
+                
                 snapE.forEach(d => {
                     const e = d.data();
-                    
-                    // [BỘ LỌC] Kiểm tra xem đề thi có thuộc thư mục hiện tại không
                     let shouldShow = false;
-                    
+
+                    // [BỘ LỌC CLIENT] Kiểm tra đề thi có thuộc view hiện tại không
                     if (folderId) {
-                        // Nếu đang trong thư mục: Query đã lọc sẵn rồi, cứ thế hiện
+                        // Nếu đang trong thư mục: Query đã lọc sẵn rồi -> Hiện luôn
                         shouldShow = true;
                     } else {
-                        // Nếu đang ở Gốc: Chỉ hiện đề KHÔNG CÓ folderId hoặc folderId rỗng/null
+                        // Nếu đang ở Gốc: Chỉ hiện đề khi folderId bị thiếu, bị null, hoặc là chuỗi rỗng
                         if (!e.folderId || e.folderId === "" || e.folderId === null) {
                             shouldShow = true;
                         }
                     }
 
                     if (shouldShow) {
-                        examCount++;
+                        hasItem = true;
                         const el = document.createElement('div');
                         el.className = "bg-white p-4 rounded-xl border hover:border-orange-500 cursor-pointer flex flex-col items-center gap-2 aspect-square justify-center shadow-sm group relative transition-all hover:shadow-md";
                         el.onclick = () => {
-                            // Logic chọn đề
+                            // Logic chọn đề thi vào bài học
                             if(activeItemIdx > -1) {
                                 const item = currentCurriculum[activeChapIdx].lessons[activeLesIdx].items[activeItemIdx];
                                 item.examId = d.id;
@@ -1104,11 +1105,11 @@ function renderCurriculumTree() {
                     }
                 });
 
-                // Hiển thị thông báo nếu thư mục trống
-                if (container.children.length === 0) {
+                // Hiển thị thông báo nếu trống trơn
+                if (snapF.empty && !hasItem) {
                     container.innerHTML = `
                         <div class="col-span-full text-center text-gray-300 py-10 flex flex-col items-center">
-                            <i class="fa-regular fa-folder-open text-4xl mb-2 opacity-50"></i>
+                            <i class="fa-regular fa-folder-open text-3xl mb-2 opacity-50"></i>
                             <span class="text-sm">Thư mục trống</span>
                         </div>`;
                 }
