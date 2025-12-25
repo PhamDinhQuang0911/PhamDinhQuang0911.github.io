@@ -305,3 +305,83 @@ export const watermarkImage = (file, text) => {
         };
     });
 };
+// ============================================================================
+// 5. CÁC HÀM BỔ SUNG (RENDER TIKZ, XỬ LÝ ẢNH, WATERMARK)
+// ============================================================================
+
+export const renderTikz = () => {
+    const scripts = document.querySelectorAll('script[type="text/tikz"]');
+    if (scripts.length === 0) return;
+    const oldScript = document.querySelector('script[src*="tikzjax.js"]');
+    if (oldScript) oldScript.remove();
+    const newScript = document.createElement('script');
+    newScript.src = "https://tikzjax.com/v1/tikzjax.js?v=" + Date.now();
+    document.head.appendChild(newScript);
+};
+
+export const compressImage = (file, quality = 0.7, maxWidth = 1000) => {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = (event) => {
+            const img = new Image();
+            img.src = event.target.result;
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                let width = img.width;
+                let height = img.height;
+                if (width > maxWidth) {
+                    height *= maxWidth / width;
+                    width = maxWidth;
+                }
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, width, height);
+                canvas.toBlob((blob) => resolve(blob), 'image/jpeg', quality);
+            };
+            img.onerror = (err) => reject(err);
+        };
+        reader.onerror = (err) => reject(err);
+    });
+};
+
+export const watermarkImage = (file, text) => {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = (event) => {
+            const img = new Image();
+            img.src = event.target.result;
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                canvas.width = img.width;
+                canvas.height = img.height;
+
+                // Vẽ ảnh gốc
+                ctx.drawImage(img, 0, 0);
+
+                // Cấu hình đóng dấu (Góc trên phải, màu đỏ)
+                const fontSize = Math.max(20, Math.floor(img.width / 25));
+                ctx.font = `bold ${fontSize}px Arial`;
+                ctx.fillStyle = "red";
+                ctx.textAlign = "right";
+                ctx.textBaseline = "top";
+                
+                const textWidth = ctx.measureText(text).width;
+                ctx.fillStyle = "rgba(255, 255, 255, 0.7)";
+                ctx.fillRect(canvas.width - textWidth - 20, 10, textWidth + 10, fontSize + 10);
+
+                ctx.fillStyle = "red";
+                ctx.fillText(text, canvas.width - 15, 15);
+
+                canvas.toBlob((blob) => {
+                    const newFile = new File([blob], file.name, { type: 'image/jpeg' });
+                    resolve(newFile);
+                }, 'image/jpeg', 0.8);
+            };
+            img.onerror = (err) => reject(err);
+        };
+    });
+};
