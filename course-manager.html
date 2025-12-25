@@ -1020,7 +1020,7 @@ function renderCurriculumTree() {
         window.loadExamManager = async (folderId) => {
             const container = document.getElementById('selectorContent');
             const breadcrumb = document.getElementById('selectorBreadcrumb');
-            container.innerHTML = '<div class="col-span-full text-center py-10 text-gray-400">Đang tải...</div>';
+            container.innerHTML = '<div class="col-span-full text-center py-10 text-gray-400"><i class="fa-solid fa-spinner fa-spin mr-2"></i>Đang tải dữ liệu...</div>';
             
             // Breadcrumb UI
             breadcrumb.innerHTML = folderId 
@@ -1028,28 +1028,54 @@ function renderCurriculumTree() {
                 : `<span class="font-bold text-brand"><i class="fa-solid fa-home"></i> Gốc</span>`;
 
             try {
-                // Fetch Data
+                // 1. TẢI THƯ MỤC (Logic cũ vẫn ổn)
                 const qF = query(collection(db, "folders"), where("parentId", "==", folderId || null));
-                const qE = query(collection(db, "exams"), where("folderId", "==", folderId || null));
-                const [snapF, snapE] = await Promise.all([getDocs(qF), getDocs(qE)]);
+                
+                // 2. TẢI ĐỀ THI (LOGIC MỚI: QUÉT SẠCH HƠN)
+                let promises = [getDocs(qF)];
+                
+                if (folderId) {
+                    // Nếu đang trong thư mục: Tìm chính xác folderId
+                    const qE = query(collection(db, "exams"), where("folderId", "==", folderId));
+                    promises.push(getDocs(qE));
+                } else {
+                    // [FIX] Nếu ở Thư mục Gốc: Tìm cả folderId = null VÀ folderId = "" (rỗng)
+                    // Vì một số đề cũ có thể lưu dạng rỗng thay vì null
+                    const qE_Null = query(collection(db, "exams"), where("folderId", "==", null));
+                    const qE_Empty = query(collection(db, "exams"), where("folderId", "==", ""));
+                    promises.push(getDocs(qE_Null));
+                    promises.push(getDocs(qE_Empty));
+                }
 
+                const results = await Promise.all(promises);
+                const snapF = results[0]; // Kết quả Folders
+                
                 container.innerHTML = '';
+
+                // RENDER FOLDERS
                 snapF.forEach(d => {
                     const el = document.createElement('div');
-                    el.className = "bg-white p-4 rounded-xl border hover:border-brand cursor-pointer flex flex-col items-center gap-2 aspect-square justify-center shadow-sm";
+                    el.className = "bg-white p-4 rounded-xl border hover:border-brand cursor-pointer flex flex-col items-center gap-2 aspect-square justify-center shadow-sm transition-all hover:bg-teal-50";
                     el.onclick = () => loadExamManager(d.id);
                     el.innerHTML = `<i class="fa-solid fa-folder text-4xl text-yellow-400"></i><div class="text-xs font-bold text-gray-700 text-center">${d.data().name}</div>`;
                     container.appendChild(el);
                 });
-                snapE.forEach(d => {
-                    const e = d.data();
+
+                // RENDER EXAMS (GỘP KẾT QUẢ TỪ CÁC QUERY)
+                const renderedExams = new Set(); // Dùng Set để tránh trùng lặp
+                
+                const renderExamItem = (doc) => {
+                    if (renderedExams.has(doc.id)) return; // Bỏ qua nếu đã vẽ rồi
+                    renderedExams.add(doc.id);
+
+                    const e = doc.data();
                     const el = document.createElement('div');
-                    el.className = "bg-white p-4 rounded-xl border hover:border-orange-500 cursor-pointer flex flex-col items-center gap-2 aspect-square justify-center shadow-sm group relative";
+                    el.className = "bg-white p-4 rounded-xl border hover:border-orange-500 cursor-pointer flex flex-col items-center gap-2 aspect-square justify-center shadow-sm group relative transition-all hover:shadow-md";
                     el.onclick = () => {
-                        // Select Exam
+                        // Select Exam logic
                         if(activeItemIdx > -1) {
                             const item = currentCurriculum[activeChapIdx].lessons[activeLesIdx].items[activeItemIdx];
-                            item.examId = d.id;
+                            item.examId = doc.id;
                             item.examTitle = e.title;
                             document.getElementById('selectedExamTitle').innerText = e.title;
                             document.getElementById('selectedExamInfo').classList.remove('hidden');
@@ -1057,11 +1083,24 @@ function renderCurriculumTree() {
                             window.showToast(`Đã chọn: ${e.title}`);
                         }
                     };
-                    el.innerHTML = `<i class="fa-solid fa-file-lines text-3xl text-gray-400 group-hover:text-orange-500"></i><div class="text-xs font-bold text-gray-700 text-center line-clamp-2">${e.title}</div>`;
+                    el.innerHTML = `<i class="fa-solid fa-file-lines text-3xl text-gray-300 group-hover:text-orange-500 transition-colors"></i><div class="text-xs font-bold text-gray-700 text-center line-clamp-2">${e.title}</div>`;
                     container.appendChild(el);
-                });
-                if(snapF.empty && snapE.empty) container.innerHTML = '<div class="col-span-full text-center text-gray-300 py-10">Thư mục trống</div>';
-            } catch(e) { container.innerHTML = `<div class="text-red-500 col-span-full">${e.message}</div>`; }
+                };
+
+                // Duyệt qua tất cả các snapshot Exam trả về (results[1], results[2]...)
+                for (let i = 1; i < results.length; i++) {
+                    results[i].forEach(renderExamItem);
+                }
+
+                // Hiển thị thông báo trống nếu không có gì
+                if (container.children.length === 0) {
+                    container.innerHTML = '<div class="col-span-full text-center text-gray-300 py-10 flex flex-col items-center"><i class="fa-regular fa-folder-open text-3xl mb-2"></i>Thư mục trống</div>';
+                }
+
+            } catch(e) { 
+                console.error(e);
+                container.innerHTML = `<div class="text-red-500 col-span-full text-center text-sm">Lỗi tải dữ liệu: ${e.message}</div>`; 
+            }
         };
 
         window.saveCurriculum = async () => {
