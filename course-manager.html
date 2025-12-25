@@ -1020,86 +1020,102 @@ function renderCurriculumTree() {
         window.loadExamManager = async (folderId) => {
             const container = document.getElementById('selectorContent');
             const breadcrumb = document.getElementById('selectorBreadcrumb');
-            container.innerHTML = '<div class="col-span-full text-center py-10 text-gray-400"><i class="fa-solid fa-spinner fa-spin mr-2"></i>Đang tải dữ liệu...</div>';
+            
+            // UI Loading
+            container.innerHTML = '<div class="col-span-full text-center py-10 text-gray-400 flex flex-col items-center"><i class="fa-solid fa-spinner fa-spin text-2xl mb-2"></i><span>Đang tải dữ liệu...</span></div>';
             
             // Breadcrumb UI
             breadcrumb.innerHTML = folderId 
-                ? `<span class="text-gray-400 cursor-pointer hover:text-brand" onclick="loadExamManager(null)"><i class="fa-solid fa-home"></i></span> <span class="text-gray-300">/</span> <span class="font-bold text-gray-700">Thư mục</span>`
-                : `<span class="font-bold text-brand"><i class="fa-solid fa-home"></i> Gốc</span>`;
+                ? `<span class="text-gray-400 cursor-pointer hover:text-brand" onclick="loadExamManager(null)"><i class="fa-solid fa-home"></i></span> <span class="text-gray-300">/</span> <span class="font-bold text-gray-700">Thư mục chi tiết</span>`
+                : `<span class="font-bold text-brand"><i class="fa-solid fa-home"></i> Ngân hàng đề thi (Gốc)</span>`;
 
             try {
-                // 1. TẢI THƯ MỤC (Logic cũ vẫn ổn)
+                // 1. TẢI THƯ MỤC CON
                 const qF = query(collection(db, "folders"), where("parentId", "==", folderId || null));
                 
-                // 2. TẢI ĐỀ THI (LOGIC MỚI: QUÉT SẠCH HƠN)
-                let promises = [getDocs(qF)];
-                
+                // 2. TẢI ĐỀ THI (LOGIC MỚI: QUÉT SẠCH MỌI TRƯỜNG HỢP)
+                let qE;
                 if (folderId) {
-                    // Nếu đang trong thư mục: Tìm chính xác folderId
-                    const qE = query(collection(db, "exams"), where("folderId", "==", folderId));
-                    promises.push(getDocs(qE));
+                    // Nếu đang trong thư mục: Tìm chính xác folderId đó
+                    qE = query(collection(db, "exams"), where("folderId", "==", folderId));
                 } else {
-                    // [FIX] Nếu ở Thư mục Gốc: Tìm cả folderId = null VÀ folderId = "" (rỗng)
-                    // Vì một số đề cũ có thể lưu dạng rỗng thay vì null
-                    const qE_Null = query(collection(db, "exams"), where("folderId", "==", null));
-                    const qE_Empty = query(collection(db, "exams"), where("folderId", "==", ""));
-                    promises.push(getDocs(qE_Null));
-                    promises.push(getDocs(qE_Empty));
+                    // [FIX QUAN TRỌNG] Nếu ở Gốc: Tải danh sách đề để lọc phía Client
+                    // Cách này đảm bảo bắt được cả đề cũ (không có folderId) và đề mới (folderId=null)
+                    qE = collection(db, "exams");
                 }
 
-                const results = await Promise.all(promises);
-                const snapF = results[0]; // Kết quả Folders
+                // Chạy song song 2 luồng tải
+                const [snapF, snapE] = await Promise.all([getDocs(qF), getDocs(qE)]);
                 
                 container.innerHTML = '';
 
-                // RENDER FOLDERS
+                // --- RENDER FOLDERS (THƯ MỤC) ---
                 snapF.forEach(d => {
                     const el = document.createElement('div');
                     el.className = "bg-white p-4 rounded-xl border hover:border-brand cursor-pointer flex flex-col items-center gap-2 aspect-square justify-center shadow-sm transition-all hover:bg-teal-50";
                     el.onclick = () => loadExamManager(d.id);
-                    el.innerHTML = `<i class="fa-solid fa-folder text-4xl text-yellow-400"></i><div class="text-xs font-bold text-gray-700 text-center">${d.data().name}</div>`;
+                    el.innerHTML = `
+                        <i class="fa-solid fa-folder text-4xl text-yellow-400 drop-shadow-sm"></i>
+                        <div class="text-xs font-bold text-gray-700 text-center truncate w-full px-2">${d.data().name}</div>
+                    `;
                     container.appendChild(el);
                 });
 
-                // RENDER EXAMS (GỘP KẾT QUẢ TỪ CÁC QUERY)
-                const renderedExams = new Set(); // Dùng Set để tránh trùng lặp
-                
-                const renderExamItem = (doc) => {
-                    if (renderedExams.has(doc.id)) return; // Bỏ qua nếu đã vẽ rồi
-                    renderedExams.add(doc.id);
-
-                    const e = doc.data();
-                    const el = document.createElement('div');
-                    el.className = "bg-white p-4 rounded-xl border hover:border-orange-500 cursor-pointer flex flex-col items-center gap-2 aspect-square justify-center shadow-sm group relative transition-all hover:shadow-md";
-                    el.onclick = () => {
-                        // Select Exam logic
-                        if(activeItemIdx > -1) {
-                            const item = currentCurriculum[activeChapIdx].lessons[activeLesIdx].items[activeItemIdx];
-                            item.examId = doc.id;
-                            item.examTitle = e.title;
-                            document.getElementById('selectedExamTitle').innerText = e.title;
-                            document.getElementById('selectedExamInfo').classList.remove('hidden');
-                            document.getElementById('examSelectorModal').classList.add('hidden');
-                            window.showToast(`Đã chọn: ${e.title}`);
+                // --- RENDER EXAMS (ĐỀ THI) ---
+                let examCount = 0;
+                snapE.forEach(d => {
+                    const e = d.data();
+                    
+                    // [BỘ LỌC] Kiểm tra xem đề thi có thuộc thư mục hiện tại không
+                    let shouldShow = false;
+                    
+                    if (folderId) {
+                        // Nếu đang trong thư mục: Query đã lọc sẵn rồi, cứ thế hiện
+                        shouldShow = true;
+                    } else {
+                        // Nếu đang ở Gốc: Chỉ hiện đề KHÔNG CÓ folderId hoặc folderId rỗng/null
+                        if (!e.folderId || e.folderId === "" || e.folderId === null) {
+                            shouldShow = true;
                         }
-                    };
-                    el.innerHTML = `<i class="fa-solid fa-file-lines text-3xl text-gray-300 group-hover:text-orange-500 transition-colors"></i><div class="text-xs font-bold text-gray-700 text-center line-clamp-2">${e.title}</div>`;
-                    container.appendChild(el);
-                };
+                    }
 
-                // Duyệt qua tất cả các snapshot Exam trả về (results[1], results[2]...)
-                for (let i = 1; i < results.length; i++) {
-                    results[i].forEach(renderExamItem);
-                }
+                    if (shouldShow) {
+                        examCount++;
+                        const el = document.createElement('div');
+                        el.className = "bg-white p-4 rounded-xl border hover:border-orange-500 cursor-pointer flex flex-col items-center gap-2 aspect-square justify-center shadow-sm group relative transition-all hover:shadow-md";
+                        el.onclick = () => {
+                            // Logic chọn đề
+                            if(activeItemIdx > -1) {
+                                const item = currentCurriculum[activeChapIdx].lessons[activeLesIdx].items[activeItemIdx];
+                                item.examId = d.id;
+                                item.examTitle = e.title;
+                                document.getElementById('selectedExamTitle').innerText = e.title;
+                                document.getElementById('selectedExamInfo').classList.remove('hidden');
+                                document.getElementById('examSelectorModal').classList.add('hidden');
+                                window.showToast(`Đã chọn: ${e.title}`);
+                            }
+                        };
+                        el.innerHTML = `
+                            <i class="fa-solid fa-file-lines text-3xl text-gray-300 group-hover:text-orange-500 transition-colors"></i>
+                            <div class="text-xs font-bold text-gray-700 text-center line-clamp-2 w-full" title="${e.title}">${e.title}</div>
+                            <div class="absolute top-2 right-2 text-[10px] text-gray-400 bg-gray-100 px-1 rounded">${e.questionCount || 0} câu</div>
+                        `;
+                        container.appendChild(el);
+                    }
+                });
 
-                // Hiển thị thông báo trống nếu không có gì
+                // Hiển thị thông báo nếu thư mục trống
                 if (container.children.length === 0) {
-                    container.innerHTML = '<div class="col-span-full text-center text-gray-300 py-10 flex flex-col items-center"><i class="fa-regular fa-folder-open text-3xl mb-2"></i>Thư mục trống</div>';
+                    container.innerHTML = `
+                        <div class="col-span-full text-center text-gray-300 py-10 flex flex-col items-center">
+                            <i class="fa-regular fa-folder-open text-4xl mb-2 opacity-50"></i>
+                            <span class="text-sm">Thư mục trống</span>
+                        </div>`;
                 }
 
             } catch(e) { 
                 console.error(e);
-                container.innerHTML = `<div class="text-red-500 col-span-full text-center text-sm">Lỗi tải dữ liệu: ${e.message}</div>`; 
+                container.innerHTML = `<div class="text-red-500 col-span-full text-center text-sm p-4 bg-red-50 rounded-xl">Lỗi tải dữ liệu: ${e.message}</div>`; 
             }
         };
 
