@@ -1448,24 +1448,43 @@
         };
 
         window.renderStatsTable = (filterType = 'all') => {
-            const tbody = document.getElementById('statsTableBody'); tbody.innerHTML = '';
+            const tbody = document.getElementById('statsTableBody'); 
+            if (!tbody) return;
+            tbody.innerHTML = '';
+            
             let dataToShow = Object.values(statsMap);
-            const allowedClassId = document.getElementById('settingClassSelect').value;
-            if (filterType === 'class' && allowedClassId && classStudentList.length > 0) {
-                dataToShow = classStudentList.map(st => { const match = dataToShow.find(d => (d.studentName === st.name) || (st.username && d.studentName.includes(st.username))); if (match) return { ...match, status: 'Đã làm' }; return { studentName: st.name, score: '--', submittedAt: null, status: 'Chưa làm', attempts: [] }; });
-            }
-            const sortType = document.getElementById('sortStats').value;
-            dataToShow.sort((a, b) => { const sA = parseFloat(a.score) || 0; const sB = parseFloat(b.score) || 0; if (sortType === 'score_desc') return sB - sA; if (sortType === 'score_asc') return sA - sB; if (sortType === 'time_desc') return new Date(b.submittedAt || 0) - new Date(a.submittedAt || 0); });
+            
+            // [FIX LỖI] Đã xóa dòng gọi 'settingClassSelect' gây lỗi null
+            
+            // Logic sắp xếp
+            const sortTypeEl = document.getElementById('sortStats');
+            const sortType = sortTypeEl ? sortTypeEl.value : 'score_desc';
+
+            dataToShow.sort((a, b) => { 
+                const sA = parseFloat(a.score) || 0; 
+                const sB = parseFloat(b.score) || 0; 
+                if (sortType === 'score_desc') return sB - sA; 
+                if (sortType === 'score_asc') return sA - sB; 
+                if (sortType === 'time_desc') return new Date(b.submittedAt || 0) - new Date(a.submittedAt || 0); 
+                return 0;
+            });
+
+            // Logic hiển thị dữ liệu
             dataToShow.forEach(r => { 
                 const dateStr = r.submittedAt ? new Date(r.submittedAt).toLocaleString('vi-VN') : '--'; 
                 const scoreClass = r.status === 'Chưa làm' ? 'text-gray-400' : (r.score >= 8 ? 'text-green-600' : (r.score >= 5 ? 'text-blue-600' : 'text-red-500')); 
                 const attemptCount = r.attempts ? r.attempts.length : 0; 
                 
-                // Logic hiển thị vi phạm (Lấy lượt mới nhất hoặc tổng)
+                // Hiển thị số lần vi phạm (Cột mới)
+                // Lấy cheatCount từ lần thi tốt nhất hoặc cộng dồn tùy logic, ở đây lấy từ bản ghi bestScore
                 const lastCheat = r.cheatCount || 0;
-                const cheatHtml = lastCheat > 0 ? `<span class="px-2 py-1 bg-red-100 text-red-600 rounded-full font-bold text-xs">${lastCheat}</span>` : `<span class="text-gray-300">-</span>`;
+                const cheatHtml = lastCheat > 0 
+                    ? `<span class="px-2 py-1 bg-red-100 text-red-600 rounded-full font-bold text-xs"><i class="fa-solid fa-triangle-exclamation"></i> ${lastCheat}</span>` 
+                    : `<span class="text-gray-300">-</span>`;
 
-                const nameHtml = attemptCount > 0 ? `<button onclick="showStudentHistory('${r.studentName}')" class="font-bold text-blue-600 hover:underline flex items-center gap-2"><i class="fa-solid fa-user-graduate"></i> ${r.studentName}</button>` : r.studentName; 
+                const nameHtml = attemptCount > 0 
+                    ? `<button onclick="showStudentHistory('${r.studentName}')" class="font-bold text-blue-600 hover:underline flex items-center gap-2"><i class="fa-solid fa-user-graduate"></i> ${r.studentName}</button>` 
+                    : r.studentName; 
                 
                 tbody.innerHTML += `
                     <tr class="bg-white border-b hover:bg-gray-50 transition-colors">
