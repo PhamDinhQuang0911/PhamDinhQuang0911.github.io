@@ -340,6 +340,7 @@
                                 <button onclick="filterStatus('all')" id="stBtn_all" class="px-3 py-1 text-xs font-bold rounded bg-gray-100 text-gray-800">Tất cả</button>
                                 <button onclick="filterStatus('done')" id="stBtn_done" class="px-3 py-1 text-xs font-bold rounded text-gray-500 hover:bg-gray-50">Đã nộp</button>
                                 <button onclick="filterStatus('missing')" id="stBtn_missing" class="px-3 py-1 text-xs font-bold rounded text-gray-500 hover:bg-gray-50">Chưa nộp</button>
+                                <button onclick="filterStatus('not_graded')" id="stBtn_not_graded" class="px-3 py-1 text-xs font-bold rounded text-gray-500 hover:bg-gray-50 text-red-500">Chưa chấm</button>
                                 <button onclick="filterStatus('graded')" id="stBtn_graded" class="px-3 py-1 text-xs font-bold rounded text-gray-500 hover:bg-gray-50">Đã chấm</button>
                             </div>
                         </div>
@@ -1452,14 +1453,16 @@
             classContainer.innerHTML = `<button onclick="filterStats('all')" class="px-3 py-1.5 rounded-lg text-sm font-bold bg-blue-600 text-white shadow-sm whitespace-nowrap transition-colors" id="filterBtnAll">Tất cả</button>`;
 
             // Nếu có gán lớp
+            // [FIX LỖI] Lọc trùng ID lớp bằng Set
             if (examData.allowedClassIds && examData.allowedClassIds.length > 0) {
-                for (const classId of examData.allowedClassIds) {
+                const uniqueClassIds = [...new Set(examData.allowedClassIds)]; // Lọc trùng
+                
+                for (const classId of uniqueClassIds) {
                     try {
                         const classSnap = await getDoc(doc(db, "classes", classId));
                         if (classSnap.exists()) {
                             const cls = classSnap.data();
                             
-                            // Tạo nút lọc cho lớp
                             const btn = document.createElement('button');
                             btn.className = `px-3 py-1.5 rounded-lg text-sm font-bold bg-white text-gray-600 border hover:bg-gray-50 shadow-sm whitespace-nowrap transition-colors class-filter-btn`;
                             btn.dataset.id = classId;
@@ -1467,7 +1470,7 @@
                             btn.onclick = () => filterStats(classId);
                             classContainer.appendChild(btn);
 
-                            // Lấy danh sách học sinh (Giả sử field 'students' là mảng {uid, name})
+                            // Lấy học sinh
                             const students = cls.students || [];
                             students.forEach(st => {
                                 fullStudentList.push({
@@ -1527,22 +1530,34 @@
 
         window.filterStatus = (status) => {
             currentStatusFilter = status;
-            ['all','done','missing','graded'].forEach(s => {
+            
+            // Cập nhật giao diện nút bấm (Active/Inactive)
+            const statuses = ['all', 'done', 'missing', 'graded', 'not_graded'];
+            statuses.forEach(s => {
                 const btn = document.getElementById(`stBtn_${s}`);
-                if(s === status) btn.className = "px-3 py-1 text-xs font-bold rounded bg-blue-100 text-blue-700 border border-blue-200 transition-colors";
-                else btn.className = "px-3 py-1 text-xs font-bold rounded text-gray-500 hover:bg-gray-50 transition-colors";
+                if (!btn) return;
+                
+                if (s === status) {
+                    btn.className = "px-3 py-1 text-xs font-bold rounded bg-blue-100 text-blue-700 border border-blue-200 transition-colors";
+                } else {
+                    btn.className = "px-3 py-1 text-xs font-bold rounded text-gray-500 hover:bg-gray-50 transition-colors";
+                }
             });
+            
+            // Gọi hàm render lại bảng sau khi lọc
             renderStatsTable();
         };
 
-        window.renderStatsTable = () => {
+        window.renderStatsTable = (filterType = 'all') => {
             const tbody = document.getElementById('statsTableBody'); 
-            if(!tbody) return;
+            if (!tbody) return;
             tbody.innerHTML = '';
 
             // 1. Gộp danh sách (Học sinh trong lớp + Kết quả thi thực tế)
             let combinedData = fullStudentList.map(st => {
+                // Tìm bài làm dựa trên ID hoặc Tên
                 const result = statsMap[st.studentId] || statsMap[st.studentName];
+                
                 if (result) {
                     return { ...st, ...result, hasSubmitted: true };
                 } else {
@@ -1550,14 +1565,14 @@
                 }
             });
 
-            // Thêm những người thi tự do (không nằm trong danh sách lớp)
+            // Thêm những người thi tự do (không nằm trong danh sách lớp đã cài đặt)
             Object.values(statsMap).forEach(res => {
                 if (!combinedData.find(d => d.studentId === res.studentId)) {
                     combinedData.push({ ...res, className: 'Khác', classId: 'other', hasSubmitted: true });
                 }
             });
 
-            // 2. Lọc dữ liệu
+            // 2. Lọc dữ liệu theo Lớp và Trạng thái
             let filteredData = combinedData.filter(item => {
                 // Lọc theo lớp
                 if (currentClassFilter !== 'all' && item.classId !== currentClassFilter) return false;
@@ -1565,58 +1580,92 @@
                 // Lọc theo trạng thái
                 if (currentStatusFilter === 'done' && !item.hasSubmitted) return false;
                 if (currentStatusFilter === 'missing' && item.hasSubmitted) return false;
-                // Đã chấm: Có điểm và đã nộp (hoặc có trường gradedAt)
+                
+                // Lọc Đã chấm: Phải nộp VÀ có trường gradedAt (đã chấm xong)
                 if (currentStatusFilter === 'graded') {
-                    // Logic tạm: Nếu là tự luận mà chưa có điểm (score=0?) hoặc chưa có gradedAt
-                    // Ở đây ta đơn giản hóa: cứ nộp là coi như hệ thống đã chấm sơ bộ
-                    if (!item.hasSubmitted) return false;
+                    if (!item.hasSubmitted || !item.gradedAt) return false;
                 }
+                
+                // Lọc Chưa chấm: Đã nộp NHƯNG chưa có gradedAt
+                if (currentStatusFilter === 'not_graded') {
+                    if (!item.hasSubmitted || item.gradedAt) return false;
+                }
+                
                 return true;
             });
 
-            // 3. Sắp xếp
+            // 3. Sắp xếp dữ liệu
             const sortType = document.getElementById('sortStats').value;
             filteredData.sort((a, b) => { 
-                if (sortType === 'time_desc') return new Date(b.submittedAt || 0) - new Date(a.submittedAt || 0);
+                if (sortType === 'time_desc') {
+                    return new Date(b.submittedAt || 0) - new Date(a.submittedAt || 0);
+                }
+                
                 const sA = parseFloat(a.bestScore) || 0; 
                 const sB = parseFloat(b.bestScore) || 0; 
-                return sortType === 'score_desc' ? sB - sA : sA - sB; 
+                
+                if (sortType === 'score_desc') return sB - sA; // Cao -> Thấp
+                if (sortType === 'score_asc') return sA - sB; // Thấp -> Cao
+                
+                return 0;
             });
 
-            // 4. Render
-            if(filteredData.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="5" class="text-center py-8 text-gray-400 text-sm">Không tìm thấy học sinh nào.</td></tr>';
+            // 4. Render ra bảng HTML
+            if (filteredData.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" class="text-center py-8 text-gray-400 text-sm">Không tìm thấy học sinh nào phù hợp bộ lọc.</td></tr>';
                 return;
             }
 
             filteredData.forEach(r => { 
+                // Xử lý ngày nộp
                 const dateStr = r.submittedAt ? new Date(r.submittedAt).toLocaleString('vi-VN') : '<span class="text-red-400 italic">Chưa nộp</span>'; 
-                const scoreClass = !r.hasSubmitted ? 'text-gray-300' : (r.bestScore >= 8 ? 'text-green-600' : (r.bestScore >= 5 ? 'text-blue-600' : 'text-red-500')); 
+                
+                // Xử lý màu điểm số
+                const scoreClass = !r.hasSubmitted 
+                    ? 'text-gray-300' 
+                    : (r.bestScore >= 8 ? 'text-green-600' : (r.bestScore >= 5 ? 'text-blue-600' : 'text-red-500')); 
+                
                 const attemptCount = r.attempts ? r.attempts.length : 0; 
                 
-                // Nút xem chi tiết (chỉ hiện khi đã nộp)
+                // Tên học sinh (Link xem chi tiết hoặc Text thường)
                 const nameHtml = r.hasSubmitted 
                     ? `<button onclick="showStudentHistory('${r.studentName}')" class="font-bold text-blue-600 hover:underline flex items-center gap-2"><i class="fa-solid fa-user-graduate"></i> ${r.studentName}</button>` 
                     : `<span class="text-gray-500 flex items-center gap-2"><i class="fa-regular fa-user"></i> ${r.studentName}</span>`;
                 
-                // Cảnh báo vi phạm
-                const cheatCount = r.cheatCount || 0;
-                const cheatBadge = (r.hasSubmitted && cheatCount > 0) 
-                    ? `<span class="bg-red-100 text-red-600 px-2 py-0.5 rounded text-xs font-bold" title="${cheatCount} lần vi phạm"><i class="fa-solid fa-triangle-exclamation"></i> ${cheatCount}</span>` 
+                // Badge trạng thái Chấm bài
+                let statusBadge = '';
+                if (r.hasSubmitted) {
+                    if (r.gradedAt) {
+                        statusBadge = '<span class="text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded border border-green-200 font-bold whitespace-nowrap">Đã chấm</span>';
+                    } else {
+                        statusBadge = '<span class="text-[10px] bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded border border-yellow-200 font-bold whitespace-nowrap">Chờ chấm</span>';
+                    }
+                }
+
+                // Badge cảnh báo gian lận
+                const cheatBadge = (r.hasSubmitted && r.cheatCount > 0) 
+                    ? `<span class="ml-1 bg-red-100 text-red-600 px-2 py-0.5 rounded text-xs font-bold" title="${r.cheatCount} lần vi phạm"><i class="fa-solid fa-triangle-exclamation"></i> ${r.cheatCount}</span>` 
                     : '';
 
+                // Tạo dòng TR
                 tbody.innerHTML += `
                     <tr class="bg-white border-b hover:bg-gray-50 transition-colors ${!r.hasSubmitted ? 'bg-gray-50/50' : ''}">
                         <td class="px-6 py-3">
                             <div class="font-medium text-gray-900">${nameHtml}</div>
-                            <div class="text-[10px] text-gray-500 flex items-center gap-1">
-                                <span class="bg-gray-100 px-1.5 rounded border">${r.className || 'Tự do'}</span>
-                                ${cheatBadge}
+                            <div class="text-[10px] text-gray-500 flex items-center gap-1 mt-1">
+                                <span class="bg-gray-100 px-1.5 rounded border border-gray-200 text-gray-600">${r.className || 'Tự do'}</span>
+                                ${statusBadge} ${cheatBadge}
                             </div>
                         </td>
-                        <td class="px-6 py-3 text-center font-bold ${scoreClass} text-lg">${r.hasSubmitted ? r.bestScore : '--'}</td>
-                        <td class="px-6 py-3 text-center text-xs text-gray-500">${attemptCount}</td>
-                        <td class="px-6 py-3 text-right text-xs text-gray-500 font-mono">${dateStr}</td>
+                        <td class="px-6 py-3 text-center font-bold ${scoreClass} text-lg">
+                            ${r.hasSubmitted ? r.bestScore : '--'}
+                        </td>
+                        <td class="px-6 py-3 text-center text-xs text-gray-500 font-bold">
+                            ${attemptCount}
+                        </td>
+                        <td class="px-6 py-3 text-right text-xs text-gray-500 font-mono">
+                            ${dateStr}
+                        </td>
                     </tr>`; 
             });
         };
@@ -1625,44 +1674,30 @@
             const studentData = Object.values(statsMap).find(s => s.studentName === studentName);
             if (!studentData || !studentData.attempts) return;
             
+            // [QUAN TRỌNG] Lưu danh sách attempt vào biến toàn cục để không cần truyền qua HTML
+            window.currentHistoryAttempts = [...studentData.attempts].sort((a,b) => new Date(b.submittedAt) - new Date(a.submittedAt));
+
             const modal = document.getElementById('historyModal'); 
             const content = document.getElementById('histModalContent'); 
             const title = document.getElementById('histModalTitle');
-            
             title.innerHTML = `<i class="fa-solid fa-clock-rotate-left mr-2"></i>Lịch sử: ${studentName}`; 
             
-            // Tạo bảng lịch sử nâng cao
-            content.innerHTML = `
-                <table class="w-full text-sm text-left text-gray-600">
-                    <thead class="bg-blue-50 text-blue-800 uppercase text-xs">
-                        <tr><th class="p-3">Lần thi</th><th class="p-3 text-center">Điểm</th><th class="p-3 text-center">Vi phạm</th><th class="p-3 text-right">Hành động</th></tr>
-                    </thead>
-                    <tbody class="divide-y divide-gray-100" id="histTbody"></tbody>
-                </table>`;
+            let html = `<table class="w-full text-sm text-left text-gray-600"><thead class="bg-blue-50 text-blue-800 uppercase text-xs"><tr><th class="p-3">Lần</th><th class="p-3 text-center">Điểm</th><th class="p-3 text-right">Hành động</th></tr></thead><tbody class="divide-y divide-gray-100">`;
             
-            const tbody = document.getElementById('histTbody'); 
-            // Sắp xếp: Mới nhất lên đầu
-            const sortedAttempts = [...studentData.attempts].sort((a,b) => new Date(b.submittedAt) - new Date(a.submittedAt));
-            
-            sortedAttempts.forEach((att, idx) => { 
-                const attemptIndex = sortedAttempts.length - idx; // Lần 1, Lần 2...
-                const cheatBadge = att.cheatCount > 0 ? `<span class="text-red-500 font-bold text-xs"><i class="fa-solid fa-triangle-exclamation"></i> ${att.cheatCount}</span>` : `<span class="text-green-500"><i class="fa-solid fa-check"></i></span>`;
-                
-                // Nút mở Giao diện Chấm thi
-                // Lưu index vào attribute để hàm openGrading truy xuất
-                tbody.innerHTML += `
-                    <tr>
-                        <td class="p-3 font-bold">Lần ${attemptIndex} <div class="text-[10px] text-gray-400 font-normal">${new Date(att.submittedAt).toLocaleString('vi-VN')}</div></td>
-                        <td class="p-3 text-center font-black text-blue-600 text-lg">${att.score}</td>
-                        <td class="p-3 text-center">${cheatBadge}</td>
-                        <td class="p-3 text-right">
-                            <button onclick='window.openGrading(${JSON.stringify(att).replace(/'/g, "&apos;")})' class="px-3 py-1.5 bg-white border border-blue-200 text-blue-600 rounded-lg hover:bg-blue-50 text-xs font-bold shadow-sm transition-all">
-                                <i class="fa-solid fa-pen-nib mr-1"></i> Chấm / Xem
-                            </button>
-                        </td>
-                    </tr>`; 
+            window.currentHistoryAttempts.forEach((att, idx) => {
+                // Truyền INDEX (số nguyên) thay vì OBJECT
+                html += `<tr>
+                    <td class="p-3 font-bold">Lần ${window.currentHistoryAttempts.length - idx} <div class="text-[10px] text-gray-400 font-normal">${new Date(att.submittedAt).toLocaleString('vi-VN')}</div></td>
+                    <td class="p-3 text-center font-black text-blue-600 text-lg">${att.score}</td>
+                    <td class="p-3 text-right">
+                        <button onclick="startGradingSession(${idx})" class="px-3 py-1.5 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 text-xs font-bold border border-blue-200">
+                            <i class="fa-solid fa-pen-nib mr-1"></i> Chấm bài
+                        </button>
+                    </td>
+                </tr>`;
             });
-            
+            html += `</tbody></table>`;
+            content.innerHTML = html;
             modal.classList.remove('opacity-0', 'pointer-events-none'); 
             modal.querySelector('div').classList.add('scale-100');
         };
@@ -1838,13 +1873,22 @@
             modal.querySelector('div').classList.add('scale-100');
         };
 
-        window.startGradingSession = (attempt) => {
+        // Hàm nhận vào INDEX thay vì OBJECT
+        window.startGradingSession = (attemptIndex) => {
+            // Lấy dữ liệu từ biến toàn cục
+            const attempt = window.currentHistoryAttempts[attemptIndex];
+            if(!attempt) return console.error("Không tìm thấy dữ liệu bài thi");
+
             currentGradingAttempt = attempt;
-            document.getElementById('historyModal').classList.add('opacity-0', 'pointer-events-none');
-            const modal = document.getElementById('gradingModal');
             
-            document.getElementById('gradingStudentName').textContent = attempt.studentName;
+            // Ẩn modal lịch sử
+            document.getElementById('historyModal').classList.add('opacity-0', 'pointer-events-none');
+            
+            // Hiện modal chấm
+            const modal = document.getElementById('gradingModal');
+            document.getElementById('gradingStudentName').textContent = attempt.studentName || 'Học sinh';
             document.getElementById('gradingTotalScore').textContent = attempt.score;
+            document.getElementById('gradingAttemptNum').textContent = new Date(attempt.submittedAt).toLocaleString('vi-VN');
             
             const container = document.getElementById('gradingQuestionList');
             container.innerHTML = '';
@@ -1863,12 +1907,12 @@
 
                 let answerHtml = '';
                 if(q.type === 'essay') {
-                    // Vùng chấm tự luận (Canvas)
                     answerHtml = `<div class="relative bg-gray-50 min-h-[200px]" id="essay-wrapper-${idx}">`;
                     if (u && u.includes('<img')) {
-                        // Trích xuất URL ảnh từ HTML bài làm (chỉ lấy ảnh đầu tiên demo)
+                        // Trích xuất URL ảnh (đơn giản hóa để lấy ảnh đầu tiên)
                         const srcMatch = u.match(/src="([^"]+)"/);
                         if(srcMatch) {
+                            // Thêm crossorigin="anonymous" để vẽ lên canvas không bị lỗi bảo mật
                             answerHtml += `<div class="relative inline-block w-full">
                                 <img src="${srcMatch[1]}" class="w-full h-auto block pointer-events-none" id="essay-img-${idx}" crossorigin="anonymous">
                                 <canvas id="grading-canvas-${idx}" class="absolute inset-0 w-full h-full z-10 cursor-crosshair touch-none"></canvas>
@@ -1888,17 +1932,16 @@
                         </div>
                     </div>`;
                 } else {
-                    // Trắc nghiệm
                     let isCorrect = false;
                     if (q.type === 'mc' && u === q.correct) isCorrect = true;
-                    // ... (Logic chấm các loại khác) ...
+                    else if (q.type === 'short' && q.answer && String(u).trim().toLowerCase() === String(q.answer).trim().toLowerCase()) isCorrect = true;
+                    
                     answerHtml = `<div class="p-3 bg-gray-50 text-sm">Học sinh chọn: <b>${u!==undefined?u:'Trống'}</b> <span class="${isCorrect?'text-green-600':'text-red-600'} font-bold">(${isCorrect?'Đúng':'Sai'})</span></div>`;
                 }
 
                 card.innerHTML = contentHtml + answerHtml;
                 container.appendChild(card);
 
-                // Khởi tạo Canvas sau khi ảnh load
                 if(q.type === 'essay') {
                     setTimeout(() => initCanvas(idx), 500);
                 }
