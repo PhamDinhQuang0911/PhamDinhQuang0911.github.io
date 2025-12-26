@@ -44,18 +44,20 @@
     <script src="https://tikzjax.com/v1/tikzjax.js"></script>
     <style>
         /* --- CSS CHO CHẤM THI --- */
-        .gallery-container { position: relative; width: 100%; background: #000; min-height: 400px; display: flex; align-items: center; justify-content: center; overflow: hidden; border-radius: 8px; }
-        .gallery-image { max-width: 100%; max-height: 80vh; pointer-events: auto; touch-action: none; }
-        .grading-canvas { position: absolute; top: 0; left: 0; pointer-events: auto; touch-action: none; z-index: 10; }
-        .gallery-nav-btn { position: absolute; top: 50%; transform: translateY(-50%); background: rgba(255,255,255,0.8); border-radius: 50%; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 20; border: none; box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
-        .gallery-nav-btn:hover { background: white; transform: translateY(-50%) scale(1.1); }
+        /* CSS MỚI CHO GIAO DIỆN CHẤM THI PRO */
+        .gallery-container { position: relative; width: 100%; background: #e5e7eb; min-height: 400px; display: flex; align-items: center; justify-content: center; border-radius: 8px; overflow: hidden; user-select: none; }
+        .gallery-image { display: block; max-width: 100%; max-height: 70vh; pointer-events: none; } /* Ảnh nằm dưới */
+        .grading-canvas { position: absolute; top: 0; left: 0; z-index: 10; touch-action: none; cursor: crosshair; } /* Canvas phủ lên trên */
+        
+        .gallery-nav-btn { position: absolute; top: 50%; transform: translateY(-50%); width: 40px; height: 40px; background: rgba(255,255,255,0.8); border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 20; box-shadow: 0 2px 5px rgba(0,0,0,0.2); transition: all 0.2s; }
+        .gallery-nav-btn:hover { background: white; scale: 1.1; }
         .gallery-prev { left: 10px; }
         .gallery-next { right: 10px; }
-        .gallery-zoom-btn { position: absolute; top: 10px; right: 10px; background: rgba(0,0,0,0.6); color: white; padding: 5px 10px; border-radius: 4px; font-size: 12px; cursor: pointer; z-index: 20; }
+        .gallery-zoom-btn { position: absolute; top: 10px; right: 10px; background: rgba(0,0,0,0.6); color: white; padding: 4px 8px; border-radius: 4px; font-size: 11px; z-index: 20; cursor: pointer; }
         
-        /* Modal Zoom Fullscreen */
-        #zoomModal { position: fixed; inset: 0; z-index: 9999; background: rgba(0,0,0,0.95); display: flex; align-items: center; justify-content: center; overflow: auto; }
-        #zoomImg { max-width: none; transition: transform 0.2s; cursor: grab; }
+        /* Modal Zoom */
+        #zoomModal { position: fixed; inset: 0; z-index: 9999; background: rgba(0,0,0,0.9); display: flex; align-items: center; justify-content: center; }
+        #zoomImg { max-width: 95vw; max-height: 95vh; transition: transform 0.3s; cursor: zoom-in; }
         body { font-family: 'Nunito', sans-serif; background-color: #F8F9FA; }
         .font-handwriting { font-family: 'Pacifico', cursive; }
         .sidebar-item.active { background-color: #EFF6FF; color: #1D4ED8; font-weight: 700; border-right: 3px solid #1D4ED8; }
@@ -2004,11 +2006,70 @@
         // ============================================================
         // LOGIC CHẤM THI PRO (Fix mực, Gallery, Zoom, Setup điểm)
         // ============================================================
-        let gradingTool = 'cursor';
-        let gradingStep = 0.25; // Mặc định điểm cộng trừ
-        let currentImageIndexes = {}; // Lưu chỉ số ảnh hiện tại của từng câu: { qIdx: imgIdx }
+        <div id="gradingModal" class="fixed inset-0 z-[120] bg-gray-900 bg-opacity-95 hidden flex flex-col transition-opacity duration-300 opacity-0">
+        <div class="h-16 bg-white border-b border-gray-200 flex justify-between items-center px-4 shrink-0 shadow-md z-20">
+            <div class="flex items-center gap-4">
+                <button onclick="closeGradingModal()" class="w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-600"><i class="fa-solid fa-arrow-left"></i></button>
+                <div>
+                    <h3 class="font-bold text-gray-800 text-lg leading-tight" id="gradingStudentName">Tên học sinh</h3>
+                    <p class="text-xs text-gray-500">Đang chấm: <span id="gradingAttemptNum">--</span></p>
+                </div>
+            </div>
 
-        // 1. Cài đặt công cụ
+            <div id="gradingToolbar" class="flex items-center gap-3 overflow-x-auto no-scrollbar py-1">
+                <div class="flex items-center gap-1 bg-gray-100 p-1 rounded-lg border shrink-0">
+                    <button onclick="setGradingTool('cursor')" class="grading-tool-btn p-1.5 rounded bg-white shadow-sm text-blue-600" title="Di chuyển"><i class="fa-solid fa-arrow-pointer"></i></button>
+                    <button onclick="setGradingTool('pen')" class="grading-tool-btn p-1.5 rounded hover:bg-white text-gray-600" title="Bút"><i class="fa-solid fa-pen"></i></button>
+                    <button onclick="setGradingTool('eraser')" class="grading-tool-btn p-1.5 rounded hover:bg-white text-gray-600" title="Tẩy"><i class="fa-solid fa-eraser"></i></button>
+                    <div class="w-[1px] h-4 bg-gray-300 mx-1"></div>
+                    <input type="color" id="penColor" value="#ff0000" class="w-6 h-6 border-0 p-0 rounded cursor-pointer">
+                </div>
+
+                <div class="flex items-center gap-1 bg-gray-100 p-1 rounded-lg border shrink-0">
+                    <div class="flex flex-col px-2 cursor-pointer hover:bg-gray-200 rounded" onclick="changeStepScore()" title="Bấm để đổi điểm">
+                        <span class="text-[8px] text-gray-500 font-bold uppercase">Bước điểm</span>
+                        <span class="text-xs font-bold text-blue-600" id="stepScoreDisplay">0.25</span>
+                    </div>
+                    <button onclick="setGradingTool('mark_correct')" class="grading-tool-btn p-1.5 rounded hover:bg-green-100 text-green-600" title="Đúng (+Điểm)"><i class="fa-solid fa-check"></i></button>
+                    <button onclick="setGradingTool('mark_wrong')" class="grading-tool-btn p-1.5 rounded hover:bg-red-100 text-red-600" title="Sai (-Điểm)"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+
+                <button onclick="runAIGrading()" class="px-3 py-1.5 bg-purple-100 text-purple-700 rounded-lg text-xs font-bold hover:bg-purple-200 flex items-center gap-1 shrink-0">
+                    <i class="fa-solid fa-robot"></i> <span class="hidden md:inline">AI</span>
+                </button>
+            </div>
+
+            <div class="flex items-center gap-4">
+                <div class="text-right hidden md:block">
+                    <p class="text-xs text-gray-500 uppercase font-bold">Tổng điểm</p>
+                    <p class="text-2xl font-black text-blue-600" id="gradingTotalScore">0.0</p>
+                </div>
+                <button onclick="saveGradingResult()" class="px-5 py-2 bg-green-600 hover:bg-green-700 text-white font-bold rounded-xl shadow-lg transition-all flex items-center gap-2">
+                    <i class="fa-solid fa-floppy-disk"></i> Lưu
+                </button>
+            </div>
+        </div>
+
+        <div class="flex-1 flex overflow-hidden bg-gray-100 relative">
+            <div class="w-64 bg-gray-50 border-r border-gray-200 flex flex-col hidden lg:flex">
+                <div class="p-4 font-bold text-gray-600 text-sm uppercase border-b bg-gray-100">Danh sách câu hỏi</div>
+                <div class="flex-1 overflow-y-auto p-3 space-y-2" id="gradingNavList"></div>
+            </div>
+            <div class="flex-1 overflow-y-auto p-4 md:p-8 flex justify-center" id="gradingWorkspace">
+                <div class="max-w-4xl w-full space-y-6" id="gradingQuestionList"></div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        // (Giữ lại các import cũ ở đầu file, đoạn mã này chỉ bổ sung logic chấm thi vào cuối script)
+        
+        // --- LOGIC CHẤM THI PRO (Fix lỗi mực, thêm Gallery) ---
+        let currentGradingAttempt = null;
+        let gradingTool = 'cursor';
+        let gradingStep = 0.25; 
+        let imageIndexes = {}; // Lưu vị trí ảnh của từng câu
+
         window.setGradingTool = (tool) => {
             gradingTool = tool;
             document.querySelectorAll('.grading-tool-btn').forEach(b => {
@@ -2020,138 +2081,107 @@
                 activeBtn.classList.remove('hover:bg-white', 'text-gray-600');
                 activeBtn.classList.add('bg-blue-100', 'text-blue-600', 'shadow-sm');
             }
-            // Con trỏ chuột
-            document.body.style.cursor = (tool === 'pen' || tool === 'eraser') ? 'crosshair' : (tool.startsWith('mark') ? 'copy' : 'default');
+            // Đổi con trỏ chuột
+            document.body.style.cursor = (tool==='pen'||tool==='eraser') ? 'crosshair' : (tool.startsWith('mark')?'copy':'default');
         };
 
-        // 2. Cài đặt bước nhảy điểm
-        window.setStepScore = () => {
-            const val = prompt("Nhập số điểm cộng/trừ mỗi lần chạm (VD: 0.25):", gradingStep);
-            if(val && !isNaN(val)) {
-                gradingStep = parseFloat(val);
-                document.getElementById('stepScoreDisplay').innerText = "±" + gradingStep;
-            }
+        window.changeStepScore = () => {
+            const val = prompt("Nhập điểm cộng/trừ mỗi lần chạm:", gradingStep);
+            if(val && !isNaN(val)) { gradingStep = parseFloat(val); document.getElementById('stepScoreDisplay').innerText = gradingStep; }
         };
 
-        // 3. Render giao diện chấm (Hỗ trợ Gallery nhiều ảnh)
         window.renderGradingView = () => {
             const container = document.getElementById('gradingQuestionList');
             const nav = document.getElementById('gradingNavList');
             container.innerHTML = ''; nav.innerHTML = '';
-            const answers = currentGradingAttempt.answers || {};
-
+            
             window.questions.forEach((q, idx) => {
-                const u = answers[idx];
+                const u = currentGradingAttempt.answers ? currentGradingAttempt.answers[idx] : null;
                 const maxPoint = parseFloat(q.point) || 0;
                 
-                // Sidebar Nav
+                // Nav Item
                 const navItem = document.createElement('button');
-                navItem.className = `w-full text-left p-3 rounded-lg text-xs font-bold mb-1 border ${q.type==='essay'?'bg-purple-50 border-purple-200 text-purple-700':'bg-gray-50'}`;
+                navItem.className = `w-full text-left p-3 rounded-lg text-xs font-bold mb-1 border ${q.type==='essay'?'bg-purple-50 border-purple-200 text-purple-700':'bg-white'}`;
                 navItem.innerHTML = `Câu ${idx+1} <span class="float-right">${q.type.toUpperCase()}</span>`;
                 navItem.onclick = () => document.getElementById(`grade-q-${idx}`).scrollIntoView({behavior:'smooth', block:'center'});
                 nav.appendChild(navItem);
 
-                // Card nội dung
+                // Main Card
                 const card = document.createElement('div');
                 card.id = `grade-q-${idx}`;
                 card.className = "bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden";
-                
                 let contentHtml = `<div class="p-4 border-b border-gray-100"><div class="flex justify-between mb-2"><span class="font-bold text-gray-700">Câu ${idx+1}</span><span class="text-xs bg-gray-100 px-2 py-1 rounded font-bold">${maxPoint}đ</span></div><div class="text-gray-800">${window.formatContent(q.content)}</div></div>`;
                 let answerHtml = '';
 
                 if (q.type === 'essay') {
-                    // Tách ảnh từ HTML bài làm
+                    // Tách ảnh
                     const div = document.createElement('div'); div.innerHTML = u || '';
                     const imgs = Array.from(div.querySelectorAll('img')).map(i => i.src);
                     
                     if (imgs.length > 0) {
-                        // Khởi tạo index
-                        if (currentImageIndexes[idx] === undefined) currentImageIndexes[idx] = 0;
-                        
+                        if (imageIndexes[idx] === undefined) imageIndexes[idx] = 0;
                         answerHtml = `
-                        <div class="gallery-container" id="gallery-${idx}">
-                            </div>
-                        <div class="p-3 bg-yellow-50 flex items-center justify-between border-t">
-                            <div class="flex items-center gap-2">
-                                <span class="font-bold text-yellow-800 text-xs">Điểm:</span>
-                                <input type="number" id="manual-score-${idx}" class="form-input w-20 text-right font-bold text-blue-600" value="${maxPoint}" step="0.1" onchange="window.updateTotalScore()">
-                                <span class="text-gray-400 text-xs">/${maxPoint}</span>
-                            </div>
-                            <div class="text-xs text-gray-500 italic" id="gallery-info-${idx}">Ảnh 1/${imgs.length}</div>
-                        </div>`;
-                        
-                        // Render ảnh đầu tiên sau khi HTML load
-                        setTimeout(() => window.renderGalleryImage(idx, imgs), 100);
+                            <div class="gallery-container" id="gallery-${idx}"></div>
+                            <div class="p-3 bg-yellow-50 flex items-center justify-between border-t">
+                                <div class="flex items-center gap-2">
+                                    <span class="font-bold text-yellow-800 text-xs">Điểm:</span>
+                                    <input type="number" id="manual-score-${idx}" class="form-input w-20 text-right font-bold text-blue-600" value="${maxPoint}" step="0.1" onchange="window.updateTotalScore()">
+                                    <span class="text-gray-400 text-xs">/${maxPoint}</span>
+                                </div>
+                                <div class="text-xs text-gray-500 italic" id="gallery-info-${idx}"></div>
+                            </div>`;
+                        setTimeout(() => window.renderGallery(idx, imgs), 100);
                     } else {
-                        answerHtml = `<div class="p-10 text-center text-gray-400 italic">Không có ảnh bài làm.</div>`;
+                        answerHtml = `<div class="p-10 text-center text-gray-400 italic">Học sinh không nộp ảnh.</div>`;
                     }
                 } else {
-                    // Trắc nghiệm
                     let isCorrect = (q.type === 'mc' && u === q.correct);
-                    answerHtml = `<div class="p-3 bg-gray-50 text-sm">Chọn: <b class="${isCorrect?'text-green-600':'text-red-600'}">${u!==undefined?u:'--'}</b> | Đáp án: <b class="text-green-600">${q.correct!==undefined?String.fromCharCode(65+q.correct):'--'}</b></div>`;
+                    answerHtml = `<div class="p-3 bg-gray-50 text-sm">Chọn: <b class="${isCorrect?'text-green-600':'text-red-600'}">${u!==undefined?u:'--'}</b></div>`;
                 }
-
                 card.innerHTML = contentHtml + answerHtml;
                 container.appendChild(card);
             });
             if(window.MathJax) MathJax.typesetPromise([container]).catch(()=>{});
         };
 
-        // 4. Render Gallery Ảnh (Chuyển tiếp ảnh)
-        window.renderGalleryImage = (qIdx, imgList) => {
-            const container = document.getElementById(`gallery-${qIdx}`);
-            const currentIndex = currentImageIndexes[qIdx];
-            const src = imgList[currentIndex];
-
-            container.innerHTML = `
-                <img src="${src}" class="gallery-image" id="essay-img-${qIdx}" crossorigin="anonymous">
-                <canvas id="grading-canvas-${qIdx}" class="grading-canvas"></canvas>
-                
-                ${imgList.length > 1 ? `
-                    <button class="gallery-nav-btn gallery-prev" onclick="changeGalleryImage(${qIdx}, -1, '${imgList.join("|||")}')"><i class="fa-solid fa-chevron-left"></i></button>
-                    <button class="gallery-nav-btn gallery-next" onclick="changeGalleryImage(${qIdx}, 1, '${imgList.join("|||")}')"><i class="fa-solid fa-chevron-right"></i></button>
-                ` : ''}
-                
-                <button class="gallery-zoom-btn" onclick="openZoomModal('${src}')"><i class="fa-solid fa-magnifying-glass-plus"></i> Zoom</button>
-            `;
-
-            document.getElementById(`gallery-info-${qIdx}`).innerText = `Ảnh ${currentIndex + 1}/${imgList.length}`;
+        window.renderGallery = (idx, imgs) => {
+            const container = document.getElementById(`gallery-${idx}`);
+            const cur = imageIndexes[idx];
             
-            // Khởi tạo Canvas vẽ lên ảnh này
-            // Phải đợi ảnh load xong để lấy kích thước thật
-            const img = document.getElementById(`essay-img-${qIdx}`);
-            if (img.complete) window.initCanvas(qIdx);
-            else img.onload = () => window.initCanvas(qIdx);
+            // Xóa crossorigin="anonymous" để tránh lỗi CORS Black Screen
+            container.innerHTML = `
+                <img src="${imgs[cur]}" class="gallery-image" id="essay-img-${idx}" onload="window.initCanvas(${idx})">
+                <canvas id="grading-canvas-${idx}" class="grading-canvas"></canvas>
+                ${imgs.length > 1 ? `<button class="gallery-nav-btn gallery-prev" onclick="switchImg(${idx}, -1, '${imgs.join('|')}')"><i class="fa-solid fa-chevron-left"></i></button>
+                <button class="gallery-nav-btn gallery-next" onclick="switchImg(${idx}, 1, '${imgs.join('|')}')"><i class="fa-solid fa-chevron-right"></i></button>` : ''}
+                <button class="gallery-zoom-btn" onclick="zoomImg('${imgs[cur]}')"><i class="fa-solid fa-expand"></i> Zoom</button>
+            `;
+            document.getElementById(`gallery-info-${idx}`).innerText = `Ảnh ${cur+1}/${imgs.length}`;
         };
 
-        window.changeGalleryImage = (qIdx, direction, imgListStr) => {
-            const imgList = imgListStr.split("|||");
-            let newIndex = currentImageIndexes[qIdx] + direction;
-            if (newIndex < 0) newIndex = imgList.length - 1;
-            if (newIndex >= imgList.length) newIndex = 0;
-            currentImageIndexes[qIdx] = newIndex;
-            window.renderGalleryImage(qIdx, imgList);
+        window.switchImg = (idx, dir, str) => {
+            const imgs = str.split('|');
+            let n = imageIndexes[idx] + dir;
+            if(n < 0) n = imgs.length - 1; if(n >= imgs.length) n = 0;
+            imageIndexes[idx] = n;
+            window.renderGallery(idx, imgs);
         };
 
-        // 5. Logic Vẽ & Chấm (Đã fix lỗi offset mực)
         window.initCanvas = (idx) => {
             const canvas = document.getElementById(`grading-canvas-${idx}`);
             const img = document.getElementById(`essay-img-${idx}`);
             if(!canvas || !img) return;
 
-            // Đặt kích thước canvas bằng kích thước hiển thị của ảnh
+            // Đặt kích thước canvas bằng đúng kích thước hiển thị của ảnh
             canvas.width = img.offsetWidth;
             canvas.height = img.offsetHeight;
             
-            // Resize lại khi window đổi cỡ
-            window.addEventListener('resize', () => {
-                canvas.width = img.offsetWidth;
-                canvas.height = img.offsetHeight;
-            });
+            // Canh giữa canvas trùng ảnh
+            canvas.style.top = img.offsetTop + "px";
+            canvas.style.left = img.offsetLeft + "px";
 
             const ctx = canvas.getContext('2d');
-            let isDown = false;
-            let lastX = 0, lastY = 0;
+            let isDown = false; let lastX = 0, lastY = 0;
 
             const getPos = (e) => {
                 const rect = canvas.getBoundingClientRect();
@@ -2162,90 +2192,61 @@
 
             const start = (e) => {
                 if(gradingTool === 'cursor') return;
-                // Nếu là bút, ngăn scroll trang
-                if(gradingTool === 'pen' || gradingTool === 'eraser') e.preventDefault();
-                
-                isDown = true;
-                const pos = getPos(e);
-                lastX = pos.x; lastY = pos.y;
+                e.preventDefault(); isDown = true;
+                const pos = getPos(e); lastX = pos.x; lastY = pos.y;
 
-                // CHẤM NHANH (1 Chạm)
-                if (gradingTool.startsWith('mark_')) {
-                    const size = 15; 
+                if(gradingTool.startsWith('mark')) {
                     ctx.lineWidth = 4; ctx.lineCap = 'round';
                     const inp = document.getElementById(`manual-score-${idx}`);
-                    let score = parseFloat(inp ? inp.value : 0) || 0;
-
-                    if (gradingTool === 'mark_correct') {
-                        // Vẽ chữ V
+                    let val = parseFloat(inp ? inp.value : 0) || 0;
+                    
+                    if(gradingTool === 'mark_correct') {
                         ctx.strokeStyle = '#10B981';
                         ctx.beginPath(); ctx.moveTo(lastX-10, lastY-5); ctx.lineTo(lastX, lastY+10); ctx.lineTo(lastX+15, lastY-15); ctx.stroke();
-                        score += gradingStep;
+                        if(inp) inp.value = (val + gradingStep).toFixed(2);
                     } else {
-                        // Vẽ chữ X
                         ctx.strokeStyle = '#EF4444';
-                        ctx.beginPath(); 
-                        ctx.moveTo(lastX-10, lastY-10); ctx.lineTo(lastX+10, lastY+10);
-                        ctx.moveTo(lastX+10, lastY-10); ctx.lineTo(lastX-10, lastY+10);
-                        ctx.stroke();
-                        score -= gradingStep;
+                        ctx.beginPath(); ctx.moveTo(lastX-10, lastY-10); ctx.lineTo(lastX+10, lastY+10);
+                        ctx.moveTo(lastX+10, lastY-10); ctx.lineTo(lastX-10, lastY+10); ctx.stroke();
+                        if(inp) inp.value = (val - gradingStep < 0 ? 0 : val - gradingStep).toFixed(2);
                     }
-                    
-                    if(inp) { inp.value = Math.max(0, score).toFixed(2); window.updateTotalScore(); }
-                    isDown = false; // Chấm xong nhả luôn
+                    if(inp) window.updateTotalScore();
+                    isDown = false;
                 }
             };
 
             const move = (e) => {
-                if(!isDown || gradingTool.startsWith('mark_') || gradingTool === 'cursor') return;
+                if(!isDown || gradingTool.startsWith('mark') || gradingTool === 'cursor') return;
                 e.preventDefault();
                 const pos = getPos(e);
-                
-                ctx.beginPath();
-                ctx.moveTo(lastX, lastY);
-                ctx.lineTo(pos.x, pos.y);
+                ctx.beginPath(); ctx.moveTo(lastX, lastY); ctx.lineTo(pos.x, pos.y);
                 ctx.strokeStyle = document.getElementById('penColor').value;
-                
-                if(gradingTool === 'eraser') {
-                    ctx.globalCompositeOperation = 'destination-out';
-                    ctx.lineWidth = 20;
-                } else {
-                    ctx.globalCompositeOperation = 'source-over';
-                    ctx.lineWidth = 3;
-                }
-                
+                if(gradingTool === 'eraser') { ctx.globalCompositeOperation = 'destination-out'; ctx.lineWidth = 20; }
+                else { ctx.globalCompositeOperation = 'source-over'; ctx.lineWidth = 3; }
                 ctx.stroke();
                 lastX = pos.x; lastY = pos.y;
             };
 
             const end = () => { isDown = false; };
-
-            canvas.addEventListener('mousedown', start); canvas.addEventListener('touchstart', start, {passive: false});
-            canvas.addEventListener('mousemove', move); canvas.addEventListener('touchmove', move, {passive: false});
-            canvas.addEventListener('mouseup', end); canvas.addEventListener('touchend', end);
-            canvas.addEventListener('mouseout', end);
+            
+            canvas.addEventListener('mousedown', start); canvas.addEventListener('mousemove', move); canvas.addEventListener('mouseup', end);
+            canvas.addEventListener('touchstart', start, {passive:false}); canvas.addEventListener('touchmove', move, {passive:false}); canvas.addEventListener('touchend', end);
         };
 
-        // 6. Tính năng Zoom (Lightbox)
-        window.openZoomModal = (src) => {
-            let m = document.getElementById('zoomModal');
-            if(!m) {
-                m = document.createElement('div'); m.id = 'zoomModal';
-                m.innerHTML = `<img id="zoomImg" src="${src}"><button onclick="this.parentElement.remove()" style="position:fixed;top:20px;right:20px;color:white;font-size:30px;"><i class="fa-solid fa-times"></i></button>`;
-                document.body.appendChild(m);
-                
-                // Logic zoom/pan ảnh (cơ bản)
-                const img = m.querySelector('img');
-                let scale = 1;
-                img.onclick = () => { scale = scale === 1 ? 2 : 1; img.style.transform = `scale(${scale})`; img.style.cursor = scale===1?'zoom-in':'zoom-out'; };
-            }
+        window.zoomImg = (src) => {
+            const d = document.createElement('div'); d.id = 'zoomModal';
+            d.innerHTML = `<img id="zoomImg" src="${src}"><button onclick="this.parentElement.remove()" style="position:fixed;top:20px;right:20px;color:white;font-size:30px;cursor:pointer">&times;</button>`;
+            document.body.appendChild(d);
+            const img = d.querySelector('img');
+            let s = 1;
+            img.onclick = () => { s = s===1 ? 2.5 : 1; img.style.transform = `scale(${s})`; img.style.cursor = s===1?'zoom-in':'zoom-out'; };
         };
-
+        
         window.updateTotalScore = () => {
-            let total = 0;
-            document.querySelectorAll('input[id^="manual-score-"]').forEach(inp => total += parseFloat(inp.value)||0);
-            document.getElementById('gradingTotalScore').textContent = total.toFixed(2);
+            let t = 0; document.querySelectorAll('input[id^="manual-score-"]').forEach(i => t += parseFloat(i.value)||0);
+            document.getElementById('gradingTotalScore').textContent = t.toFixed(2);
         };
+    </script>
         
         window.saveGradingResult = async () => {
             if (!currentGradingAttempt || !currentGradingAttempt.id) return;
@@ -2326,24 +2327,24 @@
                 </div>
             </div>
 
-            <div id="gradingToolbar" class="flex items-center gap-3 overflow-x-auto no-scrollbar">
+            <div id="gradingToolbar" class="flex items-center gap-3 overflow-x-auto no-scrollbar py-1">
                 <div class="flex items-center gap-1 bg-gray-100 p-1 rounded-lg border shrink-0">
-                    <button onclick="setGradingTool('cursor')" class="grading-tool-btn p-1.5 rounded bg-white shadow-sm text-blue-600" title="Di chuyển / Zoom"><i class="fa-solid fa-arrow-pointer"></i></button>
-                    <button onclick="setGradingTool('pen')" class="grading-tool-btn p-1.5 rounded hover:bg-white text-gray-600" title="Bút viết"><i class="fa-solid fa-pen"></i></button>
+                    <button onclick="setGradingTool('cursor')" class="grading-tool-btn p-1.5 rounded bg-white shadow-sm text-blue-600" title="Di chuyển"><i class="fa-solid fa-arrow-pointer"></i></button>
+                    <button onclick="setGradingTool('pen')" class="grading-tool-btn p-1.5 rounded hover:bg-white text-gray-600" title="Bút"><i class="fa-solid fa-pen"></i></button>
                     <button onclick="setGradingTool('eraser')" class="grading-tool-btn p-1.5 rounded hover:bg-white text-gray-600" title="Tẩy"><i class="fa-solid fa-eraser"></i></button>
                     <div class="w-[1px] h-4 bg-gray-300 mx-1"></div>
                     <input type="color" id="penColor" value="#ff0000" class="w-6 h-6 border-0 p-0 rounded cursor-pointer">
                 </div>
 
                 <div class="flex items-center gap-1 bg-gray-100 p-1 rounded-lg border shrink-0">
-                    <div class="flex flex-col px-1">
-                        <span class="text-[8px] text-gray-400 font-bold uppercase leading-none">Điểm</span>
-                        <span class="text-[10px] font-bold text-blue-600 cursor-pointer hover:underline" onclick="setStepScore()" id="stepScoreDisplay" title="Bấm để thay đổi">±0.25</span>
+                    <div class="flex flex-col px-2 cursor-pointer hover:bg-gray-200 rounded" onclick="changeStepScore()" title="Bấm để đổi điểm">
+                        <span class="text-[8px] text-gray-500 font-bold uppercase">Bước điểm</span>
+                        <span class="text-xs font-bold text-blue-600" id="stepScoreDisplay">0.25</span>
                     </div>
                     <button onclick="setGradingTool('mark_correct')" class="grading-tool-btn p-1.5 rounded hover:bg-green-100 text-green-600" title="Đúng (+Điểm)"><i class="fa-solid fa-check"></i></button>
                     <button onclick="setGradingTool('mark_wrong')" class="grading-tool-btn p-1.5 rounded hover:bg-red-100 text-red-600" title="Sai (-Điểm)"><i class="fa-solid fa-xmark"></i></button>
                 </div>
-                
+
                 <button onclick="runAIGrading()" class="px-3 py-1.5 bg-purple-100 text-purple-700 rounded-lg text-xs font-bold hover:bg-purple-200 flex items-center gap-1 shrink-0">
                     <i class="fa-solid fa-robot"></i> <span class="hidden md:inline">AI</span>
                 </button>
@@ -2365,7 +2366,6 @@
                 <div class="p-4 font-bold text-gray-600 text-sm uppercase border-b bg-gray-100">Danh sách câu hỏi</div>
                 <div class="flex-1 overflow-y-auto p-3 space-y-2" id="gradingNavList"></div>
             </div>
-
             <div class="flex-1 overflow-y-auto p-4 md:p-8 flex justify-center" id="gradingWorkspace">
                 <div class="max-w-4xl w-full space-y-6" id="gradingQuestionList"></div>
             </div>
