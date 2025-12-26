@@ -319,29 +319,17 @@
                 </div>
 
                 <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-                    <div class="p-4 border-b border-gray-100 flex flex-col gap-4 bg-gray-50">
-                        <div class="flex flex-col md:flex-row justify-between gap-4">
-                            <div class="flex gap-2 overflow-x-auto pb-1 no-scrollbar items-center" id="classFilterContainer">
-                                <button onclick="filterStats('all')" class="px-3 py-1.5 rounded-lg text-sm font-bold bg-blue-600 text-white shadow-sm whitespace-nowrap transition-colors" id="filterBtnAll">Tất cả</button>
-                                </div>
-                            
-                            <div class="shrink-0">
-                                <select id="sortStats" class="form-input text-sm py-1.5 w-40 bg-white" onchange="renderStatsTable()">
-                                    <option value="score_desc">Điểm cao -> thấp</option>
-                                    <option value="score_asc">Điểm thấp -> cao</option>
-                                    <option value="time_desc">Nộp mới nhất</option>
-                                </select>
-                            </div>
+                    <div class="p-4 border-b border-gray-100 flex flex-col md:flex-row gap-4 justify-between bg-gray-50">
+                        <div class="flex gap-2">
+                            <button onclick="filterStats('all')" class="px-3 py-1.5 rounded-lg text-sm font-bold bg-blue-600 text-white shadow-sm" id="filterBtnAll">Tất cả</button>
+                            <button onclick="filterStats('class')" class="hidden px-3 py-1.5 rounded-lg text-sm font-bold bg-white text-gray-600 border hover:bg-gray-100" id="filterBtnClass">Theo lớp</button>
                         </div>
-
-                        <div class="flex items-center gap-2 pt-2 border-t border-gray-200">
-                            <span class="text-xs font-bold text-gray-500 uppercase mr-2">Lọc theo:</span>
-                            <div class="flex bg-white rounded-lg border border-gray-300 p-1 shadow-sm">
-                                <button onclick="filterStatus('all')" id="stBtn_all" class="px-3 py-1 text-xs font-bold rounded bg-gray-100 text-gray-800">Tất cả</button>
-                                <button onclick="filterStatus('done')" id="stBtn_done" class="px-3 py-1 text-xs font-bold rounded text-gray-500 hover:bg-gray-50">Đã nộp</button>
-                                <button onclick="filterStatus('missing')" id="stBtn_missing" class="px-3 py-1 text-xs font-bold rounded text-gray-500 hover:bg-gray-50">Chưa nộp</button>
-                                <button onclick="filterStatus('graded')" id="stBtn_graded" class="px-3 py-1 text-xs font-bold rounded text-gray-500 hover:bg-gray-50">Đã chấm</button>
-                            </div>
+                        <div class="flex gap-2">
+                            <select id="sortStats" class="form-input text-sm py-1.5 w-40" onchange="renderStatsTable()">
+                                <option value="score_desc">Điểm cao -> thấp</option>
+                                <option value="score_asc">Điểm thấp -> cao</option>
+                                <option value="time_desc">Nộp mới nhất</option>
+                            </select>
                         </div>
                     </div>
                     <div class="overflow-x-auto">
@@ -1412,24 +1400,18 @@
             } catch(e) { console.error(e); window.customAlert("Lỗi lưu: " + e.message, "error"); } finally { btn.innerHTML = originalText; btn.disabled = false; }
         }
 
-        // Biến toàn cục mới cho bộ lọc
-        let currentClassFilter = 'all';
-        let currentStatusFilter = 'all';
-        let fullStudentList = []; 
-
         window.loadStats = async () => { 
-            if (!currentExamId) return;
-            
-            // 1. Lấy dữ liệu kết quả thi (Những người đã làm)
-            const qRes = query(collection(db, "results"), where("examId", "==", currentExamId));
+            if (!currentExamId) return; 
+            const qRes = query(collection(db, "results"), where("examId", "==", currentExamId)); 
             const snapRes = await getDocs(qRes);
             statsMap = {}; 
             
             snapRes.forEach(d => { 
-                const r = d.data();
-                const attemptData = { ...r, id: d.id }; // Lưu ID doc để chấm điểm sau này
-                const key = r.studentId || r.studentName; 
+                const r = d.data(); 
+                // [QUAN TRỌNG] Lưu thêm ID để sau này update điểm
+                const attemptData = { ...r, id: d.id };
                 
+                const key = r.studentId || r.studentName; 
                 if (!statsMap[key]) { 
                     statsMap[key] = { ...attemptData, attempts: [attemptData], bestScore: r.score }; 
                 } else { 
@@ -1440,56 +1422,6 @@
                     } 
                 } 
             });
-
-            // 2. Lấy cấu hình đề thi để biết giao cho lớp nào
-            const examRef = await getDoc(doc(db, "exams", currentExamId));
-            const examData = examRef.data();
-            fullStudentList = [];
-
-            // Reset bộ lọc lớp
-            const classContainer = document.getElementById('classFilterContainer');
-            // Giữ lại nút "Tất cả"
-            classContainer.innerHTML = `<button onclick="filterStats('all')" class="px-3 py-1.5 rounded-lg text-sm font-bold bg-blue-600 text-white shadow-sm whitespace-nowrap transition-colors" id="filterBtnAll">Tất cả</button>`;
-
-            // Nếu có gán lớp
-            if (examData.allowedClassIds && examData.allowedClassIds.length > 0) {
-                for (const classId of examData.allowedClassIds) {
-                    try {
-                        const classSnap = await getDoc(doc(db, "classes", classId));
-                        if (classSnap.exists()) {
-                            const cls = classSnap.data();
-                            
-                            // Tạo nút lọc cho lớp
-                            const btn = document.createElement('button');
-                            btn.className = `px-3 py-1.5 rounded-lg text-sm font-bold bg-white text-gray-600 border hover:bg-gray-50 shadow-sm whitespace-nowrap transition-colors class-filter-btn`;
-                            btn.dataset.id = classId;
-                            btn.textContent = cls.name;
-                            btn.onclick = () => filterStats(classId);
-                            classContainer.appendChild(btn);
-
-                            // Lấy danh sách học sinh (Giả sử field 'students' là mảng {uid, name})
-                            const students = cls.students || [];
-                            students.forEach(st => {
-                                fullStudentList.push({
-                                    studentId: st.uid,
-                                    studentName: st.name,
-                                    className: cls.name,
-                                    classId: classId
-                                });
-                            });
-                        }
-                    } catch(e) { console.log("Lỗi tải lớp:", e); }
-                }
-            } else {
-                // Nếu thi tự do
-                fullStudentList = Object.values(statsMap).map(s => ({
-                    studentId: s.studentId,
-                    studentName: s.studentName,
-                    className: 'Tự do',
-                    classId: 'public'
-                }));
-            }
-
             renderStatsDashboard();
         };
 
@@ -1509,114 +1441,58 @@
             renderStatsTable();
         };
 
-        window.filterStats = (classId) => {
-            currentClassFilter = classId;
-            // Update UI nút bấm
-            document.getElementById('filterBtnAll').className = classId === 'all' 
-                ? "px-3 py-1.5 rounded-lg text-sm font-bold bg-blue-600 text-white shadow-sm whitespace-nowrap transition-colors"
-                : "px-3 py-1.5 rounded-lg text-sm font-bold bg-white text-gray-600 border hover:bg-gray-50 shadow-sm whitespace-nowrap transition-colors";
-            
-            document.querySelectorAll('.class-filter-btn').forEach(btn => {
-                const isActive = btn.dataset.id === classId;
-                btn.className = isActive
-                    ? "px-3 py-1.5 rounded-lg text-sm font-bold bg-blue-600 text-white shadow-sm whitespace-nowrap transition-colors class-filter-btn"
-                    : "px-3 py-1.5 rounded-lg text-sm font-bold bg-white text-gray-600 border hover:bg-gray-50 shadow-sm whitespace-nowrap transition-colors class-filter-btn";
-            });
-            renderStatsTable();
+        window.filterStats = (type) => {
+            document.getElementById('filterBtnAll').className = type === 'all' ? "px-3 py-1.5 rounded-lg text-sm font-bold bg-blue-600 text-white shadow-sm" : "px-3 py-1.5 rounded-lg text-sm font-bold bg-white text-gray-600 border hover:bg-gray-100";
+            document.getElementById('filterBtnClass').className = type === 'class' ? "px-3 py-1.5 rounded-lg text-sm font-bold bg-blue-600 text-white shadow-sm" : "px-3 py-1.5 rounded-lg text-sm font-bold bg-white text-gray-600 border hover:bg-gray-100";
+            renderStatsTable(type);
         };
 
-        window.filterStatus = (status) => {
-            currentStatusFilter = status;
-            ['all','done','missing','graded'].forEach(s => {
-                const btn = document.getElementById(`stBtn_${s}`);
-                if(s === status) btn.className = "px-3 py-1 text-xs font-bold rounded bg-blue-100 text-blue-700 border border-blue-200 transition-colors";
-                else btn.className = "px-3 py-1 text-xs font-bold rounded text-gray-500 hover:bg-gray-50 transition-colors";
-            });
-            renderStatsTable();
-        };
-
-        window.renderStatsTable = () => {
+        window.renderStatsTable = (filterType = 'all') => {
             const tbody = document.getElementById('statsTableBody'); 
-            if(!tbody) return;
+            if (!tbody) return;
             tbody.innerHTML = '';
+            
+            let dataToShow = Object.values(statsMap);
+            
+            // [FIX LỖI] Đã xóa dòng gọi 'settingClassSelect' gây lỗi null
+            
+            // Logic sắp xếp
+            const sortTypeEl = document.getElementById('sortStats');
+            const sortType = sortTypeEl ? sortTypeEl.value : 'score_desc';
 
-            // 1. Gộp danh sách (Học sinh trong lớp + Kết quả thi thực tế)
-            let combinedData = fullStudentList.map(st => {
-                const result = statsMap[st.studentId] || statsMap[st.studentName];
-                if (result) {
-                    return { ...st, ...result, hasSubmitted: true };
-                } else {
-                    return { ...st, score: '--', attempts: [], hasSubmitted: false, status: 'Chưa làm' };
-                }
+            dataToShow.sort((a, b) => { 
+                const sA = parseFloat(a.score) || 0; 
+                const sB = parseFloat(b.score) || 0; 
+                if (sortType === 'score_desc') return sB - sA; 
+                if (sortType === 'score_asc') return sA - sB; 
+                if (sortType === 'time_desc') return new Date(b.submittedAt || 0) - new Date(a.submittedAt || 0); 
+                return 0;
             });
 
-            // Thêm những người thi tự do (không nằm trong danh sách lớp)
-            Object.values(statsMap).forEach(res => {
-                if (!combinedData.find(d => d.studentId === res.studentId)) {
-                    combinedData.push({ ...res, className: 'Khác', classId: 'other', hasSubmitted: true });
-                }
-            });
-
-            // 2. Lọc dữ liệu
-            let filteredData = combinedData.filter(item => {
-                // Lọc theo lớp
-                if (currentClassFilter !== 'all' && item.classId !== currentClassFilter) return false;
-                
-                // Lọc theo trạng thái
-                if (currentStatusFilter === 'done' && !item.hasSubmitted) return false;
-                if (currentStatusFilter === 'missing' && item.hasSubmitted) return false;
-                // Đã chấm: Có điểm và đã nộp (hoặc có trường gradedAt)
-                if (currentStatusFilter === 'graded') {
-                    // Logic tạm: Nếu là tự luận mà chưa có điểm (score=0?) hoặc chưa có gradedAt
-                    // Ở đây ta đơn giản hóa: cứ nộp là coi như hệ thống đã chấm sơ bộ
-                    if (!item.hasSubmitted) return false;
-                }
-                return true;
-            });
-
-            // 3. Sắp xếp
-            const sortType = document.getElementById('sortStats').value;
-            filteredData.sort((a, b) => { 
-                if (sortType === 'time_desc') return new Date(b.submittedAt || 0) - new Date(a.submittedAt || 0);
-                const sA = parseFloat(a.bestScore) || 0; 
-                const sB = parseFloat(b.bestScore) || 0; 
-                return sortType === 'score_desc' ? sB - sA : sA - sB; 
-            });
-
-            // 4. Render
-            if(filteredData.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="5" class="text-center py-8 text-gray-400 text-sm">Không tìm thấy học sinh nào.</td></tr>';
-                return;
-            }
-
-            filteredData.forEach(r => { 
-                const dateStr = r.submittedAt ? new Date(r.submittedAt).toLocaleString('vi-VN') : '<span class="text-red-400 italic">Chưa nộp</span>'; 
-                const scoreClass = !r.hasSubmitted ? 'text-gray-300' : (r.bestScore >= 8 ? 'text-green-600' : (r.bestScore >= 5 ? 'text-blue-600' : 'text-red-500')); 
+            // Logic hiển thị dữ liệu
+            dataToShow.forEach(r => { 
+                const dateStr = r.submittedAt ? new Date(r.submittedAt).toLocaleString('vi-VN') : '--'; 
+                const scoreClass = r.status === 'Chưa làm' ? 'text-gray-400' : (r.score >= 8 ? 'text-green-600' : (r.score >= 5 ? 'text-blue-600' : 'text-red-500')); 
                 const attemptCount = r.attempts ? r.attempts.length : 0; 
                 
-                // Nút xem chi tiết (chỉ hiện khi đã nộp)
-                const nameHtml = r.hasSubmitted 
-                    ? `<button onclick="showStudentHistory('${r.studentName}')" class="font-bold text-blue-600 hover:underline flex items-center gap-2"><i class="fa-solid fa-user-graduate"></i> ${r.studentName}</button>` 
-                    : `<span class="text-gray-500 flex items-center gap-2"><i class="fa-regular fa-user"></i> ${r.studentName}</span>`;
-                
-                // Cảnh báo vi phạm
-                const cheatCount = r.cheatCount || 0;
-                const cheatBadge = (r.hasSubmitted && cheatCount > 0) 
-                    ? `<span class="bg-red-100 text-red-600 px-2 py-0.5 rounded text-xs font-bold" title="${cheatCount} lần vi phạm"><i class="fa-solid fa-triangle-exclamation"></i> ${cheatCount}</span>` 
-                    : '';
+                // Hiển thị số lần vi phạm (Cột mới)
+                // Lấy cheatCount từ lần thi tốt nhất hoặc cộng dồn tùy logic, ở đây lấy từ bản ghi bestScore
+                const lastCheat = r.cheatCount || 0;
+                const cheatHtml = lastCheat > 0 
+                    ? `<span class="px-2 py-1 bg-red-100 text-red-600 rounded-full font-bold text-xs"><i class="fa-solid fa-triangle-exclamation"></i> ${lastCheat}</span>` 
+                    : `<span class="text-gray-300">-</span>`;
 
+                const nameHtml = attemptCount > 0 
+                    ? `<button onclick="showStudentHistory('${r.studentName}')" class="font-bold text-blue-600 hover:underline flex items-center gap-2"><i class="fa-solid fa-user-graduate"></i> ${r.studentName}</button>` 
+                    : r.studentName; 
+                
                 tbody.innerHTML += `
-                    <tr class="bg-white border-b hover:bg-gray-50 transition-colors ${!r.hasSubmitted ? 'bg-gray-50/50' : ''}">
-                        <td class="px-6 py-3">
-                            <div class="font-medium text-gray-900">${nameHtml}</div>
-                            <div class="text-[10px] text-gray-500 flex items-center gap-1">
-                                <span class="bg-gray-100 px-1.5 rounded border">${r.className || 'Tự do'}</span>
-                                ${cheatBadge}
-                            </div>
-                        </td>
-                        <td class="px-6 py-3 text-center font-bold ${scoreClass} text-lg">${r.hasSubmitted ? r.bestScore : '--'}</td>
-                        <td class="px-6 py-3 text-center text-xs text-gray-500">${attemptCount}</td>
-                        <td class="px-6 py-3 text-right text-xs text-gray-500 font-mono">${dateStr}</td>
+                    <tr class="bg-white border-b hover:bg-gray-50 transition-colors">
+                        <td class="px-6 py-3 font-medium text-gray-900">${nameHtml} <span class="text-xs text-gray-400 ml-1">${r.status || ''}</span></td>
+                        <td class="px-6 py-3 text-center font-bold ${scoreClass} text-lg">${r.score}</td>
+                        <td class="px-6 py-3 text-center">${cheatHtml}</td>
+                        <td class="px-6 py-3 text-center text-xs text-gray-500 font-bold">${attemptCount}</td>
+                        <td class="px-6 py-3 text-right text-xs text-gray-500">${dateStr}</td>
                     </tr>`; 
             });
         };
@@ -1790,121 +1666,17 @@
             }
         });
     // --- LOGIC CHẤM THI (GRADING) ---
-// --- LOGIC CHẤM THI & CANVAS ---
         let currentGradingAttempt = null;
-        let gradingTool = 'cursor';
-        let isDrawing = false;
 
-        window.openGrading = (attemptIndex) => {
-            // Lấy dữ liệu attempt từ statsMap (do HTML không truyền được object)
-            // Cần logic tìm lại attempt dựa trên index hoặc ID. 
-            // Tạm thời để đơn giản: Ta sẽ lưu attempt hiện tại vào biến global khi render list
-            // Ở đây tôi giả định bạn đã sửa hàm showStudentHistory để truyền object hoặc lưu trữ.
-            // Để code chạy ngay, ta sửa lại hàm showStudentHistory một chút ở dưới.
-        };
-        
-        // CẬP NHẬT LẠI HÀM showStudentHistory ĐỂ MỞ MODAL NÀY
-        window.showStudentHistory = (studentName) => {
-            const studentData = Object.values(statsMap).find(s => s.studentName === studentName);
-            if (!studentData || !studentData.attempts) return;
-            
-            // Lưu tạm vào biến global để dùng cho openGrading
-            window.tempStudentData = studentData;
-
-            const modal = document.getElementById('historyModal'); 
-            const content = document.getElementById('histModalContent'); 
-            const title = document.getElementById('histModalTitle');
-            title.innerHTML = `<i class="fa-solid fa-clock-rotate-left mr-2"></i>Lịch sử: ${studentName}`; 
-            
-            let html = `<table class="w-full text-sm text-left text-gray-600"><thead class="bg-blue-50 text-blue-800 uppercase text-xs"><tr><th class="p-3">Lần</th><th class="p-3 text-center">Điểm</th><th class="p-3 text-right">Hành động</th></tr></thead><tbody class="divide-y divide-gray-100">`;
-            
-            // Sắp xếp mới nhất lên đầu
-            const sorted = [...studentData.attempts].sort((a,b) => new Date(b.submittedAt) - new Date(a.submittedAt));
-            
-            sorted.forEach((att, idx) => {
-                html += `<tr>
-                    <td class="p-3 font-bold">Lần ${sorted.length - idx} <div class="text-[10px] text-gray-400 font-normal">${new Date(att.submittedAt).toLocaleString('vi-VN')}</div></td>
-                    <td class="p-3 text-center font-black text-blue-600 text-lg">${att.score}</td>
-                    <td class="p-3 text-right">
-                        <button onclick='startGradingSession(${JSON.stringify(att).replace(/'/g, "&apos;")})' class="px-3 py-1.5 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 text-xs font-bold border border-blue-200">
-                            <i class="fa-solid fa-pen-nib mr-1"></i> Chấm bài
-                        </button>
-                    </td>
-                </tr>`;
-            });
-            html += `</tbody></table>`;
-            content.innerHTML = html;
-            modal.classList.remove('opacity-0', 'pointer-events-none'); 
-            modal.querySelector('div').classList.add('scale-100');
-        };
-
-        window.startGradingSession = (attempt) => {
+        window.openGrading = (attempt) => {
             currentGradingAttempt = attempt;
-            document.getElementById('historyModal').classList.add('opacity-0', 'pointer-events-none');
-            const modal = document.getElementById('gradingModal');
+            document.getElementById('historyModal').classList.add('opacity-0', 'pointer-events-none'); // Ẩn modal lịch sử
             
+            const modal = document.getElementById('gradingModal');
             document.getElementById('gradingStudentName').textContent = attempt.studentName;
             document.getElementById('gradingTotalScore').textContent = attempt.score;
             
-            const container = document.getElementById('gradingQuestionList');
-            container.innerHTML = '';
-
-            window.questions.forEach((q, idx) => {
-                const u = attempt.answers ? attempt.answers[idx] : null;
-                const maxPoint = parseFloat(q.point) || 0;
-                
-                const card = document.createElement('div');
-                card.className = "bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden";
-                
-                let contentHtml = `<div class="p-5 border-b border-gray-100">
-                    <div class="flex justify-between mb-2"><span class="font-bold text-gray-700">Câu ${idx+1}</span><span class="text-xs bg-gray-100 px-2 py-1 rounded font-bold">${maxPoint}đ</span></div>
-                    <div class="text-gray-800">${window.formatContent(q.content)}</div>
-                </div>`;
-
-                let answerHtml = '';
-                if(q.type === 'essay') {
-                    // Vùng chấm tự luận (Canvas)
-                    answerHtml = `<div class="relative bg-gray-50 min-h-[200px]" id="essay-wrapper-${idx}">`;
-                    if (u && u.includes('<img')) {
-                        // Trích xuất URL ảnh từ HTML bài làm (chỉ lấy ảnh đầu tiên demo)
-                        const srcMatch = u.match(/src="([^"]+)"/);
-                        if(srcMatch) {
-                            answerHtml += `<div class="relative inline-block w-full">
-                                <img src="${srcMatch[1]}" class="w-full h-auto block pointer-events-none" id="essay-img-${idx}" crossorigin="anonymous">
-                                <canvas id="grading-canvas-${idx}" class="absolute inset-0 w-full h-full z-10 cursor-crosshair touch-none"></canvas>
-                            </div>`;
-                        } else {
-                            answerHtml += `<div class="p-4">${u}</div>`;
-                        }
-                    } else {
-                        answerHtml += `<div class="p-10 text-center text-gray-400 italic">Học sinh không nộp bài.</div>`;
-                    }
-                    answerHtml += `</div>
-                    <div class="p-3 bg-yellow-50 border-t border-yellow-100 flex items-center justify-between">
-                        <span class="text-sm font-bold text-yellow-800"><i class="fa-solid fa-pen mr-2"></i>Chấm điểm:</span>
-                        <div class="flex items-center gap-2">
-                            <input type="number" id="manual-score-${idx}" class="form-input w-20 text-right font-bold text-blue-600" value="${maxPoint}" max="${maxPoint}" min="0" step="0.1" onchange="updateGradingTotal()">
-                            <span class="text-gray-500 font-bold">/ ${maxPoint}</span>
-                        </div>
-                    </div>`;
-                } else {
-                    // Trắc nghiệm
-                    let isCorrect = false;
-                    if (q.type === 'mc' && u === q.correct) isCorrect = true;
-                    // ... (Logic chấm các loại khác) ...
-                    answerHtml = `<div class="p-3 bg-gray-50 text-sm">Học sinh chọn: <b>${u!==undefined?u:'Trống'}</b> <span class="${isCorrect?'text-green-600':'text-red-600'} font-bold">(${isCorrect?'Đúng':'Sai'})</span></div>`;
-                }
-
-                card.innerHTML = contentHtml + answerHtml;
-                container.appendChild(card);
-
-                // Khởi tạo Canvas sau khi ảnh load
-                if(q.type === 'essay') {
-                    setTimeout(() => initCanvas(idx), 500);
-                }
-            });
-
-            if(window.MathJax) MathJax.typesetPromise([container]).catch(()=>{});
+            renderGradingView();
             
             modal.classList.remove('hidden');
             setTimeout(() => modal.classList.remove('opacity-0'), 50);
@@ -1916,112 +1688,147 @@
             setTimeout(() => modal.classList.add('hidden'), 300);
         };
 
-        // --- CÁC HÀM CANVAS CƠ BẢN ---
-        window.setGradingTool = (tool) => {
-            gradingTool = tool;
-            document.querySelectorAll('.grading-tool-btn').forEach(b => b.classList.remove('bg-blue-100', 'text-blue-600'));
-            // Highlight logic...
-        };
-
-        function initCanvas(idx) {
-            const canvas = document.getElementById(`grading-canvas-${idx}`);
-            const img = document.getElementById(`essay-img-${idx}`);
-            if(!canvas || !img) return;
-
-            // Set kích thước canvas bằng ảnh
-            canvas.width = img.naturalWidth || img.width;
-            canvas.height = img.naturalHeight || img.height;
+        window.renderGradingView = () => {
+            const container = document.getElementById('gradingQuestionList');
+            const nav = document.getElementById('gradingNavList');
+            container.innerHTML = '';
+            nav.innerHTML = '';
             
-            const ctx = canvas.getContext('2d');
-            let isDown = false;
-            let prevX, prevY;
+            const answers = currentGradingAttempt.answers || {};
 
-            const getPos = (e) => {
-                const rect = canvas.getBoundingClientRect();
-                const scaleX = canvas.width / rect.width;
-                const scaleY = canvas.height / rect.height;
-                return {
-                    x: ((e.clientX || e.touches[0].clientX) - rect.left) * scaleX,
-                    y: ((e.clientY || e.touches[0].clientY) - rect.top) * scaleY
-                };
-            };
-
-            const start = (e) => {
-                if(gradingTool === 'cursor') return;
-                e.preventDefault();
-                isDown = true;
-                const pos = getPos(e);
-                prevX = pos.x; prevY = pos.y;
+            window.questions.forEach((q, idx) => {
+                const u = answers[idx];
+                let isCorrect = false; 
+                let score = 0;
+                let maxPoint = parseFloat(q.point) || 0;
                 
-                // Logic chấm nhanh (Click)
-                if (gradingTool === 'mark_correct' || gradingTool === 'mark_wrong') {
-                    ctx.lineWidth = 5; ctx.lineCap = 'round';
-                    if (gradingTool === 'mark_correct') {
-                        ctx.strokeStyle = '#10B981';
-                        ctx.beginPath(); ctx.moveTo(prevX-10, prevY); ctx.lineTo(prevX, prevY+15); ctx.lineTo(prevX+20, prevY-20); ctx.stroke();
-                        // Cộng điểm
+                // Logic chấm tự động để hiển thị màu
+                if (q.type === 'mc' && u === q.correct) isCorrect = true;
+                else if (q.type === 'short' && q.answer && String(u).trim().toLowerCase() === String(q.answer).trim().toLowerCase()) isCorrect = true;
+                else if (q.type === 'tf') {/*...*/ } // (Giản lược hiển thị TF)
+
+                // Render Nav Item
+                const navItem = document.createElement('button');
+                navItem.className = `w-full text-left p-3 rounded-lg text-xs font-bold mb-1 border ${q.type==='essay' ? 'bg-purple-50 border-purple-200 text-purple-700' : (isCorrect ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700')}`;
+                navItem.innerHTML = `Câu ${idx+1} <span class="float-right">${q.type.toUpperCase()}</span>`;
+                navItem.onclick = () => document.getElementById(`grade-q-${idx}`).scrollIntoView({behavior:'smooth', block:'center'});
+                nav.appendChild(navItem);
+
+                // Render Main Content
+                const card = document.createElement('div');
+                card.id = `grade-q-${idx}`;
+                card.className = "bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden";
+                
+                let answerHtml = '';
+                
+                if (q.type === 'essay') {
+                    // HIỂN THỊ ẢNH TỰ LUẬN
+                    if (u && u.includes('<img')) {
+                        answerHtml = `<div class="p-4 bg-gray-50 border-t border-b border-gray-100">
+                            <div class="text-xs font-bold text-gray-500 uppercase mb-2">Bài làm của học sinh:</div>
+                            <div class="grading-essay-content">${u}</div>
+                        </div>`;
                     } else {
-                        ctx.strokeStyle = '#EF4444';
-                        ctx.beginPath(); ctx.moveTo(prevX-15, prevY-15); ctx.lineTo(prevX+15, prevY+15); ctx.moveTo(prevX+15, prevY-15); ctx.lineTo(prevX-15, prevY+15); ctx.stroke();
-                        // Trừ điểm
+                        answerHtml = `<div class="p-4 text-gray-400 italic text-sm">Học sinh không nộp bài cho câu này.</div>`;
                     }
-                    isDown = false;
+                    
+                    // Ô NHẬP ĐIỂM CHO TỰ LUẬN
+                    // Nếu chưa có điểm riêng, mặc định là 0 (hoặc logic tự chia điểm trước đó nếu có)
+                    // Ở đây ta tạm lấy maxPoint nếu chưa chấm, hoặc cần lưu điểm chấm riêng vào attempt
+                    // [TODO] Cần lưu điểm chấm tay vào cấu trúc dữ liệu. Tạm thời dùng input để nhập.
+                    
+                    answerHtml += `
+                        <div class="p-4 bg-yellow-50 flex items-center justify-between">
+                            <span class="font-bold text-yellow-800 text-sm"><i class="fa-solid fa-pen-nib mr-2"></i>Chấm điểm:</span>
+                            <div class="flex items-center gap-2">
+                                <input type="number" id="manual-score-${idx}" class="form-input w-24 text-right font-bold text-lg text-blue-600" 
+                                    value="${maxPoint}" max="${maxPoint}" min="0" step="0.1" onchange="updateTotalScore()">
+                                <span class="text-gray-500 font-bold">/ ${maxPoint}đ</span>
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    // Các loại câu khác (Chỉ xem, không sửa điểm)
+                    let userText = (u !== undefined) ? (q.type==='mc' ? `Phương án ${String.fromCharCode(65+u)}` : u) : 'Bỏ trống';
+                    answerHtml = `<div class="p-3 border-t bg-gray-50 text-sm">
+                        Học sinh chọn: <b class="${isCorrect?'text-green-600':'text-red-600'}">${userText}</b> 
+                        ${!isCorrect ? `| Đáp án đúng: <b class="text-green-600">${q.type==='mc'?String.fromCharCode(65+q.correct):q.answer}</b>` : ''}
+                    </div>`;
                 }
-            };
 
-            const move = (e) => {
-                if(!isDown || (gradingTool !== 'pen' && gradingTool !== 'eraser')) return;
-                e.preventDefault();
-                const pos = getPos(e);
-                ctx.beginPath();
-                ctx.moveTo(prevX, prevY);
-                ctx.lineTo(pos.x, pos.y);
-                ctx.strokeStyle = document.getElementById('penColor').value;
-                ctx.lineWidth = 3;
-                if(gradingTool === 'eraser') { ctx.globalCompositeOperation = 'destination-out'; ctx.lineWidth = 20; }
-                else ctx.globalCompositeOperation = 'source-over';
-                ctx.stroke();
-                prevX = pos.x; prevY = pos.y;
-            };
-
-            const end = () => { isDown = false; };
-
-            canvas.addEventListener('mousedown', start);
-            canvas.addEventListener('mousemove', move);
-            canvas.addEventListener('mouseup', end);
-            canvas.addEventListener('touchstart', start);
-            canvas.addEventListener('touchmove', move);
-            canvas.addEventListener('touchend', end);
-        }
-
-        window.updateGradingTotal = () => {
-            let total = 0;
-            const inputs = document.querySelectorAll('input[id^="manual-score-"]');
-            inputs.forEach(inp => total += parseFloat(inp.value)||0);
-            // Cộng thêm điểm trắc nghiệm (nếu tách riêng)
-            // Tạm thời lấy tổng điểm input
-            document.getElementById('gradingTotalScore').textContent = total.toFixed(2);
+                card.innerHTML = `
+                    <div class="p-5">
+                        <div class="flex justify-between mb-2">
+                            <span class="font-bold text-gray-700">Câu ${idx+1}</span>
+                            <span class="text-xs bg-gray-100 px-2 py-1 rounded text-gray-500 font-bold">${maxPoint} điểm</span>
+                        </div>
+                        <div class="text-gray-800 mb-4">${window.formatContent(q.content)}</div>
+                        ${q.solution ? `<div class="text-sm text-gray-500 border-l-4 border-blue-200 pl-3 py-1 bg-blue-50/50 italic">${window.formatContent(q.solution)}</div>` : ''}
+                    </div>
+                    ${answerHtml}
+                `;
+                container.appendChild(card);
+            });
+            
+            if(window.MathJax) MathJax.typesetPromise([container]).catch(()=>{});
         };
 
-        window.runAIGrading = () => {
-            window.showToast("Tính năng AI đang được phát triển...", "info");
-            // Placeholder cho API Call
+        window.updateTotalScore = () => {
+            let total = 0;
+            // Tính tổng lại dựa trên các ô nhập điểm (Essay) và điểm tự động (Trắc nghiệm)
+            const answers = currentGradingAttempt.answers || {};
+            window.questions.forEach((q, idx) => {
+                if (q.type === 'essay') {
+                    const inp = document.getElementById(`manual-score-${idx}`);
+                    if (inp) total += parseFloat(inp.value) || 0;
+                } else {
+                    // Logic tính điểm cũ cho trắc nghiệm
+                    // (Đơn giản hóa: Nếu đúng cộng full điểm câu đó)
+                    const u = answers[idx];
+                    let isCorrect = false;
+                    if (q.type === 'mc' && u === q.correct) isCorrect = true;
+                    else if (q.type === 'short' && q.answer && String(u).trim().toLowerCase() === String(q.answer).trim().toLowerCase()) isCorrect = true;
+                    // (Thêm logic TF nếu cần)
+                    
+                    if (isCorrect) total += (parseFloat(q.point) || 0);
+                }
+            });
+            
+            document.getElementById('gradingTotalScore').textContent = parseFloat(total.toFixed(2));
         };
 
         window.saveGradingResult = async () => {
-            if (!currentGradingAttempt || !currentGradingAttempt.id) return;
-            const newScore = parseFloat(document.getElementById('gradingTotalScore').textContent);
+            if (!currentGradingAttempt || !currentGradingAttempt.id) return window.customAlert("Lỗi dữ liệu bài thi!", "error");
             
+            const newScore = parseFloat(document.getElementById('gradingTotalScore').textContent);
+            const btn = document.querySelector('#gradingModal button[onclick="saveGradingResult()"]');
+            const oldText = btn.innerHTML;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang lưu...'; btn.disabled = true;
+
             try {
+                // Cập nhật điểm mới vào Firestore
                 await updateDoc(doc(db, "results", currentGradingAttempt.id), {
                     score: newScore,
                     gradedAt: new Date().toISOString(),
-                    graderId: currentUser.uid
+                    graderId: currentUser.uid // Lưu người chấm
                 });
-                window.showToast("Đã lưu kết quả!", "success");
-                loadStats(); // Reload bảng
+                
+                // Cập nhật lại statsMap cục bộ để không cần reload trang
+                if (currentGradingAttempt) {
+                    currentGradingAttempt.score = newScore;
+                    // Tìm và update trong mảng attempts của statsMap
+                    // (Phần này có thể bỏ qua, chỉ cần reloadStats nếu muốn chắc ăn)
+                }
+                
+                window.showToast("Đã lưu kết quả chấm thi!", "success");
+                loadStats(); // Tải lại bảng thống kê
                 closeGradingModal();
-            } catch(e) { window.customAlert("Lỗi lưu: " + e.message, "error"); }
+            } catch (e) {
+                console.error(e);
+                window.customAlert("Lỗi lưu điểm: " + e.message, "error");
+            } finally {
+                btn.innerHTML = oldText; btn.disabled = false;
+            }
         };
     </script>
     <div id="missingImagesPanel" class="hidden fixed bottom-4 right-4 z-50 bg-white border-2 border-orange-500 shadow-2xl rounded-xl w-64 overflow-hidden flex flex-col max-h-[60vh]">
@@ -2110,52 +1917,6 @@
                         </div>
                 </div>
 
-            </div>
-        </div>
-    </div>
-    <div id="gradingModal" class="fixed inset-0 z-[120] bg-gray-900 bg-opacity-95 hidden flex flex-col transition-opacity duration-300 opacity-0">
-        <div class="h-16 bg-white border-b border-gray-200 flex justify-between items-center px-4 shrink-0 shadow-md z-20">
-            <div class="flex items-center gap-4">
-                <button onclick="closeGradingModal()" class="w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-600"><i class="fa-solid fa-arrow-left"></i></button>
-                <div>
-                    <h3 class="font-bold text-gray-800 text-lg leading-tight" id="gradingStudentName">Tên học sinh</h3>
-                    <p class="text-xs text-gray-500">Đang chấm: <span id="gradingAttemptNum">--</span></p>
-                </div>
-            </div>
-
-            <div id="gradingToolbar" class="flex items-center gap-3">
-                <div class="flex items-center gap-1 bg-gray-100 p-1 rounded-lg border">
-                    <button onclick="setGradingTool('cursor')" class="grading-tool-btn p-1.5 rounded bg-white shadow-sm text-blue-600" title="Di chuyển"><i class="fa-solid fa-arrow-pointer"></i></button>
-                    <button onclick="setGradingTool('pen')" class="grading-tool-btn p-1.5 rounded hover:bg-white text-gray-600" title="Bút viết"><i class="fa-solid fa-pen"></i></button>
-                    <button onclick="setGradingTool('eraser')" class="grading-tool-btn p-1.5 rounded hover:bg-white text-gray-600" title="Tẩy"><i class="fa-solid fa-eraser"></i></button>
-                    <div class="w-[1px] h-4 bg-gray-300 mx-1"></div>
-                    <input type="color" id="penColor" value="#ff0000" class="w-6 h-6 border-0 p-0 rounded cursor-pointer">
-                </div>
-
-                <div class="flex items-center gap-1 bg-gray-100 p-1 rounded-lg border hidden md:flex">
-                    <button onclick="setGradingTool('mark_correct')" class="grading-tool-btn p-1.5 rounded hover:bg-green-100 text-green-600" title="Đúng (Click để chấm)"><i class="fa-solid fa-check"></i></button>
-                    <button onclick="setGradingTool('mark_wrong')" class="grading-tool-btn p-1.5 rounded hover:bg-red-100 text-red-600" title="Sai (Click để chấm)"><i class="fa-solid fa-xmark"></i></button>
-                </div>
-
-                <button onclick="runAIGrading()" class="px-3 py-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg text-xs font-bold shadow hover:opacity-90 flex items-center gap-1">
-                    <i class="fa-solid fa-robot"></i> <span class="hidden md:inline">Chấm AI</span>
-                </button>
-            </div>
-
-            <div class="flex items-center gap-4">
-                <div class="text-right hidden md:block">
-                    <p class="text-xs text-gray-500 uppercase font-bold">Tổng điểm</p>
-                    <p class="text-2xl font-black text-blue-600" id="gradingTotalScore">0.0</p>
-                </div>
-                <button onclick="saveGradingResult()" class="px-5 py-2 bg-green-600 hover:bg-green-700 text-white font-bold rounded-xl shadow-lg transition-all flex items-center gap-2">
-                    <i class="fa-solid fa-floppy-disk"></i> Lưu
-                </button>
-            </div>
-        </div>
-
-        <div class="flex-1 flex overflow-hidden bg-gray-100 relative">
-            <div class="flex-1 overflow-y-auto p-4 md:p-8 flex justify-center" id="gradingWorkspace">
-                <div class="max-w-4xl w-full space-y-6" id="gradingQuestionList"></div>
             </div>
         </div>
     </div>
