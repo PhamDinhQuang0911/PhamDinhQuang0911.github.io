@@ -679,7 +679,6 @@ async function loadLobbyData(id) {
             const q = currentQuestions[idx];
             document.getElementById('currentQNum').textContent = idx + 1;
             dom.badge.textContent = q.type==='mc'?'TRẮC NGHIỆM':(q.type==='tf'?'ĐÚNG/SAI':(q.type==='short'?'TRẢ LỜI NGẮN':'TỰ LUẬN'));
-            
             dom.content.innerHTML = window.formatContent(q.content);
             dom.options.innerHTML = '';
 
@@ -713,14 +712,13 @@ async function loadLobbyData(id) {
                 inp.onchange = (e) => { userAnswers[idx]=e.target.value; updatePalette(); saveLocal(); };
                 dom.options.appendChild(inp);
             } else { 
-                // --- TỰ LUẬN (GIAO DIỆN MỚI: NÚT XÓA TẤT CẢ) ---
+                // --- TỰ LUẬN (CẬP NHẬT) ---
                 const wrapper = document.createElement('div');
                 wrapper.className = "space-y-4 pb-24"; 
 
                 // Khu vực hiển thị ảnh đã nộp
                 const submittedWrapper = document.createElement('div');
                 submittedWrapper.id = `submitted-area-wrapper-${idx}`;
-                // Chỉ hiện nếu có dữ liệu
                 submittedWrapper.className = userAnswers[idx] ? "bg-blue-50 p-4 rounded-xl border border-blue-200 mb-4" : "hidden";
                 
                 submittedWrapper.innerHTML = `
@@ -728,11 +726,11 @@ async function loadLobbyData(id) {
                         <div class="flex items-center gap-2 text-blue-700 font-bold text-sm">
                             <i class="fa-solid fa-check-circle"></i> Bài làm đã lưu:
                         </div>
-                        <button onclick="deleteAllImages(${idx})" class="text-xs bg-white text-red-600 border border-red-200 px-3 py-1 rounded-lg hover:bg-red-50 font-bold shadow-sm">
-                            <i class="fa-solid fa-trash-can mr-1"></i> Xóa tất cả
+                        <button onclick="window.deleteAllImages(${idx})" class="text-xs bg-white text-red-600 border border-red-200 px-3 py-1.5 rounded-lg hover:bg-red-600 hover:text-white font-bold shadow-sm transition-colors flex items-center gap-1">
+                            <i class="fa-solid fa-trash-can"></i> Xóa tất cả
                         </button>
                     </div>
-                    <div id="submitted-area-${idx}" class="submitted-content grid gap-4">
+                    <div id="submitted-area-${idx}" class="submitted-content grid gap-6">
                         ${userAnswers[idx] || ''}
                     </div>
                 `;
@@ -964,18 +962,23 @@ async function loadLobbyData(id) {
                     
                     const uniqueId = `img-wrapper-${Date.now()}-${i}`;
                     
-                    // [HTML MỚI] Dùng style inline để chắc chắn hiện nút xóa
+                    // [HTML MỚI: NÚT XÓA TINH TẾ HƠN & Z-INDEX THẤP HƠN MODAL]
                     htmlImgs += `
-                        <div id="${uniqueId}" class="relative inline-block w-full max-w-md border-2 border-gray-200 rounded-lg mb-4 bg-white" style="position: relative;">
-                            <img src="${data.url}" class="w-full h-auto block rounded-lg" loading="lazy">
+                        <div id="${uniqueId}" class="relative inline-block w-full max-w-md border border-gray-300 rounded-lg bg-white shadow-sm mb-3 group" style="position: relative;">
+                            <img src="${data.url}" class="w-full h-auto block rounded-t-lg" loading="lazy">
                             
                             <div onclick="window.deleteStudentImage('${data.url}', ${qIdx}, '${uniqueId}')" 
-                                 style="position: absolute; top: -10px; right: -10px; width: 35px; height: 35px; background-color: #DC2626; color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.3); z-index: 9999;">
-                                <i class="fa-solid fa-trash"></i>
+                                 class="absolute top-2 right-2 w-8 h-8 bg-red-600 text-white rounded-full flex items-center justify-center shadow-md cursor-pointer hover:bg-red-700 transition-transform hover:scale-110 active:scale-95"
+                                 style="z-index: 20; opacity: 0.8;" 
+                                 onmouseover="this.style.opacity='1'" 
+                                 onmouseout="this.style.opacity='0.8'"
+                                 title="Xóa ảnh này">
+                                <i class="fa-solid fa-trash text-xs"></i>
                             </div>
 
-                            <div class="absolute bottom-2 right-2 bg-black/60 text-white text-[10px] font-bold px-2 py-1 rounded backdrop-blur-sm z-40">
-                                Tờ ${pageNum}
+                            <div class="bg-gray-50 text-gray-600 text-xs font-bold px-3 py-2 border-t border-gray-200 rounded-b-lg flex justify-between items-center">
+                                <span>Tờ thứ ${pageNum}</span>
+                                <span class="text-[10px] text-gray-400">Đã lưu</span>
                             </div>
                         </div>`;
                 }
@@ -1018,61 +1021,65 @@ async function loadLobbyData(id) {
                 } else { await updateDoc(userRef, { qpoint: currentQpoint - fee }); window.showToast(`Thanh toán thành công! Còn lại: ${currentQpoint - fee} Qpoint`); viewDetailSolutions(); }
             } catch(e) { console.error(e); window.customAlert("Lỗi giao dịch: " + e.message, "error"); }
         };
-        // --- HÀM XÓA ẢNH HỌC SINH (MỚI) ---
-        // --- HÀM XÓA ẢNH (CÓ XÓA TRÊN CLOUD) ---
+        // --- CÁC HÀM XÓA (GÁN VÀO WINDOW ĐỂ HTML GỌI ĐƯỢC) ---
+        
         window.deleteStudentImage = async (imgUrl, qIdx, wrapperId) => {
-            // Hỏi xác nhận trước khi xóa
-            const confirmDelete = await window.customConfirm("Bạn có chắc chắn muốn xóa ảnh bài làm này không?\nHành động này không thể hoàn tác.");
+            // Dừng sự kiện click lan truyền
+            if(window.event) window.event.stopPropagation();
+
+            const confirmDelete = await window.customConfirm("Bạn có chắc chắn muốn xóa ảnh này không?");
             if (!confirmDelete) return;
 
-            // Bật cờ upload để không bị tính vi phạm khi đang xử lý
             window.isUploading = true;
-            
-            // Hiện thông báo đang xóa
             window.showToast("Đang xóa ảnh...", "info");
 
             try {
-                // 1. Xử lý đường dẫn để lấy Key (Tên file trên Cloud)
                 let keyName = imgUrl;
-                // Nếu là URL đầy đủ, cắt lấy phần sau domain
                 if (imgUrl.startsWith('http')) {
                     try {
                         const urlObj = new URL(imgUrl);
-                        // Lấy pathname, bỏ dấu / ở đầu nếu có
                         keyName = urlObj.pathname.startsWith('/') ? urlObj.pathname.substring(1) : urlObj.pathname;
-                        // Giải mã ký tự đặc biệt (VD: %20 -> khoảng trắng)
                         keyName = decodeURIComponent(keyName);
-                    } catch(e) { console.warn("Lỗi parse URL:", e); }
+                    } catch(e) {}
                 }
 
-                // 2. Gọi API xóa trên Cloudflare R2
-                const res = await fetch(`https://upload-helper.phamngockhanh-942001.workers.dev/?key=${encodeURIComponent(keyName)}`, {
-                    method: 'DELETE'
-                });
+                await fetch(`https://upload-helper.phamngockhanh-942001.workers.dev/?key=${encodeURIComponent(keyName)}`, { method: 'DELETE' });
 
-                // 3. Xóa trên giao diện
                 const wrapper = document.getElementById(wrapperId);
                 if (wrapper) wrapper.remove();
 
-                // 4. Cập nhật lại dữ liệu bài làm trong bộ nhớ
                 const containerHtml = document.getElementById(`submitted-area-${qIdx}`).innerHTML;
-                
                 if (!containerHtml.trim()) {
-                    delete userAnswers[qIdx]; // Nếu xóa hết thì xóa luôn key
+                    delete userAnswers[qIdx];
                     document.getElementById(`submitted-area-wrapper-${qIdx}`).classList.add('hidden');
                 } else {
                     userAnswers[qIdx] = containerHtml;
                 }
                 
-                saveLocal(); // Lưu lại trạng thái mới
-                window.showToast("Đã xóa ảnh vĩnh viễn!", "success");
+                saveLocal();
+                window.showToast("Đã xóa ảnh!", "success");
 
             } catch (e) {
                 console.error(e);
-                window.customAlert("Lỗi khi xóa ảnh: " + e.message, "error");
             } finally {
                 setTimeout(() => { window.isUploading = false; }, 500);
             }
+        };
+
+        window.deleteAllImages = async (qIdx) => {
+            const confirmDelete = await window.customConfirm("CẢNH BÁO: Bạn có muốn xóa TOÀN BỘ ảnh của câu này không?");
+            if (!confirmDelete) return;
+
+            window.isUploading = true;
+            
+            delete userAnswers[qIdx];
+            saveLocal();
+            
+            document.getElementById(`submitted-area-wrapper-${qIdx}`).classList.add('hidden');
+            document.getElementById(`submitted-area-${qIdx}`).innerHTML = '';
+            
+            window.showToast("Đã xóa sạch bài làm câu này!", "success");
+            setTimeout(() => { window.isUploading = false; }, 500);
         };
     </script>
     <div id="cheatModal" class="fixed inset-0 z-[200] flex items-center justify-center bg-red-900/95 hidden backdrop-blur-sm transition-opacity duration-300 opacity-0">
