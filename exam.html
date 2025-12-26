@@ -941,11 +941,15 @@ async function loadLobbyData(id) {
             if(uploadBtn) { uploadBtn.disabled = true; uploadBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang tải lên...'; }
 
             let htmlImgs = "";
+            
+            // Lấy nội dung cũ để đếm số trang tiếp theo
             const currentHtml = userAnswers[qIdx] || "";
+            // Đếm số lượng thẻ img đang có (để đánh số trang tiếp theo)
             const existingCount = (currentHtml.match(/<img/g) || []).length;
             
             try {
                 for (let i = 0; i < files.length; i++) {
+                    // Tính số trang = Số ảnh cũ + Thứ tự ảnh mới + 1
                     const pageNum = existingCount + i + 1;
                     const watermarkText = `Câu ${qIdx + 1}: Tờ thứ ${pageNum}`;
                     
@@ -953,6 +957,7 @@ async function loadLobbyData(id) {
                     const compressed = await compressImage(markedFile, 0.7, 1000);
 
                     const formData = new FormData();
+                    // Lưu đúng thư mục submissions/
                     const fileName = `submissions/${currentUser.uid}_${Date.now()}_${i}.jpg`;
                     formData.append('file', compressed, fileName);
 
@@ -960,36 +965,39 @@ async function loadLobbyData(id) {
                     if(!res.ok) throw new Error("Lỗi upload ảnh");
                     const data = await res.json();
                     
+                    // [TẠO KHỐI ẢNH CÓ NÚT XÓA]
                     const uniqueId = `img-wrapper-${Date.now()}-${i}`;
                     
-                    // [HTML MỚI: NÚT XÓA TINH TẾ HƠN & Z-INDEX THẤP HƠN MODAL]
+                    // HTML cho từng ảnh (bao gồm nút xóa)
                     htmlImgs += `
-                        <div id="${uniqueId}" class="relative inline-block w-full max-w-md border border-gray-300 rounded-lg bg-white shadow-sm mb-3 group" style="position: relative;">
-                            <img src="${data.url}" class="w-full h-auto block rounded-t-lg" loading="lazy">
+                        <div id="${uniqueId}" class="relative inline-block w-full max-w-md border-2 border-gray-200 rounded-lg mb-4 bg-white group shadow-sm" style="position: relative;">
+                            
+                            <img src="${data.url}" class="w-full h-auto block rounded-lg" loading="lazy">
                             
                             <div onclick="window.deleteStudentImage('${data.url}', ${qIdx}, '${uniqueId}')" 
-                                 class="absolute top-2 right-2 w-8 h-8 bg-red-600 text-white rounded-full flex items-center justify-center shadow-md cursor-pointer hover:bg-red-700 transition-transform hover:scale-110 active:scale-95"
-                                 style="z-index: 20; opacity: 0.8;" 
-                                 onmouseover="this.style.opacity='1'" 
-                                 onmouseout="this.style.opacity='0.8'"
+                                 class="absolute top-2 right-2 w-9 h-9 bg-red-600 text-white rounded-full flex items-center justify-center shadow-md cursor-pointer hover:bg-red-700 hover:scale-110 transition-all z-50 border-2 border-white"
                                  title="Xóa ảnh này">
-                                <i class="fa-solid fa-trash text-xs"></i>
+                                <i class="fa-solid fa-trash-can text-sm"></i>
                             </div>
 
-                            <div class="bg-gray-50 text-gray-600 text-xs font-bold px-3 py-2 border-t border-gray-200 rounded-b-lg flex justify-between items-center">
-                                <span>Tờ thứ ${pageNum}</span>
-                                <span class="text-[10px] text-gray-400">Đã lưu</span>
+                            <div class="absolute bottom-2 right-2 bg-black/60 text-white text-[10px] font-bold px-2 py-1 rounded backdrop-blur-sm z-40 pointer-events-none">
+                                Tờ ${pageNum}
                             </div>
                         </div>`;
                 }
 
+                // Nối ảnh mới vào bài làm cũ
                 userAnswers[qIdx] = currentHtml + htmlImgs;
+                
+                // Lưu lại ngay
                 saveLocal();
 
+                // Dọn dẹp giao diện upload tạm
                 window.tempStudentFiles[qIdx] = [];
                 document.getElementById(`preview-area-${qIdx}`).innerHTML = ''; 
                 document.getElementById(`upload-actions-${qIdx}`).classList.add('hidden'); 
                 
+                // Render lại câu hỏi để hiện ảnh mới
                 renderQuestion(qIdx); 
                 window.showToast("Đã nộp ảnh thành công!", "success");
 
@@ -998,71 +1006,6 @@ async function loadLobbyData(id) {
                 window.customAlert("Lỗi tải ảnh: " + e.message, "error");
             } finally {
                 if(uploadBtn) { uploadBtn.disabled = false; uploadBtn.innerHTML = '<i class="fa-solid fa-cloud-arrow-up"></i> Đóng dấu số trang & Nộp bài'; }
-            }
-        };
-
-        window.fireConfetti = (score, maxScore = 10) => {
-            const ratio = score / maxScore; if (ratio < 0.5) return;
-            const duration = (ratio >= 0.8) ? 3000 : 1000; const end = Date.now() + duration;
-            (function frame() { confetti({ particleCount: ratio >= 0.9 ? 5 : 2, angle: 60, spread: 55, origin: { x: 0 }, colors: ratio >= 0.9 ? ['#FFD700', '#FF0000'] : undefined }); confetti({ particleCount: ratio >= 0.9 ? 5 : 2, angle: 120, spread: 55, origin: { x: 1 }, colors: ratio >= 0.9 ? ['#FFD700', '#FF0000'] : undefined }); if (Date.now() < end) requestAnimationFrame(frame); }());
-        };
-
-        window.handlePayAndShowSolution = async (fee) => {
-            if(!currentUser) return;
-            const confirm = await window.customConfirm(`Bạn cần trả ${fee} Qpoint để xem lời giải chi tiết. Đồng ý thanh toán?`);
-            if(!confirm) return;
-            try {
-                const userRef = doc(db, "users", currentUser.uid); const userSnap = await getDoc(userRef);
-                if(!userSnap.exists()) return;
-                const userData = userSnap.data(); const currentQpoint = userData.qpoint || 0;
-                if(currentQpoint < fee) { 
-                    const wantTopUp = await window.customConfirm(`Số dư hiện tại: ${currentQpoint} Qpoint.\nBạn thiếu ${fee - currentQpoint} Qpoint.\n\nBạn có muốn đến trang Nạp Qpoint ngay không?`);
-                    if(wantTopUp) window.customAlert("Tính năng Nạp Qpoint đang được xây dựng. Vui lòng quay lại sau!", "info");
-                } else { await updateDoc(userRef, { qpoint: currentQpoint - fee }); window.showToast(`Thanh toán thành công! Còn lại: ${currentQpoint - fee} Qpoint`); viewDetailSolutions(); }
-            } catch(e) { console.error(e); window.customAlert("Lỗi giao dịch: " + e.message, "error"); }
-        };
-        // --- CÁC HÀM XÓA (GÁN VÀO WINDOW ĐỂ HTML GỌI ĐƯỢC) ---
-        
-        window.deleteStudentImage = async (imgUrl, qIdx, wrapperId) => {
-            // Dừng sự kiện click lan truyền
-            if(window.event) window.event.stopPropagation();
-
-            const confirmDelete = await window.customConfirm("Bạn có chắc chắn muốn xóa ảnh này không?");
-            if (!confirmDelete) return;
-
-            window.isUploading = true;
-            window.showToast("Đang xóa ảnh...", "info");
-
-            try {
-                let keyName = imgUrl;
-                if (imgUrl.startsWith('http')) {
-                    try {
-                        const urlObj = new URL(imgUrl);
-                        keyName = urlObj.pathname.startsWith('/') ? urlObj.pathname.substring(1) : urlObj.pathname;
-                        keyName = decodeURIComponent(keyName);
-                    } catch(e) {}
-                }
-
-                await fetch(`https://upload-helper.phamngockhanh-942001.workers.dev/?key=${encodeURIComponent(keyName)}`, { method: 'DELETE' });
-
-                const wrapper = document.getElementById(wrapperId);
-                if (wrapper) wrapper.remove();
-
-                const containerHtml = document.getElementById(`submitted-area-${qIdx}`).innerHTML;
-                if (!containerHtml.trim()) {
-                    delete userAnswers[qIdx];
-                    document.getElementById(`submitted-area-wrapper-${qIdx}`).classList.add('hidden');
-                } else {
-                    userAnswers[qIdx] = containerHtml;
-                }
-                
-                saveLocal();
-                window.showToast("Đã xóa ảnh!", "success");
-
-            } catch (e) {
-                console.error(e);
-            } finally {
-                setTimeout(() => { window.isUploading = false; }, 500);
             }
         };
 
