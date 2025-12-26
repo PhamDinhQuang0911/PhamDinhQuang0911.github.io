@@ -939,28 +939,20 @@ async function loadLobbyData(id) {
 
             let htmlImgs = "";
             
-            // [LOGIC ĐẾM ẢNH CŨ]
+            // Lấy nội dung cũ để đếm số trang tiếp theo
             const currentHtml = userAnswers[qIdx] || "";
-            // Đếm số lượng thẻ img đang có để đánh số tiếp theo
             const existingCount = (currentHtml.match(/<img/g) || []).length;
             
             try {
                 for (let i = 0; i < files.length; i++) {
-                    // [SỬA LỖI ĐÓNG DẤU] Số trang = (Số ảnh cũ) + (Thứ tự ảnh này trong mảng) + 1
-                    // Ví dụ: Đã có 2 ảnh. Upload thêm 2 ảnh.
-                    // Ảnh đầu tiên: 2 + 0 + 1 = Trang 3
                     const pageNum = existingCount + i + 1;
-                    
-                    // Lưu ý: Không thể ghi "Trang X / Tổng Y" chính xác tuyệt đối nếu học sinh upload nhiều lần.
-                    // Vì ảnh cũ đã bị "đốt" chữ vào pixel rồi, không sửa lại số "Tổng" được.
-                    // Nên ta ghi: "Câu X: Tờ thứ Y" cho an toàn và chính xác nhất.
                     const watermarkText = `Câu ${qIdx + 1}: Tờ thứ ${pageNum}`;
                     
                     const markedFile = await watermarkImage(files[i], watermarkText);
                     const compressed = await compressImage(markedFile, 0.7, 1000);
 
                     const formData = new FormData();
-                    // Thêm tiền tố submissions/ để gọn gàng
+                    // Lưu đúng thư mục submissions/
                     const fileName = `submissions/${currentUser.uid}_${Date.now()}_${i}.jpg`;
                     formData.append('file', compressed, fileName);
 
@@ -968,31 +960,33 @@ async function loadLobbyData(id) {
                     if(!res.ok) throw new Error("Lỗi upload ảnh");
                     const data = await res.json();
                     
-                    // [THÊM NÚT XÓA VÀO HTML]
+                    // [TẠO KHỐI ẢNH CÓ NÚT XÓA]
                     const uniqueId = `img-wrapper-${Date.now()}-${i}`;
                     htmlImgs += `
-                        <div id="${uniqueId}" class="relative group inline-block w-full max-w-md border rounded-lg overflow-hidden shadow-sm mb-2">
-                            <img src="${data.url}" class="w-full h-auto" loading="lazy">
-                            <button onclick="deleteStudentImage('${data.url}', ${qIdx}, '${uniqueId}')" class="absolute top-2 right-2 bg-red-600 text-white w-8 h-8 rounded-full flex items-center justify-center shadow-lg hover:bg-red-700 transition-colors z-10" title="Xóa ảnh này">
-                                <i class="fa-solid fa-trash-can"></i>
+                        <div id="${uniqueId}" class="relative group inline-block w-full max-w-md border-2 border-gray-100 rounded-lg overflow-hidden shadow-sm mb-3 bg-white">
+                            <img src="${data.url}" class="w-full h-auto block" loading="lazy">
+                            
+                            <button onclick="window.deleteStudentImage('${data.url}', ${qIdx}, '${uniqueId}')" 
+                                class="absolute top-2 right-2 bg-red-600 text-white w-9 h-9 rounded-full flex items-center justify-center shadow-lg hover:bg-red-700 transition-transform hover:scale-110 z-50 cursor-pointer" 
+                                title="Xóa ảnh này">
+                                <i class="fa-solid fa-trash"></i>
                             </button>
-                            <div class="absolute bottom-2 right-2 bg-black/50 text-white text-[10px] px-2 py-1 rounded backdrop-blur-sm">
+
+                            <div class="absolute bottom-2 right-2 bg-black/60 text-white text-[10px] font-bold px-2 py-1 rounded backdrop-blur-sm z-40">
                                 Tờ ${pageNum}
                             </div>
                         </div>`;
                 }
 
-                // Nối thêm ảnh mới vào ảnh cũ
+                // Nối ảnh mới vào bài làm cũ
                 userAnswers[qIdx] = currentHtml + htmlImgs;
-                
-                saveLocal(); // Lưu lại ngay
+                saveLocal();
 
                 // Dọn dẹp giao diện
                 window.tempStudentFiles[qIdx] = [];
                 document.getElementById(`preview-area-${qIdx}`).innerHTML = ''; 
                 document.getElementById(`upload-actions-${qIdx}`).classList.add('hidden'); 
                 
-                // Render lại để hiện ảnh mới
                 renderQuestion(qIdx); 
                 window.showToast("Đã nộp ảnh thành công!", "success");
 
@@ -1025,46 +1019,53 @@ async function loadLobbyData(id) {
             } catch(e) { console.error(e); window.customAlert("Lỗi giao dịch: " + e.message, "error"); }
         };
         // --- HÀM XÓA ẢNH HỌC SINH (MỚI) ---
+        // --- HÀM XÓA ẢNH (CÓ XÓA TRÊN CLOUD) ---
         window.deleteStudentImage = async (imgUrl, qIdx, wrapperId) => {
-            if (!confirm("Bạn có chắc chắn muốn xóa ảnh này không?")) return;
+            // Hỏi xác nhận trước khi xóa
+            const confirmDelete = await window.customConfirm("Bạn có chắc chắn muốn xóa ảnh bài làm này không?\nHành động này không thể hoàn tác.");
+            if (!confirmDelete) return;
 
-            // Bật cờ upload để không bị tính vi phạm khi hiện confirm
+            // Bật cờ upload để không bị tính vi phạm khi đang xử lý
             window.isUploading = true;
             
+            // Hiện thông báo đang xóa
+            window.showToast("Đang xóa ảnh...", "info");
+
             try {
-                // 1. Xóa trên Cloudflare R2
-                // Lấy key từ URL (phần sau tên miền)
+                // 1. Xử lý đường dẫn để lấy Key (Tên file trên Cloud)
                 let keyName = imgUrl;
-                if (imgUrl.includes('/submissions/')) {
-                    keyName = 'submissions/' + imgUrl.split('/submissions/')[1];
-                    // Decode URI để xử lý các ký tự đặc biệt nếu có
-                    keyName = decodeURIComponent(keyName);
+                // Nếu là URL đầy đủ, cắt lấy phần sau domain
+                if (imgUrl.startsWith('http')) {
+                    try {
+                        const urlObj = new URL(imgUrl);
+                        // Lấy pathname, bỏ dấu / ở đầu nếu có
+                        keyName = urlObj.pathname.startsWith('/') ? urlObj.pathname.substring(1) : urlObj.pathname;
+                        // Giải mã ký tự đặc biệt (VD: %20 -> khoảng trắng)
+                        keyName = decodeURIComponent(keyName);
+                    } catch(e) { console.warn("Lỗi parse URL:", e); }
                 }
 
+                // 2. Gọi API xóa trên Cloudflare R2
                 const res = await fetch(`https://upload-helper.phamngockhanh-942001.workers.dev/?key=${encodeURIComponent(keyName)}`, {
                     method: 'DELETE'
                 });
 
-                if (!res.ok) console.warn("Không xóa được trên Cloud (có thể file không tồn tại)");
-
-                // 2. Xóa trên giao diện (DOM)
+                // 3. Xóa trên giao diện
                 const wrapper = document.getElementById(wrapperId);
                 if (wrapper) wrapper.remove();
 
-                // 3. Cập nhật lại userAnswers và LocalStorage
-                // Lấy lại HTML mới sau khi xóa div
+                // 4. Cập nhật lại dữ liệu bài làm trong bộ nhớ
                 const containerHtml = document.getElementById(`submitted-area-${qIdx}`).innerHTML;
                 
-                // Nếu xóa hết ảnh thì gán về rỗng
                 if (!containerHtml.trim()) {
-                    delete userAnswers[qIdx];
+                    delete userAnswers[qIdx]; // Nếu xóa hết thì xóa luôn key
                     document.getElementById(`submitted-area-wrapper-${qIdx}`).classList.add('hidden');
                 } else {
                     userAnswers[qIdx] = containerHtml;
                 }
                 
-                saveLocal();
-                window.showToast("Đã xóa ảnh thành công!", "success");
+                saveLocal(); // Lưu lại trạng thái mới
+                window.showToast("Đã xóa ảnh vĩnh viễn!", "success");
 
             } catch (e) {
                 console.error(e);
