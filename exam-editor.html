@@ -43,6 +43,19 @@
     <link rel="stylesheet" type="text/css" href="https://tikzjax.com/v1/fonts.css">
     <script src="https://tikzjax.com/v1/tikzjax.js"></script>
     <style>
+        /* --- CSS CHO CHẤM THI --- */
+        .gallery-container { position: relative; width: 100%; background: #000; min-height: 400px; display: flex; align-items: center; justify-content: center; overflow: hidden; border-radius: 8px; }
+        .gallery-image { max-width: 100%; max-height: 80vh; pointer-events: auto; touch-action: none; }
+        .grading-canvas { position: absolute; top: 0; left: 0; pointer-events: auto; touch-action: none; z-index: 10; }
+        .gallery-nav-btn { position: absolute; top: 50%; transform: translateY(-50%); background: rgba(255,255,255,0.8); border-radius: 50%; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 20; border: none; box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
+        .gallery-nav-btn:hover { background: white; transform: translateY(-50%) scale(1.1); }
+        .gallery-prev { left: 10px; }
+        .gallery-next { right: 10px; }
+        .gallery-zoom-btn { position: absolute; top: 10px; right: 10px; background: rgba(0,0,0,0.6); color: white; padding: 5px 10px; border-radius: 4px; font-size: 12px; cursor: pointer; z-index: 20; }
+        
+        /* Modal Zoom Fullscreen */
+        #zoomModal { position: fixed; inset: 0; z-index: 9999; background: rgba(0,0,0,0.95); display: flex; align-items: center; justify-content: center; overflow: auto; }
+        #zoomImg { max-width: none; transition: transform 0.2s; cursor: grab; }
         body { font-family: 'Nunito', sans-serif; background-color: #F8F9FA; }
         .font-handwriting { font-family: 'Pacifico', cursive; }
         .sidebar-item.active { background-color: #EFF6FF; color: #1D4ED8; font-weight: 700; border-right: 3px solid #1D4ED8; }
@@ -1988,8 +2001,14 @@
         // ============================================================
         // [FIX] LOGIC CHẤM THI, VẼ CANVAS & CHẤM NHANH
         // ============================================================
+        // ============================================================
+        // LOGIC CHẤM THI PRO (Fix mực, Gallery, Zoom, Setup điểm)
+        // ============================================================
         let gradingTool = 'cursor';
+        let gradingStep = 0.25; // Mặc định điểm cộng trừ
+        let currentImageIndexes = {}; // Lưu chỉ số ảnh hiện tại của từng câu: { qIdx: imgIdx }
 
+        // 1. Cài đặt công cụ
         window.setGradingTool = (tool) => {
             gradingTool = tool;
             document.querySelectorAll('.grading-tool-btn').forEach(b => {
@@ -2001,183 +2020,249 @@
                 activeBtn.classList.remove('hover:bg-white', 'text-gray-600');
                 activeBtn.classList.add('bg-blue-100', 'text-blue-600', 'shadow-sm');
             }
-            // Đổi cursor
-            if(tool === 'pen' || tool === 'eraser') document.body.style.cursor = 'crosshair';
-            else if(tool.startsWith('mark_')) document.body.style.cursor = 'copy';
-            else document.body.style.cursor = 'default';
+            // Con trỏ chuột
+            document.body.style.cursor = (tool === 'pen' || tool === 'eraser') ? 'crosshair' : (tool.startsWith('mark') ? 'copy' : 'default');
         };
 
-        window.runAIGrading = () => { window.showToast("Tính năng AI đang được phát triển...", "info"); };
+        // 2. Cài đặt bước nhảy điểm
+        window.setStepScore = () => {
+            const val = prompt("Nhập số điểm cộng/trừ mỗi lần chạm (VD: 0.25):", gradingStep);
+            if(val && !isNaN(val)) {
+                gradingStep = parseFloat(val);
+                document.getElementById('stepScoreDisplay').innerText = "±" + gradingStep;
+            }
+        };
 
+        // 3. Render giao diện chấm (Hỗ trợ Gallery nhiều ảnh)
+        window.renderGradingView = () => {
+            const container = document.getElementById('gradingQuestionList');
+            const nav = document.getElementById('gradingNavList');
+            container.innerHTML = ''; nav.innerHTML = '';
+            const answers = currentGradingAttempt.answers || {};
+
+            window.questions.forEach((q, idx) => {
+                const u = answers[idx];
+                const maxPoint = parseFloat(q.point) || 0;
+                
+                // Sidebar Nav
+                const navItem = document.createElement('button');
+                navItem.className = `w-full text-left p-3 rounded-lg text-xs font-bold mb-1 border ${q.type==='essay'?'bg-purple-50 border-purple-200 text-purple-700':'bg-gray-50'}`;
+                navItem.innerHTML = `Câu ${idx+1} <span class="float-right">${q.type.toUpperCase()}</span>`;
+                navItem.onclick = () => document.getElementById(`grade-q-${idx}`).scrollIntoView({behavior:'smooth', block:'center'});
+                nav.appendChild(navItem);
+
+                // Card nội dung
+                const card = document.createElement('div');
+                card.id = `grade-q-${idx}`;
+                card.className = "bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden";
+                
+                let contentHtml = `<div class="p-4 border-b border-gray-100"><div class="flex justify-between mb-2"><span class="font-bold text-gray-700">Câu ${idx+1}</span><span class="text-xs bg-gray-100 px-2 py-1 rounded font-bold">${maxPoint}đ</span></div><div class="text-gray-800">${window.formatContent(q.content)}</div></div>`;
+                let answerHtml = '';
+
+                if (q.type === 'essay') {
+                    // Tách ảnh từ HTML bài làm
+                    const div = document.createElement('div'); div.innerHTML = u || '';
+                    const imgs = Array.from(div.querySelectorAll('img')).map(i => i.src);
+                    
+                    if (imgs.length > 0) {
+                        // Khởi tạo index
+                        if (currentImageIndexes[idx] === undefined) currentImageIndexes[idx] = 0;
+                        
+                        answerHtml = `
+                        <div class="gallery-container" id="gallery-${idx}">
+                            </div>
+                        <div class="p-3 bg-yellow-50 flex items-center justify-between border-t">
+                            <div class="flex items-center gap-2">
+                                <span class="font-bold text-yellow-800 text-xs">Điểm:</span>
+                                <input type="number" id="manual-score-${idx}" class="form-input w-20 text-right font-bold text-blue-600" value="${maxPoint}" step="0.1" onchange="window.updateTotalScore()">
+                                <span class="text-gray-400 text-xs">/${maxPoint}</span>
+                            </div>
+                            <div class="text-xs text-gray-500 italic" id="gallery-info-${idx}">Ảnh 1/${imgs.length}</div>
+                        </div>`;
+                        
+                        // Render ảnh đầu tiên sau khi HTML load
+                        setTimeout(() => window.renderGalleryImage(idx, imgs), 100);
+                    } else {
+                        answerHtml = `<div class="p-10 text-center text-gray-400 italic">Không có ảnh bài làm.</div>`;
+                    }
+                } else {
+                    // Trắc nghiệm
+                    let isCorrect = (q.type === 'mc' && u === q.correct);
+                    answerHtml = `<div class="p-3 bg-gray-50 text-sm">Chọn: <b class="${isCorrect?'text-green-600':'text-red-600'}">${u!==undefined?u:'--'}</b> | Đáp án: <b class="text-green-600">${q.correct!==undefined?String.fromCharCode(65+q.correct):'--'}</b></div>`;
+                }
+
+                card.innerHTML = contentHtml + answerHtml;
+                container.appendChild(card);
+            });
+            if(window.MathJax) MathJax.typesetPromise([container]).catch(()=>{});
+        };
+
+        // 4. Render Gallery Ảnh (Chuyển tiếp ảnh)
+        window.renderGalleryImage = (qIdx, imgList) => {
+            const container = document.getElementById(`gallery-${qIdx}`);
+            const currentIndex = currentImageIndexes[qIdx];
+            const src = imgList[currentIndex];
+
+            container.innerHTML = `
+                <img src="${src}" class="gallery-image" id="essay-img-${qIdx}" crossorigin="anonymous">
+                <canvas id="grading-canvas-${qIdx}" class="grading-canvas"></canvas>
+                
+                ${imgList.length > 1 ? `
+                    <button class="gallery-nav-btn gallery-prev" onclick="changeGalleryImage(${qIdx}, -1, '${imgList.join("|||")}')"><i class="fa-solid fa-chevron-left"></i></button>
+                    <button class="gallery-nav-btn gallery-next" onclick="changeGalleryImage(${qIdx}, 1, '${imgList.join("|||")}')"><i class="fa-solid fa-chevron-right"></i></button>
+                ` : ''}
+                
+                <button class="gallery-zoom-btn" onclick="openZoomModal('${src}')"><i class="fa-solid fa-magnifying-glass-plus"></i> Zoom</button>
+            `;
+
+            document.getElementById(`gallery-info-${qIdx}`).innerText = `Ảnh ${currentIndex + 1}/${imgList.length}`;
+            
+            // Khởi tạo Canvas vẽ lên ảnh này
+            // Phải đợi ảnh load xong để lấy kích thước thật
+            const img = document.getElementById(`essay-img-${qIdx}`);
+            if (img.complete) window.initCanvas(qIdx);
+            else img.onload = () => window.initCanvas(qIdx);
+        };
+
+        window.changeGalleryImage = (qIdx, direction, imgListStr) => {
+            const imgList = imgListStr.split("|||");
+            let newIndex = currentImageIndexes[qIdx] + direction;
+            if (newIndex < 0) newIndex = imgList.length - 1;
+            if (newIndex >= imgList.length) newIndex = 0;
+            currentImageIndexes[qIdx] = newIndex;
+            window.renderGalleryImage(qIdx, imgList);
+        };
+
+        // 5. Logic Vẽ & Chấm (Đã fix lỗi offset mực)
         window.initCanvas = (idx) => {
             const canvas = document.getElementById(`grading-canvas-${idx}`);
             const img = document.getElementById(`essay-img-${idx}`);
             if(!canvas || !img) return;
 
-            // Hàm set kích thước canvas chuẩn theo ảnh hiển thị
-            const fitCanvas = () => {
-                canvas.width = img.offsetWidth;  // Lấy kích thước hiển thị thực tế
-                canvas.height = img.offsetHeight;
-            };
-
-            // Đợi ảnh load xong hoặc resize
-            if (img.complete) fitCanvas();
-            else img.onload = fitCanvas;
+            // Đặt kích thước canvas bằng kích thước hiển thị của ảnh
+            canvas.width = img.offsetWidth;
+            canvas.height = img.offsetHeight;
             
-            // Resize canvas khi cửa sổ thay đổi để không bị lệch nét
-            window.addEventListener('resize', fitCanvas);
+            // Resize lại khi window đổi cỡ
+            window.addEventListener('resize', () => {
+                canvas.width = img.offsetWidth;
+                canvas.height = img.offsetHeight;
+            });
 
             const ctx = canvas.getContext('2d');
             let isDown = false;
             let lastX = 0, lastY = 0;
 
-            // Lấy tọa độ chuẩn (kể cả khi scroll)
             const getPos = (e) => {
                 const rect = canvas.getBoundingClientRect();
                 const clientX = e.touches ? e.touches[0].clientX : e.clientX;
                 const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-                return {
-                    x: clientX - rect.left,
-                    y: clientY - rect.top
-                };
+                return { x: clientX - rect.left, y: clientY - rect.top };
             };
 
             const start = (e) => {
                 if(gradingTool === 'cursor') return;
+                // Nếu là bút, ngăn scroll trang
+                if(gradingTool === 'pen' || gradingTool === 'eraser') e.preventDefault();
                 
-                // Nếu là cảm ứng hoặc vẽ, chặn scroll màn hình
-                if(e.type === 'touchstart' || gradingTool === 'pen') {
-                    // e.preventDefault(); // (Có thể bỏ dòng này nếu muốn scroll bằng 2 ngón)
-                }
-
                 isDown = true;
                 const pos = getPos(e);
-                lastX = pos.x; 
-                lastY = pos.y;
+                lastX = pos.x; lastY = pos.y;
 
-                // --- LOGIC CHẤM NHANH (1 CLICK) ---
-                if (gradingTool === 'mark_correct' || gradingTool === 'mark_wrong') {
-                    ctx.lineWidth = 4; 
-                    ctx.lineCap = 'round';
-                    ctx.lineJoin = 'round';
-
-                    const input = document.getElementById(`manual-score-${idx}`);
-                    let currentVal = parseFloat(input ? input.value : 0) || 0;
+                // CHẤM NHANH (1 Chạm)
+                if (gradingTool.startsWith('mark_')) {
+                    const size = 15; 
+                    ctx.lineWidth = 4; ctx.lineCap = 'round';
+                    const inp = document.getElementById(`manual-score-${idx}`);
+                    let score = parseFloat(inp ? inp.value : 0) || 0;
 
                     if (gradingTool === 'mark_correct') {
-                        // Vẽ dấu V (Xanh)
+                        // Vẽ chữ V
                         ctx.strokeStyle = '#10B981';
-                        ctx.beginPath();
-                        ctx.moveTo(lastX - 10, lastY);
-                        ctx.lineTo(lastX - 3, lastY + 10); // Đỉnh nhọn
-                        ctx.lineTo(lastX + 15, lastY - 15);
-                        ctx.stroke();
-                        // Cộng điểm (+0.25)
-                        if(input) input.value = (currentVal + 0.25).toFixed(2);
+                        ctx.beginPath(); ctx.moveTo(lastX-10, lastY-5); ctx.lineTo(lastX, lastY+10); ctx.lineTo(lastX+15, lastY-15); ctx.stroke();
+                        score += gradingStep;
                     } else {
-                        // Vẽ dấu X (Đỏ)
+                        // Vẽ chữ X
                         ctx.strokeStyle = '#EF4444';
-                        ctx.beginPath();
-                        ctx.moveTo(lastX - 10, lastY - 10); ctx.lineTo(lastX + 10, lastY + 10);
-                        ctx.moveTo(lastX + 10, lastY - 10); ctx.lineTo(lastX - 10, lastY + 10);
+                        ctx.beginPath(); 
+                        ctx.moveTo(lastX-10, lastY-10); ctx.lineTo(lastX+10, lastY+10);
+                        ctx.moveTo(lastX+10, lastY-10); ctx.lineTo(lastX-10, lastY+10);
                         ctx.stroke();
-                        // Trừ điểm (-0.25)
-                        if(input) {
-                            let newVal = currentVal - 0.25;
-                            input.value = (newVal < 0 ? 0 : newVal).toFixed(2);
-                        }
+                        score -= gradingStep;
                     }
                     
-                    if(window.updateTotalScore) window.updateTotalScore();
-                    isDown = false; // Chấm xong nhả ngay
+                    if(inp) { inp.value = Math.max(0, score).toFixed(2); window.updateTotalScore(); }
+                    isDown = false; // Chấm xong nhả luôn
                 }
             };
 
             const move = (e) => {
-                if(!isDown) return;
-                if(gradingTool === 'cursor' || gradingTool.startsWith('mark_')) return;
-
-                e.preventDefault(); // Chặn scroll khi đang vẽ nét
+                if(!isDown || gradingTool.startsWith('mark_') || gradingTool === 'cursor') return;
+                e.preventDefault();
                 const pos = getPos(e);
                 
                 ctx.beginPath();
                 ctx.moveTo(lastX, lastY);
                 ctx.lineTo(pos.x, pos.y);
-                
-                // Cấu hình nét vẽ
-                const color = document.getElementById('penColor').value;
-                ctx.strokeStyle = color;
+                ctx.strokeStyle = document.getElementById('penColor').value;
                 
                 if(gradingTool === 'eraser') {
                     ctx.globalCompositeOperation = 'destination-out';
-                    ctx.lineWidth = 20; // Tẩy to
+                    ctx.lineWidth = 20;
                 } else {
                     ctx.globalCompositeOperation = 'source-over';
-                    ctx.lineWidth = 2; // Nét bút thanh mảnh
+                    ctx.lineWidth = 3;
                 }
-
+                
                 ctx.stroke();
-                lastX = pos.x;
-                lastY = pos.y;
+                lastX = pos.x; lastY = pos.y;
             };
 
             const end = () => { isDown = false; };
 
-            // Mouse Events
-            canvas.addEventListener('mousedown', start);
-            canvas.addEventListener('mousemove', move);
-            canvas.addEventListener('mouseup', end);
+            canvas.addEventListener('mousedown', start); canvas.addEventListener('touchstart', start, {passive: false});
+            canvas.addEventListener('mousemove', move); canvas.addEventListener('touchmove', move, {passive: false});
+            canvas.addEventListener('mouseup', end); canvas.addEventListener('touchend', end);
             canvas.addEventListener('mouseout', end);
-
-            // Touch Events (Mobile/Tablet) - Quan trọng để vẽ trên điện thoại
-            canvas.addEventListener('touchstart', start, {passive: false});
-            canvas.addEventListener('touchmove', move, {passive: false});
-            canvas.addEventListener('touchend', end);
         };
 
-        // Hàm cập nhật tổng điểm khi chấm nhanh
-        window.updateTotalScore = () => {
-            let total = 0;
-            document.querySelectorAll('input[id^="manual-score-"]').forEach(inp => {
-                total += parseFloat(inp.value) || 0;
-            });
-            // Cộng thêm điểm trắc nghiệm (tự động) nếu có
-            // Tạm thời lấy tổng input manual + điểm MC từ attempt (nếu cần logic phức tạp hơn)
-            document.getElementById('gradingTotalScore').textContent = parseFloat(total.toFixed(2));
-        };
-
-        // [FIX LỖI] Hàm Lưu Kết Quả
-        window.saveGradingResult = async () => {
-            if (!currentGradingAttempt || !currentGradingAttempt.id) return window.customAlert("Lỗi dữ liệu bài thi!", "error");
-            
-            const btn = document.querySelector('#gradingModal button[onclick="saveGradingResult()"]');
-            const oldText = btn.innerHTML;
-            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang lưu...'; btn.disabled = true;
-
-            try {
-                const newScore = parseFloat(document.getElementById('gradingTotalScore').textContent);
+        // 6. Tính năng Zoom (Lightbox)
+        window.openZoomModal = (src) => {
+            let m = document.getElementById('zoomModal');
+            if(!m) {
+                m = document.createElement('div'); m.id = 'zoomModal';
+                m.innerHTML = `<img id="zoomImg" src="${src}"><button onclick="this.parentElement.remove()" style="position:fixed;top:20px;right:20px;color:white;font-size:30px;"><i class="fa-solid fa-times"></i></button>`;
+                document.body.appendChild(m);
                 
-                // Gọi updateDoc (đã được import ở bước 1)
-                await updateDoc(doc(db, "results", currentGradingAttempt.id), {
-                    score: newScore,
-                    gradedAt: new Date().toISOString(),
-                    graderId: currentUser.uid 
-                });
-                
-                window.showToast("Đã lưu kết quả chấm thi!", "success");
-                
-                // Refresh lại bảng thống kê
-                if(window.loadStats) window.loadStats(); 
-                window.closeGradingModal();
-
-            } catch (e) {
-                console.error(e);
-                window.customAlert("Lỗi lưu điểm: " + e.message, "error");
-            } finally {
-                btn.innerHTML = oldText; btn.disabled = false;
+                // Logic zoom/pan ảnh (cơ bản)
+                const img = m.querySelector('img');
+                let scale = 1;
+                img.onclick = () => { scale = scale === 1 ? 2 : 1; img.style.transform = `scale(${scale})`; img.style.cursor = scale===1?'zoom-in':'zoom-out'; };
             }
         };
-        // ============================================================
+
+        window.updateTotalScore = () => {
+            let total = 0;
+            document.querySelectorAll('input[id^="manual-score-"]').forEach(inp => total += parseFloat(inp.value)||0);
+            document.getElementById('gradingTotalScore').textContent = total.toFixed(2);
+        };
+        
+        window.saveGradingResult = async () => {
+            if (!currentGradingAttempt || !currentGradingAttempt.id) return;
+            const btn = document.querySelector('#gradingModal button[onclick="saveGradingResult()"]');
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; btn.disabled = true;
+            try {
+                const newScore = parseFloat(document.getElementById('gradingTotalScore').textContent);
+                // Dùng updateDoc đã import
+                await updateDoc(doc(db, "results", currentGradingAttempt.id), { score: newScore, gradedAt: new Date().toISOString(), graderId: currentUser.uid });
+                window.showToast("Đã lưu kết quả!", "success"); 
+                window.loadStats(); 
+                window.closeGradingModal();
+            } catch(e) { window.customAlert("Lỗi lưu: " + e.message, "error"); }
+            finally { btn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> Lưu'; btn.disabled = false; }
+        };
+
+        window.runAIGrading = () => window.showToast("AI chưa được tích hợp API.", "info");
     </script>
     <div id="missingImagesPanel" class="hidden fixed bottom-4 right-4 z-50 bg-white border-2 border-orange-500 shadow-2xl rounded-xl w-64 overflow-hidden flex flex-col max-h-[60vh]">
         <div class="bg-orange-500 text-white p-3 flex justify-between items-center shadow-sm">
@@ -2241,22 +2326,26 @@
                 </div>
             </div>
 
-            <div id="gradingToolbar" class="flex items-center gap-3">
-                <div class="flex items-center gap-1 bg-gray-100 p-1 rounded-lg border">
-                    <button onclick="setGradingTool('cursor')" class="grading-tool-btn p-1.5 rounded bg-white shadow-sm text-blue-600" title="Di chuyển"><i class="fa-solid fa-arrow-pointer"></i></button>
+            <div id="gradingToolbar" class="flex items-center gap-3 overflow-x-auto no-scrollbar">
+                <div class="flex items-center gap-1 bg-gray-100 p-1 rounded-lg border shrink-0">
+                    <button onclick="setGradingTool('cursor')" class="grading-tool-btn p-1.5 rounded bg-white shadow-sm text-blue-600" title="Di chuyển / Zoom"><i class="fa-solid fa-arrow-pointer"></i></button>
                     <button onclick="setGradingTool('pen')" class="grading-tool-btn p-1.5 rounded hover:bg-white text-gray-600" title="Bút viết"><i class="fa-solid fa-pen"></i></button>
                     <button onclick="setGradingTool('eraser')" class="grading-tool-btn p-1.5 rounded hover:bg-white text-gray-600" title="Tẩy"><i class="fa-solid fa-eraser"></i></button>
                     <div class="w-[1px] h-4 bg-gray-300 mx-1"></div>
                     <input type="color" id="penColor" value="#ff0000" class="w-6 h-6 border-0 p-0 rounded cursor-pointer">
                 </div>
 
-                <div class="flex items-center gap-1 bg-gray-100 p-1 rounded-lg border hidden md:flex">
-                    <button onclick="setGradingTool('mark_correct')" class="grading-tool-btn p-1.5 rounded hover:bg-green-100 text-green-600" title="Đúng (Click để chấm)"><i class="fa-solid fa-check"></i></button>
-                    <button onclick="setGradingTool('mark_wrong')" class="grading-tool-btn p-1.5 rounded hover:bg-red-100 text-red-600" title="Sai (Click để chấm)"><i class="fa-solid fa-xmark"></i></button>
+                <div class="flex items-center gap-1 bg-gray-100 p-1 rounded-lg border shrink-0">
+                    <div class="flex flex-col px-1">
+                        <span class="text-[8px] text-gray-400 font-bold uppercase leading-none">Điểm</span>
+                        <span class="text-[10px] font-bold text-blue-600 cursor-pointer hover:underline" onclick="setStepScore()" id="stepScoreDisplay" title="Bấm để thay đổi">±0.25</span>
+                    </div>
+                    <button onclick="setGradingTool('mark_correct')" class="grading-tool-btn p-1.5 rounded hover:bg-green-100 text-green-600" title="Đúng (+Điểm)"><i class="fa-solid fa-check"></i></button>
+                    <button onclick="setGradingTool('mark_wrong')" class="grading-tool-btn p-1.5 rounded hover:bg-red-100 text-red-600" title="Sai (-Điểm)"><i class="fa-solid fa-xmark"></i></button>
                 </div>
-
-                <button onclick="runAIGrading()" class="px-3 py-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg text-xs font-bold shadow hover:opacity-90 flex items-center gap-1">
-                    <i class="fa-solid fa-robot"></i> <span class="hidden md:inline">Chấm AI</span>
+                
+                <button onclick="runAIGrading()" class="px-3 py-1.5 bg-purple-100 text-purple-700 rounded-lg text-xs font-bold hover:bg-purple-200 flex items-center gap-1 shrink-0">
+                    <i class="fa-solid fa-robot"></i> <span class="hidden md:inline">AI</span>
                 </button>
             </div>
 
