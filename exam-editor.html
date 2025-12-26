@@ -1981,37 +1981,45 @@
                 btn.innerHTML = oldText; btn.disabled = false;
             }
         };
-    // --- BỔ SUNG: LOGIC CHO THANH CÔNG CỤ CHẤM THI (Bút, Tẩy, Vẽ) ---
-        
-        // 1. Hàm chọn công cụ (Bút, Tẩy, Chuột)
+    // ============================================================
+        // ĐOẠN MÃ BỔ SUNG (BẮT BUỘC CÓ ĐỂ VẼ VÀ CHẤM)
+        // ============================================================
+
+        // 1. Khai báo biến công cụ (Rất quan trọng, thiếu dòng này là lỗi)
+        let gradingTool = 'cursor';
+
+        // 2. Hàm chọn công cụ (Bút, Tẩy, Chuột)
         window.setGradingTool = (tool) => {
             gradingTool = tool;
             
-            // Reset giao diện các nút
+            // Reset giao diện các nút (Bỏ highlight cũ)
             document.querySelectorAll('.grading-tool-btn').forEach(b => {
                 b.classList.remove('bg-blue-100', 'text-blue-600', 'shadow-sm');
                 b.classList.add('hover:bg-white', 'text-gray-600');
             });
 
-            // Highlight nút đang chọn (Tìm nút dựa trên onclick)
+            // Highlight nút đang chọn
+            // Tìm nút có onclick chứa tool tương ứng
             const activeBtn = document.querySelector(`button[onclick="setGradingTool('${tool}')"]`);
             if(activeBtn) {
                 activeBtn.classList.remove('hover:bg-white', 'text-gray-600');
                 activeBtn.classList.add('bg-blue-100', 'text-blue-600', 'shadow-sm');
             }
+            
+            // Đổi con trỏ chuột
+            document.body.style.cursor = tool === 'pen' ? 'crosshair' : 'default';
         };
 
-        // 2. Hàm Chấm AI (Demo)
+        // 3. Hàm Chấm AI (Demo placeholder)
         window.runAIGrading = () => {
             window.showToast("Tính năng AI đang được phát triển...", "info");
         };
 
-        // 3. Hàm Khởi tạo Bảng vẽ (Canvas) lên trên ảnh
+        // 4. Hàm Khởi tạo Bảng vẽ (Canvas) lên trên ảnh
         window.initCanvas = (idx) => {
             const canvas = document.getElementById(`grading-canvas-${idx}`);
             const img = document.getElementById(`essay-img-${idx}`);
             
-            // Nếu không có ảnh hoặc canvas thì bỏ qua
             if(!canvas || !img) return;
 
             // Đợi ảnh load xong để lấy kích thước chuẩn
@@ -2030,17 +2038,15 @@
             let isDown = false;
             let prevX, prevY;
 
-            // Hàm lấy vị trí chuột/tay chính xác
+            // Hàm lấy vị trí chuột/tay chính xác (Fix lệch nét vẽ)
             const getPos = (e) => {
                 const rect = canvas.getBoundingClientRect();
-                // Tính tỉ lệ scale giữa kích thước hiển thị và kích thước thực
                 const scaleX = canvas.width / rect.width;
                 const scaleY = canvas.height / rect.height;
                 
                 let clientX = e.clientX;
                 let clientY = e.clientY;
                 
-                // Hỗ trợ cảm ứng
                 if(e.touches && e.touches.length > 0) {
                     clientX = e.touches[0].clientX;
                     clientY = e.touches[0].clientY;
@@ -2053,8 +2059,8 @@
             };
 
             const start = (e) => {
-                if(gradingTool === 'cursor') return; // Nếu là chuột thì không vẽ
-                e.preventDefault(); // Ngăn cuộn trang khi đang vẽ
+                if(gradingTool === 'cursor') return; 
+                e.preventDefault(); 
                 isDown = true;
                 const pos = getPos(e);
                 prevX = pos.x; 
@@ -2065,29 +2071,28 @@
                     ctx.lineWidth = 5; 
                     ctx.lineCap = 'round';
                     if (gradingTool === 'mark_correct') {
-                        // Vẽ dấu tích xanh
-                        ctx.strokeStyle = '#10B981';
+                        ctx.strokeStyle = '#10B981'; // Xanh lá
                         ctx.beginPath(); 
                         ctx.moveTo(prevX - 15, prevY); 
                         ctx.lineTo(prevX, prevY + 15); 
                         ctx.lineTo(prevX + 25, prevY - 25); 
                         ctx.stroke();
-                        // Cộng điểm (Demo)
+                        
+                        // Cộng điểm tự động (Demo)
                         const input = document.getElementById(`manual-score-${idx}`);
                         if(input) {
                             let val = parseFloat(input.value) || 0;
                             input.value = (val + 0.25).toFixed(1);
-                            window.updateTotalScore();
+                            window.updateTotalScore(); 
                         }
                     } else {
-                        // Vẽ dấu X đỏ
-                        ctx.strokeStyle = '#EF4444';
+                        ctx.strokeStyle = '#EF4444'; // Đỏ
                         ctx.beginPath(); 
                         ctx.moveTo(prevX - 15, prevY - 15); ctx.lineTo(prevX + 15, prevY + 15);
                         ctx.moveTo(prevX + 15, prevY - 15); ctx.lineTo(prevX - 15, prevY + 15);
                         ctx.stroke();
                     }
-                    isDown = false; // Chấm xong nhả luôn
+                    isDown = false;
                 }
             };
 
@@ -2102,15 +2107,13 @@
                 ctx.moveTo(prevX, prevY);
                 ctx.lineTo(pos.x, pos.y);
                 
-                // Cấu hình nét vẽ
                 const color = document.getElementById('penColor').value;
                 ctx.strokeStyle = color;
                 ctx.lineWidth = 3;
                 
-                // Chế độ tẩy
                 if(gradingTool === 'eraser') {
                     ctx.globalCompositeOperation = 'destination-out';
-                    ctx.lineWidth = 25; // Tẩy to hơn
+                    ctx.lineWidth = 25; 
                 } else {
                     ctx.globalCompositeOperation = 'source-over';
                 }
@@ -2122,17 +2125,16 @@
 
             const end = () => { isDown = false; };
 
-            // Gán sự kiện chuột
             canvas.addEventListener('mousedown', start);
             canvas.addEventListener('mousemove', move);
             canvas.addEventListener('mouseup', end);
             canvas.addEventListener('mouseout', end);
 
-            // Gán sự kiện cảm ứng (cho iPad, điện thoại)
             canvas.addEventListener('touchstart', start, {passive: false});
             canvas.addEventListener('touchmove', move, {passive: false});
             canvas.addEventListener('touchend', end);
         };
+        // ============================================================
     </script>
     <div id="missingImagesPanel" class="hidden fixed bottom-4 right-4 z-50 bg-white border-2 border-orange-500 shadow-2xl rounded-xl w-64 overflow-hidden flex flex-col max-h-[60vh]">
         <div class="bg-orange-500 text-white p-3 flex justify-between items-center shadow-sm">
