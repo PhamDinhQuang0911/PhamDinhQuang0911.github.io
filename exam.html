@@ -616,29 +616,32 @@ async function loadLobbyData(id) {
         // --- FIX LỖI: NÚT "QUAY LẠI" BỊ ĐƠ & CHỐNG ĐẾM TRÙNG ---
         // --- LOGIC GIÁM SÁT MỚI (FIX LỖI UPLOAD BỊ TÍNH VI PHẠM) ---
         // --- LOGIC GIÁM SÁT (FIX LỖI) ---
+        // --- LOGIC GIÁM SÁT & CHỐNG GIAN LẬN (BẢN FIX) ---
         let lastCheatTime = 0; 
         window.isUploading = false; 
-        let uploadTimeout = null; // Biến timer để tự động tắt cờ upload
+        let uploadTimeout = null; 
 
-        // Hàm bật chế độ upload (được gọi từ onclick của input file)
-        // Tự động tắt sau 30 giây để tránh bị treo nếu học sinh không chọn file mà bấm Cancel
+        // Hàm được gọi khi bấm nút "Chọn ảnh" hoặc "Chụp ảnh"
         window.triggerUploadMode = () => {
             window.isUploading = true;
-            console.log("Upload mode: ON");
+            console.log("Upload mode: ON (Miễn trừ gian lận)");
+            
+            // Tự động tắt sau 15 giây (phòng trường hợp học sinh không chọn gì mà bấm Cancel)
             if (uploadTimeout) clearTimeout(uploadTimeout);
             uploadTimeout = setTimeout(() => {
                 window.isUploading = false;
                 console.log("Upload mode: Auto-OFF (Timeout)");
-            }, 30000); 
+            }, 15000); 
         };
 
-        // Khi quay lại tab, tắt cờ upload nhanh hơn (sau 1s)
+        // Sự kiện: Khi quay lại Tab -> Tắt ngay chế độ Upload
         window.addEventListener('focus', () => {
-            if(window.isUploading) {
+            if (window.isUploading) {
+                // Delay nhỏ 0.5s để chắc chắn các sự kiện blur/focus của file dialog đã xong
                 setTimeout(() => { 
                     window.isUploading = false; 
-                    console.log("Upload mode: OFF (Focus returned)");
-                }, 1000);
+                    console.log("Upload mode: OFF (Quay lại tab)");
+                }, 500);
             }
         });
         
@@ -656,39 +659,46 @@ async function loadLobbyData(id) {
 
         function initProctoring() {
             const handleCheat = () => {
-                // Nếu đang upload thì bỏ qua
+                // 1. Nếu chưa bắt đầu thi -> Bỏ qua
+                if (!isExamActive) return;
+
+                // 2. Nếu đang trong quá trình tải ảnh -> Bỏ qua (Không phạt)
                 if (window.isUploading) {
-                    console.log("Phát hiện rời tab nhưng đang upload -> Bỏ qua.");
+                    console.log("Phát hiện rời tab nhưng đang Upload -> Bỏ qua.");
                     return;
                 }
 
-                // Logic phạt: Nếu rời đi quá 1 giây và cách lần phạt trước > 2 giây
-                if (isExamActive && (Date.now() - lastCheatTime > 2000)) {
+                // 3. Logic phạt: Giãn cách 2 giây giữa các lần phạt để tránh spam
+                if (Date.now() - lastCheatTime > 2000) {
                     lastCheatTime = Date.now();
                     cheatCount++;
-                    console.warn("GIAN LẬN PHÁT HIỆN! Lần thứ: " + cheatCount);
+                    console.warn("GIAN LẬN: Rời tab lần thứ " + cheatCount);
                     
+                    // Cập nhật giao diện
                     document.getElementById('cheatCount').textContent = cheatCount;
                     if(document.getElementById('cheatModalCount')) {
                         document.getElementById('cheatModalCount').textContent = cheatCount;
                     }
 
-                    // Hiện Modal
+                    // HIỆN MODAL CẢNH BÁO
                     const cm = document.getElementById('cheatModal');
-                    cm.classList.remove('hidden', 'pointer-events-none'); 
-                    
-                    setTimeout(() => {
-                        cm.classList.remove('opacity-0');
-                        const innerDiv = cm.querySelector('div');
-                        if(innerDiv) innerDiv.classList.add('scale-100');
-                    }, 10);
+                    if (cm) {
+                        cm.classList.remove('hidden', 'pointer-events-none'); 
+                        setTimeout(() => {
+                            cm.classList.remove('opacity-0');
+                            const innerDiv = cm.querySelector('div');
+                            if(innerDiv) innerDiv.classList.add('scale-100');
+                        }, 10);
+                    }
                 }
             };
 
+            // Bắt sự kiện ẩn tab (Switch tab, minimize browser)
             document.addEventListener("visibilitychange", () => {
                 if (document.visibilityState === 'hidden') handleCheat();
             });
 
+            // Bắt sự kiện mất tiêu điểm (Click sang phần mềm khác, Alt+Tab)
             window.addEventListener("blur", () => {
                 handleCheat();
             });
