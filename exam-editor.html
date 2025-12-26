@@ -319,17 +319,28 @@
                 </div>
 
                 <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-                    <div class="p-4 border-b border-gray-100 flex flex-col md:flex-row gap-4 justify-between bg-gray-50">
-                        <div class="flex gap-2">
-                            <button onclick="filterStats('all')" class="px-3 py-1.5 rounded-lg text-sm font-bold bg-blue-600 text-white shadow-sm" id="filterBtnAll">Tất cả</button>
-                            <button onclick="filterStats('class')" class="hidden px-3 py-1.5 rounded-lg text-sm font-bold bg-white text-gray-600 border hover:bg-gray-100" id="filterBtnClass">Theo lớp</button>
+                    <div class="p-4 border-b border-gray-100 flex flex-col gap-4 bg-gray-50">
+                        <div class="flex flex-col md:flex-row justify-between gap-4">
+                            <div class="flex gap-2 overflow-x-auto pb-1 no-scrollbar items-center" id="classFilterContainer">
+                                <button onclick="filterStats('all')" class="px-3 py-1.5 rounded-lg text-sm font-bold bg-blue-600 text-white shadow-sm whitespace-nowrap transition-colors" id="filterBtnAll">Tất cả</button>
+                            </div>
+                            <div class="shrink-0">
+                                <select id="sortStats" class="form-input text-sm py-1.5 w-40 bg-white" onchange="renderStatsTable()">
+                                    <option value="score_desc">Điểm cao -> thấp</option>
+                                    <option value="score_asc">Điểm thấp -> cao</option>
+                                    <option value="time_desc">Nộp mới nhất</option>
+                                </select>
+                            </div>
                         </div>
-                        <div class="flex gap-2">
-                            <select id="sortStats" class="form-input text-sm py-1.5 w-40" onchange="renderStatsTable()">
-                                <option value="score_desc">Điểm cao -> thấp</option>
-                                <option value="score_asc">Điểm thấp -> cao</option>
-                                <option value="time_desc">Nộp mới nhất</option>
-                            </select>
+                        <div class="flex items-center gap-2 pt-2 border-t border-gray-200">
+                            <span class="text-xs font-bold text-gray-500 uppercase mr-2">Lọc theo:</span>
+                            <div class="flex bg-white rounded-lg border border-gray-300 p-1 shadow-sm">
+                                <button onclick="filterStatus('all')" id="stBtn_all" class="px-3 py-1 text-xs font-bold rounded bg-gray-100 text-gray-800">Tất cả</button>
+                                <button onclick="filterStatus('done')" id="stBtn_done" class="px-3 py-1 text-xs font-bold rounded text-gray-500 hover:bg-gray-50">Đã nộp</button>
+                                <button onclick="filterStatus('missing')" id="stBtn_missing" class="px-3 py-1 text-xs font-bold rounded text-gray-500 hover:bg-gray-50">Chưa nộp</button>
+                                <button onclick="filterStatus('not_graded')" id="stBtn_not_graded" class="px-3 py-1 text-xs font-bold rounded text-gray-500 hover:bg-gray-50 text-red-500">Chưa chấm</button>
+                                <button onclick="filterStatus('graded')" id="stBtn_graded" class="px-3 py-1 text-xs font-bold rounded text-gray-500 hover:bg-gray-50">Đã chấm</button>
+                            </div>
                         </div>
                     </div>
                     <div class="overflow-x-auto">
@@ -499,6 +510,10 @@
         let statsMap = {}; 
         let classStudentList = [];
         let modalResolve = null;
+        // --- THÊM MỚI ---
+        let currentClassFilter = 'all';
+        let currentStatusFilter = 'all';
+        let fullStudentList = [];
 
         const modalEl = document.getElementById('customModal');
         const modalBox = document.getElementById('customModalBox');
@@ -884,6 +899,7 @@
             e.target.value = '';
         });
 
+        // --- 1. HÀM TẢI DỮ LIỆU ĐỀ THI (ĐÃ FIX LỖI NULL) ---
         window.loadExamData = async (id) => { 
              try {
                 const docSnap = await getDoc(doc(db, "exams", id));
@@ -900,48 +916,36 @@
                     document.getElementById('settingAttempts').value = (data.attempts !== undefined) ? data.attempts : 1;
                     document.getElementById('settingProctoring').checked = (data.proctoring === true);
                     document.getElementById('settingShuffle').checked = (data.shuffle !== false);
-                    if(data.showScore) document.querySelector(`input[name="settingShowScore"][value="${data.showScore}"]`).checked = true;
-                    // Load chế độ xem lời giải
-                    if(data.showResult) {
-                        const radio = document.querySelector(`input[name="settingShowResult"][value="${data.showResult}"]`);
-                        if(radio) radio.checked = true;
-                    }
-                    // Load giá trị điểm sàn và phí (nếu có)
+                    
+                    if(data.showScore) { const r = document.querySelector(`input[name="settingShowScore"][value="${data.showScore}"]`); if(r) r.checked = true; }
+                    if(data.showResult) { const r = document.querySelector(`input[name="settingShowResult"][value="${data.showResult}"]`); if(r) r.checked = true; }
                     document.getElementById('settingPassScoreInput').value = data.passScore || 5;
                     document.getElementById('settingFeeQpointInput').value = data.feeQpoint || 0;
-                    window.toggleResultOptions(); // Kích hoạt trạng thái ẩn/hiện
-                    const filterBtn = document.getElementById('filterBtnClass');
+                    if(window.toggleResultOptions) window.toggleResultOptions();
+
+                    // [FIX] Xử lý Access Type an toàn, bỏ qua nút filter cũ
                     if(data.accessType) {
-                        document.querySelector(`input[name="settingAccess"][value="${data.accessType}"]`).checked = true;
+                        const r = document.querySelector(`input[name="settingAccess"][value="${data.accessType}"]`);
+                        if(r) r.checked = true;
                         window.togglePrivasySettings(data.accessType);
-                        if (data.accessType === 'class') filterBtn.classList.remove('hidden'); else filterBtn.classList.add('hidden');
                     }
                     
                     setTimeout(async () => { 
                         let selectedIds = [];
-                        if (data.allowedClassIds && Array.isArray(data.allowedClassIds)) {
-                            selectedIds = data.allowedClassIds;
-                        } else if (data.allowedClassId) {
-                            selectedIds = [data.allowedClassId]; 
-                        }
-
-                        selectedIds.forEach(id => {
-                            const cb = document.querySelector(`.class-checkbox[value="${id}"]`);
-                            if(cb) cb.checked = true;
-                        });
-
-                        if(selectedIds.length > 0) filterBtn.textContent = `${selectedIds.length} Lớp`;
+                        if (data.allowedClassIds && Array.isArray(data.allowedClassIds)) selectedIds = data.allowedClassIds;
+                        else if (data.allowedClassId) selectedIds = [data.allowedClassId]; 
+                        selectedIds.forEach(id => { const cb = document.querySelector(`.class-checkbox[value="${id}"]`); if(cb) cb.checked = true; });
                     }, 800); 
 
                     window.questions = data.questions || [];
                     window.originalQuestionsData = JSON.parse(JSON.stringify(window.questions));
+                    if(window.sortQuestionsByType) window.sortQuestionsByType();
+                    if(window.renderPreviewList) window.renderPreviewList();
+                    if(window.questions.length > 0) window.loadQuestionToEditor(0);
                     
-                    sortQuestionsByType();
-                    renderPreviewList();
-                    if(window.questions.length > 0) loadQuestionToEditor(0);
                     if(data.status === 'published') {
-                        document.getElementById('examStatus').textContent = '• Đã xuất bản';
-                        document.getElementById('examStatus').classList.replace('text-orange-500', 'text-green-600');
+                        const st = document.getElementById('examStatus');
+                        if(st) { st.textContent = '• Đã xuất bản'; st.classList.replace('text-orange-500', 'text-green-600'); }
                         document.getElementById('publishedLinkArea').classList.remove('hidden');
                         document.getElementById('settingShareLink').value = window.location.origin + window.location.pathname.replace('exam-editor.html', 'exam.html') + '?id=' + id;
                     }
@@ -1401,16 +1405,14 @@
         }
 
         window.loadStats = async () => { 
-            if (!currentExamId) return; 
-            const qRes = query(collection(db, "results"), where("examId", "==", currentExamId)); 
+            if (!currentExamId) return;
+            // 1. Lấy kết quả thi
+            const qRes = query(collection(db, "results"), where("examId", "==", currentExamId));
             const snapRes = await getDocs(qRes);
             statsMap = {}; 
-            
             snapRes.forEach(d => { 
-                const r = d.data(); 
-                // [QUAN TRỌNG] Lưu thêm ID để sau này update điểm
-                const attemptData = { ...r, id: d.id };
-                
+                const r = d.data();
+                const attemptData = { ...r, id: d.id }; // Lưu ID để chấm điểm
                 const key = r.studentId || r.studentName; 
                 if (!statsMap[key]) { 
                     statsMap[key] = { ...attemptData, attempts: [attemptData], bestScore: r.score }; 
@@ -1422,77 +1424,226 @@
                     } 
                 } 
             });
+
+            // 2. Lấy thông tin lớp học để tạo bộ lọc
+            const examRef = await getDoc(doc(db, "exams", currentExamId));
+            const examData = examRef.data();
+            fullStudentList = [];
+            
+            const classContainer = document.getElementById('classFilterContainer');
+            if(classContainer) {
+                // Reset và thêm nút Tất cả
+                classContainer.innerHTML = `<button onclick="filterStats('all')" class="px-3 py-1.5 rounded-lg text-sm font-bold bg-blue-600 text-white shadow-sm whitespace-nowrap transition-colors" id="filterBtnAll">Tất cả</button>`;
+                
+                if (examData.allowedClassIds && examData.allowedClassIds.length > 0) {
+                    const uniqueIds = [...new Set(examData.allowedClassIds)]; // Lọc ID trùng
+                    for (const classId of uniqueIds) {
+                        try {
+                            const classSnap = await getDoc(doc(db, "classes", classId));
+                            if (classSnap.exists()) {
+                                const cls = classSnap.data();
+                                // Tạo nút bấm cho từng lớp
+                                const btn = document.createElement('button');
+                                btn.className = `px-3 py-1.5 rounded-lg text-sm font-bold bg-white text-gray-600 border hover:bg-gray-50 shadow-sm whitespace-nowrap transition-colors class-filter-btn`;
+                                btn.dataset.id = classId;
+                                btn.textContent = cls.name;
+                                btn.onclick = () => filterStats(classId);
+                                classContainer.appendChild(btn);
+
+                                // Thêm học sinh vào danh sách tổng
+                                const students = cls.students || [];
+                                students.forEach(st => {
+                                    fullStudentList.push({ 
+                                        studentId: st.uid, 
+                                        studentName: st.name, 
+                                        className: cls.name, 
+                                        classId: classId 
+                                    });
+                                });
+                            }
+                        } catch(e) { console.log("Lỗi tải lớp:", e); }
+                    }
+                } else {
+                    // Nếu là thi tự do (không chọn lớp)
+                    fullStudentList = Object.values(statsMap).map(s => ({ 
+                        studentId: s.studentId, 
+                        studentName: s.studentName, 
+                        className: 'Tự do', 
+                        classId: 'public' 
+                    }));
+                }
+            }
             renderStatsDashboard();
         };
 
         window.renderStatsDashboard = () => { 
-            const uniqueStudents = Object.values(statsMap); const totalSubs = uniqueStudents.length;
-            let totalScore = 0; uniqueStudents.forEach(r => totalScore += r.bestScore); const avg = totalSubs > 0 ? (totalScore / totalSubs).toFixed(2) : 0;
-            const scores = uniqueStudents.map(r => r.bestScore); const maxScore = scores.length > 0 ? Math.max(...scores) : 0; const minScore = scores.length > 0 ? Math.min(...scores) : 0;
-            document.getElementById('statTotalSubmissions').textContent = totalSubs; document.getElementById('statAvgScore').textContent = avg;
-            document.getElementById('statMaxScore').textContent = maxScore; document.getElementById('statMinScore').textContent = minScore;
-            const spectrum = Array(11).fill(0); scores.forEach(s => spectrum[Math.floor(s)]++);
-            const ctx = document.getElementById('scoreChart').getContext('2d'); if(window.myChart) window.myChart.destroy();
+            const uniqueStudents = Object.values(statsMap); 
+            const totalSubs = uniqueStudents.length;
+            let totalScore = 0; 
+            uniqueStudents.forEach(r => totalScore += parseFloat(r.bestScore)||0); 
+            const avg = totalSubs > 0 ? (totalScore / totalSubs).toFixed(2) : 0;
+            const scores = uniqueStudents.map(r => r.bestScore); 
+            const maxScore = scores.length > 0 ? Math.max(...scores) : 0; 
+            const minScore = scores.length > 0 ? Math.min(...scores) : 0;
+            
+            document.getElementById('statTotalSubmissions').textContent = totalSubs; 
+            document.getElementById('statAvgScore').textContent = avg;
+            document.getElementById('statMaxScore').textContent = maxScore; 
+            document.getElementById('statMinScore').textContent = minScore;
+            
+            // Vẽ biểu đồ
+            const spectrum = Array(11).fill(0); 
+            scores.forEach(s => spectrum[Math.floor(s)]++);
+            const ctx = document.getElementById('scoreChart').getContext('2d'); 
+            if(window.myChart) window.myChart.destroy();
             window.myChart = new Chart(ctx, { type: 'bar', data: { labels: ['0-1', '1-2', '2-3', '3-4', '4-5', '5-6', '6-7', '7-8', '8-9', '9-10', '10'], datasets: [{ label: 'Số lượng', data: spectrum, backgroundColor: '#3B82F6', borderRadius: 4 }] }, options: { responsive: true, maintainAspectRatio: false } });
-            const qStats = window.questions.map(() => ({ correct: 0, total: 0 }));
-            Object.values(statsMap).forEach(student => { student.attempts.forEach(attempt => { if(attempt.answers) { window.questions.forEach((q, idx) => { const u = attempt.answers[idx]; if (u !== undefined && u !== null) { qStats[idx].total++; let isCorrect = false; if (q.type === 'mc' && u === q.correct) isCorrect = true; else if (q.type === 'short' && q.answer && String(u).trim().toLowerCase() === String(q.answer).trim().toLowerCase()) isCorrect = true; else if (q.type === 'tf') { let matches = 0; if(Array.isArray(u)) q.statements.forEach((s, i) => { if(u[i]===s.isTrue) matches++; }); if(matches === 4) isCorrect = true; } if (isCorrect) qStats[idx].correct++; } }); } }); });
-            const qListDiv = document.getElementById('questionAnalysisList'); qListDiv.innerHTML = '';
-            qStats.forEach((stat, idx) => { const percent = stat.total > 0 ? Math.round((stat.correct / stat.total) * 100) : 0; const colorClass = percent > 80 ? 'bg-green-500' : (percent > 50 ? 'bg-yellow-500' : 'bg-red-500'); qListDiv.innerHTML += `<div class="flex items-center gap-2 text-xs"><span class="w-10 font-bold text-gray-500">Câu ${idx+1}</span><div class="flex-1 progress-bar-bg"><div class="progress-bar-fill ${colorClass}" style="width: ${percent}%"></div></div><span class="w-8 text-right font-bold text-gray-700">${percent}%</span></div>`; });
+            
+            // Phân tích câu hỏi
+            const qListDiv = document.getElementById('questionAnalysisList'); 
+            if(qListDiv) {
+                qListDiv.innerHTML = '';
+                const qStats = window.questions.map(() => ({ correct: 0, total: 0 }));
+                Object.values(statsMap).forEach(student => { 
+                    student.attempts.forEach(attempt => { 
+                        if(attempt.answers) { 
+                            window.questions.forEach((q, idx) => { 
+                                const u = attempt.answers[idx]; 
+                                if (u !== undefined && u !== null) { 
+                                    qStats[idx].total++; 
+                                    let isCorrect = false; 
+                                    if (q.type === 'mc' && u === q.correct) isCorrect = true; 
+                                    else if (q.type === 'short' && q.answer && String(u).trim().toLowerCase() === String(q.answer).trim().toLowerCase()) isCorrect = true; 
+                                    if (isCorrect) qStats[idx].correct++; 
+                                } 
+                            }); 
+                        } 
+                    }); 
+                });
+                qStats.forEach((stat, idx) => { 
+                    const percent = stat.total > 0 ? Math.round((stat.correct / stat.total) * 100) : 0; 
+                    const colorClass = percent > 80 ? 'bg-green-500' : (percent > 50 ? 'bg-yellow-500' : 'bg-red-500'); 
+                    qListDiv.innerHTML += `<div class="flex items-center gap-2 text-xs"><span class="w-10 font-bold text-gray-500">Câu ${idx+1}</span><div class="flex-1 progress-bar-bg"><div class="progress-bar-fill ${colorClass}" style="width: ${percent}%"></div></div><span class="w-8 text-right font-bold text-gray-700">${percent}%</span></div>`; 
+                });
+            }
+            renderStatsTable(); // Gọi hàm vẽ bảng
+        };
+
+        window.filterStats = (classId) => {
+            currentClassFilter = classId;
+            // Update giao diện nút Lớp (Đổi màu nút đang chọn)
+            const btnAll = document.getElementById('filterBtnAll');
+            if(btnAll) btnAll.className = classId === 'all' 
+                ? "px-3 py-1.5 rounded-lg text-sm font-bold bg-blue-600 text-white shadow-sm whitespace-nowrap transition-colors" 
+                : "px-3 py-1.5 rounded-lg text-sm font-bold bg-white text-gray-600 border hover:bg-gray-50 shadow-sm whitespace-nowrap transition-colors";
+            
+            document.querySelectorAll('.class-filter-btn').forEach(btn => {
+                const isActive = btn.dataset.id === classId;
+                btn.className = isActive 
+                    ? "px-3 py-1.5 rounded-lg text-sm font-bold bg-blue-600 text-white shadow-sm whitespace-nowrap transition-colors class-filter-btn" 
+                    : "px-3 py-1.5 rounded-lg text-sm font-bold bg-white text-gray-600 border hover:bg-gray-50 shadow-sm whitespace-nowrap transition-colors class-filter-btn";
+            });
             renderStatsTable();
         };
 
-        window.filterStats = (type) => {
-            document.getElementById('filterBtnAll').className = type === 'all' ? "px-3 py-1.5 rounded-lg text-sm font-bold bg-blue-600 text-white shadow-sm" : "px-3 py-1.5 rounded-lg text-sm font-bold bg-white text-gray-600 border hover:bg-gray-100";
-            document.getElementById('filterBtnClass').className = type === 'class' ? "px-3 py-1.5 rounded-lg text-sm font-bold bg-blue-600 text-white shadow-sm" : "px-3 py-1.5 rounded-lg text-sm font-bold bg-white text-gray-600 border hover:bg-gray-100";
-            renderStatsTable(type);
+        window.filterStatus = (status) => {
+            currentStatusFilter = status;
+            // Update giao diện nút Trạng thái
+            ['all', 'done', 'missing', 'graded', 'not_graded'].forEach(s => {
+                const btn = document.getElementById(`stBtn_${s}`);
+                if (!btn) return;
+                if (s === status) btn.className = "px-3 py-1 text-xs font-bold rounded bg-blue-100 text-blue-700 border border-blue-200 transition-colors";
+                else btn.className = "px-3 py-1 text-xs font-bold rounded text-gray-500 hover:bg-gray-50 transition-colors";
+            });
+            renderStatsTable();
         };
 
-        window.renderStatsTable = (filterType = 'all') => {
+        window.renderStatsTable = () => {
             const tbody = document.getElementById('statsTableBody'); 
             if (!tbody) return;
             tbody.innerHTML = '';
-            
-            let dataToShow = Object.values(statsMap);
-            
-            // [FIX LỖI] Đã xóa dòng gọi 'settingClassSelect' gây lỗi null
-            
-            // Logic sắp xếp
-            const sortTypeEl = document.getElementById('sortStats');
-            const sortType = sortTypeEl ? sortTypeEl.value : 'score_desc';
 
-            dataToShow.sort((a, b) => { 
-                const sA = parseFloat(a.score) || 0; 
-                const sB = parseFloat(b.score) || 0; 
-                if (sortType === 'score_desc') return sB - sA; 
-                if (sortType === 'score_asc') return sA - sB; 
-                if (sortType === 'time_desc') return new Date(b.submittedAt || 0) - new Date(a.submittedAt || 0); 
-                return 0;
+            // 1. Gộp danh sách: Học sinh trong lớp + Những người đã nộp
+            let combinedData = fullStudentList.map(st => {
+                // Tìm bài làm
+                const result = statsMap[st.studentId] || statsMap[st.studentName];
+                if (result) {
+                    return { ...st, ...result, hasSubmitted: true };
+                } else {
+                    return { ...st, score: '--', attempts: [], hasSubmitted: false, status: 'Chưa làm' };
+                }
             });
 
-            // Logic hiển thị dữ liệu
-            dataToShow.forEach(r => { 
-                const dateStr = r.submittedAt ? new Date(r.submittedAt).toLocaleString('vi-VN') : '--'; 
-                const scoreClass = r.status === 'Chưa làm' ? 'text-gray-400' : (r.score >= 8 ? 'text-green-600' : (r.score >= 5 ? 'text-blue-600' : 'text-red-500')); 
+            // Thêm những người thi tự do (không có trong danh sách lớp)
+            Object.values(statsMap).forEach(res => {
+                if (!combinedData.find(d => d.studentId === res.studentId)) {
+                    combinedData.push({ ...res, className: 'Khác', classId: 'other', hasSubmitted: true });
+                }
+            });
+
+            // 2. Áp dụng bộ lọc
+            let filteredData = combinedData.filter(item => {
+                // Lọc theo lớp
+                if (currentClassFilter !== 'all' && item.classId !== currentClassFilter) return false;
+                
+                // Lọc theo trạng thái
+                if (currentStatusFilter === 'done' && !item.hasSubmitted) return false;
+                if (currentStatusFilter === 'missing' && item.hasSubmitted) return false;
+                // Đã chấm: Phải nộp và có trường gradedAt
+                if (currentStatusFilter === 'graded' && (!item.hasSubmitted || !item.gradedAt)) return false;
+                // Chưa chấm: Đã nộp nhưng chưa có gradedAt
+                if (currentStatusFilter === 'not_graded' && (!item.hasSubmitted || item.gradedAt)) return false;
+                
+                return true;
+            });
+
+            // 3. Sắp xếp
+            const sortType = document.getElementById('sortStats').value;
+            filteredData.sort((a, b) => { 
+                if (sortType === 'time_desc') return new Date(b.submittedAt || 0) - new Date(a.submittedAt || 0);
+                const sA = parseFloat(a.bestScore) || 0; 
+                const sB = parseFloat(b.bestScore) || 0; 
+                return sortType === 'score_desc' ? sB - sA : sA - sB; 
+            });
+
+            // 4. Render HTML
+            if (filteredData.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" class="text-center py-8 text-gray-400 text-sm">Không tìm thấy học sinh nào.</td></tr>';
+                return;
+            }
+
+            filteredData.forEach(r => { 
+                const dateStr = r.submittedAt ? new Date(r.submittedAt).toLocaleString('vi-VN') : '<span class="text-red-400 italic">Chưa nộp</span>'; 
+                const scoreClass = !r.hasSubmitted ? 'text-gray-300' : (r.bestScore >= 8 ? 'text-green-600' : (r.bestScore >= 5 ? 'text-blue-600' : 'text-red-500')); 
                 const attemptCount = r.attempts ? r.attempts.length : 0; 
                 
-                // Hiển thị số lần vi phạm (Cột mới)
-                // Lấy cheatCount từ lần thi tốt nhất hoặc cộng dồn tùy logic, ở đây lấy từ bản ghi bestScore
-                const lastCheat = r.cheatCount || 0;
-                const cheatHtml = lastCheat > 0 
-                    ? `<span class="px-2 py-1 bg-red-100 text-red-600 rounded-full font-bold text-xs"><i class="fa-solid fa-triangle-exclamation"></i> ${lastCheat}</span>` 
-                    : `<span class="text-gray-300">-</span>`;
-
-                const nameHtml = attemptCount > 0 
+                const nameHtml = r.hasSubmitted 
                     ? `<button onclick="showStudentHistory('${r.studentName}')" class="font-bold text-blue-600 hover:underline flex items-center gap-2"><i class="fa-solid fa-user-graduate"></i> ${r.studentName}</button>` 
-                    : r.studentName; 
+                    : `<span class="text-gray-500 flex items-center gap-2"><i class="fa-regular fa-user"></i> ${r.studentName}</span>`;
                 
+                // Badge trạng thái
+                let statusBadge = '';
+                if (r.hasSubmitted) {
+                    if (r.gradedAt) statusBadge = '<span class="text-[10px] bg-green-100 text-green-700 px-1.5 rounded border border-green-200">Đã chấm</span>';
+                    else statusBadge = '<span class="text-[10px] bg-yellow-100 text-yellow-700 px-1.5 rounded border border-yellow-200">Chờ chấm</span>';
+                }
+
+                // Badge vi phạm
+                const cheatBadge = (r.hasSubmitted && r.cheatCount > 0) 
+                    ? `<span class="ml-1 bg-red-100 text-red-600 px-2 py-0.5 rounded text-xs font-bold"><i class="fa-solid fa-triangle-exclamation"></i> ${r.cheatCount}</span>` 
+                    : '';
+
                 tbody.innerHTML += `
-                    <tr class="bg-white border-b hover:bg-gray-50 transition-colors">
-                        <td class="px-6 py-3 font-medium text-gray-900">${nameHtml} <span class="text-xs text-gray-400 ml-1">${r.status || ''}</span></td>
-                        <td class="px-6 py-3 text-center font-bold ${scoreClass} text-lg">${r.score}</td>
-                        <td class="px-6 py-3 text-center">${cheatHtml}</td>
+                    <tr class="bg-white border-b hover:bg-gray-50 transition-colors ${!r.hasSubmitted ? 'bg-gray-50/50' : ''}">
+                        <td class="px-6 py-3">
+                            <div class="font-medium text-gray-900">${nameHtml}</div>
+                            <div class="text-[10px] text-gray-500 flex items-center gap-1 mt-1">
+                                <span class="bg-gray-100 px-1.5 rounded border border-gray-200 text-gray-600">${r.className || 'Tự do'}</span>
+                                ${statusBadge} ${cheatBadge}
+                            </div>
+                        </td>
+                        <td class="px-6 py-3 text-center font-bold ${scoreClass} text-lg">${r.hasSubmitted ? r.bestScore : '--'}</td>
                         <td class="px-6 py-3 text-center text-xs text-gray-500 font-bold">${attemptCount}</td>
-                        <td class="px-6 py-3 text-right text-xs text-gray-500">${dateStr}</td>
+                        <td class="px-6 py-3 text-right text-xs text-gray-500 font-mono">${dateStr}</td>
                     </tr>`; 
             });
         };
@@ -1884,39 +2035,53 @@
         </div>
     </div>
     <div id="gradingModal" class="fixed inset-0 z-[120] bg-gray-900 bg-opacity-95 hidden flex flex-col transition-opacity duration-300 opacity-0">
-        <div class="h-16 bg-white border-b border-gray-200 flex justify-between items-center px-6 shrink-0 shadow-md z-20">
+        <div class="h-16 bg-white border-b border-gray-200 flex justify-between items-center px-4 shrink-0 shadow-md z-20">
             <div class="flex items-center gap-4">
                 <button onclick="closeGradingModal()" class="w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-600"><i class="fa-solid fa-arrow-left"></i></button>
                 <div>
-                    <h3 class="font-bold text-gray-800 text-lg" id="gradingStudentName">Tên học sinh</h3>
-                    <p class="text-xs text-gray-500">Đang chấm: Lần thi <span id="gradingAttemptNum">--</span></p>
+                    <h3 class="font-bold text-gray-800 text-lg leading-tight" id="gradingStudentName">Tên học sinh</h3>
+                    <p class="text-xs text-gray-500">Đang chấm: <span id="gradingAttemptNum">--</span></p>
                 </div>
             </div>
-            <div class="flex items-center gap-6">
-                <div class="text-right">
+
+            <div id="gradingToolbar" class="flex items-center gap-3">
+                <div class="flex items-center gap-1 bg-gray-100 p-1 rounded-lg border">
+                    <button onclick="setGradingTool('cursor')" class="grading-tool-btn p-1.5 rounded bg-white shadow-sm text-blue-600" title="Di chuyển"><i class="fa-solid fa-arrow-pointer"></i></button>
+                    <button onclick="setGradingTool('pen')" class="grading-tool-btn p-1.5 rounded hover:bg-white text-gray-600" title="Bút viết"><i class="fa-solid fa-pen"></i></button>
+                    <button onclick="setGradingTool('eraser')" class="grading-tool-btn p-1.5 rounded hover:bg-white text-gray-600" title="Tẩy"><i class="fa-solid fa-eraser"></i></button>
+                    <div class="w-[1px] h-4 bg-gray-300 mx-1"></div>
+                    <input type="color" id="penColor" value="#ff0000" class="w-6 h-6 border-0 p-0 rounded cursor-pointer">
+                </div>
+
+                <div class="flex items-center gap-1 bg-gray-100 p-1 rounded-lg border hidden md:flex">
+                    <button onclick="setGradingTool('mark_correct')" class="grading-tool-btn p-1.5 rounded hover:bg-green-100 text-green-600" title="Đúng (Click để chấm)"><i class="fa-solid fa-check"></i></button>
+                    <button onclick="setGradingTool('mark_wrong')" class="grading-tool-btn p-1.5 rounded hover:bg-red-100 text-red-600" title="Sai (Click để chấm)"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+
+                <button onclick="runAIGrading()" class="px-3 py-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg text-xs font-bold shadow hover:opacity-90 flex items-center gap-1">
+                    <i class="fa-solid fa-robot"></i> <span class="hidden md:inline">Chấm AI</span>
+                </button>
+            </div>
+
+            <div class="flex items-center gap-4">
+                <div class="text-right hidden md:block">
                     <p class="text-xs text-gray-500 uppercase font-bold">Tổng điểm</p>
                     <p class="text-2xl font-black text-blue-600" id="gradingTotalScore">0.0</p>
                 </div>
-                <button onclick="saveGradingResult()" class="px-6 py-2.5 bg-green-600 hover:bg-green-700 text-white font-bold rounded-xl shadow-lg transition-all flex items-center gap-2">
-                    <i class="fa-solid fa-floppy-disk"></i> Lưu kết quả
+                <button onclick="saveGradingResult()" class="px-5 py-2 bg-green-600 hover:bg-green-700 text-white font-bold rounded-xl shadow-lg transition-all flex items-center gap-2">
+                    <i class="fa-solid fa-floppy-disk"></i> Lưu
                 </button>
             </div>
         </div>
 
-        <div class="flex-1 flex overflow-hidden">
-            <div class="w-64 bg-gray-50 border-r border-gray-200 flex flex-col hidden md:flex">
+        <div class="flex-1 flex overflow-hidden bg-gray-100 relative">
+            <div class="w-64 bg-gray-50 border-r border-gray-200 flex flex-col hidden lg:flex">
                 <div class="p-4 font-bold text-gray-600 text-sm uppercase border-b bg-gray-100">Danh sách câu hỏi</div>
-                <div class="flex-1 overflow-y-auto p-3 space-y-2" id="gradingNavList">
-                    </div>
+                <div class="flex-1 overflow-y-auto p-3 space-y-2" id="gradingNavList"></div>
             </div>
 
-            <div class="flex-1 flex flex-col md:flex-row overflow-hidden bg-gray-100 relative">
-                
-                <div class="flex-1 overflow-y-auto p-4 md:p-8" id="gradingWorkspace">
-                    <div class="max-w-3xl mx-auto space-y-6" id="gradingQuestionList">
-                        </div>
-                </div>
-
+            <div class="flex-1 overflow-y-auto p-4 md:p-8 flex justify-center" id="gradingWorkspace">
+                <div class="max-w-4xl w-full space-y-6" id="gradingQuestionList"></div>
             </div>
         </div>
     </div>
