@@ -713,20 +713,28 @@ async function loadLobbyData(id) {
                 inp.onchange = (e) => { userAnswers[idx]=e.target.value; updatePalette(); saveLocal(); };
                 dom.options.appendChild(inp);
             } else { 
-                // --- TỰ LUẬN (CẬP NHẬT ONCLICK ĐỂ TRÁNH VI PHẠM) ---
+                // --- TỰ LUẬN (CẬP NHẬT GIAO DIỆN) ---
                 const wrapper = document.createElement('div');
                 wrapper.className = "space-y-4 pb-24"; 
 
-                if (userAnswers[idx]) {
-                    const submittedDiv = document.createElement('div');
-                    submittedDiv.className = "bg-blue-50 p-4 rounded-xl border border-blue-200 mb-4";
-                    submittedDiv.innerHTML = `<div class="flex items-center gap-2 mb-2 text-blue-700 font-bold text-sm border-b border-blue-200 pb-2"><i class="fa-solid fa-check-circle"></i> Bài làm đã lưu:</div><div class="submitted-content grid gap-2">${userAnswers[idx]}</div>`;
-                    wrapper.appendChild(submittedDiv);
-                }
+                // Khu vực hiển thị ảnh đã nộp
+                const submittedWrapper = document.createElement('div');
+                submittedWrapper.id = `submitted-area-wrapper-${idx}`;
+                submittedWrapper.className = userAnswers[idx] ? "bg-blue-50 p-4 rounded-xl border border-blue-200 mb-4" : "hidden";
+                
+                submittedWrapper.innerHTML = `
+                    <div class="flex items-center gap-2 mb-2 text-blue-700 font-bold text-sm border-b border-blue-200 pb-2">
+                        <i class="fa-solid fa-check-circle"></i> Bài làm đã lưu:
+                    </div>
+                    <div id="submitted-area-${idx}" class="submitted-content grid gap-3">
+                        ${userAnswers[idx] || ''}
+                    </div>
+                `;
+                wrapper.appendChild(submittedWrapper);
 
                 const actionGrid = document.createElement('div');
                 actionGrid.className = "grid grid-cols-2 gap-3";
-                // [QUAN TRỌNG] Thêm onclick="window.isUploading=true" vào thẻ input file
+                // Thêm onclick="window.isUploading=true" để tránh bị phạt
                 actionGrid.innerHTML = `
                     <label class="flex flex-col items-center justify-center p-4 border-2 border-dashed border-blue-300 rounded-xl bg-blue-50 text-blue-600 font-bold cursor-pointer hover:bg-blue-100 hover:shadow-md transition-all active:scale-95">
                         <div class="w-10 h-10 bg-white rounded-full flex items-center justify-center shadow-sm mb-2 text-xl"><i class="fa-regular fa-image"></i></div>
@@ -930,15 +938,29 @@ async function loadLobbyData(id) {
             if(uploadBtn) { uploadBtn.disabled = true; uploadBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang tải lên...'; }
 
             let htmlImgs = "";
+            
+            // [LOGIC ĐẾM ẢNH CŨ]
+            const currentHtml = userAnswers[qIdx] || "";
+            // Đếm số lượng thẻ img đang có để đánh số tiếp theo
+            const existingCount = (currentHtml.match(/<img/g) || []).length;
+            
             try {
                 for (let i = 0; i < files.length; i++) {
-                    // [CẬP NHẬT] Đổi định dạng chữ đóng dấu: Câu X: Trang Y/Z
-                    const watermarkText = `Câu ${qIdx + 1}: Trang ${i + 1}/${files.length}`;
-                    const markedFile = await watermarkImage(files[i], watermarkText);
+                    // [SỬA LỖI ĐÓNG DẤU] Số trang = (Số ảnh cũ) + (Thứ tự ảnh này trong mảng) + 1
+                    // Ví dụ: Đã có 2 ảnh. Upload thêm 2 ảnh.
+                    // Ảnh đầu tiên: 2 + 0 + 1 = Trang 3
+                    const pageNum = existingCount + i + 1;
                     
+                    // Lưu ý: Không thể ghi "Trang X / Tổng Y" chính xác tuyệt đối nếu học sinh upload nhiều lần.
+                    // Vì ảnh cũ đã bị "đốt" chữ vào pixel rồi, không sửa lại số "Tổng" được.
+                    // Nên ta ghi: "Câu X: Tờ thứ Y" cho an toàn và chính xác nhất.
+                    const watermarkText = `Câu ${qIdx + 1}: Tờ thứ ${pageNum}`;
+                    
+                    const markedFile = await watermarkImage(files[i], watermarkText);
                     const compressed = await compressImage(markedFile, 0.7, 1000);
 
                     const formData = new FormData();
+                    // Thêm tiền tố submissions/ để gọn gàng
                     const fileName = `submissions/${currentUser.uid}_${Date.now()}_${i}.jpg`;
                     formData.append('file', compressed, fileName);
 
@@ -946,18 +968,31 @@ async function loadLobbyData(id) {
                     if(!res.ok) throw new Error("Lỗi upload ảnh");
                     const data = await res.json();
                     
-                    htmlImgs += `<img src="${data.url}" class="w-full max-w-md rounded-lg shadow-md my-2 border" loading="lazy">`;
+                    // [THÊM NÚT XÓA VÀO HTML]
+                    const uniqueId = `img-wrapper-${Date.now()}-${i}`;
+                    htmlImgs += `
+                        <div id="${uniqueId}" class="relative group inline-block w-full max-w-md border rounded-lg overflow-hidden shadow-sm mb-2">
+                            <img src="${data.url}" class="w-full h-auto" loading="lazy">
+                            <button onclick="deleteStudentImage('${data.url}', ${qIdx}, '${uniqueId}')" class="absolute top-2 right-2 bg-red-600 text-white w-8 h-8 rounded-full flex items-center justify-center shadow-lg hover:bg-red-700 transition-colors z-10" title="Xóa ảnh này">
+                                <i class="fa-solid fa-trash-can"></i>
+                            </button>
+                            <div class="absolute bottom-2 right-2 bg-black/50 text-white text-[10px] px-2 py-1 rounded backdrop-blur-sm">
+                                Tờ ${pageNum}
+                            </div>
+                        </div>`;
                 }
 
-                const currentContent = userAnswers[qIdx] || "";
-                userAnswers[qIdx] = currentContent + htmlImgs;
+                // Nối thêm ảnh mới vào ảnh cũ
+                userAnswers[qIdx] = currentHtml + htmlImgs;
                 
-                saveLocal(); // Lưu ngay sau khi nộp
+                saveLocal(); // Lưu lại ngay
 
+                // Dọn dẹp giao diện
                 window.tempStudentFiles[qIdx] = [];
                 document.getElementById(`preview-area-${qIdx}`).innerHTML = ''; 
                 document.getElementById(`upload-actions-${qIdx}`).classList.add('hidden'); 
                 
+                // Render lại để hiện ảnh mới
                 renderQuestion(qIdx); 
                 window.showToast("Đã nộp ảnh thành công!", "success");
 
@@ -988,6 +1023,55 @@ async function loadLobbyData(id) {
                     if(wantTopUp) window.customAlert("Tính năng Nạp Qpoint đang được xây dựng. Vui lòng quay lại sau!", "info");
                 } else { await updateDoc(userRef, { qpoint: currentQpoint - fee }); window.showToast(`Thanh toán thành công! Còn lại: ${currentQpoint - fee} Qpoint`); viewDetailSolutions(); }
             } catch(e) { console.error(e); window.customAlert("Lỗi giao dịch: " + e.message, "error"); }
+        };
+        // --- HÀM XÓA ẢNH HỌC SINH (MỚI) ---
+        window.deleteStudentImage = async (imgUrl, qIdx, wrapperId) => {
+            if (!confirm("Bạn có chắc chắn muốn xóa ảnh này không?")) return;
+
+            // Bật cờ upload để không bị tính vi phạm khi hiện confirm
+            window.isUploading = true;
+            
+            try {
+                // 1. Xóa trên Cloudflare R2
+                // Lấy key từ URL (phần sau tên miền)
+                let keyName = imgUrl;
+                if (imgUrl.includes('/submissions/')) {
+                    keyName = 'submissions/' + imgUrl.split('/submissions/')[1];
+                    // Decode URI để xử lý các ký tự đặc biệt nếu có
+                    keyName = decodeURIComponent(keyName);
+                }
+
+                const res = await fetch(`https://upload-helper.phamngockhanh-942001.workers.dev/?key=${encodeURIComponent(keyName)}`, {
+                    method: 'DELETE'
+                });
+
+                if (!res.ok) console.warn("Không xóa được trên Cloud (có thể file không tồn tại)");
+
+                // 2. Xóa trên giao diện (DOM)
+                const wrapper = document.getElementById(wrapperId);
+                if (wrapper) wrapper.remove();
+
+                // 3. Cập nhật lại userAnswers và LocalStorage
+                // Lấy lại HTML mới sau khi xóa div
+                const containerHtml = document.getElementById(`submitted-area-${qIdx}`).innerHTML;
+                
+                // Nếu xóa hết ảnh thì gán về rỗng
+                if (!containerHtml.trim()) {
+                    delete userAnswers[qIdx];
+                    document.getElementById(`submitted-area-wrapper-${qIdx}`).classList.add('hidden');
+                } else {
+                    userAnswers[qIdx] = containerHtml;
+                }
+                
+                saveLocal();
+                window.showToast("Đã xóa ảnh thành công!", "success");
+
+            } catch (e) {
+                console.error(e);
+                window.customAlert("Lỗi khi xóa ảnh: " + e.message, "error");
+            } finally {
+                setTimeout(() => { window.isUploading = false; }, 500);
+            }
         };
     </script>
     <div id="cheatModal" class="fixed inset-0 z-[200] flex items-center justify-center bg-red-900/95 hidden backdrop-blur-sm transition-opacity duration-300 opacity-0">
