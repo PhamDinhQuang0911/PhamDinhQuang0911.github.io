@@ -527,45 +527,57 @@ async function loadLobbyData(id) {
 
         function runTimer() { updateTimer(); timerInterval = setInterval(() => { const now = Date.now(); const diff = Math.ceil((window.endTimeStamp - now) / 1000); timeLeft = diff; if (timeLeft <= 0) { timeLeft = 0; updateTimer(); clearInterval(timerInterval); submitReal(true); } else { updateTimer(); } }, 1000); }
         // --- LOGIC GIÁM SÁT MỚI: CHỐNG ĐẾM TRÙNG & HIỆN CẢNH BÁO ---
-        let lastCheatTime = 0; // Biến lưu thời gian vi phạm lần cuối
+        // --- FIX LỖI: NÚT "QUAY LẠI" BỊ ĐƠ & CHỐNG ĐẾM TRÙNG ---
+        let lastCheatTime = 0; 
         
-        // Gán hàm đóng modal vào window để HTML gọi được
         window.closeCheatModal = () => {
             const cm = document.getElementById('cheatModal');
-            cm.classList.add('opacity-0', 'pointer-events-none'); // Ẩn hiệu ứng
-            setTimeout(() => cm.classList.add('hidden'), 300); // Ẩn hoàn toàn sau khi mờ
+            // 1. Làm mờ modal
+            cm.classList.add('opacity-0');
+            const innerDiv = cm.querySelector('div');
+            if(innerDiv) innerDiv.classList.remove('scale-100');
+
+            // 2. Ẩn hẳn sau 300ms
+            setTimeout(() => {
+                cm.classList.add('hidden');
+                // [QUAN TRỌNG] Gỡ bỏ lớp chặn click để lần sau còn bấm được
+                cm.classList.remove('pointer-events-none'); 
+            }, 300);
         };
 
         function initProctoring() {
             const handleCheat = () => {
-                // Chỉ xử lý nếu đang thi VÀ đã qua 1.5 giây kể từ lần vi phạm trước (Chống đếm đúp)
-                if (isExamActive && (Date.now() - lastCheatTime > 1500)) {
+                // Tăng thời gian chờ lên 2 giây (2000ms) để chắc chắn không bị đếm đúp
+                if (isExamActive && (Date.now() - lastCheatTime > 2000)) {
                     lastCheatTime = Date.now();
                     cheatCount++;
                     
-                    // Cập nhật số liệu trên thanh header
+                    // Cập nhật số hiển thị
                     document.getElementById('cheatCount').textContent = cheatCount;
-                    
-                    // Cập nhật số liệu trong Modal
-                    document.getElementById('cheatModalCount').textContent = cheatCount;
+                    if(document.getElementById('cheatModalCount')) {
+                        document.getElementById('cheatModalCount').textContent = cheatCount;
+                    }
 
-                    // Hiện Modal cảnh báo
+                    // MỞ MODAL CẢNH BÁO
                     const cm = document.getElementById('cheatModal');
-                    cm.classList.remove('hidden');
-                    // Timeout nhỏ để kích hoạt transition CSS
+                    // [QUAN TRỌNG] Xóa hidden VÀ pointer-events-none để đảm bảo bấm được
+                    cm.classList.remove('hidden', 'pointer-events-none'); 
+                    
+                    // Hiệu ứng hiện ra (Animation)
                     setTimeout(() => {
                         cm.classList.remove('opacity-0');
-                        cm.querySelector('div').classList.add('scale-100');
+                        const innerDiv = cm.querySelector('div');
+                        if(innerDiv) innerDiv.classList.add('scale-100');
                     }, 10);
                 }
             };
 
-            // Bắt sự kiện chuyển Tab/Ẩn trình duyệt
+            // Sự kiện ẩn tab/trình duyệt
             document.addEventListener("visibilitychange", () => {
                 if (document.visibilityState === 'hidden') handleCheat();
             });
 
-            // Bắt sự kiện mất tiêu điểm (Click sang phần mềm khác)
+            // Sự kiện mất tiêu điểm (Click sang app khác)
             window.addEventListener("blur", () => {
                 handleCheat();
             });
