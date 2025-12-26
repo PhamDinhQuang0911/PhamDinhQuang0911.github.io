@@ -368,9 +368,9 @@
         let syncInterval = null; // Biến quản lý lưu Cloud 10p/lần
         window.examHistory = [];
 
-        // --- HÀM LƯU TRỮ MỚI ---
+        // --- HÀM LƯU TRỮ (MỚI) ---
         function saveLocal() {
-            // Lưu vào máy học sinh (Tức thì - Miễn phí)
+            // Lưu ngay vào trình duyệt (Miễn phí, Tức thì)
             if(currentUser && examId) {
                 localStorage.setItem(`ans_${currentUser.uid}_${examId}`, JSON.stringify(userAnswers));
             }
@@ -422,13 +422,15 @@
 
 async function loadLobbyData(id) {
             try {
+                // 1. Tải dữ liệu Đề thi gốc
                 const docSnap = await getDoc(doc(db, "exams", id));
                 if (!docSnap.exists()) { document.getElementById('lobbyTitle').innerText = "Đề thi không tồn tại!"; return; }
                 examData = { id: docSnap.id, ...docSnap.data() }; 
                 
-                // --- Xử lý Override từ khóa học (Giữ nguyên logic của bạn) ---
+                // 2. [FIX CHÍNH XÁC] TÌM CẤU HÌNH TRONG CURRICULUM KHÓA HỌC
                 const urlParamsCheck = new URLSearchParams(window.location.search);
                 const courseIdOverride = urlParamsCheck.get('courseId');
+                
                 if (courseIdOverride) {
                     try {
                         const cSnap = await getDoc(doc(db, "public_courses", courseIdOverride));
@@ -456,7 +458,8 @@ async function loadLobbyData(id) {
                         }
                     } catch (e) { console.error("Lỗi khi tải cấu hình khóa học:", e); }
                 }
-
+                
+                // 3. Tải lịch sử làm bài
                 const q = query(collection(db, "results"), where("examId","==",id), where("studentId","==",currentUser.uid));
                 const snap = await getDocs(q);
                 window.examHistory = [];
@@ -468,17 +471,16 @@ async function loadLobbyData(id) {
                 const attemptRef = doc(db, "exam_attempts", `${currentUser.uid}_${examId}`);
                 const attemptSnap = await getDoc(attemptRef);
                 const btnStart = document.getElementById('btnStartExam');
-                
+
                 if (attemptSnap.exists()) {
                     // CÓ BÀI DỞ -> Hiện nút "Tiếp tục"
                     btnStart.innerHTML = '<i class="fa-solid fa-play"></i> Tiếp tục làm bài';
-                    btnStart.classList.remove('bg-gray-300', 'text-gray-400', 'cursor-not-allowed', 'bg-[#0F766E]');
-                    btnStart.classList.add('bg-yellow-600', 'text-white', 'hover:bg-yellow-700', 'shadow-lg');
+                    btnStart.classList.remove('bg-gray-300', 'cursor-not-allowed', 'text-gray-400');
+                    btnStart.classList.add('bg-yellow-600', 'text-white', 'shadow-lg', 'hover:bg-yellow-700');
                     btnStart.disabled = false;
                     btnStart.onclick = () => requestStart(true); // true = Chế độ Resume
                 } else {
                     // KHÔNG CÓ BÀI DỞ -> Logic cũ
-                    // Check chế độ Review
                     const urlParams = new URLSearchParams(window.location.search);
                     if (urlParams.get('mode') === 'review') {
                         if (att > 0) { currentQuestions = examData.questions || []; userAnswers = window.examHistory[0].answers || {}; document.getElementById('lobbyScreen').classList.add('hidden'); viewDetailSolutions(); return; } 
@@ -501,14 +503,13 @@ async function loadLobbyData(id) {
                     if(isPracticeMode) { msg = "Chế độ luyện tập"; color = "text-blue-600"; if(document.getElementById('lobbyMaxAttempts')) document.getElementById('lobbyMaxAttempts').innerText = '∞ (Luyện tập)'; }
 
                     const stat = document.getElementById('lobbyStatusBadge'); if(stat) { stat.textContent = msg; stat.className = `font-bold ${color}`; }
-
                     if(btnStart) {
                         if(ok) { 
                             btnStart.disabled = false; 
                             btnStart.classList.remove('bg-gray-300', 'cursor-not-allowed', 'text-gray-400'); 
                             btnStart.classList.add('bg-[#0F766E]', 'text-white', 'shadow-lg', 'hover:bg-teal-700'); 
                             btnStart.innerHTML = '<i class="fa-solid fa-play"></i> Bắt đầu làm bài'; 
-                            btnStart.onclick = () => requestStart(false);
+                            btnStart.onclick = () => requestStart(false); // false = Bài mới
                         } else { 
                             btnStart.disabled = true; 
                             btnStart.classList.add('bg-gray-300', 'cursor-not-allowed', 'text-gray-500'); 
@@ -552,7 +553,7 @@ async function loadLobbyData(id) {
                 currentQuestions = rawQuestions; 
             }
             
-            // --- LOGIC MỚI: TÍNH THỜI GIAN & KHÔI PHỤC ---
+            // --- TÍNH TOÁN THỜI GIAN & KHÔI PHỤC (LOGIC MỚI) ---
             const durationMinutes = examData.duration || 45;
             const attemptRef = doc(db, "exam_attempts", `${currentUser.uid}_${examId}`);
             let startTimeMs;
@@ -562,25 +563,26 @@ async function loadLobbyData(id) {
                 if(snap.exists()) {
                     const data = snap.data();
                     startTimeMs = data.startTime;
-                    // Gộp đáp án (Local đè Cloud)
+                    // Gộp đáp án: Cloud + LocalStorage (Local đè lên Cloud vì mới hơn)
                     const cloudAnswers = data.answers || {};
                     const localAnswers = JSON.parse(localStorage.getItem(`ans_${currentUser.uid}_${examId}`)) || {};
                     userAnswers = { ...cloudAnswers, ...localAnswers };
                     
-                    // Tính thời gian còn lại theo thời gian thực
+                    // Tính thời gian còn lại = Tổng giờ - (Hiện tại - Lúc bắt đầu)
                     const elapsedTime = Math.floor((Date.now() - startTimeMs) / 1000);
                     timeLeft = (durationMinutes * 60) - elapsedTime;
                 } else {
-                    isResume = false; 
+                    isResume = false; // Lỗi dữ liệu -> Làm bài mới
                 }
             }
             
             if (!isResume) {
+                // Bài mới: Set thời gian và tạo bản ghi Cloud
                 startTimeMs = Date.now();
                 userAnswers = {};
                 timeLeft = durationMinutes * 60;
                 
-                // Tạo bản ghi trên Cloud
+                // [QUAN TRỌNG] Tạo bản ghi Attempt để bắt đầu tính giờ
                 await setDoc(attemptRef, {
                     examId: examId,
                     studentId: currentUser.uid,
@@ -596,7 +598,7 @@ async function loadLobbyData(id) {
                 return;
             }
 
-            // Đồng bộ đồng hồ đếm ngược
+            // Cập nhật mốc thời gian cho đồng hồ đếm ngược
             if(timeLeft > 0) { window.endTimeStamp = Date.now() + (timeLeft * 1000); runTimer(); } else { dom.timer.textContent = "∞"; }
             
             // Bắt đầu lưu 10p/lần
@@ -687,7 +689,10 @@ async function loadLobbyData(id) {
                     const checked = userAnswers[idx] === i;
                     const div = document.createElement('label'); div.className = "block cursor-pointer group w-full";
                     div.innerHTML = `<input type="radio" name="q" class="hidden custom-radio" ${checked?'checked':''}><div class="flex items-start p-4 border-2 border-gray-100 rounded-xl hover:border-blue-300 group-hover:bg-blue-50 group-hover:shadow-sm h-full transition-all"><div class="check-circle w-8 h-8 rounded-full border-2 border-gray-200 flex items-center justify-center mr-4 font-bold text-gray-400 shrink-0 mt-0.5 group-hover:scale-110 transition-transform">${String.fromCharCode(65+i)}</div><div class="flex-1 text-gray-700 leading-relaxed">${window.formatContent(opt)}</div></div>`;
-                    div.querySelector('input').onchange = () => { userAnswers[idx]=i; updatePalette(); };
+                    
+                    // [CẬP NHẬT] Thêm saveLocal()
+                    div.querySelector('input').onchange = () => { userAnswers[idx]=i; updatePalette(); saveLocal(); };
+                    
                     dom.options.appendChild(div);
                 });
             } else if (q.type === 'tf') {
@@ -695,9 +700,12 @@ async function loadLobbyData(id) {
                     const val = userAnswers[idx]?userAnswers[idx][i]:null;
                     const div = document.createElement('div'); div.className = "bg-white border-2 border-gray-100 rounded-xl p-4 hover:border-orange-200 transition-all";
                     div.innerHTML = `<div class="font-medium text-gray-800 mb-2">${window.formatContent(stmt.text)}</div><div class="flex gap-4"><label class="flex-1 cursor-pointer hover:bg-green-50 p-2 rounded transition-colors"><input type="radio" name="tf-${idx}-${i}" value="true" ${val===true?'checked':''} class="mr-2 accent-green-600">Đúng</label><label class="flex-1 cursor-pointer hover:bg-red-50 p-2 rounded transition-colors"><input type="radio" name="tf-${idx}-${i}" value="false" ${val===false?'checked':''} class="mr-2 accent-red-600">Sai</label></div>`;
+                    
+                    // [CẬP NHẬT] Thêm saveLocal()
                     div.querySelectorAll('input').forEach(inp => inp.onchange = (e) => {
-    if(!userAnswers[idx]) userAnswers[idx]={}; userAnswers[idx][i]=(e.target.value==='true'); updatePalette(); saveLocal();
-});
+                        if(!userAnswers[idx]) userAnswers[idx]={}; userAnswers[idx][i]=(e.target.value==='true'); updatePalette(); saveLocal();
+                    });
+                    
                     dom.options.appendChild(div);
                 });
             } else if (q.type === 'short') {
@@ -705,75 +713,38 @@ async function loadLobbyData(id) {
                 inp.className = "w-full p-4 border-2 rounded-xl font-bold text-lg outline-none focus:border-green-500 transition-all";
                 inp.placeholder = "Nhập đáp án của bạn...";
                 inp.value = userAnswers[idx] || '';
-                inp.onchange = (e) => { userAnswers[idx]=e.target.value; updatePalette(); };
+                
+                // [CẬP NHẬT] Thêm saveLocal()
+                inp.onchange = (e) => { userAnswers[idx]=e.target.value; updatePalette(); saveLocal(); };
+                
                 dom.options.appendChild(inp);
             } else { 
-                // --- GIAO DIỆN TỰ LUẬN (TEXT ĐÃ BỎ, CHỈ CÒN ẢNH) ---
+                // TỰ LUẬN (GIỮ NGUYÊN)
                 const wrapper = document.createElement('div');
-                // [FIX LỖI CHE MẤT] Thêm pb-24 để tạo khoảng trống cuộn trang lớn phía dưới
                 wrapper.className = "space-y-4 pb-24"; 
 
-                // 1. Hiển thị bài đã nộp (nếu có)
                 if (userAnswers[idx]) {
                     const submittedDiv = document.createElement('div');
                     submittedDiv.className = "bg-blue-50 p-4 rounded-xl border border-blue-200 mb-4";
-                    submittedDiv.innerHTML = `
-                        <div class="flex items-center gap-2 mb-2 text-blue-700 font-bold text-sm border-b border-blue-200 pb-2">
-                            <i class="fa-solid fa-check-circle"></i> Bài làm đã lưu:
-                        </div>
-                        <div class="submitted-content grid gap-2">${userAnswers[idx]}</div>
-                    `;
+                    submittedDiv.innerHTML = `<div class="flex items-center gap-2 mb-2 text-blue-700 font-bold text-sm border-b border-blue-200 pb-2"><i class="fa-solid fa-check-circle"></i> Bài làm đã lưu:</div><div class="submitted-content grid gap-2">${userAnswers[idx]}</div>`;
                     wrapper.appendChild(submittedDiv);
                 }
 
-                // 2. Hai nút chức năng tách biệt
                 const actionGrid = document.createElement('div');
                 actionGrid.className = "grid grid-cols-2 gap-3";
-                actionGrid.innerHTML = `
-                    <label class="flex flex-col items-center justify-center p-4 border-2 border-dashed border-blue-300 rounded-xl bg-blue-50 text-blue-600 font-bold cursor-pointer hover:bg-blue-100 hover:shadow-md transition-all active:scale-95">
-                        <div class="w-10 h-10 bg-white rounded-full flex items-center justify-center shadow-sm mb-2 text-xl">
-                            <i class="fa-regular fa-image"></i>
-                        </div>
-                        <span class="text-xs uppercase tracking-wide">Chọn ảnh</span>
-                        <input type="file" accept="image/*" multiple class="hidden" onchange="handleStudentUpload(this, ${idx})">
-                    </label>
-                    
-                    <label class="flex flex-col items-center justify-center p-4 border-2 border-dashed border-purple-300 rounded-xl bg-purple-50 text-purple-600 font-bold cursor-pointer hover:bg-purple-100 hover:shadow-md transition-all active:scale-95">
-                        <div class="w-10 h-10 bg-white rounded-full flex items-center justify-center shadow-sm mb-2 text-xl">
-                            <i class="fa-solid fa-camera"></i>
-                        </div>
-                        <span class="text-xs uppercase tracking-wide">Chụp ảnh</span>
-                        <input type="file" accept="image/*" capture="environment" class="hidden" onchange="handleStudentUpload(this, ${idx})">
-                    </label>
-                `;
+                actionGrid.innerHTML = `<label class="flex flex-col items-center justify-center p-4 border-2 border-dashed border-blue-300 rounded-xl bg-blue-50 text-blue-600 font-bold cursor-pointer hover:bg-blue-100 hover:shadow-md transition-all active:scale-95"><div class="w-10 h-10 bg-white rounded-full flex items-center justify-center shadow-sm mb-2 text-xl"><i class="fa-regular fa-image"></i></div><span class="text-xs uppercase tracking-wide">Chọn ảnh</span><input type="file" accept="image/*" multiple class="hidden" onchange="handleStudentUpload(this, ${idx})"></label><label class="flex flex-col items-center justify-center p-4 border-2 border-dashed border-purple-300 rounded-xl bg-purple-50 text-purple-600 font-bold cursor-pointer hover:bg-purple-100 hover:shadow-md transition-all active:scale-95"><div class="w-10 h-10 bg-white rounded-full flex items-center justify-center shadow-sm mb-2 text-xl"><i class="fa-solid fa-camera"></i></div><span class="text-xs uppercase tracking-wide">Chụp ảnh</span><input type="file" accept="image/*" capture="environment" class="hidden" onchange="handleStudentUpload(this, ${idx})"></label>`;
                 wrapper.appendChild(actionGrid);
 
-                // 3. Khu vực xem trước ảnh chuẩn bị nộp
-                const previewArea = document.createElement('div');
-                previewArea.id = `preview-area-${idx}`;
-                previewArea.className = "grid grid-cols-2 md:grid-cols-3 gap-3 mt-2 empty:hidden";
-                wrapper.appendChild(previewArea);
+                const previewArea = document.createElement('div'); previewArea.id = `preview-area-${idx}`; previewArea.className = "grid grid-cols-2 md:grid-cols-3 gap-3 mt-2 empty:hidden"; wrapper.appendChild(previewArea);
 
-                // 4. Nút Lưu (Chỉ hiện khi có ảnh mới)
-                const saveBtnArea = document.createElement('div');
-                saveBtnArea.id = `upload-actions-${idx}`;
-                saveBtnArea.className = "hidden mt-4 sticky bottom-20 z-10"; // Sticky để dễ bấm
-                saveBtnArea.innerHTML = `
-                    <button onclick="autoNumberPages(${idx})" class="w-full py-3 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-xl font-bold shadow-lg hover:shadow-xl transition-all transform active:scale-95 flex items-center justify-center gap-2">
-                        <i class="fa-solid fa-cloud-arrow-up"></i> Đóng dấu số trang & Nộp bài
-                    </button>
-                `;
+                const saveBtnArea = document.createElement('div'); saveBtnArea.id = `upload-actions-${idx}`; saveBtnArea.className = "hidden mt-4 sticky bottom-20 z-10"; 
+                saveBtnArea.innerHTML = `<button onclick="autoNumberPages(${idx})" class="w-full py-3 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-xl font-bold shadow-lg hover:shadow-xl transition-all transform active:scale-95 flex items-center justify-center gap-2"><i class="fa-solid fa-cloud-arrow-up"></i> Đóng dấu số trang & Nộp bài</button>`;
                 wrapper.appendChild(saveBtnArea);
 
                 dom.options.appendChild(wrapper);
             }
 
-            if(window.MathJax) {
-                MathJax.typesetPromise([dom.content, dom.options]).then(() => {
-                    if(window.renderTikz) window.renderTikz();
-                    if(window.autoScaleTables) window.autoScaleTables(); 
-                }).catch(()=>{});
-            }
+            if(window.MathJax) { MathJax.typesetPromise([dom.content, dom.options]).then(() => { if(window.renderTikz) window.renderTikz(); if(window.autoScaleTables) window.autoScaleTables(); }).catch(()=>{}); }
             updatePalette();
             closeAllSidebars();
         }
@@ -809,8 +780,10 @@ async function loadLobbyData(id) {
         async function submitReal(auto=false) {
             isExamActive = false; 
             clearInterval(timerInterval); 
-            if(syncInterval) clearInterval(syncInterval); // [MỚI] Dừng lưu Cloud
+            // [QUAN TRỌNG] Dừng việc đồng bộ Cloud
+            if(syncInterval) clearInterval(syncInterval);
 
+            // 1. TÍNH ĐIỂM (LOGIC CŨ)
             let totalScore = 0; let correct = 0; const normalize = (s) => String(s).replace(/\$| /g,'').toLowerCase().trim();
             let configuredPoints = 0; let unconfiguredCount = 0;
             currentQuestions.forEach(q => { if (q.point && parseFloat(q.point) > 0) configuredPoints += parseFloat(q.point); else unconfiguredCount++; });
@@ -829,22 +802,24 @@ async function loadLobbyData(id) {
             const isPassed = score >= passScore;
 
             try {
-                // 1. Lưu kết quả
+                // 2. LƯU KẾT QUẢ VÀO FIRESTORE (LOGIC CŨ)
                 await addDoc(collection(db, "results"), { examId, studentId: currentUser.uid, studentName: currentUser.displayName || currentUser.email, score, answers: userAnswers, cheatCount, correctCount: correct, totalQuestions: currentQuestions.length, isPassed: isPassed, passScoreSnapshot: passScore, submittedAt: new Date().toISOString() });
                 
-                // 2. [QUAN TRỌNG] Xóa dữ liệu tạm (exam_attempts) và LocalStorage
+                // 3. [MỚI] XÓA DỮ LIỆU TẠM (CLEANUP)
+                // Xóa bản ghi "đang làm dở" trên Cloud
                 await deleteDoc(doc(db, "exam_attempts", `${currentUser.uid}_${examId}`));
+                // Xóa dữ liệu trong máy
                 localStorage.removeItem(`ans_${currentUser.uid}_${examId}`);
                 localStorage.removeItem(`order_${currentUser.uid}_${examId}`);
 
-                // 3. Hiển thị kết quả (Code cũ)
+                // 4. HIỂN THỊ KẾT QUẢ & PHÁO HOA (LOGIC CŨ)
                 document.getElementById('scoreDisplay').textContent = score; document.getElementById('correctCount').textContent = `${correct}/${currentQuestions.length}`;
                 const resultTitle = document.getElementById('resultTitle'); const resultMsg = document.getElementById('resultMsg'); const resultIcon = document.getElementById('resultIcon'); const scoreDisplay = document.getElementById('scoreDisplay');
 
                 if (isPassed) {
                     resultTitle.textContent = "Chúc mừng! Bạn đã vượt qua"; resultTitle.className = "text-2xl font-extrabold text-green-600 mb-2";
                     resultMsg.textContent = `Bạn đã đạt ${score} điểm (Điểm chuẩn: ${passScore})`; resultIcon.innerHTML = "🎉"; scoreDisplay.className = "text-6xl font-black text-green-600";
-                    window.fireConfetti(score); 
+                    window.fireConfetti(score); // BẮN PHÁO HOA
                 } else {
                     resultTitle.textContent = "Chưa đạt yêu cầu"; resultTitle.className = "text-2xl font-extrabold text-red-600 mb-2";
                     resultMsg.textContent = `Cần tối thiểu ${passScore} điểm để qua bài. Hãy ôn tập thêm!`; resultIcon.innerHTML = "😓"; scoreDisplay.className = "text-6xl font-black text-red-500";
@@ -852,19 +827,51 @@ async function loadLobbyData(id) {
                 
                 if (examData.showScore === 'immediate' || (examData.showScore === 'after_exam' && timeLeft <= 0)) { document.getElementById('scoreSection').classList.remove('hidden'); }
                 
+                // 5. XỬ LÝ NÚT XEM GIẢI (LOGIC CŨ + OVERRIDE)
                 const btnView = document.getElementById('btnViewSolution');
+                
+                // Sử dụng examData đã được cập nhật Override từ khóa học
                 let finalMode = examData.showResult; 
                 let finalPassScore = parseFloat(examData.passScore) || 5;
                 let finalFee = parseInt(examData.feeQpoint) || 0;
+
                 const isTimeOk = (finalMode !== 'after_exam' || timeLeft <= 0);
 
-                if (finalMode === 'never') { btnView.classList.add('hidden'); } 
-                else if (finalMode === 'pass_score') {
-                    if (score >= finalPassScore) { btnView.classList.remove('hidden'); btnView.classList.replace('bg-gray-200', 'bg-orange-100'); btnView.classList.replace('text-gray-500', 'text-orange-600'); btnView.innerHTML = `<i class="fa-solid fa-eye mr-2"></i> Xem lời giải chi tiết`; btnView.onclick = viewDetailSolutions; } 
-                    else { btnView.classList.remove('hidden'); btnView.classList.replace('bg-orange-100', 'bg-gray-200'); btnView.classList.replace('text-orange-600', 'text-gray-500'); btnView.innerHTML = `<i class="fa-solid fa-lock mr-2"></i> Đạt ${finalPassScore}đ để xem`; btnView.onclick = () => window.customAlert(`Cần đạt ${finalPassScore} điểm để xem giải.`, 'warning'); }
+                if (finalMode === 'never') {
+                    btnView.classList.add('hidden');
                 } 
-                else if (finalMode === 'fee_qpoint') { btnView.classList.remove('hidden'); btnView.className = "w-full py-3 rounded-xl bg-gradient-to-r from-yellow-400 to-orange-500 text-white font-bold hover:shadow-lg transition-all"; btnView.innerHTML = `<i class="fa-solid fa-unlock-keyhole mr-2"></i> Mở khóa lời giải (${finalFee} Qpoint)`; btnView.onclick = () => window.handlePayAndShowSolution(finalFee); } 
-                else { if (isTimeOk) { btnView.classList.remove('hidden'); btnView.classList.replace('bg-gray-200', 'bg-orange-100'); btnView.classList.replace('text-gray-500', 'text-orange-600'); btnView.innerHTML = `<i class="fa-solid fa-eye mr-2"></i> Xem lời giải chi tiết`; btnView.onclick = viewDetailSolutions; } else { btnView.classList.add('hidden'); } }
+                else if (finalMode === 'pass_score') {
+                    if (score >= finalPassScore) {
+                        btnView.classList.remove('hidden');
+                        btnView.classList.replace('bg-gray-200', 'bg-orange-100');
+                        btnView.classList.replace('text-gray-500', 'text-orange-600');
+                        btnView.innerHTML = `<i class="fa-solid fa-eye mr-2"></i> Xem lời giải chi tiết`;
+                        btnView.onclick = viewDetailSolutions;
+                    } else {
+                        btnView.classList.remove('hidden');
+                        btnView.classList.replace('bg-orange-100', 'bg-gray-200');
+                        btnView.classList.replace('text-orange-600', 'text-gray-500');
+                        btnView.innerHTML = `<i class="fa-solid fa-lock mr-2"></i> Đạt ${finalPassScore}đ để xem`;
+                        btnView.onclick = () => window.customAlert(`Nội dung khóa học yêu cầu bạn phải đạt tối thiểu ${finalPassScore} điểm để mở khóa lời giải. Hãy cố gắng làm bài tốt hơn nhé!`, 'warning');
+                    }
+                } 
+                else if (finalMode === 'fee_qpoint') {
+                    btnView.classList.remove('hidden');
+                    btnView.className = "w-full py-3 rounded-xl bg-gradient-to-r from-yellow-400 to-orange-500 text-white font-bold hover:shadow-lg transition-all";
+                    btnView.innerHTML = `<i class="fa-solid fa-unlock-keyhole mr-2"></i> Mở khóa lời giải (${finalFee} Qpoint)`;
+                    btnView.onclick = () => window.handlePayAndShowSolution(finalFee);
+                } 
+                else {
+                    if (isTimeOk) {
+                        btnView.classList.remove('hidden');
+                        btnView.classList.replace('bg-gray-200', 'bg-orange-100');
+                        btnView.classList.replace('text-gray-500', 'text-orange-600');
+                        btnView.innerHTML = `<i class="fa-solid fa-eye mr-2"></i> Xem lời giải chi tiết`;
+                        btnView.onclick = viewDetailSolutions;
+                    } else {
+                        btnView.classList.add('hidden');
+                    }
+                }
                 
                 document.getElementById('resultModal').classList.remove('hidden');
                 setTimeout(() => { document.getElementById('resultModal').classList.remove('opacity-0'); document.getElementById('resultModalContent').classList.add('scale-100'); }, 50);
