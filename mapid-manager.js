@@ -2,20 +2,18 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebas
 import { getFirestore, doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 
-// --- CONFIG ---
+// 1. CONFIG FIREBASE (Giữ nguyên cấu hình của bạn)
 const firebaseConfig = { apiKey: "AIzaSyCqAX3x1MbJ3do7m3EaH9JA4kFuVhlAc78", authDomain: "lms-thitracnghiem.firebaseapp.com", projectId: "lms-thitracnghiem", storageBucket: "lms-thitracnghiem.firebasestorage.app", messagingSenderId: "760187217240", appId: "1:760187217240:web:d043cd5808c349f87a712d" };
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const auth = getAuth(app);
 
-// --- STATE ---
+// 2. STATE
 let mapData = { metadata: [], tree: [] };
 let selectedNode = null;
-let expandedNodes = new Set(); // Lưu trạng thái mở rộng của các node (theo ID path)
+let expandedNodes = new Set(); // Lưu ID các node đang mở
 
-// --- 1. CORE LOGIC ---
-
-// Parse text -> JSON Tree
+// 3. CORE LOGIC: PARSER (Xử lý file text -> JSON)
 function parseMapID(text) {
     const lines = text.split(/\r?\n/);
     const root = [];
@@ -50,7 +48,7 @@ function parseMapID(text) {
     return { tree: root, metadata };
 }
 
-// Generate JSON -> Text
+// 4. CORE LOGIC: GENERATOR (JSON -> Text)
 function generateMapID(data) {
     let output = data.metadata.join('\n') + '\n';
     function traverse(nodes, lvl) {
@@ -64,7 +62,7 @@ function generateMapID(data) {
     return output;
 }
 
-// Helper: Tìm path từ root đến node (để hiển thị ID)
+// Helper: Tìm đường dẫn từ gốc đến node
 function findPathToNode(nodes, target, currentPath = []) {
     for (let node of nodes) {
         if (node === target) return [...currentPath, node];
@@ -76,15 +74,16 @@ function findPathToNode(nodes, target, currentPath = []) {
     return null;
 }
 
-// Helper: Đếm tổng số con cháu
+// Helper: Đếm số con cháu
 function countTotalChildren(node) {
-    let count = node.children.length;
-    node.children.forEach(child => count += countTotalChildren(child));
+    let count = node.children ? node.children.length : 0;
+    if (node.children) {
+        node.children.forEach(child => count += countTotalChildren(child));
+    }
     return count;
 }
 
-// --- 2. UI RENDERING (SMART TREE) ---
-
+// 5. UI RENDERER (Vẽ cây)
 function renderTree() {
     const container = document.getElementById('treeContainer');
     container.innerHTML = '';
@@ -95,6 +94,7 @@ function renderTree() {
         return;
     }
 
+    // Hàm đệ quy tạo HTML cho từng node
     function createNodeElement(node, parentPathId = "") {
         totalNodes++;
         const currentPathId = parentPathId ? `${parentPathId}_${node.id}` : node.id;
@@ -102,15 +102,13 @@ function renderTree() {
         const isExpanded = expandedNodes.has(currentPathId);
         const isSelected = selectedNode === node;
 
-        // Container chính
         const wrapper = document.createElement('div');
 
         // Dòng hiển thị Node
         const row = document.createElement('div');
         row.className = `tree-node flex items-center gap-2 p-1.5 cursor-pointer rounded ${isSelected ? 'active' : ''}`;
-        row.dataset.path = currentPathId; // Để định danh
-
-        // Nút Toggle (Mũi tên)
+        
+        // Nút Toggle
         const toggleBtn = document.createElement('span');
         toggleBtn.className = `w-5 h-5 flex items-center justify-center text-gray-400 hover:text-blue-600 transition-transform ${isExpanded ? 'rotate-90' : ''}`;
         toggleBtn.innerHTML = hasChildren ? '<i class="fa-solid fa-caret-right"></i>' : '';
@@ -119,7 +117,7 @@ function renderTree() {
             if (hasChildren) {
                 if (isExpanded) expandedNodes.delete(currentPathId);
                 else expandedNodes.add(currentPathId);
-                renderTree(); // Re-render để cập nhật trạng thái
+                renderTree();
             }
         };
 
@@ -131,45 +129,43 @@ function renderTree() {
 
         // Mã ID (Editable)
         const idBadge = document.createElement('span');
-        idBadge.className = "font-mono text-xs font-bold text-gray-600 bg-gray-200 px-1.5 rounded min-w-[20px] text-center hover:bg-white hover:border hover:border-blue-300";
+        idBadge.className = "font-mono text-xs font-bold text-gray-600 bg-gray-200 px-1.5 rounded min-w-[20px] text-center hover:bg-white hover:border hover:border-blue-300 outline-none focus:bg-white focus:border-blue-500";
         idBadge.contentEditable = true;
         idBadge.textContent = node.id;
+        idBadge.onclick = (e) => e.stopPropagation(); // Chặn click lan ra dòng
         idBadge.onblur = () => { node.id = idBadge.textContent.trim(); updateRightPanel(); };
         idBadge.onkeydown = (e) => { if(e.key==='Enter'){ e.preventDefault(); idBadge.blur(); }};
 
         // Tên (Editable)
         const nameSpan = document.createElement('span');
-        nameSpan.className = "node-name text-sm flex-1 truncate hover:border-b hover:border-dashed hover:border-gray-400";
+        nameSpan.className = "node-name text-sm flex-1 truncate hover:border-b hover:border-dashed hover:border-gray-400 outline-none focus:border-b-2 focus:border-blue-500 focus:bg-white";
         nameSpan.contentEditable = true;
         nameSpan.textContent = node.name;
+        nameSpan.onclick = (e) => e.stopPropagation();
         nameSpan.onblur = () => { node.name = nameSpan.textContent.trim(); updateRightPanel(); };
         nameSpan.onkeydown = (e) => { if(e.key==='Enter'){ e.preventDefault(); nameSpan.blur(); }};
 
-        // Nút thêm nhanh (+)
+        // Nút thêm con (+)
         const addBtn = document.createElement('button');
         addBtn.className = "opacity-0 group-hover:opacity-100 text-green-600 hover:bg-green-100 w-6 h-6 rounded flex items-center justify-center transition-opacity";
         addBtn.innerHTML = '<i class="fa-solid fa-plus text-xs"></i>';
         addBtn.title = "Thêm mục con";
         addBtn.onclick = (e) => {
             e.stopPropagation();
-            // Thêm node con mới
             if (!node.children) node.children = [];
             node.children.push({ id: "?", name: "Mục mới", level: node.level + 1, children: [] });
-            expandedNodes.add(currentPathId); // Tự động mở để thấy con mới
+            expandedNodes.add(currentPathId);
             renderTree();
         };
 
-        // Gắn sự kiện chọn dòng
+        // Sự kiện chọn dòng
         row.onclick = () => {
             selectedNode = node;
-            renderTree();
+            renderTree(); // Highlight dòng
             updateRightPanel();
         };
 
-        // CSS Hover cho nút Add
-        row.classList.add('group');
-
-        // Lắp ráp Row
+        row.classList.add('group'); // Cho hover effect
         row.appendChild(toggleBtn);
         row.innerHTML += `<div class="w-5 text-center">${iconHtml}</div>`;
         row.appendChild(idBadge);
@@ -178,10 +174,10 @@ function renderTree() {
 
         wrapper.appendChild(row);
 
-        // Render con (nếu đang mở)
+        // Render con
         if (hasChildren && isExpanded) {
             const childContainer = document.createElement('div');
-            childContainer.className = "tree-children";
+            childContainer.className = "pl-6 border-l border-dashed border-gray-300 ml-2.5";
             node.children.forEach(child => {
                 childContainer.appendChild(createNodeElement(child, currentPathId));
             });
@@ -195,143 +191,150 @@ function renderTree() {
         container.appendChild(createNodeElement(node));
     });
 
-    document.getElementById('nodeCountBadge').textContent = `${totalNodes} mục`;
+    const badge = document.getElementById('nodeCountBadge');
+    if(badge) badge.textContent = `${totalNodes} mục`;
 }
 
-// --- 3. UI: RIGHT PANEL (ID EXPLANATION) ---
-
+// 6. UI: RIGHT PANEL (Thông tin chi tiết)
 function updateRightPanel() {
     const infoPanel = document.getElementById('infoPanel');
     const infoEmpty = document.getElementById('infoEmpty');
     const statPanel = document.getElementById('statPanel');
 
     if (!selectedNode) {
-        infoPanel.classList.add('hidden');
-        statPanel.classList.add('hidden');
-        infoEmpty.classList.remove('hidden');
+        if(infoPanel) infoPanel.classList.add('hidden');
+        if(statPanel) statPanel.classList.add('hidden');
+        if(infoEmpty) infoEmpty.classList.remove('hidden');
         return;
     }
 
-    infoPanel.classList.remove('hidden');
-    statPanel.classList.remove('hidden');
-    infoEmpty.classList.add('hidden');
+    if(infoPanel) infoPanel.classList.remove('hidden');
+    if(statPanel) statPanel.classList.remove('hidden');
+    if(infoEmpty) infoEmpty.classList.add('hidden');
 
-    // 1. Dò đường (Path)
+    // Breadcrumb & ID Preview
     const path = findPathToNode(mapData.tree, selectedNode);
     if (path) {
         const pathContainer = document.getElementById('pathContainer');
-        pathContainer.innerHTML = '';
-        
-        let fullID = "";
-        
-        path.forEach((p, idx) => {
-            fullID += p.id; // Cộng dồn ID (VD: 9 + D + 1...)
-            // Nếu là bước cuối có thể thêm gạch nối nếu cần (tùy logic THPT)
-            // Ở đây ta cộng dồn đơn giản để demo
+        if(pathContainer) {
+            pathContainer.innerHTML = '';
+            // Ghép ID (Có thể tùy chỉnh logic ghép chuỗi ở đây nếu cần dấu gạch ngang)
+            let fullID = path.map(n => n.id).join(''); 
+            
+            // Xử lý ID lớp 9 hoặc THPT (thêm gạch ngang trước ý cuối cùng nếu cần)
+            // Ví dụ: 1H2V3-4 (Nếu cấp cuối là dạng bài)
+            
+            document.getElementById('previewID').innerText = fullID;
 
-            const div = document.createElement('div');
-            div.className = "flex items-start gap-3 text-sm";
-            div.innerHTML = `
-                <div class="flex flex-col items-center">
-                    <span class="w-2 h-2 rounded-full bg-blue-500 mt-1.5"></span>
-                    ${idx < path.length - 1 ? '<div class="w-0.5 h-full bg-gray-200 my-1"></div>' : ''}
-                </div>
-                <div>
-                    <span class="text-xs font-bold text-gray-400 uppercase">Cấp ${p.level}</span>
-                    <div class="font-bold text-gray-800">${p.name}</div>
-                    <div class="text-xs font-mono text-blue-600 bg-blue-50 px-1 rounded inline-block">Mã: ${p.id}</div>
-                </div>
-            `;
-            pathContainer.appendChild(div);
-        });
-
-        // Hiển thị ID giả định (Lấy các ký tự đầu ghép lại)
-        // Lưu ý: Logic ID thực tế có thể phức tạp hơn (VD thêm dấu gạch ngang), ở đây ghép chuỗi để minh họa
-        document.getElementById('previewID').innerText = path.map(n => n.id).join('');
+            path.forEach((p, idx) => {
+                const div = document.createElement('div');
+                div.className = "flex items-start gap-3 text-sm";
+                div.innerHTML = `
+                    <div class="flex flex-col items-center">
+                        <span class="w-2 h-2 rounded-full bg-blue-500 mt-1.5"></span>
+                        ${idx < path.length - 1 ? '<div class="w-0.5 h-full bg-gray-200 my-1"></div>' : ''}
+                    </div>
+                    <div>
+                        <span class="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Cấp ${p.level}</span>
+                        <div class="font-bold text-gray-800">${p.name}</div>
+                        <div class="text-xs font-mono text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded inline-block mt-0.5 border border-blue-100">Mã: ${p.id}</div>
+                    </div>
+                `;
+                pathContainer.appendChild(div);
+            });
+        }
     }
 
-    // 2. Thống kê
-    document.getElementById('statDirectChild').innerText = selectedNode.children ? selectedNode.children.length : 0;
-    document.getElementById('statTotalChild').innerText = countTotalChildren(selectedNode);
+    // Stats
+    const elDirect = document.getElementById('statDirectChild');
+    const elTotal = document.getElementById('statTotalChild');
+    if(elDirect) elDirect.innerText = selectedNode.children ? selectedNode.children.length : 0;
+    if(elTotal) elTotal.innerText = countTotalChildren(selectedNode);
 }
 
-// --- 4. ACTIONS & EVENTS ---
+// 7. EVENT LISTENERS
+document.addEventListener('DOMContentLoaded', () => {
+    // Import
+    const btnImport = document.getElementById('btnImport');
+    if(btnImport) btnImport.addEventListener('click', () => document.getElementById('fileInput').click());
+    
+    document.getElementById('fileInput').addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (evt) => {
+            mapData = parseMapID(evt.target.result);
+            expandedNodes.clear();
+            renderTree();
+            showToast('Đã nhập file thành công!');
+            e.target.value = '';
+        };
+        reader.readAsText(file);
+    });
 
-// Xóa Node
-document.getElementById('btnDeleteNode').addEventListener('click', () => {
-    if (!selectedNode) return;
-    if (!confirm(`Xóa mục "${selectedNode.name}" và toàn bộ con?`)) return;
+    // Export
+    const btnExport = document.getElementById('btnExport');
+    if(btnExport) btnExport.addEventListener('click', () => {
+        const text = generateMapID(mapData);
+        const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `MapID_Config_${new Date().toISOString().slice(0,10)}.txt`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+    });
 
-    function removeNode(nodes, target) {
-        for (let i = 0; i < nodes.length; i++) {
-            if (nodes[i] === target) {
-                nodes.splice(i, 1);
-                return true;
-            }
-            if (nodes[i].children && nodes[i].children.length > 0) {
-                if (removeNode(nodes[i].children, target)) return true;
-            }
+    // Save Firebase
+    const btnSave = document.getElementById('btnSave');
+    if(btnSave) btnSave.addEventListener('click', async () => {
+        const oldText = btnSave.innerHTML;
+        btnSave.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang lưu...';
+        try {
+            await setDoc(doc(db, "configurations", "map_id_tree"), {
+                metadata: mapData.metadata,
+                tree: JSON.parse(JSON.stringify(mapData.tree)),
+                updatedAt: new Date().toISOString(),
+                updatedBy: auth.currentUser ? auth.currentUser.email : 'unknown'
+            });
+            showToast('Đã lưu cấu hình lên Server!');
+        } catch (e) {
+            console.error(e);
+            alert("Lỗi lưu: " + e.message);
+        } finally {
+            btnSave.innerHTML = oldText;
         }
-        return false;
-    }
+    });
 
-    removeNode(mapData.tree, selectedNode);
-    selectedNode = null;
-    renderTree();
-    updateRightPanel();
-});
+    // Delete Node (Button trong panel bên phải)
+    const btnDel = document.getElementById('btnDeleteNode');
+    if(btnDel) btnDel.addEventListener('click', () => {
+        if (!selectedNode) return;
+        if (!confirm(`Xóa mục "${selectedNode.name}" và toàn bộ con?`)) return;
 
-// Import
-document.getElementById('btnImport').addEventListener('click', () => document.getElementById('fileInput').click());
-document.getElementById('fileInput').addEventListener('change', (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-        mapData = parseMapID(evt.target.result);
-        expandedNodes.clear(); // Reset trạng thái mở rộng khi nhập mới
+        function removeNode(nodes, target) {
+            for (let i = 0; i < nodes.length; i++) {
+                if (nodes[i] === target) {
+                    nodes.splice(i, 1);
+                    return true;
+                }
+                if (nodes[i].children && nodes[i].children.length > 0) {
+                    if (removeNode(nodes[i].children, target)) return true;
+                }
+            }
+            return false;
+        }
+
+        removeNode(mapData.tree, selectedNode);
+        selectedNode = null;
         renderTree();
-        showToast('Đã nhập dữ liệu thành công!');
-        e.target.value = '';
-    };
-    reader.readAsText(file);
+        updateRightPanel();
+        showToast('Đã xóa mục!');
+    });
 });
 
-// Export
-document.getElementById('btnExport').addEventListener('click', () => {
-    const text = generateMapID(mapData);
-    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `MapID_Config_${new Date().toISOString().slice(0,10)}.txt`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-});
-
-// Save Firebase
-document.getElementById('btnSave').addEventListener('click', async () => {
-    const btn = document.getElementById('btnSave');
-    const oldText = btn.innerHTML;
-    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang lưu...';
-    try {
-        await setDoc(doc(db, "configurations", "map_id_tree"), {
-            metadata: mapData.metadata,
-            tree: JSON.parse(JSON.stringify(mapData.tree)),
-            updatedAt: new Date().toISOString(),
-            updatedBy: auth.currentUser ? auth.currentUser.email : 'unknown'
-        });
-        showToast('Đã lưu cấu hình lên Server!');
-    } catch (e) {
-        console.error(e);
-        alert("Lỗi lưu: " + e.message);
-    } finally {
-        btn.innerHTML = oldText;
-    }
-});
-
-// Init
+// Load Init
 onAuthStateChanged(auth, async (user) => {
     if (user) {
         try {
@@ -341,6 +344,7 @@ onAuthStateChanged(auth, async (user) => {
                 mapData.tree = data.tree || [];
                 mapData.metadata = data.metadata || [];
                 renderTree();
+                console.log("Đã tải cấu hình từ Server");
             }
         } catch(e) { console.log(e); }
     } else {
@@ -350,7 +354,9 @@ onAuthStateChanged(auth, async (user) => {
 
 function showToast(msg) {
     const t = document.getElementById('toast');
-    document.getElementById('toastMsg').innerText = msg;
-    t.classList.remove('translate-x-full');
-    setTimeout(() => t.classList.add('translate-x-full'), 3000);
+    if(t) {
+        document.getElementById('toastMsg').innerText = msg;
+        t.classList.remove('translate-x-full');
+        setTimeout(() => t.classList.add('translate-x-full'), 3000);
+    }
 }
