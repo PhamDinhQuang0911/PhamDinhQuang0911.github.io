@@ -275,6 +275,7 @@
                         <div class="w-[1px] h-6 bg-gray-200 mx-1"></div>                                             
                         <button onclick="deleteCurrentQuestion()" class="p-1.5 bg-red-50 text-red-600 rounded hover:bg-red-100 text-xs" title="Xóa câu hiện tại"><i class="fa-solid fa-trash"></i></button>
                         <button onclick="deleteAllQuestions()" class="p-1.5 ml-1 bg-red-600 text-white rounded hover:bg-red-700 text-xs shadow-sm" title="Xóa TOÀN BỘ câu hỏi"><i class="fa-solid fa-dumpster-fire"></i> Xóa hết</button>
+                        <button onclick="cleanWhitespace()" class="p-1.5 ml-1 bg-yellow-100 text-yellow-700 rounded hover:bg-yellow-200 text-xs font-bold" title="Tự động xóa dòng trắng thừa quanh ảnh"><i class="fa-solid fa-broom"></i> Dọn dòng</button>
                     </div>
                 </div>
                 <div id="editorArea" class="flex-1 overflow-y-auto p-4 md:p-6 bg-white relative">
@@ -1879,6 +1880,79 @@
             }
         };
 
+        // --- HÀM MỚI: DỌN DẸP KHOẢNG TRẮNG THỪA QUANH ẢNH ---
+        window.cleanWhitespace = () => {
+            let count = 0;
+            const containerClass = "flex justify-center my-1"; // Class nhận diện khung chứa ảnh
+
+            window.questions.forEach(q => {
+                let isModified = false;
+                
+                ['content', 'solution'].forEach(key => {
+                    if (!q[key] || !q[key].includes('<img')) return;
+
+                    // 1. Tạo DOM ảo để xử lý an toàn
+                    const tempDiv = document.createElement('div');
+                    tempDiv.innerHTML = q[key];
+
+                    // 2. Tìm tất cả các khung chứa ảnh (div wrapper)
+                    // Hoặc tìm trực tiếp thẻ img nếu không có wrapper
+                    const wrappers = tempDiv.querySelectorAll(`div.${containerClass.replace(/ /g, '.')}, img`);
+
+                    wrappers.forEach(el => {
+                        // Xác định đối tượng cần xử lý (Nếu là img nằm trong div flex thì lấy div cha)
+                        let target = el;
+                        if (el.tagName === 'IMG' && el.parentElement && el.parentElement.className.includes('flex')) {
+                            target = el.parentElement;
+                        }
+
+                        // 3. Xóa sạch <br> và text rỗng ở PHÍA TRƯỚC
+                        while (target.previousSibling) {
+                            const prev = target.previousSibling;
+                            if (prev.nodeName === 'BR') {
+                                prev.remove();
+                                isModified = true;
+                            } else if (prev.nodeType === 3 && !prev.textContent.trim()) {
+                                // Node văn bản nhưng chỉ chứa khoảng trắng/xuống dòng (\n)
+                                prev.remove();
+                                isModified = true;
+                            } else {
+                                break; // Gặp chữ hoặc thẻ khác thì dừng
+                            }
+                        }
+
+                        // 4. Xóa sạch <br> và text rỗng ở PHÍA SAU
+                        while (target.nextSibling) {
+                            const next = target.nextSibling;
+                            if (next.nodeName === 'BR') {
+                                next.remove();
+                                isModified = true;
+                            } else if (next.nodeType === 3 && !next.textContent.trim()) {
+                                next.remove();
+                                isModified = true;
+                            } else {
+                                break;
+                            }
+                        }
+                    });
+
+                    // 5. Lưu lại nếu có thay đổi
+                    if (isModified) {
+                        q[key] = tempDiv.innerHTML;
+                        count++;
+                    }
+                });
+            });
+
+            if (count > 0) {
+                window.renderPreviewList();
+                // Load lại câu hiện tại nếu đang mở
+                if (window.currentQIndex !== -1) window.loadQuestionToEditor(window.currentQIndex);
+                window.showToast(`Đã dọn dẹp dòng trắng cho ${count} vị trí!`, "success");
+            } else {
+                window.showToast("Đề thi đã sạch, không có dòng trắng thừa.", "info");
+            }
+        };
         // --- 2. HÀM XÓA TOÀN BỘ CÂU HỎI ---
         window.deleteAllQuestions = async () => {
             if (window.questions.length === 0) {
