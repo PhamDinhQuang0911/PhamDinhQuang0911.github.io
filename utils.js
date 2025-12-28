@@ -2,51 +2,49 @@
  * utils.js - Thư viện dùng chung (Đã tích hợp đầy đủ xử lý Ảnh & TikZ)
  */
 
+/**
+ * utils.js - Phiên bản "Strict Timeout"
+ */
 const TIKZ_API_URL = "https://compile.qmath.io.vn/compile"; 
 
 export const compileTikZToImage = async (tikzCode) => {
-    // Timeout 35s: Đủ cho VPS xử lý nhưng sẽ tự ngắt nếu bị treo kết nối
+    // THỜI GIAN TỐI ĐA CHO PHÉP: 30 Giây
+    // Nếu VPS làm xong mà Cloudflare không trả về trong 30s -> CẮT
+    const TIMEOUT_MS = 30000;
+
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 35000);
+    
+    // 1. Lệnh ngắt kết nối (Bom hẹn giờ)
+    const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => {
+            controller.abort(); // Ngắt kết nối vật lý
+            reject(new Error("TIMEOUT_FORCE")); // Báo lỗi logic
+        }, TIMEOUT_MS);
+    });
 
-    try {
-        const response = await fetch(TIKZ_API_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ code: tikzCode }),
-            signal: controller.signal
-        });
-
-        clearTimeout(timeoutId);
-
-        // 1. Đọc dạng Text trước để kiểm tra lỗi "Response Rỗng"
-        const rawText = await response.text();
-
-        // Nếu status 200 mà không có nội dung -> Lỗi do mạng/VPS cắt kết nối
-        if (!rawText || rawText.trim().length === 0) {
-            throw new Error("Server trả về Header OK nhưng Body rỗng (Zombie Response)");
-        }
-
-        // 2. Parse JSON
-        let data;
+    // 2. Lệnh gửi đi thực tế
+    const requestPromise = async () => {
         try {
-            data = JSON.parse(rawText);
-        } catch (e) {
-            throw new Error(`Phản hồi không phải JSON hợp lệ: ${rawText.substring(0, 50)}...`);
-        }
+            const response = await fetch(TIKZ_API_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ code: tikzCode }),
+                signal: controller.signal
+            });
 
-        if (!response.ok) throw new Error(data.log || data.error || "Lỗi Server Logic");
-        
-        return data.url;
+            if (!response.ok) throw new Error(`HTTP Error ${response.status}`);
+            
+            const text = await response.text();
+            if (!text || text.trim() === "") throw new Error("Empty Response");
 
-    } catch (error) {
-        clearTimeout(timeoutId);
-        // Chuẩn hóa lỗi Timeout để hiển thị dễ hiểu
-        if (error.name === 'AbortError') {
-            throw new Error("Timeout: VPS quá tải hoặc mất kết nối ( >35s).");
+            return JSON.parse(text).url;
+        } catch (err) {
+            throw err;
         }
-        throw error;
-    }
+    };
+
+    // 3. Cuộc đua: Ai xong trước thì lấy kết quả người đó
+    return Promise.race([requestPromise(), timeoutPromise]);
 };
 
 // --- CÁC HÀM EXPORT HỖ TRỢ ---
