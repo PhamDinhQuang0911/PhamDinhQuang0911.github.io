@@ -1157,91 +1157,117 @@
         // --- HÀM CẬP NHẬT: XÓA KHOẢNG TRẮNG CHO TIKZ/VPS ---
         // --- HÀM FIX: XÓA CHỮ THỪA CHO TIKZ ---
         // --- HÀM MỚI: BIÊN DỊCH SONG SONG 2 LUỒNG (BATCH PROCESSING) ---
+        // --- HÀM MỚI: WORKER POOL (CHẠY ĐUA 2 LUỒNG) ---
         window.handleAutoCompileAll = async () => {
-            // 1. Ẩn modal chọn chế độ, hiện thanh tiến độ
+            // 1. Chuẩn bị giao diện
             document.getElementById('importModeModal').classList.add('opacity-0', 'pointer-events-none');
             const pm = document.getElementById('progressModal');
             pm.classList.remove('opacity-0', 'pointer-events-none');
 
-            // 2. Lấy danh sách cần biên dịch
-            // Lọc ra những item chưa xong (_done chưa true)
-            let tikzItems = pendingImageUploads.filter(i => i.type === 'tikz' && !i._done);
-            const total = tikzItems.length;
-            let finishedCount = 0;
+            // 2. Lấy danh sách cần làm và thêm thuộc tính theo dõi số lần thử lại
+            // (Queue là danh sách động, các worker sẽ lấy dần từ đây)
+            const queue = pendingImageUploads
+                .filter(i => i.type === 'tikz' && !i._done)
+                .map(item => ({ ...item, retries: 0 })); // Copy ra đối tượng mới để quản lý retry
 
-            const updateProgress = () => {
-                const pct = Math.round((finishedCount / total) * 100);
+            const total = queue.length;
+            let completedCount = 0;
+
+            // Hàm cập nhật thanh tiến độ
+            const updateUI = () => {
+                const pct = Math.round((completedCount / total) * 100);
                 document.getElementById('compileProgressBar').style.width = `${pct}%`;
-                document.getElementById('compileProgressText').innerText = `${finishedCount}/${total}`;
+                document.getElementById('compileProgressText').innerText = `${completedCount}/${total}`;
                 document.getElementById('compilePercent').innerText = `${pct}%`;
             };
-            updateProgress();
+            updateUI();
 
-            // 3. CẤU HÌNH SONG SONG: Gửi 2 ảnh cùng lúc
-            const BATCH_SIZE = 2; 
-
-            for (let i = 0; i < total; i += BATCH_SIZE) {
-                // Lấy ra lô hiện tại (tối đa 2 item)
-                const batch = tikzItems.slice(i, i + BATCH_SIZE);
-                
-                // Tạo mảng các Promise để chạy song song
-                const promises = batch.map(async (item) => {
+            // --- ĐỊNH NGHĨA CÔNG NHÂN (WORKER) ---
+            const worker = async (workerId) => {
+                // Công nhân làm việc liên tục cho đến khi hàng đợi rỗng
+                while (queue.length > 0) {
+                    // Lấy 1 việc từ hàng đợi (Cắt từ đầu mảng)
+                    const item = queue.shift();
+                    
                     try {
-                        // Gọi API biên dịch
+                        console.log(`[Worker ${workerId}] Đang xử lý ảnh ${item.questionIdx + 1}...`);
+
+                        // Gọi API (Đã có timeout 30s ở utils.js)
                         const url = await compileTikZToImage(item.contentCode);
+
+                        // --> THÀNH CÔNG: Cập nhật giao diện ngay lập tức
+                        const imgTag = `<div class="flex justify-center my-1"><img src="${url}" class="rounded-lg shadow-sm" style="max-height:350px;" loading="lazy"></div>`;
                         
-                        // --- XỬ LÝ KẾT QUẢ NGAY LẬP TỨC (Không cần đợi lô xong) ---
-                        const simpleImgTag = `<div class="flex justify-center my-1"><img src="${url}" class="rounded-lg shadow-sm" style="max-height:350px;" loading="lazy"></div>`;
-                        
-                        // Tìm và thay thế Marker trong câu hỏi
+                        // Tìm và thay thế ảnh vào câu hỏi gốc
+                        // (Lưu ý: Phải tìm trong window.questions dựa trên ID gốc của item)
                         window.questions.forEach(q => {
-                            ['content', 'solution'].forEach(field => {
-                                if (q[field] && q[field].includes(item.id)) {
+                            ['content', 'solution'].forEach(key => {
+                                if (q[key] && q[key].includes(item.id)) {
                                     const tempDiv = document.createElement('div');
-                                    tempDiv.innerHTML = q[field];
-                                    const ph = tempDiv.querySelector(`div[data-id="${item.id}"]`);
-                                    if(ph) {
-                                        ph.outerHTML = "___IMAGE_MARKER___";
-                                        let newHTML = tempDiv.innerHTML;
-                                        newHTML = newHTML.replace(/(\s*<br\s*\/?>\s*|\s+)*___IMAGE_MARKER___(\s*<br\s*\/?>\s*|\s+)*/gi, '\n' + simpleImgTag + '\n');
-                                        q[field] = newHTML;
+                                    tempDiv.innerHTML = q[key];
+                                    const placeholder = tempDiv.querySelector(`div[data-id="${item.id}"]`);
+                                    if (placeholder) {
+                                        placeholder.outerHTML = "___IMG_MARKER___";
+                                        q[key] = tempDiv.innerHTML.replace(/___IMG_MARKER___/g, '\n' + imgTag + '\n');
                                     }
                                 }
                             });
                         });
+
+                        // Đánh dấu vào danh sách gốc là đã xong
+                        const originalItem = pendingImageUploads.find(i => i.id === item.id);
+                        if(originalItem) originalItem._done = true;
+
+                        completedCount++;
+                        updateUI();
+                        console.log(`[Worker ${workerId}] -> Ảnh ${item.questionIdx + 1} XONG.`);
+
+                    } catch (err) {
+                        // --> NẾU CÓ LỖI (Mạng, Timeout, Cloudflare...)
+                        console.warn(`[Worker ${workerId}] Lỗi ảnh ${item.questionIdx + 1}: ${err.message}`);
                         
-                        // Đánh dấu đã xong để không xử lý lại
-                        item._done = true;
+                        item.retries++;
                         
-                    } catch (e) {
-                        console.error(`Lỗi item ${item.id}:`, e.message);
-                        // Nếu lỗi, ta không đánh dấu _done để người dùng có thể thử lại sau
-                        // Hoặc bạn có thể gán ảnh lỗi vào
-                    } finally {
-                        // Cập nhật tiến độ ngay khi 1 ảnh trong lô chạy xong
-                        finishedCount++;
-                        updateProgress();
+                        if (item.retries < 3) {
+                            // Nếu chưa quá 3 lần: Đẩy lại vào đầu hàng đợi để làm lại ngay
+                            console.log(`[Worker ${workerId}] -> Đẩy lại vào hàng đợi (Lần thử ${item.retries + 1})`);
+                            queue.unshift(item); 
+                            
+                            // QUAN TRỌNG: Nghỉ 2 giây để "xả" kết nối lỗi trước khi làm tiếp
+                            await new Promise(r => setTimeout(r, 2000));
+                        } else {
+                            // Nếu đã lỗi 3 lần: Bỏ qua luôn
+                            console.error(`[Worker ${workerId}] -> BỎ QUA ảnh ${item.questionIdx + 1} sau 3 lần lỗi.`);
+                            completedCount++; // Vẫn tính là xong (dù lỗi) để thanh chạy hết
+                            updateUI();
+                        }
                     }
-                });
+                    
+                    // Nghỉ nhẹ 200ms giữa các ảnh để trình duyệt thở
+                    await new Promise(r => setTimeout(r, 200));
+                }
+            };
 
-                // Đợi cả lô này chạy xong mới qua lô tiếp theo (để bảo vệ VPS không bị quá tải)
-                await Promise.all(promises);
-            }
+            // 3. KHỞI ĐỘNG 2 CÔNG NHÂN CHẠY SONG SONG
+            // VPS có 2 luồng -> Ta tạo đúng 2 workers
+            const workerPool = [worker(1), worker(2)];
 
-            // 4. Hoàn tất
-            // Lọc lại danh sách pending để loại bỏ những cái đã xong
-            pendingImageUploads = pendingImageUploads.filter(i => !i._done);
+            // Đợi cả 2 công nhân làm hết việc
+            await Promise.all(workerPool);
 
+            // 4. KẾT THÚC
             setTimeout(() => {
                 pm.classList.add('opacity-0', 'pointer-events-none');
-                window.finishImportProcess(); 
+                window.finishImportProcess();
                 
-                if (pendingImageUploads.length === 0) {
-                    window.showToast("Đã biên dịch xong tất cả!", "success");
+                // Kiểm tra kết quả cuối cùng từ danh sách gốc
+                const failed = pendingImageUploads.filter(i => i.type === 'tikz' && !i._done);
+                if (failed.length === 0) {
+                    window.showToast("Tuyệt vời! Đã biên dịch xong 100%.", "success");
                 } else {
-                    window.showToast(`Xong ${finishedCount}/${total}. Còn lỗi vài ảnh.`, "warning");
+                    window.showToast(`Hoàn tất. Có ${failed.length} ảnh bị lỗi không thể xử lý.`, "warning");
                 }
-            }, 500);
+            }, 800);
         };
         window.handleTexUpload = (input) => {
             const file = input.files[0]; 
