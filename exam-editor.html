@@ -1156,56 +1156,91 @@
 
         // --- HÀM CẬP NHẬT: XÓA KHOẢNG TRẮNG CHO TIKZ/VPS ---
         // --- HÀM FIX: XÓA CHỮ THỪA CHO TIKZ ---
+        // --- HÀM MỚI: BIÊN DỊCH SONG SONG 2 LUỒNG (BATCH PROCESSING) ---
         window.handleAutoCompileAll = async () => {
+            // 1. Ẩn modal chọn chế độ, hiện thanh tiến độ
             document.getElementById('importModeModal').classList.add('opacity-0', 'pointer-events-none');
             const pm = document.getElementById('progressModal');
             pm.classList.remove('opacity-0', 'pointer-events-none');
 
-            const tikzItems = pendingImageUploads.filter(i => i.type === 'tikz');
+            // 2. Lấy danh sách cần biên dịch
+            // Lọc ra những item chưa xong (_done chưa true)
+            let tikzItems = pendingImageUploads.filter(i => i.type === 'tikz' && !i._done);
             const total = tikzItems.length;
-            let current = 0;
+            let finishedCount = 0;
 
             const updateProgress = () => {
-                const pct = Math.round((current / total) * 100);
+                const pct = Math.round((finishedCount / total) * 100);
                 document.getElementById('compileProgressBar').style.width = `${pct}%`;
-                document.getElementById('compileProgressText').innerText = `${current}/${total}`;
+                document.getElementById('compileProgressText').innerText = `${finishedCount}/${total}`;
+                document.getElementById('compilePercent').innerText = `${pct}%`;
             };
             updateProgress();
 
-            for (const item of tikzItems) {
-                try {
-                    const url = await compileTikZToImage(item.contentCode);
-                    const simpleImgTag = `<div class="flex justify-center my-1"><img src="${url}" class="rounded-lg shadow-sm" style="max-height:350px;" loading="lazy"></div>`;
-                    
-                    window.questions.forEach(q => {
-                        ['content', 'solution'].forEach(field => {
-                            if (q[field] && q[field].includes(item.id)) {
-                                const tempDiv = document.createElement('div');
-                                tempDiv.innerHTML = q[field];
-                                const ph = tempDiv.querySelector(`div[data-id="${item.id}"]`);
-                                if(ph) {
-                                    ph.outerHTML = "___IMAGE_MARKER___";
-                                    let newHTML = tempDiv.innerHTML;
-                                    newHTML = newHTML.replace(/(\s*<br\s*\/?>\s*|\s+)*___IMAGE_MARKER___(\s*<br\s*\/?>\s*|\s+)*/gi, '\n' + simpleImgTag + '\n');
-                                    q[field] = newHTML;
+            // 3. CẤU HÌNH SONG SONG: Gửi 2 ảnh cùng lúc
+            const BATCH_SIZE = 2; 
+
+            for (let i = 0; i < total; i += BATCH_SIZE) {
+                // Lấy ra lô hiện tại (tối đa 2 item)
+                const batch = tikzItems.slice(i, i + BATCH_SIZE);
+                
+                // Tạo mảng các Promise để chạy song song
+                const promises = batch.map(async (item) => {
+                    try {
+                        // Gọi API biên dịch
+                        const url = await compileTikZToImage(item.contentCode);
+                        
+                        // --- XỬ LÝ KẾT QUẢ NGAY LẬP TỨC (Không cần đợi lô xong) ---
+                        const simpleImgTag = `<div class="flex justify-center my-1"><img src="${url}" class="rounded-lg shadow-sm" style="max-height:350px;" loading="lazy"></div>`;
+                        
+                        // Tìm và thay thế Marker trong câu hỏi
+                        window.questions.forEach(q => {
+                            ['content', 'solution'].forEach(field => {
+                                if (q[field] && q[field].includes(item.id)) {
+                                    const tempDiv = document.createElement('div');
+                                    tempDiv.innerHTML = q[field];
+                                    const ph = tempDiv.querySelector(`div[data-id="${item.id}"]`);
+                                    if(ph) {
+                                        ph.outerHTML = "___IMAGE_MARKER___";
+                                        let newHTML = tempDiv.innerHTML;
+                                        newHTML = newHTML.replace(/(\s*<br\s*\/?>\s*|\s+)*___IMAGE_MARKER___(\s*<br\s*\/?>\s*|\s+)*/gi, '\n' + simpleImgTag + '\n');
+                                        q[field] = newHTML;
+                                    }
                                 }
-                            }
+                            });
                         });
-                    });
-                    item._done = true;
-                } catch (e) {
-                    console.error("Lỗi biên dịch item " + item.id, e);
-                }
-                current++;
-                updateProgress();
+                        
+                        // Đánh dấu đã xong để không xử lý lại
+                        item._done = true;
+                        
+                    } catch (e) {
+                        console.error(`Lỗi item ${item.id}:`, e.message);
+                        // Nếu lỗi, ta không đánh dấu _done để người dùng có thể thử lại sau
+                        // Hoặc bạn có thể gán ảnh lỗi vào
+                    } finally {
+                        // Cập nhật tiến độ ngay khi 1 ảnh trong lô chạy xong
+                        finishedCount++;
+                        updateProgress();
+                    }
+                });
+
+                // Đợi cả lô này chạy xong mới qua lô tiếp theo (để bảo vệ VPS không bị quá tải)
+                await Promise.all(promises);
             }
 
+            // 4. Hoàn tất
+            // Lọc lại danh sách pending để loại bỏ những cái đã xong
             pendingImageUploads = pendingImageUploads.filter(i => !i._done);
 
             setTimeout(() => {
                 pm.classList.add('opacity-0', 'pointer-events-none');
                 window.finishImportProcess(); 
-                window.showToast("Đã biên dịch xong!", "success");
+                
+                if (pendingImageUploads.length === 0) {
+                    window.showToast("Đã biên dịch xong tất cả!", "success");
+                } else {
+                    window.showToast(`Xong ${finishedCount}/${total}. Còn lỗi vài ảnh.`, "warning");
+                }
             }, 500);
         };
         window.handleTexUpload = (input) => {
