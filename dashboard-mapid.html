@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quản lý Cấu trúc MapID - Smart System</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Nunito', sans-serif; background-color: #F3F4F6; }
+        .tree-line { position: relative; padding-left: 20px; border-left: 1px dashed #CBD5E1; }
+        .tree-line:last-child { border-left: none; }
+        .tree-line::before { content: ""; position: absolute; top: 14px; left: 0; width: 15px; height: 1px; background: #CBD5E1; }
+        .tree-line:last-child::before { border-left: 1px dashed #CBD5E1; height: 14px; top: 0; }
+        
+        /* Custom Scrollbar */
+        .custom-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+        .custom-scroll::-webkit-scrollbar-track { background: #f1f1f1; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #c1c1c1; border-radius: 10px; }
+        .custom-scroll::-webkit-scrollbar-thumb:hover { background: #a8a8a8; }
+
+        .node-active { background-color: #EFF6FF; border-color: #3B82F6; color: #1D4ED8; }
+    </style>
+</head>
+<body class="h-screen flex flex-col overflow-hidden text-gray-800">
+
+    <header class="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-6 shadow-sm z-20 flex-shrink-0">
+        <div class="flex items-center gap-3">
+            <a href="dashboard.html" class="w-10 h-10 bg-gray-100 rounded-full flex items-center justify-center text-gray-600 hover:bg-gray-200 transition-colors">
+                <i class="fa-solid fa-arrow-left"></i>
+            </a>
+            <div>
+                <h1 class="font-bold text-xl text-gray-800"><i class="fa-solid fa-folder-tree text-blue-600 mr-2"></i>Quản lý MapID</h1>
+                <p class="text-xs text-gray-500">Cấu hình cây kiến thức cho hệ thống</p>
+            </div>
+        </div>
+        
+        <div class="flex items-center gap-3">
+            <button onclick="document.getElementById('fileInput').click()" class="px-4 py-2 bg-white border border-gray-300 text-gray-700 font-bold rounded-lg hover:bg-gray-50 text-sm flex items-center gap-2 shadow-sm">
+                <i class="fa-solid fa-upload"></i> Nhập file .txt
+            </button>
+            <button onclick="exportMapID()" class="px-4 py-2 bg-white border border-gray-300 text-gray-700 font-bold rounded-lg hover:bg-gray-50 text-sm flex items-center gap-2 shadow-sm">
+                <i class="fa-solid fa-download"></i> Xuất file .txt
+            </button>
+            <div class="h-8 w-[1px] bg-gray-300 mx-1"></div>
+            <button onclick="saveToFirebase()" id="btnSave" class="px-5 py-2 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 text-sm flex items-center gap-2 shadow-lg shadow-blue-200 transition-all">
+                <i class="fa-solid fa-cloud-arrow-up"></i> Lưu cấu hình
+            </button>
+        </div>
+    </header>
+
+    <main class="flex-1 flex overflow-hidden">
+        
+        <div class="w-2/3 flex flex-col bg-white border-r border-gray-200">
+            <div class="p-3 bg-gray-50 border-b border-gray-200 flex justify-between items-center text-xs font-bold text-gray-500 uppercase">
+                <span>Cấu trúc cây kiến thức</span>
+                <span id="nodeCount">0 mục</span>
+            </div>
+            <div id="treeContainer" class="flex-1 overflow-y-auto p-4 custom-scroll space-y-1">
+                <div class="text-center py-20 text-gray-400">
+                    <i class="fa-solid fa-file-import text-4xl mb-3"></i>
+                    <p>Chưa có dữ liệu.<br>Vui lòng nhập file MapID (.txt)</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="w-1/3 flex flex-col bg-gray-50">
+            <div class="p-6">
+                <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200">
+                    <h3 class="font-bold text-gray-800 mb-4 flex items-center gap-2">
+                        <i class="fa-solid fa-microscope text-purple-600"></i> Kiểm tra ID
+                    </h3>
+                    <div class="relative">
+                        <input type="text" id="testIdInput" placeholder="Nhập thử ID (VD: 9D1N1-1, 6D1N2...)" 
+                            class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-200 focus:border-purple-500 outline-none font-mono text-lg uppercase transition-all">
+                        <button onclick="testID()" class="absolute right-2 top-2 px-3 py-1.5 bg-purple-100 text-purple-700 rounded font-bold text-sm hover:bg-purple-200">
+                            Check
+                        </button>
+                    </div>
+                    
+                    <div id="testResult" class="mt-4 hidden">
+                        <div class="p-3 bg-green-50 border border-green-200 rounded-lg text-sm space-y-2">
+                            <div class="flex"><span class="w-20 font-bold text-gray-500">Lớp:</span> <b id="resGrade" class="text-green-700">--</b></div>
+                            <div class="flex"><span class="w-20 font-bold text-gray-500">Môn:</span> <b id="resSubj" class="text-green-700">--</b></div>
+                            <div class="flex"><span class="w-20 font-bold text-gray-500">Chương:</span> <b id="resChap" class="text-green-700">--</b></div>
+                            <div class="flex"><span class="w-20 font-bold text-gray-500">Mức độ:</span> <b id="resLevel" class="text-orange-600">--</b></div>
+                            <div class="flex"><span class="w-20 font-bold text-gray-500">Bài:</span> <b id="resLesson" class="text-green-700">--</b></div>
+                            <div class="flex hidden" id="rowDetail"><span class="w-20 font-bold text-gray-500">Chi tiết:</span> <b id="resDetail" class="text-green-700">--</b></div>
+                        </div>
+                    </div>
+                    <div id="testError" class="mt-4 hidden p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600 font-bold">
+                        <i class="fa-solid fa-circle-exclamation mr-1"></i> <span id="errMsg"></span>
+                    </div>
+                </div>
+            </div>
+
+            <div id="nodeEditor" class="flex-1 px-6 pb-6 overflow-y-auto hidden">
+                <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-200">
+                    <h3 class="font-bold text-gray-800 mb-4 flex items-center gap-2">
+                        <i class="fa-solid fa-pen-to-square text-blue-600"></i> Chỉnh sửa mục
+                    </h3>
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Mã ID (Key)</label>
+                            <input type="text" id="editKey" class="w-full px-3 py-2 border rounded font-mono font-bold text-blue-600 bg-gray-50">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Tên hiển thị</label>
+                            <input type="text" id="editName" class="w-full px-3 py-2 border rounded font-bold">
+                        </div>
+                        <div class="flex gap-2 pt-2">
+                            <button onclick="updateCurrentNode()" class="flex-1 py-2 bg-blue-600 text-white font-bold rounded hover:bg-blue-700">Cập nhật</button>
+                            <button onclick="deleteCurrentNode()" class="px-4 py-2 bg-red-100 text-red-600 font-bold rounded hover:bg-red-200"><i class="fa-solid fa-trash"></i></button>
+                        </div>
+                    </div>
+                    
+                    <hr class="my-4 border-gray-100">
+                    
+                    <h4 class="font-bold text-gray-700 text-sm mb-2">Thêm mục con</h4>
+                    <div class="flex gap-2">
+                        <input type="text" id="newChildKey" placeholder="Mã (VD: 1)" class="w-1/3 px-2 py-1.5 border rounded text-sm font-mono">
+                        <input type="text" id="newChildName" placeholder="Tên mục con..." class="flex-1 px-2 py-1.5 border rounded text-sm">
+                        <button onclick="addChildNode()" class="px-3 bg-green-100 text-green-700 rounded hover:bg-green-200"><i class="fa-solid fa-plus"></i></button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <input type="file" id="fileInput" accept=".txt" class="hidden">
+
+    <div id="toast" class="fixed top-5 right-5 z-50 transform translate-x-full transition-transform duration-300">
+        <div class="bg-white border-l-4 border-green-500 shadow-xl rounded p-4 flex items-center gap-3">
+            <i class="fa-solid fa-check-circle text-green-500 text-xl"></i>
+            <div>
+                <h4 class="font-bold text-sm text-gray-800">Thông báo</h4>
+                <p class="text-xs text-gray-600" id="toastMsg">Nội dung thông báo</p>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getFirestore, doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+
+        // CONFIG FIREBASE (Dùng chung config của bạn)
+        const firebaseConfig = { apiKey: "AIzaSyCqAX3x1MbJ3do7m3EaH9JA4kFuVhlAc78", authDomain: "lms-thitracnghiem.firebaseapp.com", projectId: "lms-thitracnghiem", storageBucket: "lms-thitracnghiem.firebasestorage.app", messagingSenderId: "760187217240", appId: "1:760187217240:web:d043cd5808c349f87a712d" };
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+
+        // --- GLOBAL STATE ---
+        let mapData = {
+            metadata: [], // Các dòng header, comment
+            tree: []      // Cấu trúc cây JSON
+        };
+        let selectedNode = null; // Node đang được chọn để sửa
+
+        // --- 1. CORE: PARSER (Đọc file text -> JSON) ---
+        function parseMapID(text) {
+            const lines = text.split(/\r?\n/);
+            const root = [];
+            const stack = []; // Stack lưu cha: [NodeLvl0, NodeLvl1, NodeLvl2...]
+            const metadata = [];
+
+            lines.forEach(line => {
+                const trimmed = line.trim();
+                if (!trimmed) return;
+
+                // Nếu không bắt đầu bằng '-', coi là metadata
+                if (!trimmed.startsWith('-')) {
+                    metadata.push(line);
+                    return;
+                }
+
+                // Parse dòng cấu trúc: "----[D] Đại số"
+                const match = line.match(/^(-+)\[(.+?)\]\s*(.*)/);
+                if (match) {
+                    const dashes = match[1].length;
+                    const id = match[2];
+                    const name = match[3];
+
+                    // Công thức level: (số gạch - 1) / 3
+                    // 1->0, 4->1, 7->2, 10->3, 13->4
+                    const level = Math.round((dashes - 1) / 3);
+
+                    const node = {
+                        id: id,
+                        name: name,
+                        level: level,
+                        children: [],
+                        // Lưu tham chiếu cha để dễ traverse ngược nếu cần (nhưng JSON không stringify được circular)
+                        // Nên ta chỉ lưu cấu trúc xuôi
+                    };
+
+                    if (level === 0) {
+                        root.push(node);
+                        stack[0] = node; // Đặt làm cha cấp 0
+                        // Xóa các cấp con cũ trong stack
+                        stack.length = 1; 
+                    } else {
+                        // Tìm cha ở cấp level-1
+                        const parent = stack[level - 1];
+                        if (parent) {
+                            parent.children.push(node);
+                            stack[level] = node; // Đặt mình làm cha cấp hiện tại
+                            stack.length = level + 1; // Cắt đuôi stack thừa
+                        } else {
+                            console.warn("Lỗi cấu trúc: Không tìm thấy cha cho dòng", line);
+                        }
+                    }
+                }
+            });
+
+            return { tree: root, metadata: metadata };
+        }
+
+        // --- 2. CORE: GENERATOR (JSON -> Text) ---
+        function generateMapID(data) {
+            let output = data.metadata.join('\n') + '\n';
+
+            function traverse(nodes, lvl) {
+                if (!nodes || nodes.length === 0) return;
+                nodes.forEach(node => {
+                    const dashes = '-'.repeat(1 + (lvl * 3));
+                    output += `${dashes}[${node.id}] ${node.name}\n`;
+                    if (node.children.length > 0) traverse(node.children, lvl + 1);
+                });
+            }
+
+            traverse(data.tree, 0);
+            return output;
+        }
+
+        // --- 3. UI: RENDER TREE ---
+        function renderTree() {
+            const container = document.getElementById('treeContainer');
+            container.innerHTML = '';
+            
+            if (mapData.tree.length === 0) {
+                container.innerHTML = '<div class="text-center py-10 text-gray-400">Trống</div>';
+                return;
+            }
+
+            let count = 0;
+
+            function createNodeHTML(node, pathIndices) {
+                count++;
+                const isSelected = selectedNode && selectedNode === node;
+                
+                // Div bọc node
+                const div = document.createElement('div');
+                div.className = `pl-4 ${node.level > 0 ? 'tree-line' : 'mb-2'}`;
+                
+                // Nội dung dòng
+                const content = document.createElement('div');
+                content.className = `flex items-center gap-2 p-1.5 rounded cursor-pointer hover:bg-gray-100 transition-colors ${isSelected ? 'node-active' : ''}`;
+                content.onclick = (e) => {
+                    e.stopPropagation();
+                    selectNode(node);
+                };
+
+                // Icon theo cấp
+                let iconClass = 'fa-circle text-[6px]';
+                if (node.level === 0) iconClass = 'fa-folder text-yellow-500 text-lg'; // Lớp
+                else if (node.level === 1) iconClass = 'fa-book text-blue-500'; // Môn
+                else if (node.level === 2) iconClass = 'fa-bookmark text-green-500'; // Chương
+                
+                content.innerHTML = `
+                    <div class="w-6 text-center"><i class="fa-solid ${iconClass}"></i></div>
+                    <span class="font-mono font-bold bg-gray-200 px-1.5 rounded text-xs text-gray-700 min-w-[24px] text-center">${node.id}</span>
+                    <span class="text-sm font-medium truncate flex-1">${node.name}</span>
+                    <span class="text-[10px] text-gray-400 bg-gray-100 px-1 rounded">Lv${node.level}</span>
+                `;
+
+                div.appendChild(content);
+
+                // Render con đệ quy
+                if (node.children && node.children.length > 0) {
+                    const childrenContainer = document.createElement('div');
+                    // childrenContainer.className = "hidden"; // Có thể ẩn/hiện nếu muốn collapse
+                    node.children.forEach((child, idx) => {
+                        childrenContainer.appendChild(createNodeHTML(child, [...pathIndices, idx]));
+                    });
+                    div.appendChild(childrenContainer);
+                }
+
+                return div;
+            }
+
+            mapData.tree.forEach((node, idx) => {
+                container.appendChild(createNodeHTML(node, [idx]));
+            });
+
+            document.getElementById('nodeCount').innerText = `${count} mục`;
+        }
+
+        // --- 4. LOGIC: SELECTION & EDIT ---
+        window.selectNode = (node) => {
+            selectedNode = node;
+            renderTree(); // Re-render để highlight
+            
+            const editor = document.getElementById('nodeEditor');
+            editor.classList.remove('hidden');
+            
+            document.getElementById('editKey').value = node.id;
+            document.getElementById('editName').value = node.name;
+            
+            // Reset form thêm con
+            document.getElementById('newChildKey').value = '';
+            document.getElementById('newChildName').value = '';
+        };
+
+        window.updateCurrentNode = () => {
+            if (!selectedNode) return;
+            selectedNode.id = document.getElementById('editKey').value.trim();
+            selectedNode.name = document.getElementById('editName').value.trim();
+            renderTree();
+            showToast('Đã cập nhật mục!');
+        };
+
+        window.addChildNode = () => {
+            if (!selectedNode) return;
+            const key = document.getElementById('newChildKey').value.trim();
+            const name = document.getElementById('newChildName').value.trim();
+            if (!key || !name) return alert("Vui lòng nhập Mã và Tên!");
+
+            const newNode = {
+                id: key,
+                name: name,
+                level: selectedNode.level + 1,
+                children: []
+            };
+            selectedNode.children.push(newNode);
+            renderTree();
+            showToast('Đã thêm mục con!');
+        };
+
+        window.deleteCurrentNode = () => {
+            if (!selectedNode) return;
+            if (!confirm(`Bạn có chắc muốn xóa mục "[${selectedNode.id}] ${selectedNode.name}" và toàn bộ con của nó?`)) return;
+
+            // Hàm tìm và xóa node trong cây (đệ quy)
+            function removeNode(nodes, target) {
+                for (let i = 0; i < nodes.length; i++) {
+                    if (nodes[i] === target) {
+                        nodes.splice(i, 1);
+                        return true;
+                    }
+                    if (nodes[i].children.length > 0) {
+                        if (removeNode(nodes[i].children, target)) return true;
+                    }
+                }
+                return false;
+            }
+
+            removeNode(mapData.tree, selectedNode);
+            selectedNode = null;
+            document.getElementById('nodeEditor').classList.add('hidden');
+            renderTree();
+            showToast('Đã xóa mục!');
+        };
+
+        // --- 5. LOGIC: TEST ID (SMART PARSER) ---
+        window.testID = () => {
+            const rawId = document.getElementById('testIdInput').value.trim();
+            if (!rawId) return;
+
+            const resBox = document.getElementById('testResult');
+            const errBox = document.getElementById('testError');
+            const errTxt = document.getElementById('errMsg');
+            
+            resBox.classList.add('hidden');
+            errBox.classList.add('hidden');
+
+            try {
+                // Tách ID: VD "9D1N1-2" -> 9, D, 1, N, 1, 2
+                // Hoặc "6D1N2" -> 6, D, 1, N, 2
+                
+                const cleanId = rawId.replace(/[\s\[\]]/g, '').toUpperCase();
+                
+                // Quy tắc:
+                // Char 0: Lớp (Tìm trong root)
+                // Char 1: Môn (Tìm trong con của Lớp)
+                // Char 2: Chương (Tìm trong con của Môn)
+                // Char 3: Mức độ (N/H/V/C) - Không nằm trong cây
+                // Char 4: Bài (Tìm trong con của Chương)
+                // Char 5 trở đi (nếu có, sau dấu - hoặc liền): Chi tiết (Tìm trong con của Bài)
+
+                // 1. Tìm Lớp
+                const gradeKey = cleanId[0];
+                const gradeNode = mapData.tree.find(n => n.id === gradeKey);
+                if (!gradeNode) throw new Error(`Không tìm thấy Lớp mã [${gradeKey}]`);
+
+                // 2. Tìm Môn
+                const subjKey = cleanId[1];
+                const subjNode = gradeNode.children.find(n => n.id === subjKey);
+                if (!subjNode) throw new Error(`Không tìm thấy Môn mã [${subjKey}] trong Lớp ${gradeKey}`);
+
+                // 3. Tìm Chương
+                const chapKey = cleanId[2];
+                const chapNode = subjNode.children.find(n => n.id === chapKey);
+                if (!chapNode) throw new Error(`Không tìm thấy Chương mã [${chapKey}] trong Môn ${subjKey}`);
+
+                // 4. Mức độ (Ký tự thứ 4)
+                const levelKey = cleanId[3];
+                const levels = {'N': 'Nhận biết', 'H': 'Thông hiểu', 'V': 'Vận dụng', 'C': 'Vận dụng cao'};
+                const levelName = levels[levelKey] || "Chưa xác định";
+
+                // 5. Tìm Bài (Ký tự thứ 5)
+                const lessonKey = cleanId[4];
+                let lessonNode = null;
+                // Lưu ý: Bài có thể là 1 hoặc nhiều ký tự? Theo format chuẩn là 1 ký tự.
+                if (chapNode.children) {
+                    lessonNode = chapNode.children.find(n => n.id === lessonKey);
+                }
+                if (!lessonNode) throw new Error(`Không tìm thấy Bài mã [${lessonKey}] trong Chương ${chapKey}`);
+
+                // 6. Tìm Chi tiết (Nếu có) - Dành cho Lớp 9 hoặc THPT
+                // ID có thể là 6D1N2 (hết) hoặc 1H2V3-4 (có thêm -4)
+                let detailNode = null;
+                let detailKey = "";
+                
+                // Cắt phần còn lại sau ký tự thứ 5
+                let remaining = cleanId.substring(5);
+                if (remaining.startsWith('-')) remaining = remaining.substring(1); // Bỏ dấu gạch nối
+
+                if (remaining.length > 0) {
+                    detailKey = remaining;
+                    if (lessonNode.children) {
+                        detailNode = lessonNode.children.find(n => n.id === detailKey);
+                    }
+                    if (!detailNode) throw new Error(`Không tìm thấy Chi tiết mã [${detailKey}] trong Bài ${lessonKey}`);
+                }
+
+                // --- HIỂN THỊ KẾT QUẢ ---
+                document.getElementById('resGrade').innerText = gradeNode.name;
+                document.getElementById('resSubj').innerText = subjNode.name;
+                document.getElementById('resChap').innerText = chapNode.name;
+                document.getElementById('resLevel').innerText = `${levelKey} - ${levelName}`;
+                document.getElementById('resLesson').innerText = lessonNode.name;
+                
+                const rowDetail = document.getElementById('rowDetail');
+                if (detailNode) {
+                    rowDetail.classList.remove('hidden');
+                    document.getElementById('resDetail').innerText = detailNode.name;
+                } else {
+                    rowDetail.classList.add('hidden');
+                }
+
+                resBox.classList.remove('hidden');
+
+            } catch (err) {
+                errTxt.innerText = err.message;
+                errBox.classList.remove('hidden');
+            }
+        };
+
+        // --- 6. IMPORT / EXPORT ---
+        document.getElementById('fileInput').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (evt) => {
+                const text = evt.target.result;
+                mapData = parseMapID(text);
+                renderTree();
+                showToast('Đã nhập file thành công!');
+                // Reset input
+                e.target.value = '';
+            };
+            reader.readAsText(file);
+        });
+
+        window.exportMapID = () => {
+            const text = generateMapID(mapData);
+            const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `MapID_Config_${new Date().toISOString().slice(0,10)}.txt`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        };
+
+        // --- 7. FIREBASE SAVE/LOAD ---
+        window.saveToFirebase = async () => {
+            if (mapData.tree.length === 0) return alert("Dữ liệu trống!");
+            const btn = document.getElementById('btnSave');
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang lưu...';
+            
+            try {
+                // Lưu vào collection 'configurations', doc 'map_id_tree'
+                await setDoc(doc(db, "configurations", "map_id_tree"), {
+                    metadata: mapData.metadata,
+                    tree: JSON.parse(JSON.stringify(mapData.tree)), // Deep copy clean object
+                    updatedAt: new Date().toISOString(),
+                    updatedBy: auth.currentUser ? auth.currentUser.email : 'unknown'
+                });
+                showToast('Đã lưu cấu hình lên Server!', 'success');
+            } catch (e) {
+                console.error(e);
+                alert("Lỗi lưu: " + e.message);
+            } finally {
+                btn.innerHTML = '<i class="fa-solid fa-cloud-arrow-up"></i> Lưu cấu hình';
+            }
+        };
+
+        // Load khi vào trang
+        onAuthStateChanged(auth, async (user) => {
+            if (user) {
+                try {
+                    const docSnap = await getDoc(doc(db, "configurations", "map_id_tree"));
+                    if (docSnap.exists()) {
+                        const data = docSnap.data();
+                        mapData.tree = data.tree || [];
+                        mapData.metadata = data.metadata || [];
+                        renderTree();
+                        console.log("Đã tải cấu hình từ Server");
+                    }
+                } catch(e) { console.log("Chưa có cấu hình online:", e); }
+            } else {
+                window.location.href = 'index.html';
+            }
+        });
+
+        // Utils
+        window.showToast = (msg) => {
+            const t = document.getElementById('toast');
+            document.getElementById('toastMsg').innerText = msg;
+            t.classList.remove('translate-x-full');
+            setTimeout(() => t.classList.add('translate-x-full'), 3000);
+        };
+
+    </script>
+</body>
+</html>
