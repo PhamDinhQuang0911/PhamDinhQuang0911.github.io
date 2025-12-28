@@ -1881,76 +1881,107 @@
         };
 
         // --- HÀM MỚI: DỌN DẸP KHOẢNG TRẮNG THỪA QUANH ẢNH ---
+        // --- HÀM MỚI: DỌN DẸP KHOẢNG TRẮNG (PHIÊN BẢN MẠNH MẼ & AN TOÀN) ---
         window.cleanWhitespace = () => {
             let count = 0;
-            const containerClass = "flex justify-center my-1"; // Class nhận diện khung chứa ảnh
 
-            window.questions.forEach(q => {
-                let isModified = false;
+            // Hàm con: Xử lý dọn dẹp theo hướng (Trước/Sau)
+            const cleanNode = (node, direction) => {
+                let sibling = direction === 'prev' ? node.previousSibling : node.nextSibling;
                 
-                ['content', 'solution'].forEach(key => {
-                    if (!q[key] || !q[key].includes('<img')) return;
+                // Vòng lặp quét liên tục các phần tử lân cận
+                while (sibling) {
+                    // Lưu lại phần tử tiếp theo trước khi có thể bị xóa
+                    const nextSibling = direction === 'prev' ? sibling.previousSibling : sibling.nextSibling;
+                    let shouldRemove = false;
 
-                    // 1. Tạo DOM ảo để xử lý an toàn
-                    const tempDiv = document.createElement('div');
-                    tempDiv.innerHTML = q[key];
-
-                    // 2. Tìm tất cả các khung chứa ảnh (div wrapper)
-                    // Hoặc tìm trực tiếp thẻ img nếu không có wrapper
-                    const wrappers = tempDiv.querySelectorAll(`div.${containerClass.replace(/ /g, '.')}, img`);
-
-                    wrappers.forEach(el => {
-                        // Xác định đối tượng cần xử lý (Nếu là img nằm trong div flex thì lấy div cha)
-                        let target = el;
-                        if (el.tagName === 'IMG' && el.parentElement && el.parentElement.className.includes('flex')) {
-                            target = el.parentElement;
-                        }
-
-                        // 3. Xóa sạch <br> và text rỗng ở PHÍA TRƯỚC
-                        while (target.previousSibling) {
-                            const prev = target.previousSibling;
-                            if (prev.nodeName === 'BR') {
-                                prev.remove();
-                                isModified = true;
-                            } else if (prev.nodeType === 3 && !prev.textContent.trim()) {
-                                // Node văn bản nhưng chỉ chứa khoảng trắng/xuống dòng (\n)
-                                prev.remove();
-                                isModified = true;
-                            } else {
-                                break; // Gặp chữ hoặc thẻ khác thì dừng
+                    // 1. Nếu là thẻ <br> -> XÓA
+                    if (sibling.nodeName === 'BR') {
+                        shouldRemove = true;
+                    }
+                    // 2. Nếu là Văn bản (Text Node)
+                    else if (sibling.nodeType === 3) {
+                        const text = sibling.textContent;
+                        if (!text.trim()) {
+                            // Nếu chỉ toàn dấu cách -> XÓA
+                            shouldRemove = true;
+                        } else {
+                            // Nếu có chữ nhưng bị thừa dấu cách ở đầu/đuôi -> CẮT GỌT
+                            // Ví dụ: "Câu hỏi:   " -> "Câu hỏi:"
+                            const trimmed = direction === 'prev' ? text.trimEnd() : text.trimStart();
+                            if (trimmed !== text) {
+                                sibling.textContent = trimmed;
+                                count++;
                             }
+                            // Gặp chữ rồi thì dừng lại, không xóa tiếp
+                            break;
                         }
-
-                        // 4. Xóa sạch <br> và text rỗng ở PHÍA SAU
-                        while (target.nextSibling) {
-                            const next = target.nextSibling;
-                            if (next.nodeName === 'BR') {
-                                next.remove();
-                                isModified = true;
-                            } else if (next.nodeType === 3 && !next.textContent.trim()) {
-                                next.remove();
-                                isModified = true;
-                            } else {
-                                break;
-                            }
+                    }
+                    // 3. Nếu là Thẻ Khối (P, DIV, SPAN...) mà bên trong rỗng tuếch
+                    // Ví dụ: <p>&nbsp;</p> hoặc <p><br></p>
+                    else if (sibling.nodeType === 1 && ['P', 'DIV', 'SPAN', 'STRONG', 'EM'].includes(sibling.nodeName)) {
+                        // Kiểm tra xem bên trong có ảnh hay nội dung gì không
+                        if (!sibling.innerText.trim() && !sibling.querySelector('img')) {
+                            shouldRemove = true;
+                        } else {
+                            break; // Gặp khối có nội dung thì dừng
                         }
-                    });
+                    } else {
+                        break; // Gặp thẻ lạ thì dừng
+                    }
 
-                    // 5. Lưu lại nếu có thay đổi
-                    if (isModified) {
-                        q[key] = tempDiv.innerHTML;
+                    if (shouldRemove) {
+                        sibling.remove();
                         count++;
                     }
+                    
+                    // Tiếp tục xét phần tử kế tiếp
+                    sibling = nextSibling;
+                }
+            };
+
+            // Duyệt qua tất cả câu hỏi
+            window.questions.forEach(q => {
+                let isModified = false;
+                ['content', 'solution'].forEach(key => {
+                    if (!q[key]) return;
+                    
+                    const tempDiv = document.createElement('div');
+                    tempDiv.innerHTML = q[key];
+                    
+                    // Tìm tất cả ảnh trong nội dung
+                    const images = tempDiv.querySelectorAll('img');
+                    if (images.length === 0) return;
+
+                    images.forEach(img => {
+                        // Xác định mục tiêu là khối bao quanh ảnh (nếu có class flex) hoặc chính thẻ img
+                        let target = img;
+                        if (img.parentElement && img.parentElement.classList.contains('flex')) {
+                            target = img.parentElement;
+                        }
+                        
+                        // Quét sạch phía trước và phía sau
+                        cleanNode(target, 'prev');
+                        cleanNode(target, 'next');
+                    });
+
+                    // Nếu nội dung thay đổi so với ban đầu thì cập nhật
+                    if (tempDiv.innerHTML !== q[key]) {
+                        q[key] = tempDiv.innerHTML;
+                        isModified = true;
+                    }
                 });
+                
+                if (isModified) count++;
             });
 
             if (count > 0) {
                 window.renderPreviewList();
-                // Load lại câu hiện tại nếu đang mở
+                // Load lại câu hiện tại để thấy ngay kết quả
                 if (window.currentQIndex !== -1) window.loadQuestionToEditor(window.currentQIndex);
-                window.showToast(`Đã dọn dẹp dòng trắng cho ${count} vị trí!`, "success");
+                window.showToast(`Đã dọn sạch rác cho ${count} câu hỏi!`, "success");
             } else {
-                window.showToast("Đề thi đã sạch, không có dòng trắng thừa.", "info");
+                window.showToast("Không tìm thấy khoảng trắng thừa nào.", "info");
             }
         };
         // --- 2. HÀM XÓA TOÀN BỘ CÂU HỎI ---
