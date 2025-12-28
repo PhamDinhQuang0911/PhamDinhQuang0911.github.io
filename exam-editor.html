@@ -870,38 +870,73 @@
             }
         });
 
+        // --- CẬP NHẬT: UPLOAD FOLDER TUẦN TỰ + RETRY (KHẮC PHỤC LỖI 405) ---
         document.getElementById('folderInput').addEventListener('change', async (e) => {
             const files = Array.from(e.target.files);
             if (files.length === 0) return;
 
+            // 1. Chuẩn bị
             window.showToast(`Đang phân tích ${files.length} file trong thư mục...`, "info");
-            
-            let matchCount = 0;
             const btnClose = document.querySelector('#batchImageModal button[onclick="closeBatchImageModal()"]');
-            if(btnClose) btnClose.disabled = true;
+            if(btnClose) btnClose.disabled = true; // Khóa nút đóng để tránh lỗi
 
+            let matchCount = 0;
+            // Tạo bản sao danh sách cần làm để tránh xung đột vòng lặp
             const processList = [...pendingImageUploads];
 
+            // Hàm delay (ngủ)
+            const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+            // 2. Duyệt qua từng ô chờ ảnh (Queue)
             for (const item of processList) {
-                const rawName = item.originalPath.split('/').pop().split('\\').pop();
-                const nameKey = rawName.split('.')[0].toLowerCase();
+                // Logic tìm file trong thư mục khớp với tên ảnh gốc
+                const rawName = item.originalPath.split('/').pop().split('\\').pop(); // Lấy tên file
+                const nameKey = rawName.split('.')[0].toLowerCase(); // Lấy phần tên không đuôi
                 
                 const matchedFile = files.find(f => f.name.toLowerCase().includes(nameKey));
 
                 if (matchedFile) {
-                    try {
-                        await uploadAndReplaceImage(matchedFile, item.id);
-                        matchCount++;
-                    } catch (err) { console.error("Lỗi auto upload:", err); }
+                    // CƠ CHẾ RETRY (THỬ LẠI KHI LỖI)
+                    let attempts = 0;
+                    const maxAttempts = 3;
+                    let success = false;
+
+                    while (attempts < maxAttempts && !success) {
+                        attempts++;
+                        try {
+                            // Cập nhật thông báo trạng thái
+                            const retryMsg = attempts > 1 ? ` (Thử lại lần ${attempts})` : '';
+                            window.showToast(`Đang tải: ${matchedFile.name}${retryMsg}...`, "info");
+
+                            await uploadAndReplaceImage(matchedFile, item.id);
+                            
+                            matchCount++;
+                            success = true;
+
+                            // QUAN TRỌNG: Nghỉ 1 giây sau khi thành công để tránh lỗi 405 (Server quá tải)
+                            await wait(1000);
+
+                        } catch (err) {
+                            console.warn(`Lỗi tải file ${matchedFile.name}:`, err);
+                            
+                            if (attempts < maxAttempts) {
+                                // Nếu lỗi 405 hoặc lỗi mạng, nghỉ lâu hơn (2.5 giây) trước khi thử lại
+                                await wait(2500);
+                            } else {
+                                window.showToast(`Bỏ qua ${matchedFile.name} do lỗi server.`, "error");
+                            }
+                        }
+                    }
                 }
             }
 
-            if(btnClose) btnClose.disabled = false;
+            // 3. Kết thúc
+            if(btnClose) btnClose.disabled = false; // Mở lại nút đóng
             
-            if (matchCount > 0) window.showToast(`Đã tự động ghép và tải lên ${matchCount} ảnh!`, "success");
-            else window.showToast("Không tìm thấy ảnh nào khớp tên.", "warning");
+            if (matchCount > 0) window.showToast(`Hoàn tất! Đã tự động ghép và tải lên ${matchCount} ảnh.`, "success");
+            else window.showToast("Không tìm thấy ảnh nào khớp tên trong thư mục này.", "warning");
             
-            e.target.value = '';
+            e.target.value = ''; // Reset ô chọn file
         });
 
         // --- 1. HÀM TẢI DỮ LIỆU ĐỀ THI (ĐÃ FIX LỖI NULL) ---
