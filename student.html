@@ -254,9 +254,22 @@
                 <div class="bg-red-50/50 p-5 rounded-2xl border border-red-100">
                     <h4 class="text-xs font-black text-red-600 uppercase mb-3 tracking-wider flex items-center gap-2"><i class="fa-solid fa-shield-halved"></i> Bảo mật</h4>
                     <div class="space-y-4">
-                        <div><label class="block text-xs font-bold text-gray-600 mb-1 pl-1">Tên đăng nhập (Cố định)</label><input type="text" id="profUsername" disabled class="w-full px-4 py-3 bg-red-50 border border-red-100 rounded-xl text-gray-500 font-mono text-sm font-bold cursor-not-allowed"></div>
-                        <div><label class="block text-xs font-bold text-gray-600 mb-1 pl-1">Đổi mật khẩu mới</label><input type="password" id="profPass" placeholder="Nhập mật khẩu mới (nếu muốn đổi)..." class="w-full px-4 py-3 border border-red-200 rounded-xl bg-white outline-none focus:ring-2 focus:ring-red-200 text-sm font-medium"><p class="text-[10px] text-red-400 mt-2 flex items-center gap-1 font-medium"><i class="fa-solid fa-circle-info"></i> Để trống nếu không muốn thay đổi.</p></div>
-                    </div>
+    <div>
+        <label class="block text-xs font-bold text-gray-600 mb-1 pl-1">Tên đăng nhập (Cố định)</label>
+        <input type="text" id="profUsername" disabled class="w-full px-4 py-3 bg-red-50 border border-red-100 rounded-xl text-gray-500 font-mono text-sm font-bold cursor-not-allowed">
+    </div>
+    
+    <div>
+        <label class="block text-xs font-bold text-gray-600 mb-1 pl-1">Mật khẩu hiện tại <span class="text-red-500">*</span></label>
+        <input type="password" id="profOldPass" placeholder="Nhập mật khẩu cũ để xác thực..." class="w-full px-4 py-3 border border-gray-200 rounded-xl outline-none focus:ring-2 focus:ring-teal-200 text-sm">
+    </div>
+
+    <div>
+        <label class="block text-xs font-bold text-gray-600 mb-1 pl-1">Mật khẩu mới (Nếu muốn đổi)</label>
+        <input type="password" id="profPass" placeholder="Nhập mật khẩu mới..." class="w-full px-4 py-3 border border-red-200 rounded-xl bg-white outline-none focus:ring-2 focus:ring-red-200 text-sm font-medium">
+        <p class="text-[10px] text-red-400 mt-2 flex items-center gap-1 font-medium"><i class="fa-solid fa-circle-info"></i> Để trống nếu không muốn thay đổi.</p>
+    </div>
+</div>
                 </div>
             </div>
             <div class="px-6 py-4 bg-gray-50 border-t border-gray-100 flex justify-end gap-3">
@@ -319,7 +332,7 @@
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-        import { getAuth, onAuthStateChanged, signOut, updateProfile, updatePassword } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+        import { getAuth, onAuthStateChanged, signOut, updateProfile, updatePassword, EmailAuthProvider, reauthenticateWithCredential } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
         // Thêm enableIndexedDbPersistence vào dòng import này
         import { getFirestore, doc, getDoc, updateDoc, collection, getDocs, query, where, addDoc, limit, orderBy, deleteDoc, onSnapshot, enableIndexedDbPersistence } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
@@ -458,7 +471,90 @@
                 document.getElementById('profUsername').value = data.username || user.email;
             } catch(e) { console.error(e); }
         }
-        window.saveProfile = async () => { window.showNotification("Đã cập nhật thông tin!", "success"); }
+        // --- CẬP NHẬT THÔNG TIN CÁ NHÂN (ĐÃ FIX ĐỔI PASSWORD) ---
+        window.saveProfile = async () => {
+            const user = auth.currentUser;
+            if (!user) return;
+
+            // 1. Lấy dữ liệu từ Form
+            const name = document.getElementById('profName').value.trim();
+            const dob = document.getElementById('profDob').value;
+            const gender = document.getElementById('profGender').value;
+            const phone = document.getElementById('profPhone').value.trim();
+            const parentPhone = document.getElementById('profParentPhone').value.trim();
+            
+            const oldPass = document.getElementById('profOldPass').value;
+            const newPass = document.getElementById('profPass').value;
+
+            // Validate cơ bản
+            if (!name) return window.showNotification("Vui lòng nhập họ tên!", "error");
+
+            const btn = document.querySelector('#profileModal button[onclick="saveProfile()"]');
+            const oldBtnText = btn.innerHTML;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang lưu...';
+            btn.disabled = true;
+
+            try {
+                // 2. Xử lý Đổi mật khẩu (Nếu có nhập)
+                if (newPass) {
+                    if (newPass.length < 6) throw new Error("Mật khẩu mới phải từ 6 ký tự trở lên!");
+                    if (!oldPass) throw new Error("Vui lòng nhập mật khẩu hiện tại để xác thực!");
+
+                    // Bước quan trọng: Xác thực lại người dùng trước khi đổi pass
+                    const credential = EmailAuthProvider.credential(user.email, oldPass);
+                    await reauthenticateWithCredential(user, credential);
+                    
+                    // Đổi mật khẩu trong Auth (Login)
+                    await updatePassword(user, newPass);
+                }
+
+                // 3. Cập nhật Auth DisplayName
+                if (name !== user.displayName) {
+                    await updateProfile(user, { displayName: name });
+                }
+
+                // 4. Cập nhật Firestore (Database)
+                const updateData = {
+                    displayName: name,
+                    birthDate: dob,
+                    gender: gender,
+                    phoneNumber: phone,
+                    parentPhoneNumber: parentPhone,
+                    updatedAt: new Date().toISOString()
+                };
+
+                // Nếu có đổi pass -> Lưu thêm field 'password' để giáo viên thấy
+                if (newPass) {
+                    updateData.password = newPass;
+                }
+
+                await updateDoc(doc(db, "users", user.uid), updateData);
+
+                // 5. Hoàn tất
+                window.showNotification("Cập nhật hồ sơ thành công!", "success");
+                document.getElementById('profileModal').classList.add('hidden');
+                
+                // Reset form mật khẩu
+                document.getElementById('profOldPass').value = '';
+                document.getElementById('profPass').value = '';
+                
+                // Tải lại UI
+                loadUserProfile(user);
+
+            } catch (e) {
+                console.error(e);
+                let msg = e.message;
+                if (msg.includes("auth/invalid-credential") || msg.includes("auth/wrong-password")) {
+                    msg = "Mật khẩu hiện tại không đúng!";
+                } else if (msg.includes("auth/too-many-requests")) {
+                    msg = "Bạn thử lại quá nhiều lần. Vui lòng đợi lát nữa.";
+                }
+                window.showNotification("Lỗi: " + msg, "error");
+            } finally {
+                btn.innerHTML = oldBtnText;
+                btn.disabled = false;
+            }
+        };
 
         // --- CÁC HÀM LOAD DỮ LIỆU ---
         async function loadSiteLogo() {
