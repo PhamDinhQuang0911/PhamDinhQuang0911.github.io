@@ -1147,7 +1147,55 @@
         function renderBreadcrumb() { const container = document.getElementById('breadcrumbContainer'); if (!currentFolderId) { container.innerHTML = '<span class="mx-2 text-gray-400">/</span><span>Tất cả</span>'; return; } let path = []; let curr = folderData.find(f => f.id === currentFolderId); while(curr) { path.unshift(curr); curr = folderData.find(f => f.id === curr.parentId); } let html = '<span class="mx-2 text-gray-400">/</span><button onclick="window.navigateFolder(\'root\')" class="hover:text-blue-600">...</button><span class="mx-2">/</span>Current'; path.forEach((p, idx) => { html += `<span class="mx-2 text-gray-400">/</span>`; if (idx === path.length - 1) html += `<span class="font-bold text-gray-800">${p.name}</span>`; else html += `<button onclick="window.navigateFolder(\'${p.id}\')" class="hover:text-blue-600">${p.name}</button>`; }); container.innerHTML = html; }
         window.openContextMenu = (id, type, name) => { currentActionItem = {id, type, name}; document.getElementById('actionModalTitle').textContent = `Thao tác: ${name}`; const content = document.getElementById('dynamicContent'); content.innerHTML = `<div class="grid grid-cols-3 gap-3 mb-4"><button onclick="window.triggerAction('rename')" class="p-3 bg-blue-50 text-blue-600 rounded-lg font-bold hover:bg-blue-100 flex flex-col items-center"><i class="fa-solid fa-pen mb-1"></i> Đổi tên</button><button onclick="window.triggerAction('move')" class="p-3 bg-purple-50 text-purple-600 rounded-lg font-bold hover:bg-purple-100 flex flex-col items-center"><i class="fa-solid fa-arrow-right-to-bracket mb-1"></i> Di chuyển</button><button onclick="window.triggerAction('delete')" class="p-3 bg-red-50 text-red-600 rounded-lg font-bold hover:bg-red-100 flex flex-col items-center"><i class="fa-solid fa-trash mb-1"></i> Xóa</button></div><div id="subActionContent"></div>`; window.toggleModal('actionModal', true); }
         async function deleteR2Image(fileKeyOrUrl) { if (!fileKeyOrUrl) return; try { let keyName = fileKeyOrUrl; if (fileKeyOrUrl.startsWith('http')) { try { const urlObj = new URL(fileKeyOrUrl); keyName = urlObj.pathname.substring(1); keyName = decodeURIComponent(keyName); } catch(e) { console.warn("Không parse được URL:", fileKeyOrUrl); } } return fetch(`https://upload-helper.phamngockhanh-942001.workers.dev/?key=${encodeURIComponent(keyName)}`, { method: 'DELETE', keepalive: true }); } catch (e) { console.error("Lỗi xóa R2:", e); } }
-        window.triggerAction = async (action) => { const container = document.getElementById('subActionContent'); container.innerHTML = ''; if (action === 'rename') { container.innerHTML = `<label class="block text-sm font-bold text-gray-700 mb-2">Tên mới</label><div class="flex gap-2"><input type="text" id="renameInput" value="${currentActionItem.name}" class="flex-1 border rounded px-3 py-2"><button onclick="window.commitRename()" class="bg-blue-600 text-white px-4 rounded font-bold">Lưu</button></div>`; } else if (action === 'delete') { window.toggleModal('actionModal', false); if(await window.customConfirm(`CẢNH BÁO: Xóa đề thi "${currentActionItem.name}" sẽ xóa vĩnh viễn cả CÂU HỎI và HÌNH ẢNH đi kèm.\nBạn có chắc chắn không?`)) { try { const collName = currentActionItem.type === 'folder' ? 'folders' : 'exams'; if (currentActionItem.type === 'exam') { const docSnap = await getDoc(doc(db, "exams", currentActionItem.id)); if (docSnap.exists()) { const examData = docSnap.data(); const strData = JSON.stringify(examData); const regex = /(https:\/\/[^"'\s\\]+\.r2\.dev\/[^"'\s\\]+|https:\/\/firebasestorage\.googleapis\.com\/v0\/b\/[^"'\s\\]+)/g; const images = strData.match(regex) || []; if (images.length > 0) { window.showNotification(`Đang dọn dẹp ${images.length} file ảnh trên Cloud...`, "warning"); await Promise.all(images.map(url => deleteR2Image(url))); } } } await deleteDoc(doc(db, collName, currentActionItem.id)); window.showNotification("Đã xóa hoàn toàn đề thi và dữ liệu!", "success"); loadFileManager(); } catch(e) { console.error(e); window.showNotification("Lỗi xóa: " + e.message, 'error'); } } } else if (action === 'move') { let html = '<p class="text-sm font-bold text-gray-700 mb-2">Chọn thư mục đến:</p><div class="h-40 overflow-y-auto border rounded p-1 space-y-1">'; html += `<button onclick="window.commitMove(null)" class="w-full text-left px-3 py-2 hover:bg-gray-100 rounded flex items-center gap-2"><i class="fa-solid fa-house text-gray-400"></i> Thư mục gốc</button>`; folderData.forEach(f => { if (f.id !== currentActionItem.id) html += `<button onclick="window.commitMove('${f.id}')" class="w-full text-left px-3 py-2 hover:bg-gray-100 rounded flex items-center gap-2"><i class="fa-solid fa-folder text-yellow-400"></i> ${f.name}</button>`; }); html += '</div>'; container.innerHTML = html; } }
+        window.triggerAction = async (action) => { const container = document.getElementById('subActionContent'); container.innerHTML = ''; if (action === 'rename') { container.innerHTML = `<label class="block text-sm font-bold text-gray-700 mb-2">Tên mới</label><div class="flex gap-2"><input type="text" id="renameInput" value="${currentActionItem.name}" class="flex-1 border rounded px-3 py-2"><button onclick="window.commitRename()" class="bg-blue-600 text-white px-4 rounded font-bold">Lưu</button></div>`; } else if (action === 'delete') {
+            window.toggleModal('actionModal', false);
+            if(await window.customConfirm(`CẢNH BÁO: Xóa "${currentActionItem.name}" sẽ xóa vĩnh viễn và KHÔNG THỂ KHÔI PHỤC.\nNếu đây là đề thi, các bài đã giao cho học sinh cũng sẽ bị xóa theo.\nBạn có chắc chắn không?`)) {
+                window.showNotification("Đang tiến hành xóa dữ liệu...", "info");
+                try {
+                    const collName = currentActionItem.type === 'folder' ? 'folders' : 'exams';
+                    
+                    // 1. NẾU LÀ ĐỀ THI: Dọn dẹp ảnh và các bản sao
+                    if (currentActionItem.type === 'exam') {
+                        // A. Dọn dẹp ảnh trên Cloud (R2)
+                        const docSnap = await getDoc(doc(db, "exams", currentActionItem.id));
+                        if (docSnap.exists()) {
+                            const examData = docSnap.data();
+                            const strData = JSON.stringify(examData);
+                            const regex = /(https:\/\/[^"'\s\\]+\.r2\.dev\/[^"'\s\\]+|https:\/\/firebasestorage\.googleapis\.com\/v0\/b\/[^"'\s\\]+)/g;
+                            const images = strData.match(regex) || [];
+                            if (images.length > 0) {
+                                // Chạy xóa ảnh ngầm, không cần await để giao diện mượt hơn
+                                Promise.all(images.map(url => deleteR2Image(url))).catch(err => console.log("Lỗi xóa ảnh rác:", err));
+                            }
+                        }
+
+                        // B. [QUAN TRỌNG] Tìm và xóa các BẢN SAO đã giao cho lớp (Fix lỗi hiển thị bên học sinh)
+                        // Tìm các đề có originalId trùng với ID đề đang xóa
+                        const qCopies = query(collection(db, "exams"), where("originalId", "==", currentActionItem.id));
+                        const snapCopies = await getDocs(qCopies);
+                        
+                        const deletePromises = [];
+                        snapCopies.forEach((docCopy) => {
+                            console.log("Đang xóa bản sao:", docCopy.id);
+                            deletePromises.push(deleteDoc(docCopy.ref));
+                        });
+                        
+                        // Đợi xóa hết bản sao
+                        if(deletePromises.length > 0) await Promise.all(deletePromises);
+                    }
+
+                    // 2. Xóa thư mục/đề thi gốc
+                    await deleteDoc(doc(db, collName, currentActionItem.id));
+                    
+                    window.showNotification("Đã xóa hoàn toàn đề thi và các dữ liệu liên quan!", "success");
+                    loadFileManager();
+                    
+                } catch(e) {
+                    console.error(e);
+                    window.showNotification("Lỗi xóa: " + e.message, 'error');
+                }
+            }
+        } else if (action === 'move') { let html = '<p class="text-sm font-bold text-gray-700 mb-2">Chọn thư mục đến:</p><div class="h-40 overflow-y-auto border rounded p-1 space-y-1">'; html += `<button onclick="window.commitMove(null)" class="w-full text-left px-3 py-2 hover:bg-gray-100 rounded flex items-center gap-2"><i class="fa-solid fa-house text-gray-400"></i> Thư mục gốc</button>`; folderData.forEach(f => { if (f.id !== currentActionItem.id) html += `<button onclick="window.commitMove('${f.id}')" class="w-full text-left px-3 py-2 hover:bg-gray-100 rounded flex items-center gap-2"><i class="fa-solid fa-folder text-yellow-400"></i> ${f.name}</button>`; }); html += '</div>'; container.innerHTML = html; } }
         window.commitRename = async () => { const newName = document.getElementById('renameInput').value; if(!newName) return; const collName = currentActionItem.type === 'folder' ? 'folders' : 'exams'; await updateDoc(doc(db, collName, currentActionItem.id), { name: newName, title: newName }); window.showNotification("Đã đổi tên"); window.toggleModal('actionModal', false); loadFileManager(); }
         window.commitMove = async (targetFolderId) => { const collName = currentActionItem.type === 'folder' ? 'folders' : 'exams'; const field = currentActionItem.type === 'folder' ? 'parentId' : 'folderId'; await updateDoc(doc(db, collName, currentActionItem.id), { [field]: targetFolderId }); window.toggleModal('actionModal', false); window.showNotification("Đã di chuyển"); loadFileManager(); }
 
