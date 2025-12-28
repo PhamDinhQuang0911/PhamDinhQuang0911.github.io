@@ -1203,88 +1203,95 @@
         window.commitMove = async (targetFolderId) => { const collName = currentActionItem.type === 'folder' ? 'folders' : 'exams'; const field = currentActionItem.type === 'folder' ? 'parentId' : 'folderId'; await updateDoc(doc(db, collName, currentActionItem.id), { [field]: targetFolderId }); window.toggleModal('actionModal', false); window.showNotification("Đã di chuyển"); loadFileManager(); }
         // --- TÍNH NĂNG: DỌN DẸP DỮ LIỆU RÁC (FIX LỖI ĐỀ CŨ) ---
         // --- TÍNH NĂNG CAO CẤP: DỌN DẸP HỆ THỐNG TOÀN DIỆN (DEEP CLEAN) ---
+        // --- TÍNH NĂNG: DỌN DẸP HỆ THỐNG V3 (HỦY DIỆT RÁC CỨNG ĐẦU) ---
         window.cleanUpSystem = async () => {
-            if(!await window.customConfirm("CHẾ ĐỘ QUÉT SÂU (DEEP CLEAN):\n\nHệ thống sẽ tìm quét:\n1. Các đề thi lỗi (mất gốc).\n2. Các hình ảnh đi kèm trong đề thi lỗi.\n3. Các thư mục mồ côi (mất thư mục cha).\n\nQuá trình này có thể mất vài phút. Thầy có muốn bắt đầu không?")) return;
+            if(!await window.customConfirm("CHẾ ĐỘ QUÉT SÂU V3 (HỦY DIỆT):\n\nSẽ quét và xóa:\n1. Đề thi bản sao mất gốc (cha đã xóa).\n2. Đề thi trong lớp nhưng KHÔNG CÓ liên kết ngân hàng (Trường hợp 'Toán 3').\n3. Thư mục rác & Ảnh rác.\n\nThầy có chắc chắn muốn dọn sạch không?")) return;
             
-            window.showNotification("Đang phân tích dữ liệu toàn hệ thống...", "info");
+            window.showNotification("Đang rà soát toàn bộ cơ sở dữ liệu...", "info");
             
             try {
-                // 1. TẢI TOÀN BỘ DỮ LIỆU CẦN THIẾT
+                // 1. TẢI TOÀN BỘ DỮ LIỆU
                 const [snapExams, snapFolders] = await Promise.all([
                     getDocs(collection(db, "exams")),
                     getDocs(collection(db, "folders"))
                 ]);
 
-                // 2. PHÂN TÍCH ĐỀ THI (TÌM ZOMBIE EXAMS)
                 const allExams = [];
                 const validOriginalIds = new Set();
                 
+                // Lấy danh sách tất cả đề thi và xác định đâu là đề GỐC hợp lệ
                 snapExams.forEach(doc => {
                     const d = doc.data();
                     allExams.push({ id: doc.id, ...d, ref: doc.ref });
-                    // Nếu là đề gốc (không có originalId), thì đây là ID hợp lệ
-                    if (!d.originalId) validOriginalIds.add(doc.id);
+                    // Đề gốc là đề không có classId (nằm trong ngân hàng)
+                    if (!d.classId) {
+                        validOriginalIds.add(doc.id);
+                    }
                 });
 
-                // Lọc ra các đề bản sao mà ID gốc không tồn tại
-                const zombieExams = allExams.filter(e => e.originalId && !validOriginalIds.has(e.originalId));
+                // 2. NHẬN DIỆN "RÁC" (Bao gồm cả trường hợp Toán 3)
+                const trashExams = allExams.filter(e => {
+                    // Chỉ xét các đề đang nằm trong lớp học (là bản sao)
+                    if (e.classId) {
+                        // TRƯỜNG HỢP 1: Có link gốc, nhưng gốc không tồn tại (Zombie)
+                        if (e.originalId && !validOriginalIds.has(e.originalId)) return true;
+                        
+                        // TRƯỜNG HỢP 2 (QUAN TRỌNG): Là đề trong lớp nhưng KHÔNG CÓ link gốc (Mồ côi/Rác)
+                        // Đây chính là nguyên nhân "Toán 3" vẫn còn sống
+                        if (!e.originalId) return true;
+                    }
+                    return false;
+                });
 
-                // 3. PHÂN TÍCH THƯ MỤC (TÌM ORPHAN FOLDERS)
+                // 3. NHẬN DIỆN THƯ MỤC RÁC
                 const allFolders = [];
                 const folderIds = new Set();
                 snapFolders.forEach(doc => {
                     folderIds.add(doc.id);
                     allFolders.push({ id: doc.id, ...doc.data(), ref: doc.ref });
                 });
-
-                // Lọc thư mục con mà cha không tồn tại (trừ thư mục gốc parentId = null)
                 const orphanFolders = allFolders.filter(f => f.parentId && !folderIds.has(f.parentId));
 
                 // 4. BÁO CÁO VÀ XÁC NHẬN
-                const totalTrash = zombieExams.length + orphanFolders.length;
+                const totalTrash = trashExams.length + orphanFolders.length;
+                console.log("Danh sách rác tìm thấy:", trashExams.map(e => e.title)); // Log ra console để kiểm tra
+
                 if (totalTrash === 0) {
-                    window.showNotification("Hệ thống cực kỳ sạch sẽ! Không tìm thấy rác.", "success");
+                    window.showNotification("Hệ thống sạch bóng! Không tìm thấy rác.", "success");
                     return;
                 }
 
-                if(!await window.customConfirm(`KẾT QUẢ QUÉT:\n- ${zombieExams.length} đề thi lỗi (kèm hình ảnh).\n- ${orphanFolders.length} thư mục rác.\n\nThầy có đồng ý XÓA VĨNH VIỄN không?`)) return;
+                if(!await window.customConfirm(`TÌM THẤY RÁC:\n- ${trashExams.length} đề thi lỗi (Có thể bao gồm 'Toán 3').\n- ${orphanFolders.length} thư mục rác.\n\nThầy có đồng ý XÓA NGAY LẬP TỨC không?`)) return;
 
-                // 5. TIẾN HÀNH DỌN DẸP (XỬ LÝ ẢNH TRƯỚC)
-                window.showNotification(`Đang dọn dẹp ${totalTrash} mục rác và hình ảnh liên quan...`, "warning");
+                // 5. TIẾN HÀNH XÓA
+                window.showNotification(`Đang xóa ${totalTrash} mục rác...`, "warning");
                 
-                // A. Xử lý ảnh trong Zombie Exams
+                // A. Xóa ảnh rác (nếu có)
                 const imageDeletionPromises = [];
                 const regex = /(https:\/\/[^"'\s\\]+\.r2\.dev\/[^"'\s\\]+|https:\/\/firebasestorage\.googleapis\.com\/v0\/b\/[^"'\s\\]+)/g;
-
-                zombieExams.forEach(exam => {
-                    const strData = JSON.stringify(exam); // Chuyển toàn bộ data đề thi thành chuỗi
+                trashExams.forEach(exam => {
+                    const strData = JSON.stringify(exam);
                     const images = strData.match(regex) || [];
-                    if (images.length > 0) {
-                        console.log(`Tìm thấy ${images.length} ảnh trong đề rác ${exam.title}`);
-                        images.forEach(url => imageDeletionPromises.push(deleteR2Image(url)));
-                    }
+                    images.forEach(url => imageDeletionPromises.push(deleteR2Image(url)));
                 });
+                Promise.all(imageDeletionPromises).catch(e => console.log("Lỗi xóa ảnh (không quan trọng):", e));
 
-                // Chờ xóa ảnh xong (hoặc chạy song song tùy chiến lược, ở đây chạy song song cho nhanh)
-                Promise.all(imageDeletionPromises).catch(e => console.warn("Lỗi xóa ảnh rác (có thể ảnh đã mất):", e));
-
-                // B. Xóa dữ liệu Firestore (Đề thi + Thư mục)
-                const docDeletionPromises = [
-                    ...zombieExams.map(z => deleteDoc(z.ref)),
+                // B. Xóa dữ liệu
+                const deletePromises = [
+                    ...trashExams.map(z => deleteDoc(z.ref)),
                     ...orphanFolders.map(f => deleteDoc(f.ref))
                 ];
 
-                await Promise.all(docDeletionPromises);
-
-                window.showNotification(`Đã dọn sạch hệ thống! Giải phóng ${totalTrash} mục rác.`, "success");
+                await Promise.all(deletePromises);
                 
-                // Tải lại dữ liệu
-                loadFileManager();
-                if(currentViewingClassId) window.openTeacherClassDetail(currentViewingClassId, document.getElementById('teacherClassTitle').textContent);
+                window.showNotification(`Đã tiêu diệt thành công ${trashExams.length} đề thi rác!`, "success");
+                
+                // Tải lại trang để thấy kết quả
+                setTimeout(() => window.location.reload(), 1500);
 
             } catch (e) {
-                console.error("Deep Clean Error:", e);
-                window.showNotification("Lỗi quá trình dọn dẹp: " + e.message, "error");
+                console.error("Lỗi dọn dẹp:", e);
+                window.showNotification("Có lỗi xảy ra: " + e.message, "error");
             }
         };
         document.getElementById('logoutBtn').onclick = async () => { if(await window.customConfirm("Bạn có chắc muốn đăng xuất?")) signOut(auth).then(()=>window.location.href="index.html"); }
