@@ -729,24 +729,57 @@
         
         window.deleteStudent = async function(index) {
             if(!await window.customConfirm("CẢNH BÁO: Hành động này sẽ xóa vĩnh viễn tài khoản đăng nhập của học sinh và loại khỏi lớp học. Bạn có chắc chắn không?")) return;
+            
             const student = currentClassStudents[index];
-            window.showNotification("Đang xử lý xóa tài khoản...", "info");
+            const btnDelete = document.querySelectorAll('#studentListTable button')[index * 2 + 1]; // Nút xóa tương ứng
+            if(btnDelete) btnDelete.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; // Hiệu ứng loading
+
+            window.showNotification("Đang xử lý...", "info");
+
             try {
-                let targetUid = student.uid;
-                if (!targetUid && student.email) {
-                    const qUser = query(collection(db, "users"), where("email", "==", student.email));
-                    const snapUser = await getDocs(qUser);
-                    if (!snapUser.empty) targetUid = snapUser.docs[0].id;
-                }
-                if (targetUid) {
-                    const deleteFunc = httpsCallable(functions, 'deleteStudentAccount');
-                    await deleteFunc({ studentUid: targetUid });
-                }
-                currentClassStudents.splice(index, 1);
-                await updateDoc(doc(db, "classes", currentViewingClassId), { students: currentClassStudents, studentCount: currentClassStudents.length });
+                // BƯỚC 1: Xóa khỏi danh sách lớp trong Firestore TRƯỚC (Ưu tiên giao diện)
+                const updatedStudents = currentClassStudents.filter((_, i) => i !== index);
+                
+                await updateDoc(doc(db, "classes", currentViewingClassId), { 
+                    students: updatedStudents, 
+                    studentCount: updatedStudents.length 
+                });
+
+                // Cập nhật giao diện ngay lập tức
+                currentClassStudents = updatedStudents;
                 renderStudentList(currentClassStudents);
-                window.showNotification("Đã xóa tài khoản và loại khỏi lớp thành công!", "success");
-            } catch(e) { console.error(e); window.showNotification("Lỗi xóa: " + e.message, "error"); }
+
+                // BƯỚC 2: Gọi Cloud Function xóa Auth (Chạy ngầm, lỗi thì bỏ qua)
+                let targetUid = student.uid;
+                
+                // Nếu không có UID, thử tìm bằng email (dự phòng)
+                if (!targetUid && student.email) {
+                    try {
+                        const qUser = query(collection(db, "users"), where("email", "==", student.email));
+                        const snapUser = await getDocs(qUser);
+                        if (!snapUser.empty) targetUid = snapUser.docs[0].id;
+                    } catch(e) { console.log("Không tìm thấy user firestore:", e); }
+                }
+
+                if (targetUid) {
+                    // Gọi hàm xóa Auth
+                    const deleteFunc = httpsCallable(functions, 'deleteStudentAccount');
+                    deleteFunc({ studentUid: targetUid }).then(() => {
+                        console.log("Đã xóa Auth thành công.");
+                    }).catch((err) => {
+                        console.warn("Lỗi xóa Auth (có thể user đã bị xóa từ trước):", err.message);
+                        // Không cần báo lỗi ra giao diện vì người dùng đã bị loại khỏi lớp rồi
+                    });
+                }
+
+                window.showNotification("Đã xóa học sinh khỏi lớp thành công!", "success");
+
+            } catch(e) { 
+                console.error(e); 
+                window.showNotification("Lỗi cập nhật danh sách: " + e.message, "error");
+                // Render lại nếu lỗi để trả về trạng thái cũ
+                renderStudentList(currentClassStudents);
+            }
         }
 
         document.getElementById('saveStudentBtn').addEventListener('click', async () => {
