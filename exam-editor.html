@@ -869,72 +869,132 @@
         });
 
         // --- CẬP NHẬT: UPLOAD FOLDER TUẦN TỰ + RETRY (KHẮC PHỤC LỖI 405) ---
+        // --- [MỚI HOÀN TOÀN] XỬ LÝ UPLOAD THƯ MỤC THÔNG MINH ---
         document.getElementById('folderInput').addEventListener('change', async (e) => {
             const files = Array.from(e.target.files);
             if (files.length === 0) return;
 
-            // 1. Chuẩn bị
-            window.showToast(`Đang phân tích ${files.length} file trong thư mục...`, "info");
+            // 1. Lọc chỉ lấy file ảnh
+            const validImages = files.filter(f => f.type.startsWith('image/'));
+            if (validImages.length === 0) {
+                window.showToast("Không tìm thấy file ảnh nào trong thư mục!", "warning");
+                return;
+            }
+
+            window.showToast(`Đang phân tích ${validImages.length} ảnh...`, "info");
+            
+            // Khóa giao diện để tránh lỗi
             const btnClose = document.querySelector('#batchImageModal button[onclick="closeBatchImageModal()"]');
-            if(btnClose) btnClose.disabled = true; // Khóa nút đóng để tránh lỗi
+            if(btnClose) btnClose.disabled = true;
 
-            let matchCount = 0;
-            // Tạo bản sao danh sách cần làm để tránh xung đột vòng lặp
-            const processList = [...pendingImageUploads];
+            let successCount = 0;
+            const processQueue = [...pendingImageUploads]; // Copy danh sách chờ
 
-            // Hàm delay (ngủ)
-            const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-
-            // 2. Duyệt qua từng ô chờ ảnh (Queue)
-            for (const item of processList) {
-                // Logic tìm file trong thư mục khớp với tên ảnh gốc
-                const rawName = item.originalPath.split('/').pop().split('\\').pop(); // Lấy tên file
-                const nameKey = rawName.split('.')[0].toLowerCase(); // Lấy phần tên không đuôi
+            // --- HÀM CON: UPLOAD ĐƠN LẺ (ĐỘC LẬP) ---
+            const uploadSingleImage = async (file) => {
+                const formData = new FormData();
+                // Đổi tên file ngẫu nhiên để tránh trùng trên server
+                const newName = `images/auto_${Date.now()}_${Math.random().toString(36).substr(2,5)}.jpg`;
                 
-                const matchedFile = files.find(f => f.name.toLowerCase().includes(nameKey));
+                // Nén ảnh (nếu hàm compressImage có sẵn, nếu không dùng file gốc)
+                let blobToSend = file;
+                if (window.compressImage) {
+                    try { blobToSend = await window.compressImage(file); } catch (e) {}
+                }
+                formData.append('file', blobToSend, newName);
 
-                if (matchedFile) {
-                    // CƠ CHẾ RETRY (THỬ LẠI KHI LỖI)
+                // GỬI PUT (Bắt buộc dùng PUT cho Worker của bạn)
+                const res = await fetch("https://upload-helper.phamngockhanh-942001.workers.dev/", {
+                    method: 'PUT',
+                    body: formData
+                });
+                
+                if (!res.ok) throw new Error(`Server Error ${res.status}`);
+                return await res.json();
+            };
+
+            // 2. VÒNG LẶP XỬ LÝ (TUẦN TỰ)
+            for (const item of processQueue) {
+                // Tách tên file gốc từ đường dẫn (VD: "C:/Img/Hinh1.png" -> "hinh1")
+                const rawName = item.originalPath.split(/[/\\]/).pop(); 
+                const targetName = rawName.split('.')[0].toLowerCase().trim();
+
+                // Tìm file trong thư mục có tên chứa từ khóa này
+                const matchFile = validImages.find(f => f.name.toLowerCase().includes(targetName));
+
+                if (matchFile) {
+                    // CƠ CHẾ THỬ LẠI (RETRY 3 LẦN)
                     let attempts = 0;
-                    const maxAttempts = 3;
-                    let success = false;
+                    let isUploaded = false;
 
-                    while (attempts < maxAttempts && !success) {
+                    while (attempts < 3 && !isUploaded) {
                         attempts++;
                         try {
-                            // Cập nhật thông báo trạng thái
-                            const retryMsg = attempts > 1 ? ` (Thử lại lần ${attempts})` : '';
-                            window.showToast(`Đang tải: ${matchedFile.name}${retryMsg}...`, "info");
+                            const msg = attempts > 1 ? ` (Thử lại ${attempts})...` : '...';
+                            window.showToast(`Đang tải: ${matchFile.name}${msg}`, "info");
 
-                            await uploadAndReplaceImage(matchedFile, item.id);
+                            // Gọi hàm upload độc lập
+                            const data = await uploadSingleImage(matchFile);
                             
-                            matchCount++;
-                            success = true;
+                            // --> THÀNH CÔNG: THAY THẾ VÀO BÀI
+                            const imgTag = `<div class="flex justify-center my-1"><img src="${data.url}" class="rounded-lg shadow-sm" style="max-height:350px;" loading="lazy"></div>`;
+                            
+                            // Cập nhật nội dung câu hỏi
+                            window.questions.forEach(q => {
+                                ['content', 'solution'].forEach(key => {
+                                    if (q[key] && q[key].includes(item.id)) {
+                                        const tempDiv = document.createElement('div');
+                                        tempDiv.innerHTML = q[key];
+                                        const ph = tempDiv.querySelector(`div[data-id="${item.id}"]`);
+                                        if (ph) {
+                                            // Thay thế và xóa khoảng trắng thừa
+                                            const MARKER = "###_IMG_###";
+                                            ph.outerHTML = MARKER;
+                                            let html = tempDiv.innerHTML;
+                                            // Xóa <br> trước và sau
+                                            html = html.replace(/(?:<br\s*\/?>|\s)+###_IMG_###(?:<br\s*\/?>|\s)+/gi, '\n' + imgTag + '\n');
+                                            html = html.replace("###_IMG_###", imgTag);
+                                            q[key] = html;
+                                        }
+                                    }
+                                });
+                            });
 
-                            // QUAN TRỌNG: Nghỉ 1 giây sau khi thành công để tránh lỗi 405 (Server quá tải)
-                            await wait(1000);
+                            // Cập nhật Editor nếu đang mở câu đó
+                            const editContent = document.getElementById('editContent');
+                            if (editContent && editContent.value.includes(item.id)) {
+                                window.loadQuestionToEditor(window.currentQIndex);
+                            }
+
+                            // Đánh dấu đã xong
+                            pendingImageUploads = pendingImageUploads.filter(i => i.id !== item.id);
+                            item._done = true;
+                            successCount++;
+                            isUploaded = true;
+
+                            // Nghỉ 1 giây để server không chặn (Tránh lỗi 405)
+                            await new Promise(r => setTimeout(r, 1000));
 
                         } catch (err) {
-                            console.warn(`Lỗi tải file ${matchedFile.name}:`, err);
-                            
-                            if (attempts < maxAttempts) {
-                                // Nếu lỗi 405 hoặc lỗi mạng, nghỉ lâu hơn (2.5 giây) trước khi thử lại
-                                await wait(2500);
-                            } else {
-                                window.showToast(`Bỏ qua ${matchedFile.name} do lỗi server.`, "error");
-                            }
+                            console.warn(`Lỗi file ${matchFile.name}:`, err);
+                            if (attempts < 3) await new Promise(r => setTimeout(r, 2000)); // Nghỉ 2s nếu lỗi
                         }
                     }
                 }
             }
 
-            // 3. Kết thúc
-            if(btnClose) btnClose.disabled = false; // Mở lại nút đóng
+            // 3. KẾT THÚC
+            if(btnClose) btnClose.disabled = false;
             
-            if (matchCount > 0) window.showToast(`Hoàn tất! Đã tự động ghép và tải lên ${matchCount} ảnh.`, "success");
-            else window.showToast("Không tìm thấy ảnh nào khớp tên trong thư mục này.", "warning");
-            
-            e.target.value = ''; // Reset ô chọn file
+            // Vẽ lại danh sách còn thiếu
+            if (window.renderBatchImageModal) window.renderBatchImageModal();
+            if (window.renderMissingImagesPanel) window.renderMissingImagesPanel();
+            window.renderPreviewList();
+
+            if (successCount > 0) window.showToast(`Tuyệt vời! Đã cập nhật xong ${successCount} ảnh.`, "success");
+            else window.showToast("Không tìm thấy ảnh nào khớp tên.", "warning");
+
+            e.target.value = ''; // Reset input
         });
 
         // --- 1. HÀM TẢI DỮ LIỆU ĐỀ THI (ĐÃ FIX LỖI NULL) ---
