@@ -5,16 +5,48 @@
 const TIKZ_API_URL = "https://compile.qmath.io.vn/compile"; 
 
 export const compileTikZToImage = async (tikzCode) => {
-  try {
-    const response = await fetch(TIKZ_API_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code: tikzCode })
-    });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.log || data.error || "Lỗi server");
-    return data.url;
-  } catch (error) { console.error("API Error:", error); throw error; }
+    // Timeout 35s: Đủ cho VPS xử lý nhưng sẽ tự ngắt nếu bị treo kết nối
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 35000);
+
+    try {
+        const response = await fetch(TIKZ_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ code: tikzCode }),
+            signal: controller.signal
+        });
+
+        clearTimeout(timeoutId);
+
+        // 1. Đọc dạng Text trước để kiểm tra lỗi "Response Rỗng"
+        const rawText = await response.text();
+
+        // Nếu status 200 mà không có nội dung -> Lỗi do mạng/VPS cắt kết nối
+        if (!rawText || rawText.trim().length === 0) {
+            throw new Error("Server trả về Header OK nhưng Body rỗng (Zombie Response)");
+        }
+
+        // 2. Parse JSON
+        let data;
+        try {
+            data = JSON.parse(rawText);
+        } catch (e) {
+            throw new Error(`Phản hồi không phải JSON hợp lệ: ${rawText.substring(0, 50)}...`);
+        }
+
+        if (!response.ok) throw new Error(data.log || data.error || "Lỗi Server Logic");
+        
+        return data.url;
+
+    } catch (error) {
+        clearTimeout(timeoutId);
+        // Chuẩn hóa lỗi Timeout để hiển thị dễ hiểu
+        if (error.name === 'AbortError') {
+            throw new Error("Timeout: VPS quá tải hoặc mất kết nối ( >35s).");
+        }
+        throw error;
+    }
 };
 
 // --- CÁC HÀM EXPORT HỖ TRỢ ---
