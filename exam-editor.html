@@ -127,7 +127,10 @@
                 <li><button onclick="switchView('stats'); window.toggleSidebar()" id="menu-stats" class="sidebar-item w-full text-left px-6 py-3 text-gray-600 hover:bg-gray-50 transition-colors flex items-center gap-3 text-sm"><i class="fa-solid fa-chart-pie w-5"></i> Thống kê & Báo cáo</button></li>
             </ul>
         </nav>
-        <div class="p-4 border-t border-gray-200">
+        <div class="p-4 border-t border-gray-200 space-y-2">
+            <button onclick="handleNewExam()" class="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm flex items-center justify-center gap-2 rounded-lg transition-colors shadow-md shadow-blue-200">
+                <i class="fa-solid fa-plus-circle"></i> Soạn đề mới
+            </button>
             <button onclick="handleBackNavigation()" class="w-full py-2 text-gray-500 hover:text-red-600 font-bold text-sm flex items-center justify-center gap-2 transition-colors"><i class="fa-solid fa-arrow-right-from-bracket"></i> Quay lại</button>
         </div>
     </aside>
@@ -270,7 +273,8 @@
                          <button onclick="document.getElementById('imgUploadInput').click()" class="p-1.5 bg-gray-100 text-gray-600 rounded hover:bg-gray-200 text-xs font-bold" title="Chèn ảnh"><i class="fa-regular fa-image"></i> Ảnh</button>
                         <input type="file" id="imgUploadInput" accept="image/*" class="hidden">
                         <div class="w-[1px] h-6 bg-gray-200 mx-1"></div>                                             
-                        <button onclick="deleteCurrentQuestion()" class="p-1.5 bg-red-50 text-red-600 rounded hover:bg-red-100 text-xs"><i class="fa-solid fa-trash"></i></button>
+                        <button onclick="deleteCurrentQuestion()" class="p-1.5 bg-red-50 text-red-600 rounded hover:bg-red-100 text-xs" title="Xóa câu hiện tại"><i class="fa-solid fa-trash"></i></button>
+                        <button onclick="deleteAllQuestions()" class="p-1.5 ml-1 bg-red-600 text-white rounded hover:bg-red-700 text-xs shadow-sm" title="Xóa TOÀN BỘ câu hỏi"><i class="fa-solid fa-dumpster-fire"></i> Xóa hết</button>
                     </div>
                 </div>
                 <div id="editorArea" class="flex-1 overflow-y-auto p-4 md:p-6 bg-white relative">
@@ -1846,7 +1850,52 @@
         window.openScoringModal = () => { document.getElementById('scoringModal').classList.remove('opacity-0', 'pointer-events-none'); document.getElementById('scoringModal').querySelector('div').classList.add('scale-100'); let cM=0, cTF=0, cE=0; let h=''; window.questions.forEach((q,i)=>{ if(q.type==='essay'){ cE++; h+=`<div class="flex items-center gap-2 text-sm"><span class="w-16 font-bold">Câu ${i+1}</span><input type="number" id="essay-score-${i}" class="form-input h-8 text-right w-20" value="${q.point||0}" step="0.1"></div>`; } else if(q.type==='tf') cTF++; else cM++; }); document.getElementById('countMcShort').textContent=cM; document.getElementById('countTF').textContent=cTF; document.getElementById('countEssay').textContent=cE; document.getElementById('essayScoreList').innerHTML = cE>0 ? h : '<p class="text-xs text-gray-400 italic">Không có câu tự luận.</p>'; };
         window.closeScoringModal = () => { document.getElementById('scoringModal').classList.add('opacity-0', 'pointer-events-none'); };
         window.applyScoring = () => { const tM = parseFloat(document.getElementById('scoreTotalMcShort').value)||0; const tTF = parseFloat(document.getElementById('scoreTotalTF').value)||0; let cM=0, cTF=0; window.questions.forEach(q=>{if(q.type==='mc'||q.type==='short')cM++; else if(q.type==='tf')cTF++;}); const pM=cM>0?(tM/cM):0; const pTF=cTF>0?(tTF/cTF):0; window.questions.forEach((q,i)=>{ if(q.type==='mc'||q.type==='short') q.point=parseFloat(pM.toFixed(2)); else if(q.type==='tf') q.point=parseFloat(pTF.toFixed(2)); else if(q.type==='essay'){ const inp=document.getElementById(`essay-score-${i}`); if(inp) q.point=parseFloat(inp.value)||0; } }); closeScoringModal(); renderPreviewList(); window.showToast("Đã chia điểm!"); };
-        
+        // --- 1. HÀM TẠO ĐỀ MỚI (QUICK ACCESS) ---
+        window.handleNewExam = async () => {
+            const hasUnsavedChanges = JSON.stringify(window.questions) !== JSON.stringify(window.originalQuestionsData);
+            const hasPendingImages = sessionUploadedFiles.length > 0;
+
+            if (hasUnsavedChanges || hasPendingImages) {
+                const confirmReset = await window.customConfirm(
+                    "CẢNH BÁO: Bạn đang có nội dung chưa lưu!\n\nNếu tạo đề mới ngay, các thay đổi và HÌNH ẢNH vừa tải lên (chưa lưu) sẽ bị XÓA VĨNH VIỄN.\n\nBạn có chắc chắn muốn tiếp tục?"
+                );
+                if (!confirmReset) return;
+            }
+
+            const loadingToast = document.createElement('div');
+            loadingToast.className = 'fixed inset-0 bg-black/50 z-[200] flex items-center justify-center';
+            loadingToast.innerHTML = '<div class="bg-white p-6 rounded-xl flex flex-col items-center"><i class="fa-solid fa-spinner fa-spin text-4xl text-blue-600 mb-3"></i><p class="font-bold">Đang khởi tạo phiên làm việc mới...</p></div>';
+            document.body.appendChild(loadingToast);
+
+            try {
+                if (sessionUploadedFiles.length > 0) {
+                    await Promise.all(sessionUploadedFiles.map(key => deleteR2Image(key)));
+                }
+                // Reload trang (không kèm ID) để về trạng thái trắng tinh
+                window.location.href = 'exam-editor.html';
+            } catch (err) {
+                console.error("Lỗi dọn dẹp:", err);
+                window.location.href = 'exam-editor.html';
+            }
+        };
+
+        // --- 2. HÀM XÓA TOÀN BỘ CÂU HỎI ---
+        window.deleteAllQuestions = async () => {
+            if (window.questions.length === 0) {
+                window.showToast("Danh sách đang trống!", "warning");
+                return;
+            }
+            const confirmDel = await window.customConfirm(
+                `CẢNH BÁO NGUY HIỂM!\n\nBạn sắp xóa toàn bộ ${window.questions.length} câu hỏi trong đề này.\nHành động này không thể hoàn tác.\n\nBạn có chắc chắn không?`
+            );
+            if (confirmDel) {
+                window.questions = [];
+                window.currentQIndex = -1;
+                window.renderPreviewList();
+                document.getElementById('editorArea').innerHTML = '<div class="absolute inset-0 flex items-center justify-center text-gray-300 text-sm"><p>Chọn câu hỏi bên trái để sửa</p></div>';
+                window.showToast("Đã xóa sạch câu hỏi!", "success");
+            }
+        };
         window.handleBackNavigation = async () => {
             const hasUnsavedChanges = JSON.stringify(window.questions) !== JSON.stringify(window.originalQuestionsData);
             const hasPendingImages = sessionUploadedFiles.length > 0;
