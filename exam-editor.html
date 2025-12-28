@@ -1095,6 +1095,7 @@
 
         function cleanLatex(text) { if (!text) return ""; let cleaned = text.replace(/^%.*$/gm, '').replace(/(?<!\\)%.*/g, '').replace(/^\s*\[.*?\]/gm, ''); return cleaned.trim(); }
         
+        window.renderMissingImagesPanel = () => {// --- HÀM MỚI: BẢNG TRẠNG THÁI THÔNG MINH (XANH/ĐỎ) ---
         window.renderMissingImagesPanel = () => {
             const panel = document.getElementById('missingImagesPanel');
             const grid = document.getElementById('missingImagesGrid');
@@ -1102,34 +1103,76 @@
             
             if (!panel || !grid) return;
 
-            const tikzImages = pendingImageUploads.filter(item => item.type === 'tikz');
+            // Lấy tất cả ảnh TikZ (kể cả xong hay chưa xong)
+            const tikzItems = pendingImageUploads.filter(item => item.type === 'tikz');
 
-            if (tikzImages.length === 0) {
+            if (tikzItems.length === 0) {
                 panel.classList.add('hidden');
                 return;
             }
 
             panel.classList.remove('hidden');
-            countDisplay.textContent = tikzImages.length;
+            countDisplay.textContent = tikzItems.length;
             grid.innerHTML = '';
 
-            tikzImages.forEach(item => {
+            tikzItems.forEach(item => {
                 const btn = document.createElement('button');
-                btn.textContent = item.questionIdx + 1; 
-                btn.className = "w-full aspect-square flex items-center justify-center bg-white border border-gray-300 rounded font-bold text-gray-600 hover:bg-orange-100 hover:border-orange-500 hover:text-orange-600 transition-all text-xs shadow-sm";
+                btn.textContent = item.questionIdx + 1;
                 
+                // --- XỬ LÝ MÀU SẮC DỰA TRÊN TRẠNG THÁI ---
+                let className = "w-full aspect-square flex items-center justify-center rounded font-bold text-xs shadow-sm transition-all border ";
+                
+                if (item._done) {
+                    // THÀNH CÔNG -> MÀU XANH
+                    className += "bg-green-100 border-green-500 text-green-700 hover:bg-green-200";
+                    btn.title = "Đã biên dịch thành công";
+                } else if (item.retries >= 3) {
+                    // THẤT BẠI (Sau 3 lần) -> MÀU ĐỎ
+                    className += "bg-red-100 border-red-500 text-red-700 hover:bg-red-200 animate-pulse";
+                    btn.title = "Lỗi biên dịch. Click đúp để tải ảnh thủ công.";
+                } else {
+                    // ĐANG CHỜ -> MÀU TRẮNG/XÁM
+                    className += "bg-white border-gray-300 text-gray-600 hover:bg-orange-100 hover:border-orange-500";
+                    btn.title = "Đang chờ xử lý...";
+                }
+                
+                btn.className = className;
+                
+                // --- XỬ LÝ SỰ KIỆN ---
+                
+                // 1. Click đơn: Cuộn đến câu hỏi
                 btn.onclick = () => {
                     loadQuestionToEditor(item.questionIdx);
+                    // Tìm placeholder hoặc ảnh đã chèn để highlight
                     setTimeout(() => {
-                        const placeholder = document.querySelector(`.image-placeholder[data-id="${item.id}"]`);
-                        if (placeholder) {
-                            placeholder.scrollIntoView({behavior: "smooth", block: "center"});
-                            placeholder.focus();
-                            placeholder.classList.add('ring-4', 'ring-orange-400');
-                            setTimeout(() => placeholder.classList.remove('ring-4', 'ring-orange-400'), 1000);
+                        // Nếu chưa xong -> Tìm placeholder
+                        let target = document.querySelector(`.image-placeholder[data-id="${item.id}"]`);
+                        
+                        // Nếu đã xong -> Tìm thẻ img (nếu cần, nhưng thường chỉ cần cuộn đến câu là đủ)
+                        if (!target && item._done) {
+                             // Đã xong thì chỉ cần focus vào editor là được
+                             window.showToast(`Câu ${item.questionIdx + 1} đã có hình!`, 'success');
+                             return;
+                        }
+
+                        if (target) {
+                            target.scrollIntoView({behavior: "smooth", block: "center"});
+                            target.classList.add('ring-4', 'ring-orange-400');
+                            setTimeout(() => target.classList.remove('ring-4', 'ring-orange-400'), 1000);
                         }
                     }, 300);
                 };
+
+                // 2. Click đúp: Mở hộp thoại tải ảnh (Cho trường hợp lỗi màu đỏ)
+                btn.ondblclick = (e) => {
+                    e.stopPropagation(); // Ngăn sự kiện click đơn
+                    if (!item._done) {
+                        window.triggerBatchUpload(item.id);
+                    } else {
+                        window.showToast("Hình này đã biên dịch xong rồi!", "info");
+                    }
+                };
+
                 grid.appendChild(btn);
             });
         };
@@ -1158,114 +1201,125 @@
         // --- HÀM FIX: XÓA CHỮ THỪA CHO TIKZ ---
         // --- HÀM MỚI: BIÊN DỊCH SONG SONG 2 LUỒNG (BATCH PROCESSING) ---
         // --- HÀM MỚI: WORKER POOL (CHẠY ĐUA 2 LUỒNG) ---
+        // --- HÀM XỬ LÝ BIÊN DỊCH: WORKER POOL + REAL-TIME UI UPDATE ---
         window.handleAutoCompileAll = async () => {
-            // 1. Chuẩn bị giao diện
+            // 1. Chuẩn bị giao diện: Ẩn modal chọn, hiện thanh tiến độ
             document.getElementById('importModeModal').classList.add('opacity-0', 'pointer-events-none');
             const pm = document.getElementById('progressModal');
             pm.classList.remove('opacity-0', 'pointer-events-none');
 
-            // 2. Lấy danh sách cần làm và thêm thuộc tính theo dõi số lần thử lại
-            // (Queue là danh sách động, các worker sẽ lấy dần từ đây)
-            const queue = pendingImageUploads
+            // 2. Lấy danh sách ảnh cần làm
+            // Lưu ý: Map sang object mới để quản lý retry, nhưng vẫn giữ tham chiếu ID để update lại mảng gốc
+            let queue = pendingImageUploads
                 .filter(i => i.type === 'tikz' && !i._done)
-                .map(item => ({ ...item, retries: 0 })); // Copy ra đối tượng mới để quản lý retry
+                .map(item => ({ ...item, retries: 0 }));
 
             const total = queue.length;
-            let completedCount = 0;
+            let finishedCount = 0;
 
-            // Hàm cập nhật thanh tiến độ
+            // Hàm cập nhật thanh tiến độ và bảng trạng thái
             const updateUI = () => {
-                const pct = Math.round((completedCount / total) * 100);
+                const pct = total > 0 ? Math.round((finishedCount / total) * 100) : 100;
                 document.getElementById('compileProgressBar').style.width = `${pct}%`;
-                document.getElementById('compileProgressText').innerText = `${completedCount}/${total}`;
+                document.getElementById('compileProgressText').innerText = `${finishedCount}/${total}`;
                 document.getElementById('compilePercent').innerText = `${pct}%`;
+                
+                // QUAN TRỌNG: Gọi hàm vẽ lại bảng để ô đổi màu Xanh/Đỏ ngay lập tức
+                if (window.renderMissingImagesPanel) window.renderMissingImagesPanel(); 
             };
-            updateUI();
+            
+            // Gọi lần đầu để reset bảng về trạng thái chờ
+            if (window.renderMissingImagesPanel) window.renderMissingImagesPanel();
 
             // --- ĐỊNH NGHĨA CÔNG NHÂN (WORKER) ---
-            const worker = async (workerId) => {
-                // Công nhân làm việc liên tục cho đến khi hàng đợi rỗng
+            const runWorker = async (workerId) => {
+                // Chạy liên tục khi hàng đợi còn việc
                 while (queue.length > 0) {
-                    // Lấy 1 việc từ hàng đợi (Cắt từ đầu mảng)
+                    // Lấy 1 nhiệm vụ ra khỏi hàng đợi
                     const item = queue.shift();
                     
                     try {
                         console.log(`[Worker ${workerId}] Đang xử lý ảnh ${item.questionIdx + 1}...`);
 
-                        // Gọi API (Đã có timeout 30s ở utils.js)
+                        // Gọi API (Hàm utils đã được cập nhật timeout 40s)
                         const url = await compileTikZToImage(item.contentCode);
 
-                        // --> THÀNH CÔNG: Cập nhật giao diện ngay lập tức
+                        // --> THÀNH CÔNG (Không bị treo, có link ảnh)
                         const imgTag = `<div class="flex justify-center my-1"><img src="${url}" class="rounded-lg shadow-sm" style="max-height:350px;" loading="lazy"></div>`;
                         
-                        // Tìm và thay thế ảnh vào câu hỏi gốc
-                        // (Lưu ý: Phải tìm trong window.questions dựa trên ID gốc của item)
+                        // Thay thế Marker trong nội dung câu hỏi bằng thẻ ảnh thật
                         window.questions.forEach(q => {
                             ['content', 'solution'].forEach(key => {
                                 if (q[key] && q[key].includes(item.id)) {
                                     const tempDiv = document.createElement('div');
                                     tempDiv.innerHTML = q[key];
-                                    const placeholder = tempDiv.querySelector(`div[data-id="${item.id}"]`);
-                                    if (placeholder) {
-                                        placeholder.outerHTML = "___IMG_MARKER___";
+                                    const ph = tempDiv.querySelector(`div[data-id="${item.id}"]`);
+                                    if(ph) {
+                                        ph.outerHTML = "___IMG_MARKER___";
                                         q[key] = tempDiv.innerHTML.replace(/___IMG_MARKER___/g, '\n' + imgTag + '\n');
                                     }
                                 }
                             });
                         });
 
-                        // Đánh dấu vào danh sách gốc là đã xong
-                        const originalItem = pendingImageUploads.find(i => i.id === item.id);
-                        if(originalItem) originalItem._done = true;
+                        // Cập nhật trạng thái "Đã xong" vào danh sách gốc (pendingImageUploads)
+                        const original = pendingImageUploads.find(i => i.id === item.id);
+                        if(original) original._done = true;
 
-                        completedCount++;
+                        // Tăng biến đếm và cập nhật giao diện (Ô sẽ chuyển XANH)
+                        finishedCount++;
                         updateUI();
                         console.log(`[Worker ${workerId}] -> Ảnh ${item.questionIdx + 1} XONG.`);
 
                     } catch (err) {
-                        // --> NẾU CÓ LỖI (Mạng, Timeout, Cloudflare...)
+                        // --> NẾU CÓ LỖI (Mạng, Timeout, v.v...)
                         console.warn(`[Worker ${workerId}] Lỗi ảnh ${item.questionIdx + 1}: ${err.message}`);
                         
                         item.retries++;
                         
+                        // Cập nhật số lần retry vào danh sách gốc để bảng hiển thị màu ĐỎ nếu fail
+                        const original = pendingImageUploads.find(i => i.id === item.id);
+                        if(original) original.retries = item.retries;
+
                         if (item.retries < 3) {
-                            // Nếu chưa quá 3 lần: Đẩy lại vào đầu hàng đợi để làm lại ngay
+                            // Nếu chưa quá 3 lần: Đẩy ngược lại vào đầu hàng đợi để thử lại ngay
                             console.log(`[Worker ${workerId}] -> Đẩy lại vào hàng đợi (Lần thử ${item.retries + 1})`);
-                            queue.unshift(item); 
+                            queue.unshift(item);
                             
-                            // QUAN TRỌNG: Nghỉ 2 giây để "xả" kết nối lỗi trước khi làm tiếp
-                            await new Promise(r => setTimeout(r, 2000));
+                            // QUAN TRỌNG: Nghỉ 3 giây để "xả" kết nối lỗi trước khi làm tiếp
+                            await new Promise(r => setTimeout(r, 3000));
                         } else {
-                            // Nếu đã lỗi 3 lần: Bỏ qua luôn
+                            // Nếu đã lỗi 3 lần: Bỏ qua, coi như xong lượt này (nhưng trạng thái là lỗi)
                             console.error(`[Worker ${workerId}] -> BỎ QUA ảnh ${item.questionIdx + 1} sau 3 lần lỗi.`);
-                            completedCount++; // Vẫn tính là xong (dù lỗi) để thanh chạy hết
-                            updateUI();
+                            finishedCount++; 
+                            updateUI(); // Ô sẽ chuyển ĐỎ
                         }
                     }
                     
-                    // Nghỉ nhẹ 200ms giữa các ảnh để trình duyệt thở
-                    await new Promise(r => setTimeout(r, 200));
+                    // Nghỉ nhẹ 500ms giữa các ảnh để trình duyệt đóng socket cũ, tránh tắc nghẽn
+                    await new Promise(r => setTimeout(r, 500));
                 }
             };
 
             // 3. KHỞI ĐỘNG 2 CÔNG NHÂN CHẠY SONG SONG
-            // VPS có 2 luồng -> Ta tạo đúng 2 workers
-            const workerPool = [worker(1), worker(2)];
-
-            // Đợi cả 2 công nhân làm hết việc
-            await Promise.all(workerPool);
+            const workers = [runWorker(1), runWorker(2)];
+            
+            // Đợi tất cả công nhân hoàn thành hết việc
+            await Promise.all(workers);
 
             // 4. KẾT THÚC
             setTimeout(() => {
                 pm.classList.add('opacity-0', 'pointer-events-none');
                 window.finishImportProcess();
                 
-                // Kiểm tra kết quả cuối cùng từ danh sách gốc
+                // Vẽ lại lần cuối để đảm bảo màu sắc đúng
+                if (window.renderMissingImagesPanel) window.renderMissingImagesPanel();
+                
                 const failed = pendingImageUploads.filter(i => i.type === 'tikz' && !i._done);
                 if (failed.length === 0) {
-                    window.showToast("Tuyệt vời! Đã biên dịch xong 100%.", "success");
+                    window.showToast("Xuất sắc! Đã biên dịch xong 100%.", "success");
                 } else {
-                    window.showToast(`Hoàn tất. Có ${failed.length} ảnh bị lỗi không thể xử lý.`, "warning");
+                    window.showToast(`Hoàn tất. Có ${failed.length} ảnh bị lỗi (Màu đỏ).`, "warning");
                 }
             }, 800);
         };
