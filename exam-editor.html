@@ -1677,13 +1677,14 @@
 
         window.loadStats = async () => { 
             if (!currentExamId) return;
+            
             // 1. Lấy kết quả thi
             const qRes = query(collection(db, "results"), where("examId", "==", currentExamId));
             const snapRes = await getDocs(qRes);
             statsMap = {}; 
             snapRes.forEach(d => { 
                 const r = d.data();
-                const attemptData = { ...r, id: d.id }; // Lưu ID để chấm điểm
+                const attemptData = { ...r, id: d.id };
                 const key = r.studentId || r.studentName; 
                 if (!statsMap[key]) { 
                     statsMap[key] = { ...attemptData, attempts: [attemptData], bestScore: r.score }; 
@@ -1696,24 +1697,33 @@
                 } 
             });
 
-            // 2. Lấy thông tin lớp học để tạo bộ lọc
+            // 2. Lấy danh sách YÊU CẦU LÀM LẠI (Mới)
+            window.reattemptRequests = {};
+            try {
+                const qReq = query(collection(db, "access_requests"), where("examId", "==", currentExamId), where("status", "==", "pending"));
+                const snapReq = await getDocs(qReq);
+                snapReq.forEach(d => {
+                    const req = d.data();
+                    window.reattemptRequests[req.studentId] = d.id; // Lưu ID yêu cầu theo StudentID
+                });
+            } catch(e) { console.log("Lỗi tải yêu cầu:", e); }
+
+            // 3. Lấy thông tin lớp học
             const examRef = await getDoc(doc(db, "exams", currentExamId));
             const examData = examRef.data();
             fullStudentList = [];
             
             const classContainer = document.getElementById('classFilterContainer');
             if(classContainer) {
-                // Reset và thêm nút Tất cả
                 classContainer.innerHTML = `<button onclick="filterStats('all')" class="px-3 py-1.5 rounded-lg text-sm font-bold bg-blue-600 text-white shadow-sm whitespace-nowrap transition-colors" id="filterBtnAll">Tất cả</button>`;
                 
                 if (examData.allowedClassIds && examData.allowedClassIds.length > 0) {
-                    const uniqueIds = [...new Set(examData.allowedClassIds)]; // Lọc ID trùng
+                    const uniqueIds = [...new Set(examData.allowedClassIds)];
                     for (const classId of uniqueIds) {
                         try {
                             const classSnap = await getDoc(doc(db, "classes", classId));
                             if (classSnap.exists()) {
                                 const cls = classSnap.data();
-                                // Tạo nút bấm cho từng lớp
                                 const btn = document.createElement('button');
                                 btn.className = `px-3 py-1.5 rounded-lg text-sm font-bold bg-white text-gray-600 border hover:bg-gray-50 shadow-sm whitespace-nowrap transition-colors class-filter-btn`;
                                 btn.dataset.id = classId;
@@ -1721,7 +1731,6 @@
                                 btn.onclick = () => filterStats(classId);
                                 classContainer.appendChild(btn);
 
-                                // Thêm học sinh vào danh sách tổng
                                 const students = cls.students || [];
                                 students.forEach(st => {
                                     fullStudentList.push({ 
@@ -1732,10 +1741,9 @@
                                     });
                                 });
                             }
-                        } catch(e) { console.log("Lỗi tải lớp:", e); }
+                        } catch(e) {}
                     }
                 } else {
-                    // Nếu là thi tự do (không chọn lớp)
                     fullStudentList = Object.values(statsMap).map(s => ({ 
                         studentId: s.studentId, 
                         studentName: s.studentName, 
@@ -1833,41 +1841,39 @@
             if (!tbody) return;
             tbody.innerHTML = '';
 
-            // 1. Gộp danh sách: Học sinh trong lớp + Những người đã nộp
             let combinedData = fullStudentList.map(st => {
-                // Tìm bài làm
                 const result = statsMap[st.studentId] || statsMap[st.studentName];
+                // Kiểm tra xem có yêu cầu làm lại không
+                const requestId = window.reattemptRequests ? window.reattemptRequests[st.studentId] : null;
+                
                 if (result) {
-                    return { ...st, ...result, hasSubmitted: true };
+                    return { ...st, ...result, hasSubmitted: true, requestId: requestId };
                 } else {
-                    return { ...st, score: '--', attempts: [], hasSubmitted: false, status: 'Chưa làm' };
+                    return { ...st, score: '--', attempts: [], hasSubmitted: false, status: 'Chưa làm', requestId: requestId };
                 }
             });
 
-            // Thêm những người thi tự do (không có trong danh sách lớp)
+            // Thêm học sinh tự do
             Object.values(statsMap).forEach(res => {
                 if (!combinedData.find(d => d.studentId === res.studentId)) {
-                    combinedData.push({ ...res, className: 'Khác', classId: 'other', hasSubmitted: true });
+                    combinedData.push({ 
+                        ...res, className: 'Khác', classId: 'other', hasSubmitted: true,
+                        requestId: window.reattemptRequests ? window.reattemptRequests[res.studentId] : null
+                    });
                 }
             });
 
-            // 2. Áp dụng bộ lọc
+            // (Giữ nguyên phần lọc và sắp xếp cũ...)
+            // ... [CODE LỌC GIỮ NGUYÊN] ...
             let filteredData = combinedData.filter(item => {
-                // Lọc theo lớp
                 if (currentClassFilter !== 'all' && item.classId !== currentClassFilter) return false;
-                
-                // Lọc theo trạng thái
                 if (currentStatusFilter === 'done' && !item.hasSubmitted) return false;
                 if (currentStatusFilter === 'missing' && item.hasSubmitted) return false;
-                // Đã chấm: Phải nộp và có trường gradedAt
                 if (currentStatusFilter === 'graded' && (!item.hasSubmitted || !item.gradedAt)) return false;
-                // Chưa chấm: Đã nộp nhưng chưa có gradedAt
                 if (currentStatusFilter === 'not_graded' && (!item.hasSubmitted || item.gradedAt)) return false;
-                
                 return true;
             });
-
-            // 3. Sắp xếp
+            
             const sortType = document.getElementById('sortStats').value;
             filteredData.sort((a, b) => { 
                 if (sortType === 'time_desc') return new Date(b.submittedAt || 0) - new Date(a.submittedAt || 0);
@@ -1876,14 +1882,14 @@
                 return sortType === 'score_desc' ? sB - sA : sA - sB; 
             });
 
-            // 4. Render HTML
+            // Render HTML
             if (filteredData.length === 0) {
                 tbody.innerHTML = '<tr><td colspan="5" class="text-center py-8 text-gray-400 text-sm">Không tìm thấy học sinh nào.</td></tr>';
                 return;
             }
 
             filteredData.forEach(r => { 
-                const dateStr = r.submittedAt ? new Date(r.submittedAt).toLocaleString('vi-VN') : '<span class="text-red-400 italic">Chưa nộp</span>'; 
+                const dateStr = r.submittedAt ? new Date(r.submittedAt).toLocaleString('vi-VN') : '<span class="text-gray-400 italic">Chưa nộp</span>'; 
                 const scoreClass = !r.hasSubmitted ? 'text-gray-300' : (r.bestScore >= 8 ? 'text-green-600' : (r.bestScore >= 5 ? 'text-blue-600' : 'text-red-500')); 
                 const attemptCount = r.attempts ? r.attempts.length : 0; 
                 
@@ -1891,17 +1897,24 @@
                     ? `<button onclick="showStudentHistory('${r.studentName}')" class="font-bold text-blue-600 hover:underline flex items-center gap-2"><i class="fa-solid fa-user-graduate"></i> ${r.studentName}</button>` 
                     : `<span class="text-gray-500 flex items-center gap-2"><i class="fa-regular fa-user"></i> ${r.studentName}</span>`;
                 
-                // Badge trạng thái
                 let statusBadge = '';
                 if (r.hasSubmitted) {
                     if (r.gradedAt) statusBadge = '<span class="text-[10px] bg-green-100 text-green-700 px-1.5 rounded border border-green-200">Đã chấm</span>';
                     else statusBadge = '<span class="text-[10px] bg-yellow-100 text-yellow-700 px-1.5 rounded border border-yellow-200">Chờ chấm</span>';
                 }
 
-                // Badge vi phạm
                 const cheatBadge = (r.hasSubmitted && r.cheatCount > 0) 
-                    ? `<span class="ml-1 bg-red-100 text-red-600 px-2 py-0.5 rounded text-xs font-bold"><i class="fa-solid fa-triangle-exclamation"></i> ${r.cheatCount}</span>` 
-                    : '';
+                    ? `<span class="ml-1 bg-red-100 text-red-600 px-2 py-0.5 rounded text-xs font-bold"><i class="fa-solid fa-triangle-exclamation"></i> ${r.cheatCount}</span>` : '';
+
+                // --- NÚT CẤP QUYỀN (MỚI) ---
+                let actionBtn = '';
+                if (r.requestId) {
+                    // Nếu có yêu cầu -> Hiện nút ĐỒNG Ý
+                    actionBtn = `<button onclick="approveReattempt('${r.studentId}', '${r.requestId}', '${r.studentName}')" class="ml-auto px-3 py-1 bg-red-500 text-white rounded-lg text-xs font-bold shadow-md hover:bg-red-600 animate-pulse flex items-center gap-1"><i class="fa-solid fa-rotate-right"></i> Duyệt thi lại</button>`;
+                } else if (r.hasSubmitted) {
+                    // Nếu đã thi -> Hiện nút Cấp lại thủ công (ẩn trong hover hoặc icon nhỏ)
+                    actionBtn = `<button onclick="approveReattempt('${r.studentId}', null, '${r.studentName}')" class="ml-auto w-7 h-7 rounded-full bg-gray-100 text-gray-400 hover:bg-red-100 hover:text-red-500 flex items-center justify-center transition-colors" title="Cấp quyền làm lại thủ công"><i class="fa-solid fa-rotate-right"></i></button>`;
+                }
 
                 tbody.innerHTML += `
                     <tr class="bg-white border-b hover:bg-gray-50 transition-colors ${!r.hasSubmitted ? 'bg-gray-50/50' : ''}">
@@ -1914,7 +1927,12 @@
                         </td>
                         <td class="px-6 py-3 text-center font-bold ${scoreClass} text-lg">${r.hasSubmitted ? r.bestScore : '--'}</td>
                         <td class="px-6 py-3 text-center text-xs text-gray-500 font-bold">${attemptCount}</td>
-                        <td class="px-6 py-3 text-right text-xs text-gray-500 font-mono">${dateStr}</td>
+                        <td class="px-6 py-3 text-right text-xs text-gray-500 font-mono">
+                            <div class="flex flex-col items-end gap-1">
+                                <span>${dateStr}</span>
+                                ${actionBtn}
+                            </div>
+                        </td>
                     </tr>`; 
             });
         };
@@ -2595,6 +2613,40 @@
                 window.customAlert("Lỗi lưu điểm: " + e.message, "error");
             } finally {
                 btn.innerHTML = oldText; btn.disabled = false;
+            }
+        };
+    // --- HÀM DUYỆT YÊU CẦU LÀM LẠI ---
+        window.approveReattempt = async (studentId, requestId, studentName) => {
+            const confirmMsg = requestId 
+                ? `Học sinh ${studentName} xin cấp quyền làm lại vì sự cố.\nBạn có đồng ý xóa bài làm cũ để em thi lại không?`
+                : `Cảnh báo: Bạn đang cấp quyền thủ công cho ${studentName}.\nToàn bộ bài làm cũ của học sinh này sẽ bị XÓA.\nTiếp tục?`;
+
+            if (await window.customConfirm(confirmMsg)) {
+                try {
+                    window.showToast("Đang xử lý...", "info");
+                    
+                    // 1. Xóa tất cả kết quả thi của học sinh này trong bài thi này
+                    const qRes = query(collection(db, "results"), where("examId", "==", currentExamId), where("studentId", "==", studentId));
+                    const snapRes = await getDocs(qRes);
+                    const deletePromises = snapRes.docs.map(d => deleteDoc(d.ref));
+                    await Promise.all(deletePromises);
+
+                    // 2. Xóa yêu cầu trong access_requests (nếu có)
+                    if (requestId) {
+                        await deleteDoc(doc(db, "access_requests", requestId));
+                    } else {
+                        // Nếu duyệt thủ công, tìm và xóa luôn các request treo (nếu có)
+                        const qReq = query(collection(db, "access_requests"), where("examId", "==", currentExamId), where("studentId", "==", studentId));
+                        const snapReq = await getDocs(qReq);
+                        snapReq.docs.forEach(async d => await deleteDoc(d.ref));
+                    }
+
+                    window.showToast(`Đã cấp quyền thi lại cho ${studentName}`, "success");
+                    loadStats(); // Tải lại bảng
+                } catch (e) {
+                    console.error(e);
+                    window.showToast("Lỗi: " + e.message, "error");
+                }
             }
         };
         // ============================================================
