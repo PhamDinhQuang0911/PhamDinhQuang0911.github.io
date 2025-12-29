@@ -491,9 +491,24 @@
                 if(createBtn) createBtn.onclick = handleCreateClass;
                 
                 // 4. Điều hướng View
+                // 4. Điều hướng View (Nâng cấp)
                 const params = new URLSearchParams(window.location.search);
                 const view = params.get('view');
-                if (view && ['classes', 'exambank'].includes(view)) {
+                const targetId = params.get('id');
+                const targetTab = params.get('tab');
+
+                if (view === 'class_detail' && targetId) {
+                    // Trường hợp quay về từ soạn đề cho lớp
+                    // Đợi loadClasses xong (đã gọi ở trên) rồi mới mở chi tiết
+                    // Nhưng để chắc ăn, ta gọi mở luôn (hàm mở sẽ tự fetch data nếu cần)
+                    await openTeacherClassDetail(targetId); 
+                    
+                    if (targetTab === 'exams') {
+                        // Kích hoạt tab bài tập
+                        const btn = document.getElementById('tabBtnExams');
+                        if (btn) btn.click();
+                    }
+                } else if (view && ['classes', 'exambank'].includes(view)) {
                     switchView(view);
                 }
             } else {
@@ -679,10 +694,17 @@
             window.switchView('teacher-class-detail');
             currentViewingClassId = id;
             const titleEl = document.getElementById('teacherClassTitle');
-            if(titleEl) titleEl.textContent = name;
+            
+            // Nếu có name thì hiện luôn, chưa có thì hiện "Đang tải..."
+            if(titleEl) titleEl.textContent = name || "Đang tải...";
+            
             const snap = await getDoc(doc(db, "classes", id));
             if(snap.exists()) {
-                currentClassStudents = snap.data().students || [];
+                const data = snap.data();
+                // Cập nhật lại tên chuẩn từ DB nếu lúc gọi hàm bị thiếu name
+                if(!name && titleEl) titleEl.textContent = data.name;
+                
+                currentClassStudents = data.students || [];
                 renderStudentList(currentClassStudents);
             }
             window.switchTab('students');
