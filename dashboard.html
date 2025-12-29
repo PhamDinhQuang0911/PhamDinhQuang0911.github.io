@@ -47,11 +47,15 @@
             </div>
             <button onclick="window.toggleSidebar()" class="md:hidden text-gray-400 hover:text-red-500"><i class="fa-solid fa-times text-xl"></i></button>
         </div>
-        <div class="p-4 border-b border-gray-100 bg-gray-50">
-            <div class="flex items-center gap-3 cursor-pointer" onclick="window.openMyProfile()">
-                <img id="sidebarAvatar" src="https://placehold.co/150" class="w-10 h-10 rounded-full border-2 border-white shadow-sm object-cover">
+        <div class="p-4 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
+            <div class="flex items-center gap-3 cursor-pointer flex-1 overflow-hidden" onclick="window.openMyProfile()">
+                <img id="sidebarAvatar" src="https://placehold.co/150" class="w-10 h-10 rounded-full border-2 border-white shadow-sm object-cover shrink-0">
                 <div class="overflow-hidden"><p id="sidebarName" class="text-sm font-bold text-gray-800 truncate">Đang tải...</p><p id="sidebarRole" class="text-xs text-gray-500 truncate">Quản trị viên</p></div>
             </div>
+            <button onclick="toggleNotificationPanel()" class="w-9 h-9 rounded-full bg-white border border-gray-200 text-gray-500 hover:text-blue-600 hover:bg-blue-50 flex items-center justify-center transition-all shadow-sm relative ml-2 shrink-0">
+                <i class="fa-regular fa-bell"></i>
+                <span id="notifCountDesktop" class="hidden absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[9px] font-bold flex items-center justify-center rounded-full border border-white animate-bounce">0</span>
+            </button>
         </div>
         <nav class="flex-1 overflow-y-auto py-4 space-y-1">
             <button onclick="switchView('home'); window.toggleSidebar()" id="nav-home" class="nav-item w-full text-left px-6 py-3 text-gray-600 hover:bg-gray-50 transition-colors flex items-center gap-3 active"><i class="fa-solid fa-house"></i> Sảnh chính</button>
@@ -76,7 +80,13 @@
     <main class="flex-1 flex flex-col overflow-hidden relative w-full">
         <div class="md:hidden h-16 bg-white border-b border-gray-200 flex items-center justify-between px-4 sticky top-0 z-20 shrink-0 shadow-sm">
             <div class="flex items-center gap-3"><button onclick="window.toggleSidebar()" class="text-gray-600 hover:text-orange-500 text-2xl p-1"><i class="fa-solid fa-bars"></i></button><span class="font-handwriting text-orange-600 text-lg">Thầy Choang</span></div>
-            <div onclick="window.openMyProfile()" class="w-9 h-9 rounded-full bg-gray-100 overflow-hidden border border-gray-200 active:scale-95 transition-transform"><img id="mobileAvatar" src="https://placehold.co/150" class="w-full h-full object-cover"></div>
+            <div class="flex items-center gap-4">
+                <button onclick="toggleNotificationPanel()" class="relative text-gray-500 hover:text-blue-600 transition-colors">
+                    <i class="fa-regular fa-bell text-xl"></i>
+                    <span id="notifCountMobile" class="hidden absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[9px] font-bold flex items-center justify-center rounded-full border border-white animate-bounce">0</span>
+                </button>
+                <div onclick="window.openMyProfile()" class="w-9 h-9 rounded-full bg-gray-100 overflow-hidden border border-gray-200 active:scale-95 transition-transform"><img id="mobileAvatar" src="https://placehold.co/150" class="w-full h-full object-cover"></div>
+            </div>
         </div>
 
         <div id="view-home" class="view-section flex-1 overflow-y-auto p-4 md:p-8">
@@ -328,7 +338,7 @@
     <script type="module">
         import { initializeApp, deleteApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getAuth, onAuthStateChanged, signOut, createUserWithEmailAndPassword, updateProfile, updatePassword } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
-        import { getFirestore, doc, getDoc, setDoc, collection, addDoc, query, where, getDocs, updateDoc, deleteDoc, arrayUnion, limit, enableIndexedDbPersistence } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { getFirestore, doc, getDoc, setDoc, collection, addDoc, query, where, getDocs, updateDoc, deleteDoc, arrayUnion, limit, enableIndexedDbPersistence, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
         import { getStorage, ref, deleteObject } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js";
         import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-functions.js";
 
@@ -466,7 +476,7 @@
                 const avatarUrl = user.photoURL || `https://ui-avatars.com/api/?name=${user.email}&background=random`;
                 document.getElementById('sidebarAvatar').src = avatarUrl;
                 if(document.getElementById('mobileAvatar')) document.getElementById('mobileAvatar').src = avatarUrl;
-
+                initNotifications(user);
                 // 2. KÍCH HOẠT TẢI DỮ LIỆU SONG SONG
                 // Nhờ Bước 2 (Cache), dữ liệu cũ sẽ hiện lên NGAY LẬP TỨC từ ổ cứng
                 // Sau đó Firebase tự động tải ngầm cái mới về để cập nhật sau
@@ -1295,6 +1305,114 @@
             }
         };
         document.getElementById('logoutBtn').onclick = async () => { if(await window.customConfirm("Bạn có chắc muốn đăng xuất?")) signOut(auth).then(()=>window.location.href="index.html"); }
+    // --- LOGIC TRUNG TÂM THÔNG BÁO ---
+        let notifUnsubscribe = null;
+
+        function initNotifications(user) {
+            if(notifUnsubscribe) notifUnsubscribe();
+            
+            // Lắng nghe các yêu cầu 'pending' (chờ duyệt)
+            const q = query(collection(db, "access_requests"), where("status", "==", "pending"));
+            
+            notifUnsubscribe = onSnapshot(q, (snapshot) => {
+                const requests = [];
+                snapshot.forEach(doc => requests.push({ id: doc.id, ...doc.data() }));
+                
+                // Sắp xếp: Mới nhất lên đầu
+                requests.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+                
+                // Cập nhật số lượng đỏ trên chuông (Cả Mobile và Desktop)
+                const countEls = [document.getElementById('notifCountDesktop'), document.getElementById('notifCountMobile')];
+                countEls.forEach(el => {
+                    if(el) {
+                        if (requests.length > 0) {
+                            el.innerText = requests.length;
+                            el.classList.remove('hidden');
+                        } else {
+                            el.classList.add('hidden');
+                        }
+                    }
+                });
+
+                // Render danh sách
+                const listEl = document.getElementById('notificationList');
+                if (!listEl) return;
+
+                if (requests.length === 0) {
+                    listEl.innerHTML = '<div class="text-center py-8 text-gray-400 text-xs"><i class="fa-regular fa-circle-check text-2xl mb-2 opacity-50"></i><p>Tất cả đã được giải quyết!</p></div>';
+                } else {
+                    listEl.innerHTML = '';
+                    requests.forEach(req => {
+                        const item = document.createElement('div');
+                        item.className = "bg-white p-3 mb-1 rounded-xl border border-gray-100 shadow-sm hover:shadow-md transition-all group relative";
+                        item.innerHTML = `
+                            <div class="flex justify-between items-start mb-1">
+                                <div class="font-bold text-sm text-gray-800 cursor-pointer hover:text-blue-600" onclick="window.location.href='exam-editor.html?id=${req.examId}&view=stats'">${req.studentName}</div>
+                                <span class="text-[10px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">${new Date(req.createdAt).toLocaleTimeString('vi-VN', {hour:'2-digit', minute:'2-digit'})}</span>
+                            </div>
+                            <div class="text-xs text-gray-500 mb-2">
+                                Xin làm lại: <span class="font-bold text-blue-600 cursor-pointer hover:underline" onclick="window.location.href='exam-editor.html?id=${req.examId}&view=stats'">${req.examTitle}</span>
+                            </div>
+                            <div class="text-[11px] bg-yellow-50 text-yellow-800 p-2 rounded-lg border border-yellow-100 mb-2 italic">
+                                <i class="fa-solid fa-quote-left text-yellow-400 mr-1"></i>${req.reason || 'Không có lý do'}
+                            </div>
+                            <div class="flex gap-2">
+                                <button onclick="quickApprove('${req.id}', '${req.examId}', '${req.studentId}', this)" class="flex-1 py-1.5 bg-green-500 text-white text-xs font-bold rounded-lg hover:bg-green-600 shadow-sm transition-colors flex items-center justify-center gap-1"><i class="fa-solid fa-check"></i> Duyệt</button>
+                                <button onclick="quickDeny('${req.id}', this)" class="flex-1 py-1.5 bg-gray-100 text-gray-600 text-xs font-bold rounded-lg hover:bg-gray-200 transition-colors">Từ chối</button>
+                            </div>
+                        `;
+                        listEl.appendChild(item);
+                    });
+                }
+            });
+        }
+
+        window.toggleNotificationPanel = () => {
+            const p = document.getElementById('notificationPanel');
+            if (p.classList.contains('hidden')) p.classList.remove('hidden');
+            else p.classList.add('hidden');
+        };
+
+        window.quickApprove = async (reqId, examId, studentId, btn) => {
+            if(!confirm("Bạn có chắc muốn duyệt? Bài làm cũ của học sinh sẽ bị XÓA để làm lại.")) return;
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; btn.disabled = true;
+            try {
+                // 1. Xóa kết quả thi cũ
+                const qRes = query(collection(db, "results"), where("examId", "==", examId), where("studentId", "==", studentId));
+                const snapRes = await getDocs(qRes);
+                const deletePromises = snapRes.docs.map(d => deleteDoc(d.ref));
+                await Promise.all(deletePromises);
+
+                // 2. Xóa yêu cầu
+                await deleteDoc(doc(db, "access_requests", reqId));
+                window.showNotification("Đã duyệt và cấp quyền thi lại!", "success");
+            } catch (e) {
+                console.error(e);
+                window.showNotification("Lỗi: " + e.message, "error");
+                btn.innerHTML = originalText; btn.disabled = false;
+            }
+        };
+
+        window.quickDeny = async (reqId, btn) => {
+            if(!confirm("Từ chối yêu cầu này?")) return;
+            try {
+                await deleteDoc(doc(db, "access_requests", reqId));
+                window.showNotification("Đã từ chối yêu cầu.", "info");
+            } catch (e) { console.error(e); }
+        };
     </script>
+    <div id="notificationPanel" class="hidden fixed top-16 right-4 md:left-64 md:top-auto md:bottom-20 md:right-auto z-[150] w-80 bg-white rounded-2xl shadow-2xl border border-gray-200 overflow-hidden animate-fade-in transform origin-top-right md:origin-bottom-left">
+        <div class="p-3 border-b border-gray-100 bg-blue-50 flex justify-between items-center">
+            <h4 class="font-bold text-blue-800 text-sm"><i class="fa-solid fa-bell mr-2"></i>Thông báo mới</h4>
+            <button onclick="toggleNotificationPanel()" class="text-gray-400 hover:text-red-500"><i class="fa-solid fa-times"></i></button>
+        </div>
+        <div id="notificationList" class="max-h-[300px] overflow-y-auto custom-scrollbar p-1 bg-gray-50/50">
+            <div class="text-center py-8 text-gray-400 text-xs">
+                <i class="fa-regular fa-envelope-open text-2xl mb-2 opacity-50"></i>
+                <p>Không có thông báo nào.</p>
+            </div>
+        </div>
+    </div>
 </body>
 </html>
