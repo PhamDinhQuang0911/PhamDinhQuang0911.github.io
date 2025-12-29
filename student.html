@@ -1926,36 +1926,94 @@
             }
         };
         // --- HÀM GỬI YÊU CẦU LÀM LẠI ---
-        window.requestReattempt = async (examId, examTitle) => {
-            if (!confirm(`Bạn đã hết lượt làm bài "${examTitle}".\nBạn có muốn gửi yêu cầu xin thầy cho làm lại không?`)) return;
+        // --- BIẾN TẠM ĐỂ LƯU ID BÀI THI ĐANG XIN ---
+        let currentRequestExamId = null;
+        let currentRequestExamTitle = null;
+
+        // 1. Hàm mở Modal (Thay thế hàm cũ)
+        window.requestReattempt = (examId, examTitle) => {
+            currentRequestExamId = examId;
+            currentRequestExamTitle = examTitle;
             
-            const btn = event.currentTarget;
-            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; btn.disabled = true;
+            // Reset form
+            document.getElementById('reattemptReason').value = '';
+            document.getElementById('reattemptModal').classList.remove('hidden');
+            document.getElementById('reattemptReason').focus();
+        };
+
+        // 2. Hàm gửi yêu cầu thật (Gọi khi bấm nút Gửi trong Modal)
+        window.submitReattemptRequest = async () => {
+            const reason = document.getElementById('reattemptReason').value.trim();
+            
+            if (!reason) {
+                alert("Vui lòng nhập lý do!");
+                return;
+            }
+            if (reason.length < 10) {
+                alert("Vui lòng nhập lý do rõ ràng hơn (ít nhất 10 ký tự).");
+                return;
+            }
+
+            const btn = event.target; // Nút đang bấm
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang gửi...';
+            btn.disabled = true;
 
             try {
                 await addDoc(collection(db, "access_requests"), {
-                    examId: examId,
-                    examTitle: examTitle,
+                    examId: currentRequestExamId,
+                    examTitle: currentRequestExamTitle,
                     studentId: auth.currentUser.uid,
                     studentName: auth.currentUser.displayName || "Học sinh",
+                    reason: reason, // Lưu lý do vào database
                     status: 'pending',
                     createdAt: new Date().toISOString()
                 });
                 
-                window.showNotification("Đã gửi yêu cầu! Vui lòng chờ thầy duyệt.", "success");
+                window.showNotification("Đã gửi yêu cầu thành công!", "success");
+                document.getElementById('reattemptModal').classList.add('hidden');
                 
-                // Reload để cập nhật nút thành "Đang chờ"
-                const activeClassBtn = document.querySelector('.class-filter-btn.active') || {dataset:{id:null}}; // Lấy ID lớp đang xem (nếu có lưu)
-                // Cách đơn giản nhất: Reload trang hoặc gọi lại hàm mở lớp
-                // Ở đây ta reload lại hàm openClassDetail nếu biết ID lớp, hoặc đơn giản là reload trang
-                setTimeout(() => window.location.reload(), 1000); 
+                // Reload lại danh sách để cập nhật trạng thái nút bấm
+                if(window.openClassDetail && document.getElementById('detailClassName').textContent !== '...') {
+                     // Nếu đang ở trong lớp thì reload lại view lớp
+                     const activeClassBtn = document.querySelector('.class-filter-btn.active'); // (Logic giả định)
+                     // Đơn giản nhất là reload trang
+                     setTimeout(() => window.location.reload(), 1000);
+                } else {
+                     setTimeout(() => window.location.reload(), 1000);
+                }
 
             } catch (e) {
                 console.error(e);
                 window.showNotification("Lỗi gửi yêu cầu: " + e.message, "error");
-                btn.innerHTML = '<i class="fa-solid fa-rotate-right"></i> Xin làm lại'; btn.disabled = false;
+            } finally {
+                btn.innerHTML = originalText;
+                btn.disabled = false;
             }
         };
     </script>
+    <div id="reattemptModal" class="hidden fixed inset-0 z-[200] bg-gray-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 transform scale-100 transition-all">
+            <div class="text-center mb-6">
+                <div class="w-16 h-16 bg-red-100 text-red-500 rounded-full flex items-center justify-center mx-auto mb-3 text-2xl">
+                    <i class="fa-solid fa-flag"></i>
+                </div>
+                <h3 class="text-xl font-black text-gray-800">Xin cấp quyền thi lại</h3>
+                <p class="text-sm text-gray-500 mt-1">Hãy cho giáo viên biết lý do bạn muốn làm lại bài (Mất điện, rớt mạng, lỗi thiết bị...).</p>
+            </div>
+            
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-xs font-bold text-gray-700 uppercase mb-1">Lý do xin phép <span class="text-red-500">*</span></label>
+                    <textarea id="reattemptReason" rows="3" class="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-red-200 focus:border-red-400 outline-none text-sm" placeholder="VD: Em đang làm thì bị mất kết nối mạng..."></textarea>
+                </div>
+                
+                <div class="grid grid-cols-2 gap-3">
+                    <button onclick="document.getElementById('reattemptModal').classList.add('hidden')" class="py-3 bg-gray-100 text-gray-600 font-bold rounded-xl hover:bg-gray-200 transition-colors">Hủy bỏ</button>
+                    <button onclick="submitReattemptRequest()" class="py-3 bg-red-500 text-white font-bold rounded-xl hover:bg-red-600 shadow-lg shadow-red-200 transition-colors">Gửi yêu cầu</button>
+                </div>
+            </div>
+        </div>
+    </div>
 </body>
 </html>
