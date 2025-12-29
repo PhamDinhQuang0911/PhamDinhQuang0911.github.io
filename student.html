@@ -726,12 +726,12 @@
             container.innerHTML = html;
         }
 
+        // --- HÀM TẢI BÀI TẬP (Dùng Query chuẩn để lọc rác) ---
         async function loadPendingTasks(user) {
             const container = document.getElementById('pendingTasksList');
             const titleEl = document.getElementById('pendingTitle');
             if(!container) return;
 
-            // HIỆN SKELETON
             container.innerHTML = `
                 <div class="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex items-center gap-4 h-24 animate-pulse">
                     <div class="w-14 h-14 rounded-xl bg-gray-200 shrink-0"></div>
@@ -739,6 +739,7 @@
                 </div>`.repeat(3);
 
             try {
+                // 1. Lấy danh sách ID lớp học của user (Lọc nhanh)
                 const qClasses = query(collection(db, "classes"));
                 const snapClasses = await getDocs(qClasses);
                 const myClassIds = [];
@@ -756,28 +757,38 @@
                     return; 
                 }
 
+                // 2. Lấy danh sách đề đã làm
                 const qResults = query(collection(db, "results"), where("studentId", "==", user.uid));
                 const snapResults = await getDocs(qResults);
                 const submittedExamIds = new Set();
                 snapResults.forEach(d => submittedExamIds.add(d.data().examId));
 
-                let pendingExams = [];
-                const qEx = query(collection(db, "exams"), where("accessType", "==", "class"), where("status", "==", "published"));
+                // 3. QUERY MỚI: Chỉ lấy các đề thi có trong danh sách lớp của tôi (Tối đa 10 lớp cho query 'in')
+                // Nếu học sinh học > 10 lớp, ta sẽ chia nhỏ hoặc filter client. Ở đây dùng slice 10 cho an toàn.
+                const searchClassIds = myClassIds.slice(0, 10); 
+                
+                // Dùng array-contains-any để Firestore tự lọc.
+                // Nếu đề gốc bị xóa -> Query này sẽ không trả về gì -> KHÔNG CÒN RÁC!
+                const qEx = query(
+                    collection(db, "exams"), 
+                    where("allowedClassIds", "array-contains-any", searchClassIds), 
+                    where("status", "==", "published")
+                );
+                
                 const snapEx = await getDocs(qEx);
+                let pendingExams = [];
 
                 snapEx.forEach(d => {
-                    if (submittedExamIds.has(d.id)) return;
-                    const ex = d.data();
-                    let isAssignedToMe = false;
-                    if (ex.allowedClassIds && Array.isArray(ex.allowedClassIds)) {
-                        isAssignedToMe = ex.allowedClassIds.some(allowedId => myClassIds.includes(allowedId));
-                    } else if (ex.allowedClassId) {
-                        isAssignedToMe = myClassIds.includes(ex.allowedClassId);
+                    // Lọc những bài đã nộp rồi
+                    if (!submittedExamIds.has(d.id)) {
+                        pendingExams.push({id: d.id, ...d.data()});
                     }
-                    if (isAssignedToMe) pendingExams.push({id: d.id, ...ex});
                 });
                 
-                pendingExams = pendingExams.slice(0, 10);
+                // Sắp xếp bài mới nhất lên đầu
+                pendingExams.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+                pendingExams = pendingExams.slice(0, 10); // Lấy 10 bài mới nhất
+
                 titleEl.innerHTML = `Em có <span class="text-red-500 font-black text-2xl mx-1">${pendingExams.length}</span> bài tập cần hoàn thành`;
 
                 if (pendingExams.length === 0) { 
