@@ -1564,33 +1564,57 @@
             return str.match(regex) || [];
         }
 
+        window.saveExam = async function(status) {// --- HÀM LƯU ĐỀ THI (CHUẨN HÓA LOGIC THAM CHIẾU) ---
         window.saveExam = async function(status) { 
             if (window.currentQIndex !== -1) saveCurrentQuestionToMemory(); 
-            const title = document.getElementById('settingTitle').value;
+            
+            const title = document.getElementById('settingTitle').value.trim();
             if(!title) return window.customAlert("Vui lòng nhập tên đề thi!", "error");
+            
             const btn = status === 'published' ? document.getElementById('btnPublish') : document.getElementById('btnSaveDraft');
-            const originalText = btn.innerHTML; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang xử lý...'; btn.disabled = true;
-            const settings = {
-                title: title, grade: document.getElementById('settingGrade').value, subject: document.getElementById('settingSubject').value,
-                duration: parseInt(document.getElementById('settingDuration').value) || 0, purpose: document.getElementById('settingPurpose').value,
-                startTime: document.getElementById('settingStartTime').value, endTime: document.getElementById('settingEndTime').value,
-                password: document.getElementById('settingPassword').value, attempts: parseInt(document.getElementById('settingAttempts').value) || 0,
-                proctoring: document.getElementById('settingProctoring').checked, shuffle: document.getElementById('settingShuffle').checked,
-                showScore: document.querySelector('input[name="settingShowScore"]:checked').value, 
-                showResult: document.querySelector('input[name="settingShowResult"]:checked').value,
-                
-                // Lưu thêm 2 trường mới (ép kiểu số cho an toàn)
-                passScore: parseFloat(document.getElementById('settingPassScoreInput').value) || 5,
-                feeQpoint: parseInt(document.getElementById('settingFeeQpointInput').value) || 0,
+            const originalText = btn.innerHTML; 
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang xử lý...'; 
+            btn.disabled = true;
 
-                accessType: document.querySelector('input[name="settingAccess"]:checked').value,
-                allowedClassIds: Array.from(document.querySelectorAll('.class-checkbox:checked')).map(cb => cb.value)
-            };
             try {
+                // 1. Thu thập cấu hình
+                const accessType = document.querySelector('input[name="settingAccess"]:checked').value;
+                
+                // Lấy danh sách lớp được chọn (Chỉ lấy nếu chọn chế độ "Lớp học")
+                let selectedClassIds = [];
+                if (accessType === 'class') {
+                    selectedClassIds = Array.from(document.querySelectorAll('.class-checkbox:checked')).map(cb => cb.value);
+                    if (status === 'published' && selectedClassIds.length === 0) {
+                        throw new Error("Vui lòng chọn ít nhất một lớp học để giao bài!");
+                    }
+                }
+
+                const settings = {
+                    title: title, 
+                    grade: document.getElementById('settingGrade').value, 
+                    subject: document.getElementById('settingSubject').value,
+                    duration: parseInt(document.getElementById('settingDuration').value) || 0, 
+                    purpose: document.getElementById('settingPurpose').value,
+                    startTime: document.getElementById('settingStartTime').value, 
+                    endTime: document.getElementById('settingEndTime').value,
+                    password: document.getElementById('settingPassword').value, 
+                    attempts: parseInt(document.getElementById('settingAttempts').value) || 0,
+                    proctoring: document.getElementById('settingProctoring').checked, 
+                    shuffle: document.getElementById('settingShuffle').checked,
+                    showScore: document.querySelector('input[name="settingShowScore"]:checked').value, 
+                    showResult: document.querySelector('input[name="settingShowResult"]:checked').value,
+                    passScore: parseFloat(document.getElementById('settingPassScoreInput').value) || 5,
+                    feeQpoint: parseInt(document.getElementById('settingFeeQpointInput').value) || 0,
+                    
+                    // QUAN TRỌNG: Lưu danh sách lớp vào thẳng đề thi
+                    accessType: accessType,
+                    allowedClassIds: selectedClassIds 
+                };
+
+                // 2. Xử lý ảnh rác (Giữ nguyên logic cũ của bạn)
                 if (currentExamId && window.originalQuestionsData.length > 0) {
                     const oldImages = getAllImageUrls(window.originalQuestionsData);
                     const newImages = getAllImageUrls(window.questions);
-                    
                     const deletedImages = oldImages.filter(url => !newImages.includes(url));
                     
                     if (deletedImages.length > 0) {
@@ -1603,19 +1627,53 @@
                 sessionUploadedFiles = [];
                 window.originalQuestionsData = JSON.parse(JSON.stringify(window.questions));
 
+                // 3. Lưu dữ liệu vào Firestore
                 const examRef = currentExamId ? doc(db, "exams", currentExamId) : doc(collection(db, "exams"));
-                await setDoc(examRef, { ...settings, teacherId: currentUser.uid, questions: window.questions, questionCount: window.questions.length, status: status, updatedAt: new Date().toISOString(), ...(currentExamId ? {} : { createdAt: new Date().toISOString() }) }, { merge: true });
-                currentExamId = examRef.id; document.getElementById('sidebarExamTitle').textContent = title;
+                
+                await setDoc(examRef, { 
+                    ...settings, 
+                    teacherId: currentUser.uid, 
+                    questions: window.questions, 
+                    questionCount: window.questions.length, 
+                    status: status, 
+                    updatedAt: new Date().toISOString(), 
+                    ...(currentExamId ? {} : { createdAt: new Date().toISOString() }) 
+                }, { merge: true });
+
+                currentExamId = examRef.id; 
+                document.getElementById('sidebarExamTitle').textContent = title;
+
+                // 4. Hoàn tất
                 if (status === 'published') {
                     const link = window.location.origin + window.location.pathname.replace('exam-editor.html', 'exam.html') + '?id=' + currentExamId;
-                    document.getElementById('shareLinkInput').value = link; document.getElementById('shareModal').classList.remove('opacity-0', 'pointer-events-none');
+                    document.getElementById('shareLinkInput').value = link; 
+                    document.getElementById('shareModal').classList.remove('opacity-0', 'pointer-events-none');
                     document.getElementById('shareModal').querySelector('div').classList.add('scale-100');
-                    document.getElementById('examStatus').textContent = '• Đã xuất bản'; document.getElementById('examStatus').classList.replace('text-orange-500', 'text-green-600');
-                    document.getElementById('publishedLinkArea').classList.remove('hidden'); document.getElementById('settingShareLink').value = link;
-                } else { window.showToast("Đã lưu bản nháp thành công!", "success"); }
+                    document.getElementById('examStatus').textContent = '• Đã xuất bản'; 
+                    document.getElementById('examStatus').classList.replace('text-orange-500', 'text-green-600');
+                    document.getElementById('publishedLinkArea').classList.remove('hidden'); 
+                    document.getElementById('settingShareLink').value = link;
+                    
+                    // Thông báo rõ ràng về việc giao bài
+                    if(accessType === 'class') {
+                        window.showToast(`Đã giao bài thành công cho ${selectedClassIds.length} lớp!`, "success");
+                    } else {
+                        window.showToast("Xuất bản công khai thành công!", "success");
+                    }
+                } else { 
+                    window.showToast("Đã lưu bản nháp thành công!", "success"); 
+                }
+                
                 if (!window.location.search.includes('id=')) window.history.pushState({path:window.location.href.split('?')[0] + '?id=' + currentExamId},'',window.location.href.split('?')[0] + '?id=' + currentExamId);
-            } catch(e) { console.error(e); window.customAlert("Lỗi lưu: " + e.message, "error"); } finally { btn.innerHTML = originalText; btn.disabled = false; }
-        }
+
+            } catch(e) { 
+                console.error(e); 
+                window.customAlert("Lỗi lưu đề thi: " + e.message, "error"); 
+            } finally { 
+                btn.innerHTML = originalText; 
+                btn.disabled = false; 
+            }
+        };
 
         window.loadStats = async () => { 
             if (!currentExamId) return;
