@@ -541,17 +541,47 @@ async function loadLobbyData(id) {
             let rawQuestions = JSON.parse(JSON.stringify(examData.questions || []));
             const savedOrder = localStorage.getItem(`order_${currentUser.uid}_${examId}`);
             
-            if(examData.shuffle && !savedOrder) {
-                const groups = { mc: [], tf: [], short: [], essay: [] };
-                rawQuestions.forEach(q => { if(groups[q.type]) groups[q.type].push(q); });
-                
-                shuffleArray(groups.mc); shuffleArray(groups.tf); shuffleArray(groups.short); shuffleArray(groups.essay);
-                groups.mc.forEach(q => { if (q.options && q.options.length > 0) { let mapped = q.options.map((opt, i) => ({ txt: opt, originalIdx: i })); shuffleArray(mapped); q.options = mapped.map(m => m.txt); q.correct = mapped.findIndex(m => m.originalIdx === q.correct); } });
-                
-                currentQuestions = [...groups.mc, ...groups.tf, ...groups.short, ...groups.essay];
-                localStorage.setItem(`order_${currentUser.uid}_${examId}`, "true"); 
-            } else { 
-                currentQuestions = rawQuestions; 
+            // --- LOGIC ĐẢO ĐỀ CỐ ĐỊNH (FIX LỖI F5 MẤT ĐÁP ÁN) ---
+            const shuffleKey = `shuffleMap_${currentUser.uid}_${examId}`;
+            let shuffleMapData = JSON.parse(localStorage.getItem(shuffleKey) || "null");
+
+            if (examData.shuffle) {
+                // Nếu chưa có Map (lần đầu vào), tạo Map mới và lưu lại
+                if (!shuffleMapData) {
+                    shuffleMapData = rawQuestions.map((q, qIndex) => {
+                        // Chỉ đảo đáp án với câu trắc nghiệm (mc)
+                        if (q.type === 'mc' && q.options && q.options.length > 0) {
+                            // Tạo mảng chỉ số [0, 1, 2, 3...]
+                            let indices = q.options.map((_, i) => i);
+                            shuffleArray(indices); // Đảo lộn chỉ số (VD: [2, 0, 3, 1])
+                            return indices;
+                        }
+                        return null; // Các loại câu khác không đảo options
+                    });
+                    
+                    // Nếu cần đảo cả thứ tự câu hỏi, ta cũng cần lưu map thứ tự câu. 
+                    // Nhưng để đơn giản và an toàn, tạm thời ta chỉ đảo Options (Đáp án) để fix lỗi chấm điểm trước.
+                    
+                    localStorage.setItem(shuffleKey, JSON.stringify(shuffleMapData));
+                }
+
+                // ÁP DỤNG MAP ĐỂ HIỂN THỊ (Khôi phục trạng thái đã đảo)
+                currentQuestions = rawQuestions.map((q, idx) => {
+                    const map = shuffleMapData[idx];
+                    if (map) {
+                        // Tạo câu hỏi bản sao để không ảnh hưởng data gốc
+                        const newQ = { ...q };
+                        // Sắp xếp lại text hiển thị theo Map
+                        newQ.options = map.map(originalIndex => q.options[originalIndex]);
+                        // Lưu Map vào câu hỏi để dùng khi render
+                        newQ.shuffleMap = map; 
+                        // QUAN TRỌNG: Giữ nguyên q.correct (Index gốc) để chấm điểm đúng
+                        return newQ;
+                    }
+                    return q;
+                });
+            } else {
+                currentQuestions = rawQuestions;
             }
             
             // --- TÍNH TOÁN THỜI GIAN & KHÔI PHỤC (LOGIC MỚI) ---
@@ -721,10 +751,22 @@ async function loadLobbyData(id) {
 
             if(q.type === 'mc') {
                 q.options.forEach((opt, i) => {
-                    const checked = userAnswers[idx] === i;
+                    // Lấy Index Gốc thực sự của ô này (dựa vào Map đã lưu)
+                    // Nếu không có map (không đảo) thì index gốc chính là i
+                    const realIdx = q.shuffleMap ? q.shuffleMap[i] : i;
+                    
+                    // Kiểm tra check dựa trên INDEX GỐC (Đảm bảo nhất quán trọn đời)
+                    const checked = userAnswers[idx] === realIdx;
+                    
                     const div = document.createElement('label'); div.className = "block cursor-pointer group w-full";
                     div.innerHTML = `<input type="radio" name="q" class="hidden custom-radio" ${checked?'checked':''}><div class="flex items-start p-4 border-2 border-gray-100 rounded-xl hover:border-blue-300 group-hover:bg-blue-50 group-hover:shadow-sm h-full transition-all"><div class="check-circle w-8 h-8 rounded-full border-2 border-gray-200 flex items-center justify-center mr-4 font-bold text-gray-400 shrink-0 mt-0.5 group-hover:scale-110 transition-transform">${String.fromCharCode(65+i)}</div><div class="flex-1 text-gray-700 leading-relaxed">${window.formatContent(opt)}</div></div>`;
-                    div.querySelector('input').onchange = () => { userAnswers[idx]=i; updatePalette(); saveLocal(); };
+                    
+                    // KHI CHỌN: Lưu INDEX GỐC (realIdx) thay vì vị trí hiển thị (i)
+                    div.querySelector('input').onchange = () => { 
+                        userAnswers[idx] = realIdx; 
+                        updatePalette(); 
+                        saveLocal(); 
+                    };
                     dom.options.appendChild(div);
                 });
             } else if (q.type === 'tf') {
