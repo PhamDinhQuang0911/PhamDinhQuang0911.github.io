@@ -538,53 +538,79 @@ async function loadLobbyData(id) {
         async function startExam(isResume) {
             dom.lobby.classList.add('hidden'); dom.header.classList.remove('hidden'); dom.main.classList.remove('hidden');
             
+            // Dữ liệu câu hỏi gốc
             let rawQuestions = JSON.parse(JSON.stringify(examData.questions || []));
-            const savedOrder = localStorage.getItem(`order_${currentUser.uid}_${examId}`);
             
-            // --- LOGIC ĐẢO ĐỀ CỐ ĐỊNH (FIX LỖI F5 MẤT ĐÁP ÁN) ---
-            const shuffleKey = `shuffleMap_${currentUser.uid}_${examId}`;
-            let shuffleMapData = JSON.parse(localStorage.getItem(shuffleKey) || "null");
+            // --- LOGIC ĐẢO ĐỀ TOÀN DIỆN (CÂU HỎI + ĐÁP ÁN) ---
+            // Key lưu trữ cấu hình đảo đề của riêng user này
+            const shuffleConfigKey = `examConfig_${currentUser.uid}_${examId}`;
+            let savedConfig = JSON.parse(localStorage.getItem(shuffleConfigKey) || "null");
 
             if (examData.shuffle) {
-                // Nếu chưa có Map (lần đầu vào), tạo Map mới và lưu lại
-                if (!shuffleMapData) {
-                    shuffleMapData = rawQuestions.map((q, qIndex) => {
-                        // Chỉ đảo đáp án với câu trắc nghiệm (mc)
+                if (!savedConfig) {
+                    // --- A. NẾU CHƯA CÓ CẤU HÌNH -> TIẾN HÀNH ĐẢO VÀ LƯU ---
+                    
+                    // 1. Phân nhóm câu hỏi để đảo trong nhóm
+                    const groups = { mc: [], tf: [], short: [], essay: [] };
+                    // Lưu kèm index gốc để sau này truy vết
+                    rawQuestions.forEach((q, originalIndex) => { 
+                        if(groups[q.type]) groups[q.type].push({ ...q, _originalIndex: originalIndex }); 
+                    });
+                    
+                    // 2. Đảo thứ tự câu hỏi trong từng nhóm
+                    shuffleArray(groups.mc); 
+                    shuffleArray(groups.tf); 
+                    shuffleArray(groups.short); 
+                    shuffleArray(groups.essay);
+                    
+                    // 3. Gộp lại thành danh sách câu hỏi mới (đã đảo thứ tự)
+                    const shuffledQuestions = [...groups.mc, ...groups.tf, ...groups.short, ...groups.essay];
+                    
+                    // 4. Tạo Map đảo đáp án cho từng câu (chỉ câu Trắc nghiệm)
+                    const optionMaps = {}; // Key: _originalIndex, Value: Mảng thứ tự hiển thị
+                    
+                    shuffledQuestions.forEach(q => {
                         if (q.type === 'mc' && q.options && q.options.length > 0) {
                             // Tạo mảng chỉ số [0, 1, 2, 3...]
                             let indices = q.options.map((_, i) => i);
                             shuffleArray(indices); // Đảo lộn chỉ số (VD: [2, 0, 3, 1])
-                            return indices;
+                            optionMaps[q._originalIndex] = indices;
                         }
-                        return null; // Các loại câu khác không đảo options
                     });
-                    
-                    // Nếu cần đảo cả thứ tự câu hỏi, ta cũng cần lưu map thứ tự câu. 
-                    // Nhưng để đơn giản và an toàn, tạm thời ta chỉ đảo Options (Đáp án) để fix lỗi chấm điểm trước.
-                    
-                    localStorage.setItem(shuffleKey, JSON.stringify(shuffleMapData));
+
+                    // 5. Lưu cấu hình vào LocalStorage
+                    savedConfig = {
+                        questionOrder: shuffledQuestions.map(q => q._originalIndex), // Lưu thứ tự câu hỏi
+                        optionMaps: optionMaps // Lưu map đảo đáp án
+                    };
+                    localStorage.setItem(shuffleConfigKey, JSON.stringify(savedConfig));
                 }
 
-                // ÁP DỤNG MAP ĐỂ HIỂN THỊ (Khôi phục trạng thái đã đảo)
-                currentQuestions = rawQuestions.map((q, idx) => {
-                    const map = shuffleMapData[idx];
+                // --- B. TÁI TẠO ĐỀ THI TỪ CẤU HÌNH ĐÃ LƯU ---
+                currentQuestions = savedConfig.questionOrder.map(originalIndex => {
+                    // Lấy câu hỏi gốc
+                    const originalQ = rawQuestions[originalIndex];
+                    if (!originalQ) return null;
+
+                    const newQ = { ...originalQ }; // Copy ra object mới
+                    
+                    // Áp dụng đảo đáp án (nếu có map)
+                    const map = savedConfig.optionMaps[originalIndex];
                     if (map) {
-                        // Tạo câu hỏi bản sao để không ảnh hưởng data gốc
-                        const newQ = { ...q };
                         // Sắp xếp lại text hiển thị theo Map
-                        newQ.options = map.map(originalIndex => q.options[originalIndex]);
-                        // Lưu Map vào câu hỏi để dùng khi render
-                        newQ.shuffleMap = map; 
-                        // QUAN TRỌNG: Giữ nguyên q.correct (Index gốc) để chấm điểm đúng
-                        return newQ;
+                        newQ.options = map.map(idx => originalQ.options[idx]);
+                        // Lưu Map vào câu hỏi để dùng khi render (quan trọng cho việc chấm điểm)
+                        newQ.shuffleMap = map;
                     }
-                    return q;
-                });
-            } else {
-                currentQuestions = rawQuestions;
+                    return newQ;
+                }).filter(q => q !== null);
+
+            } else { 
+                // Không đảo -> Dùng nguyên xi
+                currentQuestions = rawQuestions; 
             }
             
-            // --- TÍNH TOÁN THỜI GIAN & KHÔI PHỤC (LOGIC MỚI) ---
+            // --- TÍNH TOÁN THỜI GIAN & KHÔI PHỤC (LOGIC CŨ GIỮ NGUYÊN) ---
             const durationMinutes = examData.duration || 45;
             const attemptRef = doc(db, "exam_attempts", `${currentUser.uid}_${examId}`);
             let startTimeMs;
@@ -594,26 +620,20 @@ async function loadLobbyData(id) {
                 if(snap.exists()) {
                     const data = snap.data();
                     startTimeMs = data.startTime;
-                    // Gộp đáp án: Cloud + LocalStorage (Local đè lên Cloud vì mới hơn)
                     const cloudAnswers = data.answers || {};
                     const localAnswers = JSON.parse(localStorage.getItem(`ans_${currentUser.uid}_${examId}`)) || {};
                     userAnswers = { ...cloudAnswers, ...localAnswers };
-                    
-                    // Tính thời gian còn lại = Tổng giờ - (Hiện tại - Lúc bắt đầu)
                     const elapsedTime = Math.floor((Date.now() - startTimeMs) / 1000);
                     timeLeft = (durationMinutes * 60) - elapsedTime;
                 } else {
-                    isResume = false; // Lỗi dữ liệu -> Làm bài mới
+                    isResume = false;
                 }
             }
             
             if (!isResume) {
-                // Bài mới: Set thời gian và tạo bản ghi Cloud
                 startTimeMs = Date.now();
                 userAnswers = {};
                 timeLeft = durationMinutes * 60;
-                
-                // [QUAN TRỌNG] Tạo bản ghi Attempt để bắt đầu tính giờ
                 await setDoc(attemptRef, {
                     examId: examId,
                     studentId: currentUser.uid,
@@ -621,6 +641,9 @@ async function loadLobbyData(id) {
                     answers: {},
                     lastUpdated: new Date().toISOString()
                 });
+                
+                // Xóa các file ảnh rác của phiên trước (nếu có)
+                localStorage.removeItem(`ans_${currentUser.uid}_${examId}`);
             }
 
             if(timeLeft <= 0) {
@@ -629,10 +652,8 @@ async function loadLobbyData(id) {
                 return;
             }
 
-            // Cập nhật mốc thời gian cho đồng hồ đếm ngược
             if(timeLeft > 0) { window.endTimeStamp = Date.now() + (timeLeft * 1000); runTimer(); } else { dom.timer.textContent = "∞"; }
             
-            // Bắt đầu lưu 10p/lần
             startAutoSync();
 
             if(examData.proctoring) { document.getElementById('cheatWarning').classList.remove('hidden'); initProctoring(); }
