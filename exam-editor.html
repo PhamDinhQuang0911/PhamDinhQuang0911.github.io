@@ -1907,13 +1907,23 @@
                     ? `<span class="ml-1 bg-red-100 text-red-600 px-2 py-0.5 rounded text-xs font-bold"><i class="fa-solid fa-triangle-exclamation"></i> ${r.cheatCount}</span>` : '';
 
                 // --- NÚT CẤP QUYỀN (MỚI) ---
+                // --- NÚT XỬ LÝ YÊU CẦU ---
                 let actionBtn = '';
                 if (r.requestId) {
-                    // Nếu có yêu cầu -> Hiện nút ĐỒNG Ý
-                    actionBtn = `<button onclick="approveReattempt('${r.studentId}', '${r.requestId}', '${r.studentName}')" class="ml-auto px-3 py-1 bg-red-500 text-white rounded-lg text-xs font-bold shadow-md hover:bg-red-600 animate-pulse flex items-center gap-1"><i class="fa-solid fa-rotate-right"></i> Duyệt thi lại</button>`;
+                    // CÓ YÊU CẦU: Hiện 2 nút Duyệt (Xanh) và Từ chối (Xám)
+                    // Lưu lý do xin phép vào data attribute để hiển thị tooltip nếu cần
+                    actionBtn = `
+                        <div class="flex flex-col gap-1 items-end">
+                            <button onclick="approveReattempt('${r.studentId}', '${r.requestId}', '${r.studentName}')" class="px-3 py-1 bg-green-600 text-white rounded hover:bg-green-700 text-xs font-bold shadow-sm whitespace-nowrap flex items-center gap-1">
+                                <i class="fa-solid fa-check"></i> Duyệt
+                            </button>
+                            <button onclick="denyReattempt('${r.requestId}', '${r.studentName}')" class="px-3 py-1 bg-gray-200 text-gray-600 rounded hover:bg-gray-300 text-xs font-bold shadow-sm whitespace-nowrap flex items-center gap-1">
+                                <i class="fa-solid fa-xmark"></i> Từ chối
+                            </button>
+                        </div>`;
                 } else if (r.hasSubmitted) {
-                    // Nếu đã thi -> Hiện nút Cấp lại thủ công (ẩn trong hover hoặc icon nhỏ)
-                    actionBtn = `<button onclick="approveReattempt('${r.studentId}', null, '${r.studentName}')" class="ml-auto w-7 h-7 rounded-full bg-gray-100 text-gray-400 hover:bg-red-100 hover:text-red-500 flex items-center justify-center transition-colors" title="Cấp quyền làm lại thủ công"><i class="fa-solid fa-rotate-right"></i></button>`;
+                    // CHƯA CÓ YÊU CẦU (Đã nộp): Nút cấp lại thủ công
+                    actionBtn = `<button onclick="approveReattempt('${r.studentId}', null, '${r.studentName}')" class="w-8 h-8 rounded-full bg-blue-50 text-blue-600 hover:bg-blue-100 flex items-center justify-center transition-colors" title="Cấp quyền làm lại thủ công"><i class="fa-solid fa-rotate-right"></i></button>`;
                 }
 
                 tbody.innerHTML += `
@@ -2616,33 +2626,49 @@
             }
         };
     // --- HÀM DUYỆT YÊU CẦU LÀM LẠI ---
+        // --- HÀM DUYỆT YÊU CẦU LÀM LẠI ---
         window.approveReattempt = async (studentId, requestId, studentName) => {
             const confirmMsg = requestId 
-                ? `Học sinh ${studentName} xin cấp quyền làm lại vì sự cố.\nBạn có đồng ý xóa bài làm cũ để em thi lại không?`
-                : `Cảnh báo: Bạn đang cấp quyền thủ công cho ${studentName}.\nToàn bộ bài làm cũ của học sinh này sẽ bị XÓA.\nTiếp tục?`;
+                ? `Đồng ý cho ${studentName} làm lại bài?\nKết quả cũ sẽ bị XÓA VĨNH VIỄN.`
+                : `Cảnh báo: Cấp quyền thủ công cho ${studentName}.\nBài làm cũ sẽ bị XÓA. Tiếp tục?`;
 
             if (await window.customConfirm(confirmMsg)) {
                 try {
                     window.showToast("Đang xử lý...", "info");
                     
-                    // 1. Xóa tất cả kết quả thi của học sinh này trong bài thi này
+                    // 1. Xóa tất cả kết quả thi cũ của học sinh này
                     const qRes = query(collection(db, "results"), where("examId", "==", currentExamId), where("studentId", "==", studentId));
                     const snapRes = await getDocs(qRes);
+                    
                     const deletePromises = snapRes.docs.map(d => deleteDoc(d.ref));
                     await Promise.all(deletePromises);
 
-                    // 2. Xóa yêu cầu trong access_requests (nếu có)
+                    // 2. Xóa yêu cầu (nếu có)
                     if (requestId) {
                         await deleteDoc(doc(db, "access_requests", requestId));
                     } else {
-                        // Nếu duyệt thủ công, tìm và xóa luôn các request treo (nếu có)
+                        // Quét sạch request treo nếu duyệt thủ công
                         const qReq = query(collection(db, "access_requests"), where("examId", "==", currentExamId), where("studentId", "==", studentId));
                         const snapReq = await getDocs(qReq);
                         snapReq.docs.forEach(async d => await deleteDoc(d.ref));
                     }
 
-                    window.showToast(`Đã cấp quyền thi lại cho ${studentName}`, "success");
+                    window.showToast(`Đã cấp quyền cho ${studentName}`, "success");
                     loadStats(); // Tải lại bảng
+                } catch (e) {
+                    console.error(e);
+                    window.customAlert("Lỗi: " + e.message, "error");
+                }
+            }
+        };
+
+        // --- HÀM TỪ CHỐI YÊU CẦU ---
+        window.denyReattempt = async (requestId, studentName) => {
+            if (await window.customConfirm(`Từ chối yêu cầu của ${studentName}?`)) {
+                try {
+                    await deleteDoc(doc(db, "access_requests", requestId));
+                    window.showToast("Đã từ chối yêu cầu.", "info");
+                    loadStats();
                 } catch (e) {
                     console.error(e);
                     window.showToast("Lỗi: " + e.message, "error");
