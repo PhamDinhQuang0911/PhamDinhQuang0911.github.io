@@ -2,195 +2,61 @@
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Demo Scan Ảnh - Toán thầy Choang</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Test Camera Native - Toán thầy Choang</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script async src="https://docs.opencv.org/4.8.0/opencv.js" onload="onOpenCvReady();" type="text/javascript"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <style>
-        .loading { pointer-events: none; opacity: 0.6; }
-        canvas { max-width: 100%; height: auto; border: 1px solid #ccc; border-radius: 8px; }
-    </style>
 </head>
-<body class="bg-gray-100 min-h-screen p-4 flex flex-col items-center">
+<body class="bg-gray-100 min-h-screen p-4 flex flex-col items-center justify-center">
 
     <div class="max-w-md w-full bg-white rounded-2xl shadow-xl p-6">
-        <h1 class="text-xl font-bold text-gray-800 mb-4 text-center">📸 Test Tính Năng Scan</h1>
-        
-        <div id="status" class="mb-4 text-center text-sm font-bold text-orange-500">
-            <i class="fa-solid fa-spinner fa-spin"></i> Đang tải thư viện xử lý ảnh...
-        </div>
+        <h1 class="text-xl font-bold text-gray-800 mb-2 text-center">📸 Test Camera Gốc</h1>
+        <p class="text-sm text-gray-500 text-center mb-6">Sử dụng thuật toán của chính điện thoại để chụp ảnh tài liệu.</p>
 
-        <div class="mb-6">
-            <label class="block w-full p-4 border-2 border-dashed border-blue-300 rounded-xl bg-blue-50 text-blue-600 font-bold text-center cursor-pointer hover:bg-blue-100 transition-all">
-                <i class="fa-solid fa-camera text-2xl mb-2"></i><br>
-                Chụp ảnh bài làm
-                <input type="file" id="fileInput" accept="image/*" class="hidden" disabled>
+        <div class="grid grid-cols-2 gap-4 mb-6">
+            <label class="flex flex-col items-center justify-center p-4 border-2 border-dashed border-blue-300 rounded-xl bg-blue-50 text-blue-600 font-bold cursor-pointer hover:bg-blue-100 transition-all active:scale-95 h-32">
+                <div class="w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-sm mb-2 text-2xl text-blue-500"><i class="fa-solid fa-camera"></i></div>
+                <span class="text-xs uppercase tracking-wide">Chụp ảnh</span>
+                <input type="file" accept="image/*" capture="environment" class="hidden" onchange="previewImage(this)">
+            </label>
+
+            <label class="flex flex-col items-center justify-center p-4 border-2 border-dashed border-purple-300 rounded-xl bg-purple-50 text-purple-600 font-bold cursor-pointer hover:bg-purple-100 transition-all active:scale-95 h-32">
+                <div class="w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-sm mb-2 text-2xl text-purple-500"><i class="fa-regular fa-images"></i></div>
+                <span class="text-xs uppercase tracking-wide">Thư viện</span>
+                <input type="file" accept="image/*" class="hidden" onchange="previewImage(this)">
             </label>
         </div>
 
-        <div class="space-y-4 hidden" id="resultArea">
-            <div>
-                <p class="text-xs font-bold text-gray-500 mb-1">1. Ảnh gốc:</p>
-                <img id="imageSrc" class="w-full rounded-lg shadow-sm" />
+        <div id="previewArea" class="hidden space-y-4">
+            <div class="bg-gray-50 p-2 rounded-lg border border-gray-200">
+                <p class="text-xs font-bold text-gray-500 mb-2 text-center uppercase">Ảnh thu được</p>
+                <img id="imgResult" class="w-full h-auto rounded-lg shadow-sm border border-gray-300">
             </div>
             
-            <div class="flex justify-center gap-2 my-2">
-                <i class="fa-solid fa-arrow-down text-gray-400"></i>
-                <span class="text-xs text-gray-400">Xử lý tự động</span>
-                <i class="fa-solid fa-arrow-down text-gray-400"></i>
-            </div>
-
-            <div>
-                <p class="text-xs font-bold text-green-600 mb-1">2. Kết quả Scan (Đã nắn & làm rõ):</p>
-                <canvas id="canvasOutput"></canvas>
+            <div class="bg-yellow-50 p-3 rounded-lg border border-yellow-200 text-xs text-yellow-800">
+                <p class="font-bold mb-1"><i class="fa-solid fa-lightbulb"></i> Mẹo cho học sinh:</p>
+                <ul class="list-disc pl-4 space-y-1">
+                    <li>Khi Camera mở lên, hãy chọn chế độ <b>"Tài liệu" (Document)</b> hoặc <b>"Quét" (Scan)</b> nếu máy có hỗ trợ.</li>
+                    <li>Chạm vào màn hình để lấy nét vào chữ viết.</li>
+                </ul>
             </div>
         </div>
     </div>
 
     <script>
-        let cvReady = false;
-
-        function onOpenCvReady() {
-            cvReady = true;
-            const status = document.getElementById('status');
-            status.innerHTML = '<i class="fa-solid fa-check-circle"></i> Sẵn sàng! Hãy chọn ảnh.';
-            status.className = "mb-4 text-center text-sm font-bold text-green-600";
-            document.getElementById('fileInput').disabled = false;
-        }
-
-        document.getElementById('fileInput').addEventListener('change', (e) => {
-            if (!cvReady) return;
-            const file = e.target.files[0];
+        function previewImage(input) {
+            const file = input.files[0];
             if (!file) return;
 
             const reader = new FileReader();
-            reader.onload = (event) => {
-                const imgElement = document.getElementById('imageSrc');
-                imgElement.src = event.target.result;
-                imgElement.onload = () => {
-                    document.getElementById('resultArea').classList.remove('hidden');
-                    // Chờ ảnh load xong thì xử lý
-                    setTimeout(processImage, 100);
-                };
-            };
+            reader.onload = function(e) {
+                const img = document.getElementById('imgResult');
+                img.src = e.target.result;
+                document.getElementById('previewArea').classList.remove('hidden');
+            }
             reader.readAsDataURL(file);
-        });
-
-        function processImage() {
-            try {
-                // 1. Đọc ảnh vào OpenCV
-                let src = cv.imread('imageSrc');
-                let dst = new cv.Mat();
-                let gray = new cv.Mat();
-                let blurred = new cv.Mat();
-                let edges = new cv.Mat();
-
-                // 2. Tiền xử lý: Resize nhỏ lại để xử lý cho nhanh (nếu ảnh quá to)
-                let dsize = new cv.Size(0, 0);
-                // Giữ nguyên tỉ lệ, chỉ resize nếu chiều rộng > 1000px
-                let scale = 1;
-                if(src.cols > 1000) {
-                    scale = 1000 / src.cols;
-                    cv.resize(src, src, dsize, scale, scale, cv.INTER_AREA);
-                }
-
-                // 3. Chuyển xám & Làm mờ (Để tìm cạnh dễ hơn)
-                cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
-                cv.GaussianBlur(gray, blurred, new cv.Size(5, 5), 0);
-                
-                // 4. Tìm cạnh (Canny Edge Detection)
-                cv.Canny(blurred, edges, 75, 200);
-
-                // 5. Tìm đường bao (Contours)
-                let contours = new cv.MatVector();
-                let hierarchy = new cv.Mat();
-                cv.findContours(edges, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
-
-                // 6. Tìm hình chữ nhật lớn nhất (Giả sử là tờ giấy)
-                let maxArea = 0;
-                let maxContourIndex = -1;
-                let approx = new cv.Mat();
-                let foundRect = null;
-
-                for (let i = 0; i < contours.size(); ++i) {
-                    let cnt = contours.get(i);
-                    let area = cv.contourArea(cnt);
-                    if (area > 5000) { // Bỏ qua nhiễu nhỏ
-                        let perimeter = cv.arcLength(cnt, true);
-                        cv.approxPolyDP(cnt, approx, 0.02 * perimeter, true);
-                        // Nếu có 4 góc và diện tích lớn nhất -> Khả năng cao là tờ giấy
-                        if (approx.rows === 4 && area > maxArea) {
-                            maxArea = area;
-                            maxContourIndex = i;
-                            foundRect = approx.clone(); // Lưu lại tọa độ 4 góc
-                        }
-                    }
-                }
-
-                // 7. Nếu tìm thấy giấy -> Nắn thẳng (Warp)
-                if (foundRect) {
-                    // Sắp xếp 4 điểm góc: [TopLeft, TopRight, BottomRight, BottomLeft]
-                    let srcTri = cv.matFromArray(4, 1, cv.CV_32FC2, sortPoints(foundRect));
-                    
-                    // Tính kích thước ảnh đầu ra (dựa trên chiều rộng/cao lớn nhất)
-                    // (Logic đơn giản hóa cho demo: lấy kích thước ảnh gốc)
-                    let w = src.cols; 
-                    let h = src.rows;
-                    
-                    let dstTri = cv.matFromArray(4, 1, cv.CV_32FC2, [0, 0, w, 0, w, h, 0, h]);
-                    let M = cv.getPerspectiveTransform(srcTri, dstTri);
-                    
-                    cv.warpPerspective(src, dst, M, new cv.Size(w, h));
-                    
-                    // Dọn dẹp
-                    srcTri.delete(); dstTri.delete(); M.delete();
-                } else {
-                    // Không tìm thấy giấy -> Dùng nguyên ảnh gốc
-                    dst = src.clone();
-                }
-
-                // 8. Làm đẹp ảnh (Scan Effect)
-                // Chuyển sang xám
-                if(dst.channels() > 1) cv.cvtColor(dst, dst, cv.COLOR_RGBA2GRAY, 0);
-                
-                // Adaptive Threshold (Biến thành đen trắng rõ nét như máy photo)
-                cv.adaptiveThreshold(dst, dst, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY, 11, 2);
-
-                // 9. Hiển thị ra Canvas
-                cv.imshow('canvasOutput', dst);
-
-                // Dọn dẹp bộ nhớ (Cực kỳ quan trọng với OpenCV.js)
-                src.delete(); dst.delete(); gray.delete(); blurred.delete(); edges.delete();
-                contours.delete(); hierarchy.delete(); approx.delete(); if(foundRect) foundRect.delete();
-
-            } catch (err) {
-                console.error(err);
-                alert("Lỗi xử lý ảnh: " + err);
-            }
-        }
-
-        // Hàm phụ trợ: Sắp xếp 4 điểm theo thứ tự TL, TR, BR, BL
-        function sortPoints(mat) {
-            // Chuyển Mat sang mảng phẳng
-            let points = [];
-            for(let i=0; i<4; i++) {
-                points.push({x: mat.data32S[i*2], y: mat.data32S[i*2+1]});
-            }
-            
-            // Sắp xếp theo tổng (x+y) để tìm TopLeft (min) và BottomRight (max)
-            points.sort((a,b) => (a.x+a.y) - (b.x+b.y));
-            let tl = points[0];
-            let br = points[3];
-            
-            // Hai điểm còn lại: điểm nào có x lớn hơn là TR, bé hơn là BL
-            let others = [points[1], points[2]];
-            others.sort((a,b) => a.x - b.x);
-            let bl = others[0];
-            let tr = others[1];
-            
-            return [tl.x, tl.y, tr.x, tr.y, br.x, br.y, bl.x, bl.y];
         }
     </script>
+
 </body>
 </html>
