@@ -2,61 +2,154 @@
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Test Camera Native - Toán thầy Choang</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Scan V2 - Làm Sáng Ảnh</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script async src="https://docs.opencv.org/4.8.0/opencv.js" onload="onOpenCvReady();" type="text/javascript"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        canvas { width: 100%; border: 1px solid #ddd; border-radius: 8px; }
+        input[type=range] { width: 100%; }
+    </style>
 </head>
-<body class="bg-gray-100 min-h-screen p-4 flex flex-col items-center justify-center">
+<body class="bg-gray-100 min-h-screen p-4 flex flex-col items-center">
 
     <div class="max-w-md w-full bg-white rounded-2xl shadow-xl p-6">
-        <h1 class="text-xl font-bold text-gray-800 mb-2 text-center">📸 Test Camera Gốc</h1>
-        <p class="text-sm text-gray-500 text-center mb-6">Sử dụng thuật toán của chính điện thoại để chụp ảnh tài liệu.</p>
-
-        <div class="grid grid-cols-2 gap-4 mb-6">
-            <label class="flex flex-col items-center justify-center p-4 border-2 border-dashed border-blue-300 rounded-xl bg-blue-50 text-blue-600 font-bold cursor-pointer hover:bg-blue-100 transition-all active:scale-95 h-32">
-                <div class="w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-sm mb-2 text-2xl text-blue-500"><i class="fa-solid fa-camera"></i></div>
-                <span class="text-xs uppercase tracking-wide">Chụp ảnh</span>
-                <input type="file" accept="image/*" capture="environment" class="hidden" onchange="previewImage(this)">
-            </label>
-
-            <label class="flex flex-col items-center justify-center p-4 border-2 border-dashed border-purple-300 rounded-xl bg-purple-50 text-purple-600 font-bold cursor-pointer hover:bg-purple-100 transition-all active:scale-95 h-32">
-                <div class="w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-sm mb-2 text-2xl text-purple-500"><i class="fa-regular fa-images"></i></div>
-                <span class="text-xs uppercase tracking-wide">Thư viện</span>
-                <input type="file" accept="image/*" class="hidden" onchange="previewImage(this)">
-            </label>
+        <h1 class="text-xl font-bold text-gray-800 mb-2 text-center">📄 Scan: Làm Sáng & Rõ Chữ</h1>
+        <div id="status" class="mb-4 text-center text-sm font-bold text-orange-500">
+            <i class="fa-solid fa-spinner fa-spin"></i> Đang tải bộ xử lý ảnh...
         </div>
 
-        <div id="previewArea" class="hidden space-y-4">
-            <div class="bg-gray-50 p-2 rounded-lg border border-gray-200">
-                <p class="text-xs font-bold text-gray-500 mb-2 text-center uppercase">Ảnh thu được</p>
-                <img id="imgResult" class="w-full h-auto rounded-lg shadow-sm border border-gray-300">
+        <label class="block w-full p-4 border-2 border-dashed border-blue-300 rounded-xl bg-blue-50 text-blue-600 font-bold text-center cursor-pointer hover:bg-blue-100 transition-all mb-4">
+            <i class="fa-solid fa-camera text-xl mb-1"></i><br>
+            Chọn ảnh bài làm
+            <input type="file" id="fileInput" accept="image/*" class="hidden" disabled>
+        </label>
+
+        <div id="editorArea" class="hidden space-y-4">
+            <img id="imgSrc" class="hidden">
+
+            <div>
+                <p class="text-xs font-bold text-gray-500 mb-2 uppercase">Kết quả:</p>
+                <canvas id="canvasOutput"></canvas>
             </div>
-            
-            <div class="bg-yellow-50 p-3 rounded-lg border border-yellow-200 text-xs text-yellow-800">
-                <p class="font-bold mb-1"><i class="fa-solid fa-lightbulb"></i> Mẹo cho học sinh:</p>
-                <ul class="list-disc pl-4 space-y-1">
-                    <li>Khi Camera mở lên, hãy chọn chế độ <b>"Tài liệu" (Document)</b> hoặc <b>"Quét" (Scan)</b> nếu máy có hỗ trợ.</li>
-                    <li>Chạm vào màn hình để lấy nét vào chữ viết.</li>
-                </ul>
+
+            <div class="bg-gray-50 p-4 rounded-xl border border-gray-200 space-y-4">
+                <div>
+                    <div class="flex justify-between text-xs font-bold text-gray-700 mb-1">
+                        <span>Độ lọc nhiễu (Block Size)</span>
+                        <span id="valBlock">15</span>
+                    </div>
+                    <input type="range" id="rangeBlock" min="3" max="51" step="2" value="15" class="accent-blue-600">
+                    <p class="text-[10px] text-gray-400">Kéo tăng lên nếu chữ bị đứt nét.</p>
+                </div>
+
+                <div>
+                    <div class="flex justify-between text-xs font-bold text-gray-700 mb-1">
+                        <span>Độ sáng (Constant)</span>
+                        <span id="valC">10</span>
+                    </div>
+                    <input type="range" id="rangeC" min="1" max="30" step="1" value="10" class="accent-blue-600">
+                    <p class="text-[10px] text-gray-400">Kéo tăng lên để xóa nền xám/bóng đen.</p>
+                </div>
+                
+                <div class="flex gap-2 pt-2">
+                    <button onclick="setMode('bw')" class="flex-1 py-2 bg-gray-800 text-white text-xs font-bold rounded hover:bg-black">Đen trắng (Rõ nhất)</button>
+                    <button onclick="setMode('gray')" class="flex-1 py-2 bg-gray-200 text-gray-700 text-xs font-bold rounded hover:bg-gray-300">Xám (Tự nhiên)</button>
+                </div>
             </div>
         </div>
     </div>
 
     <script>
-        function previewImage(input) {
-            const file = input.files[0];
-            if (!file) return;
+        let cvReady = false;
+        let currentMode = 'bw'; // bw (Scan) hoặc gray (Thường)
 
+        function onOpenCvReady() {
+            cvReady = true;
+            document.getElementById('status').innerText = "Sẵn sàng!";
+            document.getElementById('status').className = "mb-4 text-center text-sm font-bold text-green-600";
+            document.getElementById('fileInput').disabled = false;
+        }
+
+        document.getElementById('fileInput').addEventListener('change', (e) => {
+            if (!cvReady || !e.target.files[0]) return;
             const reader = new FileReader();
-            reader.onload = function(e) {
-                const img = document.getElementById('imgResult');
-                img.src = e.target.result;
-                document.getElementById('previewArea').classList.remove('hidden');
+            reader.onload = (ev) => {
+                const img = document.getElementById('imgSrc');
+                img.src = ev.target.result;
+                img.onload = () => {
+                    document.getElementById('editorArea').classList.remove('hidden');
+                    processImage(); // Xử lý ngay khi ảnh load
+                }
+            };
+            reader.readAsDataURL(e.target.files[0]);
+        });
+
+        // Lắng nghe thanh trượt
+        document.getElementById('rangeBlock').oninput = (e) => {
+            document.getElementById('valBlock').innerText = e.target.value;
+            processImage();
+        };
+        document.getElementById('rangeC').oninput = (e) => {
+            document.getElementById('valC').innerText = e.target.value;
+            processImage();
+        };
+
+        function setMode(mode) {
+            currentMode = mode;
+            processImage();
+        }
+
+        function processImage() {
+            try {
+                let src = cv.imread('imgSrc');
+                let dst = new cv.Mat();
+                
+                // 1. Resize nếu ảnh quá to (để chạy nhanh trên điện thoại)
+                if(src.cols > 1200) {
+                    let scale = 1200 / src.cols;
+                    let dsize = new cv.Size(src.cols * scale, src.rows * scale);
+                    cv.resize(src, src, dsize, 0, 0, cv.INTER_AREA);
+                }
+
+                // 2. Chuyển sang ảnh xám (Grayscale)
+                cv.cvtColor(src, src, cv.COLOR_RGBA2GRAY, 0);
+
+                if (currentMode === 'bw') {
+                    // --- THUẬT TOÁN SCAN ĐEN TRẮNG (ADAPTIVE THRESHOLD) ---
+                    // Đây là thuật toán "thần thánh" giúp loại bỏ bóng đổ
+                    
+                    let blockSize = parseInt(document.getElementById('rangeBlock').value);
+                    let C = parseInt(document.getElementById('rangeC').value);
+
+                    // BlockSize phải là số lẻ
+                    if (blockSize % 2 === 0) blockSize++; 
+
+                    // Áp dụng bộ lọc
+                    // 255: Giá trị màu trắng tối đa
+                    // ADAPTIVE_THRESH_GAUSSIAN_C: Thuật toán tính toán thông minh
+                    // THRESH_BINARY: Biến mọi thứ thành Đen hoặc Trắng
+                    cv.adaptiveThreshold(src, dst, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY, blockSize, C);
+                
+                } else {
+                    // --- CHẾ ĐỘ XÁM TỰ NHIÊN (Tăng độ tương phản + Sáng) ---
+                    // convertScaleAbs(src, dst, alpha, beta)
+                    // alpha: Độ tương phản (Contrast) - VD: 1.5
+                    // beta: Độ sáng (Brightness) - VD: 20
+                    src.convertTo(dst, -1, 1.5, 30);
+                }
+
+                // 3. Hiển thị
+                cv.imshow('canvasOutput', dst);
+
+                // Dọn dẹp bộ nhớ
+                src.delete(); dst.delete();
+
+            } catch (err) {
+                console.error(err);
             }
-            reader.readAsDataURL(file);
         }
     </script>
-
 </body>
 </html>
