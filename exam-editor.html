@@ -487,6 +487,30 @@
         window.autoScaleTables = autoScaleTables;
         window.convertArrayToMatrix = convertArrayToMatrix; 
 
+        // [MỚI] HÀM HỖ TRỢ: PHÂN TÍCH ID CÂU HỎI (VD: 9D1H1-6)
+        const parseQuestionID = (idStr) => {
+            let subject = 'Khác';
+            let level = 'Thông hiểu'; 
+            let levelColor = 'gray';
+            
+            if (idStr.includes('D')) subject = 'Đại số';
+            else if (idStr.includes('H')) subject = 'Hình học';
+            else if (idStr.includes('G')) subject = 'Giải tích';
+            
+            // Logic đoán mức độ dựa trên ký tự cuối
+            const lastChar = idStr.slice(-1);
+            if (!isNaN(lastChar)) {
+                const lv = parseInt(lastChar);
+                if (lv === 1) { level = 'Nhận biết'; levelColor = 'green'; }
+                else if (lv === 2) { level = 'Thông hiểu'; levelColor = 'blue'; }
+                else if (lv === 3) { level = 'Vận dụng'; levelColor = 'orange'; }
+                else if (lv >= 4) { level = 'Vận dụng cao'; levelColor = 'red'; }
+            }
+            return { subject, level, levelColor };
+        };
+
+    // --- HÀM MỚI: BẬT/TẮT Ô NHẬP LIỆU KẾT QUẢ ---
+
     // --- HÀM MỚI: BẬT/TẮT Ô NHẬP LIỆU KẾT QUẢ ---
         window.toggleResultOptions = () => {
             const val = document.querySelector('input[name="settingShowResult"]:checked').value;
@@ -1168,30 +1192,23 @@
             const q = window.questions[index];
             const editor = document.getElementById('editorArea');
             
-            // [MỚI] TẠO THANH THÔNG TIN (TAGS) TỪ ID
+            // [MỚI] HIỂN THỊ THANH TAG NẾU CÓ ID
             let tagHtml = '';
             if (q.mapId) {
-                // Tái phân tích lại để lấy màu sắc (nếu cần) hoặc dùng thông tin đã lưu
-                let lvColor = 'gray';
-                if(q.level === 'Nhận biết') lvColor = 'green';
-                else if(q.level === 'Thông hiểu') lvColor = 'blue';
-                else if(q.level === 'Vận dụng') lvColor = 'yellow'; // yellow-600
-                else if(q.level === 'Vận dụng cao') lvColor = 'red';
-
+                // Nếu chưa có màu (do load từ file cũ), phân tích lại
+                let lvColor = q.levelColor || 'gray';
                 tagHtml = `
-                <div class="flex items-center gap-3 mb-4 bg-gray-50 p-2 rounded-lg border border-gray-200">
+                <div class="flex items-center gap-3 mb-4 bg-white p-3 rounded-xl border border-blue-100 shadow-sm">
                     <div class="flex items-center gap-2">
-                        <span class="text-xs font-bold text-gray-500 uppercase">ID:</span>
-                        <span class="font-mono text-xs font-black text-blue-700 bg-white px-2 py-1 rounded border">${q.mapId}</span>
+                        <span class="text-[10px] font-bold text-gray-400 uppercase tracking-wider">ID:</span>
+                        <span class="font-mono text-sm font-black text-blue-600 bg-blue-50 px-2 py-1 rounded border border-blue-100">${q.mapId}</span>
                     </div>
-                    <div class="h-4 w-[1px] bg-gray-300"></div>
+                    <div class="h-4 w-[1px] bg-gray-200"></div>
                     <div class="flex gap-2">
-                        <span class="text-[10px] uppercase font-bold bg-white text-gray-600 px-2 py-1 rounded border shadow-sm">${q.subject || 'Chưa rõ'}</span>
-                        <span class="text-[10px] uppercase font-bold bg-${lvColor}-100 text-${lvColor}-700 px-2 py-1 rounded border border-${lvColor}-200 shadow-sm">${q.level || 'Chưa rõ'}</span>
+                        <span class="text-xs font-bold text-gray-600 bg-gray-100 px-2 py-1 rounded border border-gray-200">${q.subject || 'Chưa rõ'}</span>
+                        <span class="text-xs font-bold text-${lvColor}-600 bg-${lvColor}-50 px-2 py-1 rounded border border-${lvColor}-100">${q.level || 'Chưa rõ'}</span>
                     </div>
                 </div>`;
-            } else {
-                tagHtml = `<div class="mb-4 text-xs text-gray-400 italic bg-gray-50 p-2 rounded text-center">Câu hỏi này chưa có ID phân loại.</div>`;
             }
 
             let html = `
@@ -1452,33 +1469,7 @@
                 }
             }, 800);
         };
-                // --- HÀM HỖ TRỢ: PHÂN TÍCH ID CÂU HỎI (Logic thông minh) ---
-        const parseQuestionID = (idStr) => {
-            // Ví dụ ID: 9D1H1-6 (Lớp 9, Đại số, Chương 1, Bài 1, Mức 6?)
-            // Quy ước: D = Đại số, H = Hình học
-            // Số cuối cùng: 1=NB, 2=TH, 3=VD, 4=VDC (hoặc theo quy ước riêng của bạn)
-            
-            let subject = 'Khác';
-            let level = 'Thông hiểu'; 
-            let levelColor = 'gray';
-            
-            if (idStr.includes('D')) subject = 'Đại số';
-            else if (idStr.includes('H')) subject = 'Hình học';
-            else if (idStr.includes('G')) subject = 'Giải tích';
-            
-            // Logic đoán mức độ dựa trên ký tự cuối cùng của ID (VD: -1, -2)
-            const lastChar = idStr.slice(-1);
-            if (!isNaN(lastChar)) {
-                const lv = parseInt(lastChar);
-                if (lv === 1) { level = 'Nhận biết'; levelColor = 'green'; }
-                else if (lv === 2) { level = 'Thông hiểu'; levelColor = 'blue'; }
-                else if (lv === 3) { level = 'Vận dụng'; levelColor = 'orange'; }
-                else if (lv >= 4) { level = 'Vận dụng cao'; levelColor = 'red'; }
-            }
-            return { subject, level, levelColor };
-        };
-        // --- CẬP NHẬT: XỬ LÝ UPLOAD VÀ NẠP NGÂN HÀNG ---
-        // --- CẬP NHẬT: IMPORT LATEX & TỰ ĐỘNG GẮN TAG (KHÔNG LƯU AUTO) ---
+                 // --- CẬP NHẬT: IMPORT LATEX & TỰ ĐỘNG GẮN TAG (KHÔNG LƯU AUTO) ---
         window.handleTexUpload = (input) => {
             const file = input.files[0]; 
             if (!file) return;
@@ -2396,55 +2387,7 @@
             setTimeout(() => modal.classList.add('hidden'), 300);
         };
         // --- HÀM MỚI: LƯU CÁC CÂU CÓ ID VÀO NGÂN HÀNG (R2) ---
-        window.saveCurrentQuestionsToBank = async () => {
-            // 1. Lọc ra các câu có ID hợp lệ
-            const validQuestions = window.questions.filter(q => q.mapId && q.mapId.trim() !== "");
-            
-            if (validQuestions.length === 0) {
-                window.customAlert("Không có câu hỏi nào có ID hợp lệ (VD: [9D1...]) để lưu!", "error");
-                return;
-            }
-
-            // 2. Thống kê
-            let countDai = 0, countHinh = 0;
-            validQuestions.forEach(q => {
-                if (q.subject === 'Đại số') countDai++;
-                else if (q.subject === 'Hình học') countHinh++;
-            });
-
-            // 3. Hỏi xác nhận
-            const confirmMsg = `Tìm thấy ${validQuestions.length} câu có ID hợp lệ:\n- Đại số: ${countDai} câu\n- Hình học: ${countHinh} câu\n\nBạn có muốn lưu vào Ngân hàng Cloudflare không?`;
-            if (!await window.customConfirm(confirmMsg)) return;
-
-            // 4. Gửi lên Cloudflare Worker
-            const btn = document.querySelector('button[title="Lưu các câu có ID vào kho"]');
-            const oldHtml = btn.innerHTML;
-            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang lưu...'; btn.disabled = true;
-
-            try {
-                // Link Worker của bạn
-                const WORKER_URL = "https://upload-helper.phamngockhanh-942001.workers.dev/bank";
-                
-                const response = await fetch(WORKER_URL, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    // Gửi danh sách câu hỏi đã lọc (chứa cả link ảnh R2 nếu có)
-                    body: JSON.stringify(validQuestions) 
-                });
-
-                if (!response.ok) throw new Error("Server Error: " + response.statusText);
-                
-                const result = await response.json();
-                window.showToast(`Thành công! Đã lưu ${result.count} câu vào Ngân hàng.`, "success");
-
-            } catch (err) {
-                console.error("Lỗi lưu Bank:", err);
-                window.customAlert("Lỗi khi lưu: " + err.message, "error");
-            } finally {
-                btn.innerHTML = oldHtml; btn.disabled = false;
-            }
-        };
-       // --- [FIX] CẬP NHẬT GIAO DIỆN CHẤM: XỬ LÝ ĐẢO ĐỀ & HIỂN THỊ ĐÚNG ---
+               // --- [FIX] CẬP NHẬT GIAO DIỆN CHẤM: XỬ LÝ ĐẢO ĐỀ & HIỂN THỊ ĐÚNG ---
         window.renderGradingView = () => {
             const container = document.getElementById('gradingQuestionList');
             const nav = document.getElementById('gradingNavList');
@@ -2853,6 +2796,54 @@
             }
         };
         // ============================================================
+    // --- [MỚI] HÀM LƯU VÀO NGÂN HÀNG (R2) ---
+        window.saveCurrentQuestionsToBank = async () => {
+            // 1. Lọc ra các câu có ID hợp lệ
+            const validQuestions = window.questions.filter(q => q.mapId && q.mapId.trim() !== "");
+            
+            if (validQuestions.length === 0) {
+                window.customAlert("Không tìm thấy câu hỏi nào có ID hợp lệ (VD: [9D1...]) để lưu!", "error");
+                return;
+            }
+
+            // 2. Thống kê
+            let countDai = 0, countHinh = 0;
+            validQuestions.forEach(q => {
+                if (q.subject === 'Đại số') countDai++;
+                else if (q.subject === 'Hình học') countHinh++;
+            });
+
+            // 3. Hỏi xác nhận
+            const confirmMsg = `Tìm thấy ${validQuestions.length} câu có ID hợp lệ:\n- Đại số: ${countDai} câu\n- Hình học: ${countHinh} câu\n\nBạn có muốn lưu vào Ngân hàng Cloudflare không?`;
+            if (!await window.customConfirm(confirmMsg)) return;
+
+            // 4. Gửi lên Cloudflare Worker
+            const btn = document.querySelector('button[onclick="saveCurrentQuestionsToBank()"]');
+            const oldHtml = btn.innerHTML;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang lưu...'; btn.disabled = true;
+
+            try {
+                // Link Worker của bạn
+                const WORKER_URL = "https://upload-helper.phamngockhanh-942001.workers.dev/bank";
+                
+                const response = await fetch(WORKER_URL, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(validQuestions) 
+                });
+
+                if (!response.ok) throw new Error("Server Error: " + response.statusText);
+                
+                const result = await response.json();
+                window.showToast(`Thành công! Đã lưu ${result.count} câu vào Ngân hàng.`, "success");
+
+            } catch (err) {
+                console.error("Lỗi lưu Bank:", err);
+                window.customAlert("Lỗi khi lưu: " + err.message, "error");
+            } finally {
+                btn.innerHTML = oldHtml; btn.disabled = false;
+            }
+        };
     </script>
     <div id="missingImagesPanel" class="hidden fixed bottom-4 right-4 z-50 bg-white border-2 border-orange-500 shadow-2xl rounded-xl w-64 overflow-hidden flex flex-col max-h-[60vh]">
         <div class="bg-orange-500 text-white p-3 flex justify-between items-center shadow-sm">
