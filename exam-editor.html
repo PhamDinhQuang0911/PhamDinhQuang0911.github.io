@@ -1421,46 +1421,78 @@
                 }
             }, 800);
         };
+        // --- HÀM HỖ TRỢ: PHÂN TÍCH ID CÂU HỎI ---
+        const parseQuestionID = (idStr) => {
+            // Ví dụ ID: 9D1H1-6 hoặc 12H2-1
+            let subject = 'Khác';
+            let level = 'Thông hiểu'; 
+            
+            if (idStr.includes('D')) subject = 'Đại số';
+            else if (idStr.includes('H')) subject = 'Hình học';
+            
+            // Logic đoán mức độ dựa trên ký tự cuối (1=NB, 2=TH, 3=VD, 4=VDC)
+            const lastChar = idStr.slice(-1);
+            if (!isNaN(lastChar)) {
+                const lv = parseInt(lastChar);
+                if (lv === 1) level = 'Nhận biết';
+                else if (lv === 2) level = 'Thông hiểu';
+                else if (lv === 3) level = 'Vận dụng';
+                else if (lv >= 4) level = 'Vận dụng cao';
+            }
+            return { subject, level };
+        };
+
+        // --- CẬP NHẬT: XỬ LÝ UPLOAD VÀ NẠP NGÂN HÀNG ---
         window.handleTexUpload = (input) => {
             const file = input.files[0]; 
             if (!file) return;
             
+            window.showToast("Đang xử lý...", "info");
+
             const reader = new FileReader();
-            reader.onload = function(e) {
+            reader.onload = async function(e) {
                 if (window.currentQIndex !== -1) saveCurrentQuestionToMemory();
                 
                 let content = e.target.result;
 
-                // --- [UPDATE] XỬ LÝ LÀM SẠCH LATEX THEO YÊU CẦU ---
-                // 1. Loại bỏ \, (khoảng trắng nhỏ gây lỗi hiển thị)
-                // 2. Loại bỏ môi trường multicols (Xóa tag, giữ nội dung)
+                // --- 1. LÀM SẠCH LATEX ---
                 content = content.replace(/\\begin\{multicols\}\{.*?\}/g, "");
                 content = content.replace(/\\end\{multicols\}/g, "");
-
-                // 3. [FIX] Sửa lỗi align* -> Chuyển thành aligned và thêm $$ bao quanh
-                // Cách này đảm bảo MathJax nhận diện đúng là khối công thức
-                content = content.replace(/\\begin\{align\*\}([\s\S]*?)\\end\{align\*\}/g, (match, p1) => {
-                    return `$$ \\begin{aligned}${p1}\\end{aligned} $$`;
-                });
-                // ---------------------------------------------------
-
-                content = content.replace(/(?<!\\)%.*/g, '');
+                content = content.replace(/\\begin\{align\*\}([\s\S]*?)\\end\{align\*\}/g, (match, p1) => `$$ \\begin{aligned}${p1}\\end{aligned} $$`);
+                content = content.replace(/(?<!\\)%.*/g, ''); // Xóa comment trừ \%
                 content = content.replace(/\\begin\{array\}\s*\{[^{}]*?\}/g, '\\begin{matrix}');
                 content = content.replace(/\\begin\{array\}/g, '\\begin{matrix}');
                 content = content.replace(/\\end\{array\}/g, '\\end{matrix}');
 
                 pendingImageUploads = [];
+                let batchQuestions = []; // Danh sách câu hỏi để nạp Bank
                 
                 const blockRegex = /\\begin\{(ex|bt|vd)\}([\s\S]*?)\\end\{\1\}/g;
                 let match, count = 0;
                 
                 while ((match = blockRegex.exec(content)) !== null) {
                     let fullBody = match[2];
+                    
+                    // --- TỰ ĐỘNG BẮT ID (REGEX) ---
+                    let questionID = "";
+                    let tags = { subject: 'Chưa phân loại', level: 'Chưa phân loại' };
+
+                    // Tìm chuỗi %%[ID] hoặc %[ID]
+                    const idMatch = fullBody.match(/(?:%%|%)\s*\[([a-zA-Z0-9\-_.]+)\]/);
+                    if (idMatch) {
+                        questionID = idMatch[1]; // VD: 9D1H1-6
+                        tags = parseQuestionID(questionID);
+                        // Xóa ID khỏi nội dung hiển thị
+                        fullBody = fullBody.replace(idMatch[0], ''); 
+                    }
+                    // -------------------------------
+
                     fullBody = fullBody.replace(/^\s*\[.*?\]/, ''); 
                     
                     let qType = 'essay';
                     let qData = { content: '', solution: '', options: [], statements: [], answer: '', point: 0 };
                     
+                    // --- TÁCH LỜI GIẢI ---
                     let mainContent = fullBody;
                     const loigiaiIndex = fullBody.lastIndexOf('\\loigiai');
                     
@@ -1469,11 +1501,9 @@
                         const solPart = fullBody.substring(loigiaiIndex);
                         const solMatch = solPart.match(/\\loigiai\s*\{([\s\S]*)\}/);
                         if (solMatch) {
-                             // Tìm đóng ngoặc chính xác cho lời giải
                              let depth = 0; let start = solPart.indexOf('{'); let end = -1;
                              for(let i=start; i<solPart.length; i++){
-                                 if(solPart[i]=='{') depth++;
-                                 else if(solPart[i]=='}') depth--;
+                                 if(solPart[i]=='{') depth++; else if(solPart[i]=='}') depth--;
                                  if(depth===0 && start!==-1) { end=i; break; }
                              }
                              if(end !== -1) {
@@ -1485,26 +1515,20 @@
                     
                     let procBody = processLatexImagesWithDetection(cleanTikzCode(mainContent), count);
                     
+                    // --- PHÂN LOẠI CÂU HỎI ---
                     if (procBody.includes('\\choiceTF')) {
                         qType = 'tf';
                         const parts = procBody.split('\\choiceTF');
                         qData.content = parts[0].trim();
                         const statementsRaw = parts[1];
-                        
                         let tempStmts = [];
                         let cursor = 0; 
                         function getNextArg(str) {
-                            const s = str.indexOf('{', cursor); 
-                            if(s===-1) return null;
+                            const s = str.indexOf('{', cursor); if(s===-1) return null;
                             let d=1; let e=-1;
-                            for(let i=s+1; i<str.length; i++){
-                                if(str[i]=='{') d++; else if(str[i]=='}') d--;
-                                if(d===0){ e=i; break; }
-                            }
-                            if(e!==-1) { cursor=e+1; return str.substring(s+1, e); }
-                            return null;
+                            for(let i=s+1; i<str.length; i++){ if(str[i]=='{') d++; else if(str[i]=='}') d--; if(d===0){ e=i; break; } }
+                            if(e!==-1) { cursor=e+1; return str.substring(s+1, e); } return null;
                         }
-                        
                         cursor = 0; 
                         while(cursor < statementsRaw.length){
                             let txt = getNextArg(statementsRaw);
@@ -1551,14 +1575,45 @@
                         qData.content = procBody;
                     }
                     
-                    window.questions.push({ type: qType, ...qData });
+                    // Thêm thông tin ID vào object câu hỏi
+                    const finalQuestion = { type: qType, ...qData, mapId: questionID, subject: tags.subject, level: tags.level };
+                    
+                    // Thêm vào editor để giáo viên xem
+                    window.questions.push(finalQuestion);
+                    
+                    // Thêm vào danh sách chờ nạp Bank (chỉ nạp nếu có ID)
+                    if (questionID) {
+                        batchQuestions.push(finalQuestion);
+                    }
                     count++;
                 }
 
                 input.value = ""; 
-                
-                const tikzCount = pendingImageUploads.filter(i => i.type === 'tikz').length;
 
+                // --- GỬI LÊN CLOUDFLARE WORKER ---
+                if (batchQuestions.length > 0) {
+                    try {
+                        const WORKER_URL = "https://upload-helper.phamngockhanh-942001.workers.dev/bank";
+                        window.showToast(`Đang nạp ${batchQuestions.length} câu hỏi vào Cloudflare...`, "info");
+
+                        const response = await fetch(WORKER_URL, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(batchQuestions)
+                        });
+
+                        if (!response.ok) throw new Error("Server error: " + response.statusText);
+                        
+                        const resJson = await response.json();
+                        window.showToast(`Đã lưu thành công ${resJson.count || batchQuestions.length} câu vào kho!`, "success");
+                    } catch (err) {
+                        console.error("Lỗi nạp ngân hàng:", err);
+                        window.showToast("Lỗi kết nối Cloudflare: " + err.message, "error");
+                    }
+                }
+                
+                // Xử lý TikZ và kết thúc
+                const tikzCount = pendingImageUploads.filter(i => i.type === 'tikz').length;
                 if (tikzCount > 0) {
                     document.getElementById('detectTikzCount').innerText = tikzCount;
                     const m = document.getElementById('importModeModal');
