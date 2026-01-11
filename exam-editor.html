@@ -2833,29 +2833,59 @@
             }
         };
 
-    window.parseQuestionID = (idStr) => {
-        let subject = 'Khác';
-        let level = 'Thông hiểu'; 
-        let levelColor = 'blue';
-        
-        if (idStr.includes('D') || idStr.includes('Đ')) subject = 'Đại số';
-        else if (idStr.includes('H')) subject = 'Hình học';
-        else if (idStr.includes('G')) subject = 'Giải tích';
-        
-        // Logic mức độ: Dựa vào số cuối cùng của ID
-        // File 26.tex có số cuối là 7, 8... -> Có thể quy ước >5 là VDC, <5 là VD
-        const parts = idStr.split('-');
-        const lastPart = parts[parts.length - 1];
-        const num = parseInt(lastPart);
-        
-        if (!isNaN(num)) {
-            if (num <= 2) { level = 'Nhận biết'; levelColor = 'green'; }
-            else if (num <= 4) { level = 'Thông hiểu'; levelColor = 'blue'; }
-            else if (num <= 6) { level = 'Vận dụng'; levelColor = 'orange'; }
-            else { level = 'Vận dụng cao'; levelColor = 'red'; }
-        }
-        return { subject, level, levelColor };
-    };
+    // 1. HÀM PHÂN TÍCH ID (CẬP NHẬT LOGIC N-H-V-C)
+        window.parseQuestionID = (idStr) => {
+            // Ví dụ ID chuẩn: 9D1H1-7 (Lớp 9 - Đại số - Chương 1 - Thông Hiểu - Bài 1)
+            // Cấu trúc: [Lớp][Môn][Chương][MỨC ĐỘ]...
+            
+            let subject = 'Khác';
+            let level = 'Thông hiểu'; 
+            let levelColor = 'blue';
+            
+            // 1. Xác định Môn (Dựa vào chữ cái đầu tiên tìm thấy)
+            const matchSubj = idStr.match(/[A-Z]/); // Tìm chữ cái in hoa đầu tiên
+            let subjIndex = -1;
+
+            if (matchSubj) {
+                subjIndex = matchSubj.index;
+                const char = matchSubj[0];
+                if (char === 'D') subject = 'Đại số';
+                else if (char === 'H') subject = 'Hình học';
+                else if (char === 'G') subject = 'Giải tích';
+            }
+            
+            // 2. Xác định Mức độ (N, H, V, C)
+            // Ký tự mức độ thường nằm cách ký tự Môn 1 chữ số (Chỉ số chương)
+            // Ví dụ: 9[D]1[H]... -> Chữ H nằm sau chữ D 1 số.
+            
+            if (subjIndex !== -1 && idStr.length > subjIndex + 2) {
+                const levelChar = idStr.charAt(subjIndex + 2); // Lấy ký tự mức độ
+                
+                switch (levelChar) {
+                    case 'N': 
+                        level = 'Nhận biết'; levelColor = 'green'; 
+                        break;
+                    case 'H': 
+                        level = 'Thông hiểu'; levelColor = 'blue'; 
+                        break;
+                    case 'V': 
+                        level = 'Vận dụng'; levelColor = 'orange'; 
+                        break;
+                    case 'C': 
+                        level = 'Vận dụng cao'; levelColor = 'red'; 
+                        break;
+                    default:
+                        // Fallback: Nếu không đúng vị trí, thử tìm trong chuỗi
+                        if (idStr.includes('VDC')) { level = 'Vận dụng cao'; levelColor = 'red'; }
+                        else if (idStr.includes('NB')) { level = 'Nhận biết'; levelColor = 'green'; }
+                        else if (idStr.includes('TH')) { level = 'Thông hiểu'; levelColor = 'blue'; }
+                        else if (idStr.includes('VD')) { level = 'Vận dụng'; levelColor = 'orange'; }
+                        break;
+                }
+            }
+
+            return { subject, level, levelColor };
+        };
     // ============================================================
     // --- [MỚI] HÀM LƯU VÀO NGÂN HÀNG (R2) ---
         window.saveCurrentQuestionsToBank = async () => {
