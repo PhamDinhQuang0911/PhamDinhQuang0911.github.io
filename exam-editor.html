@@ -246,6 +246,7 @@
                 <div class="p-3 border-b border-gray-200 flex justify-between items-center bg-gray-50 shrink-0">
                     <h3 class="font-bold text-gray-700 text-sm"><i class="fa-solid fa-list-ol mr-2"></i>Danh sách (<span id="totalQCount">0</span>)</h3>
                     <div class="flex gap-2">
+                        <button onclick="saveCurrentQuestionsToBank()" class="px-3 py-1.5 bg-indigo-100 text-indigo-700 rounded text-xs font-bold hover:bg-indigo-200 border border-indigo-200" title="Lưu các câu có ID vào kho"><i class="fa-solid fa-cloud-arrow-up mr-1"></i> Lưu Bank</button>
                         <button onclick="openScoringModal()" class="px-3 py-1.5 bg-yellow-100 text-yellow-700 rounded text-xs font-bold hover:bg-yellow-200"><i class="fa-solid fa-calculator mr-1"></i> Chia điểm</button>
                         <button onclick="document.getElementById('texInput').click()" class="px-3 py-1.5 bg-green-100 text-green-700 rounded text-xs font-bold hover:bg-green-200"><i class="fa-solid fa-file-import mr-1"></i> LaTeX</button>
                         <input type="file" id="texInput" accept=".tex,.txt" class="hidden" onchange="handleTexUpload(this)">
@@ -1166,7 +1167,37 @@
             setTimeout(() => { const activeItem = document.getElementById(`q-preview-${index}`); if(activeItem) activeItem.scrollIntoView({behavior: 'smooth', block: 'nearest'}); }, 100);
             const q = window.questions[index];
             const editor = document.getElementById('editorArea');
-            let html = `<div class="mb-4"><label class="form-group-title">Nội dung</label><textarea id="editContent" class="form-input min-h-[120px]" oninput="autoSaveMemory()">${q.content || ''}</textarea></div>`;
+            
+            // [MỚI] TẠO THANH THÔNG TIN (TAGS) TỪ ID
+            let tagHtml = '';
+            if (q.mapId) {
+                // Tái phân tích lại để lấy màu sắc (nếu cần) hoặc dùng thông tin đã lưu
+                let lvColor = 'gray';
+                if(q.level === 'Nhận biết') lvColor = 'green';
+                else if(q.level === 'Thông hiểu') lvColor = 'blue';
+                else if(q.level === 'Vận dụng') lvColor = 'yellow'; // yellow-600
+                else if(q.level === 'Vận dụng cao') lvColor = 'red';
+
+                tagHtml = `
+                <div class="flex items-center gap-3 mb-4 bg-gray-50 p-2 rounded-lg border border-gray-200">
+                    <div class="flex items-center gap-2">
+                        <span class="text-xs font-bold text-gray-500 uppercase">ID:</span>
+                        <span class="font-mono text-xs font-black text-blue-700 bg-white px-2 py-1 rounded border">${q.mapId}</span>
+                    </div>
+                    <div class="h-4 w-[1px] bg-gray-300"></div>
+                    <div class="flex gap-2">
+                        <span class="text-[10px] uppercase font-bold bg-white text-gray-600 px-2 py-1 rounded border shadow-sm">${q.subject || 'Chưa rõ'}</span>
+                        <span class="text-[10px] uppercase font-bold bg-${lvColor}-100 text-${lvColor}-700 px-2 py-1 rounded border border-${lvColor}-200 shadow-sm">${q.level || 'Chưa rõ'}</span>
+                    </div>
+                </div>`;
+            } else {
+                tagHtml = `<div class="mb-4 text-xs text-gray-400 italic bg-gray-50 p-2 rounded text-center">Câu hỏi này chưa có ID phân loại.</div>`;
+            }
+
+            let html = `
+                ${tagHtml}
+                <div class="mb-4"><label class="form-group-title">Nội dung</label><textarea id="editContent" class="form-input min-h-[120px]" oninput="autoSaveMemory()">${q.content || ''}</textarea></div>
+            `;
             if (q.type === 'mc') {
                 html += `<div class="grid grid-cols-1 gap-3 mb-4">`;
                 const opts = q.options || ["", "", "", ""];
@@ -1441,67 +1472,85 @@
             }
             return { subject, level };
         };
-
+        // --- HÀM HỖ TRỢ: PHÂN TÍCH ID CÂU HỎI (Logic thông minh) ---
+        const parseQuestionID = (idStr) => {
+            // Ví dụ ID: 9D1H1-6 (Lớp 9, Đại số, Chương 1, Bài 1, Mức 6?)
+            // Quy ước: D = Đại số, H = Hình học
+            // Số cuối cùng: 1=NB, 2=TH, 3=VD, 4=VDC (hoặc theo quy ước riêng của bạn)
+            
+            let subject = 'Khác';
+            let level = 'Thông hiểu'; 
+            let levelColor = 'gray';
+            
+            if (idStr.includes('D')) subject = 'Đại số';
+            else if (idStr.includes('H')) subject = 'Hình học';
+            else if (idStr.includes('G')) subject = 'Giải tích';
+            
+            // Logic đoán mức độ dựa trên ký tự cuối cùng của ID (VD: -1, -2)
+            const lastChar = idStr.slice(-1);
+            if (!isNaN(lastChar)) {
+                const lv = parseInt(lastChar);
+                if (lv === 1) { level = 'Nhận biết'; levelColor = 'green'; }
+                else if (lv === 2) { level = 'Thông hiểu'; levelColor = 'blue'; }
+                else if (lv === 3) { level = 'Vận dụng'; levelColor = 'orange'; }
+                else if (lv >= 4) { level = 'Vận dụng cao'; levelColor = 'red'; }
+            }
+            return { subject, level, levelColor };
+        };
         // --- CẬP NHẬT: XỬ LÝ UPLOAD VÀ NẠP NGÂN HÀNG ---
+        // --- CẬP NHẬT: IMPORT LATEX & TỰ ĐỘNG GẮN TAG (KHÔNG LƯU AUTO) ---
         window.handleTexUpload = (input) => {
             const file = input.files[0]; 
             if (!file) return;
             
-            window.showToast("Đang xử lý...", "info");
+            window.showToast("Đang phân tích file LaTeX...", "info");
 
             const reader = new FileReader();
-            reader.onload = async function(e) {
+            reader.onload = function(e) {
                 if (window.currentQIndex !== -1) saveCurrentQuestionToMemory();
                 
                 let content = e.target.result;
 
-                // --- 1. LÀM SẠCH LATEX ---
-                content = content.replace(/\\begin\{multicols\}\{.*?\}/g, "");
-                content = content.replace(/\\end\{multicols\}/g, "");
-                content = content.replace(/\\begin\{align\*\}([\s\S]*?)\\end\{align\*\}/g, (match, p1) => `$$ \\begin{aligned}${p1}\\end{aligned} $$`);
-                content = content.replace(/(?<!\\)%.*/g, ''); // Xóa comment trừ \%
-                content = content.replace(/\\begin\{array\}\s*\{[^{}]*?\}/g, '\\begin{matrix}');
-                content = content.replace(/\\begin\{array\}/g, '\\begin{matrix}');
-                content = content.replace(/\\end\{array\}/g, '\\end{matrix}');
+                // 1. Làm sạch LaTeX (Clean junk)
+                content = content.replace(/\\begin\{multicols\}\{.*?\}/g, "").replace(/\\end\{multicols\}/g, "");
+                content = content.replace(/\\begin\{align\*\}([\s\S]*?)\\end\{align\*\}/g, (m, p1) => `$$ \\begin{aligned}${p1}\\end{aligned} $$`);
+                content = content.replace(/(?<!\\)%.*/g, ''); 
+                content = content.replace(/\\begin\{array\}\s*\{[^{}]*?\}/g, '\\begin{matrix}').replace(/\\begin\{array\}/g, '\\begin{matrix}').replace(/\\end\{array\}/g, '\\end{matrix}');
 
                 pendingImageUploads = [];
-                let batchQuestions = []; // Danh sách câu hỏi để nạp Bank
-                
                 const blockRegex = /\\begin\{(ex|bt|vd)\}([\s\S]*?)\\end\{\1\}/g;
                 let match, count = 0;
                 
                 while ((match = blockRegex.exec(content)) !== null) {
                     let fullBody = match[2];
                     
-                    // --- TỰ ĐỘNG BẮT ID (REGEX) ---
+                    // --- TỰ ĐỘNG BẮT ID & PHÂN LOẠI ---
                     let questionID = "";
-                    let tags = { subject: 'Chưa phân loại', level: 'Chưa phân loại' };
+                    let tags = { subject: 'Chưa phân loại', level: '', levelColor: 'gray' };
 
-                    // Tìm chuỗi %%[ID] hoặc %[ID]
+                    // Regex tìm %%[ID] hoặc %[ID]
                     const idMatch = fullBody.match(/(?:%%|%)\s*\[([a-zA-Z0-9\-_.]+)\]/);
                     if (idMatch) {
                         questionID = idMatch[1]; // VD: 9D1H1-6
-                        tags = parseQuestionID(questionID);
-                        // Xóa ID khỏi nội dung hiển thị
-                        fullBody = fullBody.replace(idMatch[0], ''); 
+                        tags = parseQuestionID(questionID); // Phân tích Đại/Hình, Mức độ
+                        fullBody = fullBody.replace(idMatch[0], ''); // Xóa ID khỏi đề bài
                     }
-                    // -------------------------------
+                    // -----------------------------------
 
                     fullBody = fullBody.replace(/^\s*\[.*?\]/, ''); 
                     
                     let qType = 'essay';
                     let qData = { content: '', solution: '', options: [], statements: [], answer: '', point: 0 };
                     
-                    // --- TÁCH LỜI GIẢI ---
+                    // --- TÁCH LỜI GIẢI (Giữ nguyên logic cũ) ---
                     let mainContent = fullBody;
                     const loigiaiIndex = fullBody.lastIndexOf('\\loigiai');
-                    
                     if (loigiaiIndex !== -1) {
                         mainContent = fullBody.substring(0, loigiaiIndex);
                         const solPart = fullBody.substring(loigiaiIndex);
                         const solMatch = solPart.match(/\\loigiai\s*\{([\s\S]*)\}/);
                         if (solMatch) {
-                             let depth = 0; let start = solPart.indexOf('{'); let end = -1;
+                             let depth = 0, start = solPart.indexOf('{'), end = -1;
                              for(let i=start; i<solPart.length; i++){
                                  if(solPart[i]=='{') depth++; else if(solPart[i]=='}') depth--;
                                  if(depth===0 && start!==-1) { end=i; break; }
@@ -1515,26 +1564,23 @@
                     
                     let procBody = processLatexImagesWithDetection(cleanTikzCode(mainContent), count);
                     
-                    // --- PHÂN LOẠI CÂU HỎI ---
+                    // --- NHẬN DIỆN LOẠI CÂU HỎI (Giữ nguyên logic cũ) ---
                     if (procBody.includes('\\choiceTF')) {
                         qType = 'tf';
                         const parts = procBody.split('\\choiceTF');
                         qData.content = parts[0].trim();
-                        const statementsRaw = parts[1];
-                        let tempStmts = [];
-                        let cursor = 0; 
-                        function getNextArg(str) {
+                        const stmtsRaw = parts[1];
+                        // ... (Logic tách True/False giữ nguyên)
+                        let tempStmts = [], cursor = 0;
+                        const getNextArg = (str) => {
                             const s = str.indexOf('{', cursor); if(s===-1) return null;
-                            let d=1; let e=-1;
-                            for(let i=s+1; i<str.length; i++){ if(str[i]=='{') d++; else if(str[i]=='}') d--; if(d===0){ e=i; break; } }
+                            let d=1, e=-1; for(let i=s+1; i<str.length; i++){ if(str[i]=='{') d++; else if(str[i]=='}') d--; if(d===0){ e=i; break; } }
                             if(e!==-1) { cursor=e+1; return str.substring(s+1, e); } return null;
-                        }
+                        };
                         cursor = 0; 
-                        while(cursor < statementsRaw.length){
-                            let txt = getNextArg(statementsRaw);
-                            if(txt===null) break;
-                            let isT = txt.includes('\\True');
-                            tempStmts.push({text: txt.replace('\\True','').replace('\\False','').trim(), isTrue: isT});
+                        while(cursor < stmtsRaw.length){
+                            let txt = getNextArg(stmtsRaw); if(txt===null) break;
+                            tempStmts.push({text: txt.replace(/\\(True|False)/g,'').trim(), isTrue: txt.includes('\\True')});
                         }
                         qData.statements = tempStmts;
 
@@ -1542,18 +1588,14 @@
                         qType = 'mc';
                         const parts = procBody.split('\\choice');
                         qData.content = parts[0].trim();
-                        let cursor = 0;
-                        let optsRaw = parts[1];
-                        function getNextArg(str) { 
+                        let cursor = 0, optsRaw = parts[1], optCount = 0;
+                        const getNextArg = (str) => { 
                             const s = str.indexOf('{', cursor); if(s===-1) return null;
-                            let d=1; let e=-1;
-                            for(let i=s+1; i<str.length; i++){ if(str[i]=='{') d++; else if(str[i]=='}') d--; if(d===0){ e=i; break; } }
+                            let d=1, e=-1; for(let i=s+1; i<str.length; i++){ if(str[i]=='{') d++; else if(str[i]=='}') d--; if(d===0){ e=i; break; } }
                             if(e!==-1) { cursor=e+1; return str.substring(s+1, e); } return null;
-                        }
-                        let optCount = 0;
+                        };
                         while(optCount < 4) {
-                            let txt = getNextArg(optsRaw);
-                            if(txt===null) break;
+                            let txt = getNextArg(optsRaw); if(txt===null) break;
                             if(txt.includes('\\True')) qData.correct = optCount;
                             qData.options.push(txt.replace('\\True','').trim());
                             optCount++;
@@ -1562,57 +1604,33 @@
                         qType = 'short';
                         const parts = procBody.split('\\shortans');
                         qData.content = parts[0].trim();
-                        let start = procBody.indexOf('\\shortans') + 9;
-                        let depth = 0, end = -1;
+                        // ... (Logic tách Short Ans giữ nguyên)
+                        let start = procBody.indexOf('\\shortans') + 9, depth = 0, end = -1;
                         if(procBody[start] !== '{') start = procBody.indexOf('{', start);
-                        for(let i=start; i<procBody.length; i++){
-                            if(procBody[i]=='{') depth++; else if(procBody[i]=='}') depth--;
-                            if(depth===0 && depth !== -1) { end=i; break; }
-                        }
+                        for(let i=start; i<procBody.length; i++){ if(procBody[i]=='{') depth++; else if(procBody[i]=='}') depth--; if(depth===0 && depth!==-1) { end=i; break; } }
                         if(end!==-1) qData.answer = procBody.substring(start+1, end).trim();
                     } else {
                         qType = 'essay';
                         qData.content = procBody;
                     }
                     
-                    // Thêm thông tin ID vào object câu hỏi
-                    const finalQuestion = { type: qType, ...qData, mapId: questionID, subject: tags.subject, level: tags.level };
+                    // --- TẠO OBJECT CÂU HỎI CUỐI CÙNG ---
+                    // Lưu ý: Lưu ID và Tags vào đây để dùng cho nút "Lưu Bank" và hiển thị
+                    const finalQuestion = { 
+                        type: qType, 
+                        ...qData, 
+                        mapId: questionID,      // Lưu ID gốc (VD: 9D1H1-6)
+                        subject: tags.subject,  // Lưu môn (Đại/Hình)
+                        level: tags.level       // Lưu mức độ
+                    };
                     
-                    // Thêm vào editor để giáo viên xem
                     window.questions.push(finalQuestion);
-                    
-                    // Thêm vào danh sách chờ nạp Bank (chỉ nạp nếu có ID)
-                    if (questionID) {
-                        batchQuestions.push(finalQuestion);
-                    }
                     count++;
                 }
 
                 input.value = ""; 
-
-                // --- GỬI LÊN CLOUDFLARE WORKER ---
-                if (batchQuestions.length > 0) {
-                    try {
-                        const WORKER_URL = "https://upload-helper.phamngockhanh-942001.workers.dev/bank";
-                        window.showToast(`Đang nạp ${batchQuestions.length} câu hỏi vào Cloudflare...`, "info");
-
-                        const response = await fetch(WORKER_URL, {
-                            method: 'PUT',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(batchQuestions)
-                        });
-
-                        if (!response.ok) throw new Error("Server error: " + response.statusText);
-                        
-                        const resJson = await response.json();
-                        window.showToast(`Đã lưu thành công ${resJson.count || batchQuestions.length} câu vào kho!`, "success");
-                    } catch (err) {
-                        console.error("Lỗi nạp ngân hàng:", err);
-                        window.showToast("Lỗi kết nối Cloudflare: " + err.message, "error");
-                    }
-                }
                 
-                // Xử lý TikZ và kết thúc
+                // Xử lý TikZ và kết thúc (Giữ nguyên)
                 const tikzCount = pendingImageUploads.filter(i => i.type === 'tikz').length;
                 if (tikzCount > 0) {
                     document.getElementById('detectTikzCount').innerText = tikzCount;
@@ -2397,7 +2415,55 @@
             modal.classList.add('opacity-0');
             setTimeout(() => modal.classList.add('hidden'), 300);
         };
+        // --- HÀM MỚI: LƯU CÁC CÂU CÓ ID VÀO NGÂN HÀNG (R2) ---
+        window.saveCurrentQuestionsToBank = async () => {
+            // 1. Lọc ra các câu có ID hợp lệ
+            const validQuestions = window.questions.filter(q => q.mapId && q.mapId.trim() !== "");
+            
+            if (validQuestions.length === 0) {
+                window.customAlert("Không có câu hỏi nào có ID hợp lệ (VD: [9D1...]) để lưu!", "error");
+                return;
+            }
 
+            // 2. Thống kê
+            let countDai = 0, countHinh = 0;
+            validQuestions.forEach(q => {
+                if (q.subject === 'Đại số') countDai++;
+                else if (q.subject === 'Hình học') countHinh++;
+            });
+
+            // 3. Hỏi xác nhận
+            const confirmMsg = `Tìm thấy ${validQuestions.length} câu có ID hợp lệ:\n- Đại số: ${countDai} câu\n- Hình học: ${countHinh} câu\n\nBạn có muốn lưu vào Ngân hàng Cloudflare không?`;
+            if (!await window.customConfirm(confirmMsg)) return;
+
+            // 4. Gửi lên Cloudflare Worker
+            const btn = document.querySelector('button[title="Lưu các câu có ID vào kho"]');
+            const oldHtml = btn.innerHTML;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang lưu...'; btn.disabled = true;
+
+            try {
+                // Link Worker của bạn
+                const WORKER_URL = "https://upload-helper.phamngockhanh-942001.workers.dev/bank";
+                
+                const response = await fetch(WORKER_URL, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    // Gửi danh sách câu hỏi đã lọc (chứa cả link ảnh R2 nếu có)
+                    body: JSON.stringify(validQuestions) 
+                });
+
+                if (!response.ok) throw new Error("Server Error: " + response.statusText);
+                
+                const result = await response.json();
+                window.showToast(`Thành công! Đã lưu ${result.count} câu vào Ngân hàng.`, "success");
+
+            } catch (err) {
+                console.error("Lỗi lưu Bank:", err);
+                window.customAlert("Lỗi khi lưu: " + err.message, "error");
+            } finally {
+                btn.innerHTML = oldHtml; btn.disabled = false;
+            }
+        };
        // --- [FIX] CẬP NHẬT GIAO DIỆN CHẤM: XỬ LÝ ĐẢO ĐỀ & HIỂN THỊ ĐÚNG ---
         window.renderGradingView = () => {
             const container = document.getElementById('gradingQuestionList');
