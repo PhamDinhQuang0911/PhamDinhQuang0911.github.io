@@ -1689,6 +1689,7 @@
             }
         };
 
+// --- [FIX] CẬP NHẬT LOAD STATS: TỰ ĐỘNG NHẬN DIỆN LỚP TỪ KẾT QUẢ BÀI LÀM ---
         window.loadStats = async () => { 
             if (!currentExamId) return;
             
@@ -1711,61 +1712,89 @@
                 } 
             });
 
-            // 2. Lấy danh sách YÊU CẦU LÀM LẠI (Mới)
+            // 2. Lấy danh sách YÊU CẦU LÀM LẠI
             window.reattemptRequests = {};
             try {
                 const qReq = query(collection(db, "access_requests"), where("examId", "==", currentExamId), where("status", "==", "pending"));
                 const snapReq = await getDocs(qReq);
                 snapReq.forEach(d => {
                     const req = d.data();
-                    window.reattemptRequests[req.studentId] = d.id; // Lưu ID yêu cầu theo StudentID
+                    window.reattemptRequests[req.studentId] = d.id; 
                 });
             } catch(e) { console.log("Lỗi tải yêu cầu:", e); }
 
-            // 3. Lấy thông tin lớp học
+            // 3. Lấy thông tin lớp học và tạo bản đồ tên lớp
             const examRef = await getDoc(doc(db, "exams", currentExamId));
             const examData = examRef.data();
             fullStudentList = [];
+            let classNameMap = {}; // Map lưu ID -> Tên lớp để tra cứu ngược
             
             const classContainer = document.getElementById('classFilterContainer');
             if(classContainer) {
                 classContainer.innerHTML = `<button onclick="filterStats('all')" class="px-3 py-1.5 rounded-lg text-sm font-bold bg-blue-600 text-white shadow-sm whitespace-nowrap transition-colors" id="filterBtnAll">Tất cả</button>`;
                 
-                if (examData.allowedClassIds && examData.allowedClassIds.length > 0) {
-                    const uniqueIds = [...new Set(examData.allowedClassIds)];
-                    for (const classId of uniqueIds) {
-                        try {
-                            const classSnap = await getDoc(doc(db, "classes", classId));
-                            if (classSnap.exists()) {
-                                const cls = classSnap.data();
-                                const btn = document.createElement('button');
-                                btn.className = `px-3 py-1.5 rounded-lg text-sm font-bold bg-white text-gray-600 border hover:bg-gray-50 shadow-sm whitespace-nowrap transition-colors class-filter-btn`;
-                                btn.dataset.id = classId;
-                                btn.textContent = cls.name;
-                                btn.onclick = () => filterStats(classId);
-                                classContainer.appendChild(btn);
+                // Lấy tất cả lớp giáo viên sở hữu (để map tên lớp cho chuẩn)
+                try {
+                    const qClasses = query(collection(db, "classes"), where("teacherId", "==", currentUser.uid));
+                    const snapClasses = await getDocs(qClasses);
+                    
+                    snapClasses.forEach(clsDoc => {
+                        const cls = clsDoc.data();
+                        classNameMap[clsDoc.id] = cls.name; // Lưu map
 
-                                const students = cls.students || [];
-                                students.forEach(st => {
-                                    fullStudentList.push({ 
-                                        studentId: st.uid, 
-                                        studentName: st.name, 
-                                        className: cls.name, 
-                                        classId: classId 
-                                    });
+                        // Nếu lớp này được giao bài, hiện nút lọc và danh sách học sinh gốc
+                        if (examData.allowedClassIds && examData.allowedClassIds.includes(clsDoc.id)) {
+                            const btn = document.createElement('button');
+                            btn.className = `px-3 py-1.5 rounded-lg text-sm font-bold bg-white text-gray-600 border hover:bg-gray-50 shadow-sm whitespace-nowrap transition-colors class-filter-btn`;
+                            btn.dataset.id = clsDoc.id;
+                            btn.textContent = cls.name;
+                            btn.onclick = () => filterStats(clsDoc.id);
+                            classContainer.appendChild(btn);
+
+                            const students = cls.students || [];
+                            students.forEach(st => {
+                                fullStudentList.push({ 
+                                    studentId: st.uid, 
+                                    studentName: st.name, 
+                                    className: cls.name, 
+                                    classId: clsDoc.id 
                                 });
-                            }
-                        } catch(e) {}
-                    }
-                } else {
-                    fullStudentList = Object.values(statsMap).map(s => ({ 
-                        studentId: s.studentId, 
-                        studentName: s.studentName, 
-                        className: 'Tự do', 
-                        classId: 'public' 
-                    }));
-                }
+                            });
+                        }
+                    });
+                } catch(e) { console.error(e); }
             }
+
+            // 4. [QUAN TRỌNG] Ghép kết quả vào danh sách (Xử lý cả Vãng lai có ClassID)
+            // Logic cũ: Chỉ map dựa trên fullStudentList (danh sách cứng của lớp)
+            // Logic mới: Quét statsMap, nếu học sinh có classId khớp với classNameMap thì gán vào lớp đó
+            
+            // Tạo một set các studentId đã có trong danh sách cứng
+            const existingStudentIds = new Set(fullStudentList.map(s => s.studentId));
+
+            Object.values(statsMap).forEach(res => {
+                // Nếu học sinh này chưa có trong danh sách cứng (VD: Làm qua link, chưa add vào lớp)
+                if (!existingStudentIds.has(res.studentId)) {
+                    let finalClassName = 'Tự do';
+                    let finalClassId = 'other';
+
+                    // Nếu kết quả có lưu classId và giáo viên sở hữu lớp đó -> Gán đúng lớp
+                    if (res.classId && classNameMap[res.classId]) {
+                        finalClassName = classNameMap[res.classId];
+                        finalClassId = res.classId;
+                    } else if (res.classId === 'vang_lai') {
+                        finalClassName = 'Vãng lai';
+                    }
+
+                    fullStudentList.push({ 
+                        studentId: res.studentId, 
+                        studentName: res.studentName, 
+                        className: finalClassName, 
+                        classId: finalClassId
+                    });
+                }
+            });
+
             renderStatsDashboard();
         };
 
@@ -2314,6 +2343,7 @@
             setTimeout(() => modal.classList.add('hidden'), 300);
         };
 
+       // --- [FIX] CẬP NHẬT GIAO DIỆN CHẤM: XỬ LÝ ĐẢO ĐỀ & HIỂN THỊ ĐÚNG ---
         window.renderGradingView = () => {
             const container = document.getElementById('gradingQuestionList');
             const nav = document.getElementById('gradingNavList');
@@ -2321,17 +2351,23 @@
             nav.innerHTML = '';
             
             const answers = currentGradingAttempt.answers || {};
+            const config = currentGradingAttempt.shuffleConfig || {}; // Lấy cấu hình đảo đề của bài làm này
 
             window.questions.forEach((q, idx) => {
-                const u = answers[idx];
+                const u = answers[idx]; // u là Index gốc (hoặc nội dung gốc)
                 let isCorrect = false; 
-                let score = 0;
                 let maxPoint = parseFloat(q.point) || 0;
                 
-                // Logic chấm tự động để hiển thị màu
+                // Logic chấm điểm
                 if (q.type === 'mc' && u === q.correct) isCorrect = true;
                 else if (q.type === 'short' && q.answer && String(u).trim().toLowerCase() === String(q.answer).trim().toLowerCase()) isCorrect = true;
-                else if (q.type === 'tf') {/*...*/ } // (Giản lược hiển thị TF)
+                else if (q.type === 'tf') {
+                    // Logic TF (kiểm tra mảng answers con)
+                    if (Array.isArray(u) && q.statements) {
+                        const correctCount = q.statements.reduce((acc, s, i) => acc + (u[i] === s.isTrue ? 1 : 0), 0);
+                        if (correctCount === q.statements.length) isCorrect = true;
+                    }
+                }
 
                 // Render Nav Item
                 const navItem = document.createElement('button');
@@ -2348,37 +2384,50 @@
                 let answerHtml = '';
                 
                 if (q.type === 'essay') {
-                    // HIỂN THỊ ẢNH TỰ LUẬN
-                    if (u && u.includes('<img')) {
-                        answerHtml = `<div class="p-4 bg-gray-50 border-t border-b border-gray-100">
-                            <div class="text-xs font-bold text-gray-500 uppercase mb-2">Bài làm của học sinh:</div>
-                            <div class="grading-essay-content">${u}</div>
-                        </div>`;
+                    if (u && String(u).includes('<img')) {
+                        answerHtml = `<div class="p-4 bg-gray-50 border-t border-b border-gray-100"><div class="text-xs font-bold text-gray-500 uppercase mb-2">Bài làm của học sinh:</div><div class="grading-essay-content">${u}</div></div>`;
                     } else {
                         answerHtml = `<div class="p-4 text-gray-400 italic text-sm">Học sinh không nộp bài cho câu này.</div>`;
                     }
-                    
-                    // Ô NHẬP ĐIỂM CHO TỰ LUẬN
-                    // Nếu chưa có điểm riêng, mặc định là 0 (hoặc logic tự chia điểm trước đó nếu có)
-                    // Ở đây ta tạm lấy maxPoint nếu chưa chấm, hoặc cần lưu điểm chấm riêng vào attempt
-                    // [TODO] Cần lưu điểm chấm tay vào cấu trúc dữ liệu. Tạm thời dùng input để nhập.
-                    
-                    answerHtml += `
-                        <div class="p-4 bg-yellow-50 flex items-center justify-between">
-                            <span class="font-bold text-yellow-800 text-sm"><i class="fa-solid fa-pen-nib mr-2"></i>Chấm điểm:</span>
-                            <div class="flex items-center gap-2">
-                                <input type="number" id="manual-score-${idx}" class="form-input w-24 text-right font-bold text-lg text-blue-600" 
-                                    value="${maxPoint}" max="${maxPoint}" min="0" step="0.1" onchange="updateTotalScore()">
-                                <span class="text-gray-500 font-bold">/ ${maxPoint}đ</span>
-                            </div>
-                        </div>
-                    `;
+                    // Input nhập điểm tay
+                    answerHtml += `<div class="p-4 bg-yellow-50 flex items-center justify-between"><span class="font-bold text-yellow-800 text-sm"><i class="fa-solid fa-pen-nib mr-2"></i>Chấm điểm:</span><div class="flex items-center gap-2"><input type="number" id="manual-score-${idx}" class="form-input w-24 text-right font-bold text-lg text-blue-600" value="${maxPoint}" max="${maxPoint}" min="0" step="0.1" onchange="updateTotalScore()"><span class="text-gray-500 font-bold">/ ${maxPoint}đ</span></div></div>`;
                 } else {
-                    // Các loại câu khác (Chỉ xem, không sửa điểm)
-                    let userText = (u !== undefined) ? (q.type==='mc' ? `Phương án ${String.fromCharCode(65+u)}` : u) : 'Bỏ trống';
+                    // --- XỬ LÝ HIỂN THỊ ĐÁP ÁN (FIX LỆCH) ---
+                    let userText = 'Bỏ trống';
+                    let correctText = '';
+
+                    if (q.type === 'mc') {
+                        // Logic lấy ký tự hiển thị (A,B,C,D) dựa trên map đảo
+                        const getDisplayChar = (originalVal) => {
+                            if (originalVal === undefined || originalVal === null) return '?';
+                            // Nếu có map đảo cho câu này
+                            if (config.optionMaps && config.optionMaps[idx]) {
+                                const map = config.optionMaps[idx]; 
+                                // map = [2, 0, 3, 1] nghĩa là vị trí hiển thị 0 là option 2...
+                                // Ta cần tìm option `originalVal` nằm ở vị trí hiển thị nào?
+                                const displayIdx = map.indexOf(originalVal);
+                                return displayIdx !== -1 ? String.fromCharCode(65 + displayIdx) : '?';
+                            }
+                            return String.fromCharCode(65 + originalVal);
+                        };
+
+                        if (u !== undefined) {
+                            userText = `Phương án ${getDisplayChar(u)}`;
+                            // Hiển thị thêm nội dung gốc để giáo viên dễ đối chiếu
+                            if(q.options[u]) userText += ` <span class="text-gray-500 text-xs">(${window.formatContent(q.options[u]).substring(0, 50)}...)</span>`;
+                        }
+                        correctText = `Phương án ${getDisplayChar(q.correct)}`;
+                    
+                    } else if (q.type === 'short') {
+                        userText = (u !== undefined) ? u : 'Bỏ trống';
+                        correctText = q.answer;
+                    } else if (q.type === 'tf') {
+                        userText = 'Xem chi tiết bên dưới'; // (Có thể mở rộng hiển thị chi tiết TF nếu cần)
+                    }
+
                     answerHtml = `<div class="p-3 border-t bg-gray-50 text-sm">
                         Học sinh chọn: <b class="${isCorrect?'text-green-600':'text-red-600'}">${userText}</b> 
-                        ${!isCorrect ? `| Đáp án đúng: <b class="text-green-600">${q.type==='mc'?String.fromCharCode(65+q.correct):q.answer}</b>` : ''}
+                        ${!isCorrect ? `| Đáp án đúng: <b class="text-green-600">${correctText}</b>` : ''}
                     </div>`;
                 }
 
