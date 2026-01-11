@@ -1192,10 +1192,9 @@
             const q = window.questions[index];
             const editor = document.getElementById('editorArea');
             
-            // [MỚI] HIỂN THỊ THANH TAG NẾU CÓ ID
+            // [MỚI] HIỂN THỊ TAG NẾU CÓ ID
             let tagHtml = '';
             if (q.mapId) {
-                // Nếu chưa có màu (do load từ file cũ), phân tích lại
                 let lvColor = q.levelColor || 'gray';
                 tagHtml = `
                 <div class="flex items-center gap-3 mb-4 bg-white p-3 rounded-xl border border-blue-100 shadow-sm">
@@ -1205,8 +1204,8 @@
                     </div>
                     <div class="h-4 w-[1px] bg-gray-200"></div>
                     <div class="flex gap-2">
-                        <span class="text-xs font-bold text-gray-600 bg-gray-100 px-2 py-1 rounded border border-gray-200">${q.subject || 'Chưa rõ'}</span>
-                        <span class="text-xs font-bold text-${lvColor}-600 bg-${lvColor}-50 px-2 py-1 rounded border border-${lvColor}-100">${q.level || 'Chưa rõ'}</span>
+                        <span class="text-xs font-bold text-gray-600 bg-gray-100 px-2 py-1 rounded border border-gray-200">${q.subject || 'Khác'}</span>
+                        <span class="text-xs font-bold text-${lvColor}-600 bg-${lvColor}-50 px-2 py-1 rounded border border-${lvColor}-100">${q.level || 'Khác'}</span>
                     </div>
                 </div>`;
             }
@@ -1482,10 +1481,17 @@
                 
                 let content = e.target.result;
 
-                // 1. Làm sạch LaTeX (Clean junk)
+               // 1. Làm sạch LaTeX (Clean junk)
                 content = content.replace(/\\begin\{multicols\}\{.*?\}/g, "").replace(/\\end\{multicols\}/g, "");
                 content = content.replace(/\\begin\{align\*\}([\s\S]*?)\\end\{align\*\}/g, (m, p1) => `$$ \\begin{aligned}${p1}\\end{aligned} $$`);
-                content = content.replace(/(?<!\\)%.*/g, ''); 
+                
+                // [FIX QUAN TRỌNG] KHÔNG xóa dòng chứa ID (bắt đầu bằng %) ngay lập tức
+                // Chỉ xóa các dòng % mà KHÔNG chứa ngoặc vuông [...]
+                content = content.replace(/(?<!\\)%.*/g, (match) => {
+                    if (match.includes('[') && match.includes(']')) return match; // Giữ lại dòng có ID
+                    return ''; // Xóa dòng comment rác
+                });
+
                 content = content.replace(/\\begin\{array\}\s*\{[^{}]*?\}/g, '\\begin{matrix}').replace(/\\begin\{array\}/g, '\\begin{matrix}').replace(/\\end\{array\}/g, '\\end{matrix}');
 
                 pendingImageUploads = [];
@@ -1494,24 +1500,30 @@
                 
                 while ((match = blockRegex.exec(content)) !== null) {
                     let fullBody = match[2];
-                    
-                    // --- TỰ ĐỘNG BẮT ID & PHÂN LOẠI ---
+
+                    // --- [MỚI] TỰ ĐỘNG BẮT ID & PHÂN LOẠI ---
                     let questionID = "";
                     let tags = { subject: 'Chưa phân loại', level: '', levelColor: 'gray' };
 
-                    // Regex tìm %%[ID] hoặc %[ID]
+                    // Regex tìm ID dạng %%[9D1...] hoặc %[9D1...]
                     const idMatch = fullBody.match(/(?:%%|%)\s*\[([a-zA-Z0-9\-_.]+)\]/);
                     if (idMatch) {
-                        questionID = idMatch[1]; // VD: 9D1H1-6
-                        tags = parseQuestionID(questionID); // Phân tích Đại/Hình, Mức độ
-                        fullBody = fullBody.replace(idMatch[0], ''); // Xóa ID khỏi đề bài
+                        questionID = idMatch[1]; 
+                        tags = parseQuestionID(questionID); // Gọi hàm phân tích
+                        fullBody = fullBody.replace(idMatch[0], ''); // Xóa mã ID khỏi nội dung
                     }
-                    // -----------------------------------
-
+                    
+                    // Sau khi lấy ID xong, xóa tiếp các rác còn lại (ví dụ %[Câu 1])
+                    fullBody = fullBody.replace(/(?<!\\)%.*/g, ''); 
                     fullBody = fullBody.replace(/^\s*\[.*?\]/, ''); 
+                    // -----------------------------------
                     
                     let qType = 'essay';
-                    let qData = { content: '', solution: '', options: [], statements: [], answer: '', point: 0 };
+                    // Thêm mapId vào qData
+                    let qData = { 
+                        content: '', solution: '', options: [], statements: [], answer: '', point: 0,
+                        mapId: questionID, subject: tags.subject, level: tags.level, levelColor: tags.levelColor 
+                    };
                     
                     // --- TÁCH LỜI GIẢI (Giữ nguyên logic cũ) ---
                     let mainContent = fullBody;
@@ -2795,7 +2807,31 @@
                 }
             }
         };
-        // ============================================================
+
+    window.parseQuestionID = (idStr) => {
+        let subject = 'Khác';
+        let level = 'Thông hiểu'; 
+        let levelColor = 'blue';
+        
+        if (idStr.includes('D') || idStr.includes('Đ')) subject = 'Đại số';
+        else if (idStr.includes('H')) subject = 'Hình học';
+        else if (idStr.includes('G')) subject = 'Giải tích';
+        
+        // Logic mức độ: Dựa vào số cuối cùng của ID
+        // File 26.tex có số cuối là 7, 8... -> Có thể quy ước >5 là VDC, <5 là VD
+        const parts = idStr.split('-');
+        const lastPart = parts[parts.length - 1];
+        const num = parseInt(lastPart);
+        
+        if (!isNaN(num)) {
+            if (num <= 2) { level = 'Nhận biết'; levelColor = 'green'; }
+            else if (num <= 4) { level = 'Thông hiểu'; levelColor = 'blue'; }
+            else if (num <= 6) { level = 'Vận dụng'; levelColor = 'orange'; }
+            else { level = 'Vận dụng cao'; levelColor = 'red'; }
+        }
+        return { subject, level, levelColor };
+    };
+    // ============================================================
     // --- [MỚI] HÀM LƯU VÀO NGÂN HÀNG (R2) ---
         window.saveCurrentQuestionsToBank = async () => {
             // 1. Lọc ra các câu có ID hợp lệ
