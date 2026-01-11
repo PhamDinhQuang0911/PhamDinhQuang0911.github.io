@@ -482,13 +482,49 @@ async function loadLobbyData(id) {
                     btnStart.onclick = () => requestStart(true); // true = Chế độ Resume
                 } else {
                     // KHÔNG CÓ BÀI DỞ -> Logic cũ
-                    const urlParams = new URLSearchParams(window.location.search);
-                    if (urlParams.get('mode') === 'review') {
-                        if (att > 0) { currentQuestions = examData.questions || []; userAnswers = window.examHistory[0].answers || {}; document.getElementById('lobbyScreen').classList.add('hidden'); viewDetailSolutions(); return; } 
-                        else { window.customAlert("Bạn chưa làm bài này nên không thể xem lời giải!", "error"); }
-                    }
+                    // KHÔNG CÓ BÀI DỞ -> Logic cũ
+                const urlParams = new URLSearchParams(window.location.search);
+                
+                // --- LOGIC XEM LẠI BÀI (REVIEW MODE) ĐÃ FIX LỖI LỆCH CÂU ---
+                if (urlParams.get('mode') === 'review') {
+                    if (att > 0) { 
+                        const resultData = window.examHistory[0];
+                        userAnswers = resultData.answers || {};
+                        
+                        // 1. Kiểm tra xem bài làm này có lưu cấu hình đảo không
+                        if (resultData.shuffleConfig) {
+                            console.log("Phát hiện bài làm có đảo đề, đang tái tạo...");
+                            const config = resultData.shuffleConfig;
+                            
+                            // Tái tạo lại thứ tự câu hỏi y hệt lúc thi
+                            // examData.questions là đề gốc
+                            currentQuestions = config.questionOrder.map(originalIndex => {
+                                const originalQ = examData.questions[originalIndex];
+                                if (!originalQ) return null;
+                                
+                                const newQ = { ...originalQ };
+                                // Tái tạo cả thứ tự đáp án (A,B,C,D) nếu có
+                                if (config.optionMaps && config.optionMaps[originalIndex]) {
+                                    const map = config.optionMaps[originalIndex];
+                                    newQ.options = map.map(idx => originalQ.options[idx]);
+                                    newQ.shuffleMap = map; // Gắn lại map để hàm viewDetailSolutions biết đường tô màu
+                                }
+                                return newQ;
+                            }).filter(q => q !== null);
+                            
+                        } else {
+                            // Bài làm cũ (chưa có config) hoặc đề không đảo -> Dùng đề gốc
+                            currentQuestions = examData.questions || []; 
+                        }
 
-                    document.getElementById('lobbyTitle').innerText = examData.title || "Bài thi";
+                        document.getElementById('lobbyScreen').classList.add('hidden'); 
+                        viewDetailSolutions(); 
+                        return; 
+                    } 
+                    else { window.customAlert("Bạn chưa làm bài này nên không thể xem lời giải!", "error"); }
+                }
+
+                document.getElementById('lobbyTitle').innerText = examData.title || "Bài thi";
                     document.getElementById('lobbyDuration').innerText = examData.duration || '--';
                     if(document.getElementById('lobbyAttempts')) document.getElementById('lobbyAttempts').innerText = att;
                     if(document.getElementById('lobbyMaxAttempts')) document.getElementById('lobbyMaxAttempts').innerText = examData.attempts || '∞';
@@ -944,7 +980,27 @@ async function loadLobbyData(id) {
 
             try {
                 // 2. LƯU KẾT QUẢ VÀO FIRESTORE (LOGIC CŨ)
-                await addDoc(collection(db, "results"), { examId, studentId: currentUser.uid, studentName: currentUser.displayName || currentUser.email, score, answers: userAnswers, cheatCount, correctCount: correct, totalQuestions: currentQuestions.length, isPassed: isPassed, passScoreSnapshot: passScore, submittedAt: new Date().toISOString() });
+                // 2. LƯU KẾT QUẢ VÀO FIRESTORE (LOGIC CŨ)
+            // --- [FIX] LẤY CẤU HÌNH ĐẢO ĐỀ ĐỂ LƯU ---
+            const shuffleConfigKey = `examConfig_${currentUser.uid}_${examId}`;
+            const savedConfig = JSON.parse(localStorage.getItem(shuffleConfigKey) || "null");
+
+            await addDoc(collection(db, "results"), { 
+                examId, 
+                studentId: currentUser.uid, 
+                studentName: currentUser.displayName || currentUser.email, 
+                score, 
+                answers: userAnswers, 
+                shuffleConfig: savedConfig, // <--- THÊM DÒNG QUAN TRỌNG NÀY
+                cheatCount, 
+                correctCount: correct, 
+                totalQuestions: currentQuestions.length, 
+                isPassed: isPassed, 
+                passScoreSnapshot: passScore, 
+                submittedAt: new Date().toISOString() 
+            });
+            
+            // 3. [MỚI] XÓA DỮ LIỆU TẠM (CLEANUP)
                 
                 // 3. [MỚI] XÓA DỮ LIỆU TẠM (CLEANUP)
                 // Xóa bản ghi "đang làm dở" trên Cloud
@@ -1028,7 +1084,29 @@ async function loadLobbyData(id) {
             const normalize = (str) => String(str).replace(/\$| /g, '').toLowerCase().trim();
             currentQuestions.forEach((q, idx) => {
                 const u = userAnswers[idx]; let isCorrect = false; let ansHtml = '';
-                if(q.type==='mc') { isCorrect = (u===q.correct); ansHtml = `<div>Bạn chọn: <b class="${isCorrect?'text-green-600':'text-red-500'}">${u!==undefined?String.fromCharCode(65+u):'Chưa làm'}</b> | Đáp án: <b class="text-green-600">${String.fromCharCode(65+q.correct)}</b></div>`; }
+                
+                if(q.type==='mc') { 
+                    // Logic tìm ký tự hiển thị (A,B,C,D) dựa trên vị trí đảo
+                    const getDisplayChar = (originalIdx) => {
+                        if (originalIdx === undefined || originalIdx === null || originalIdx === "") return 'Chưa làm';
+                        // Nếu câu hỏi có map đảo (shuffleMap), ta phải tìm xem index gốc nằm ở vị trí nào
+                        if (q.shuffleMap) {
+                            // q.shuffleMap = [2, 0, 3, 1] nghĩa là: Vị trí 0 hiển thị option 2...
+                            // Ta cần tìm: Option X đang nằm ở vị trí nào?
+                            const displayIndex = q.shuffleMap.indexOf(originalIdx);
+                            return displayIndex !== -1 ? String.fromCharCode(65 + displayIndex) : '?';
+                        }
+                        // Không đảo thì hiển thị đúng index
+                        return String.fromCharCode(65 + originalIdx);
+                    };
+
+                    const userChar = getDisplayChar(u);
+                    const correctChar = getDisplayChar(q.correct);
+
+                    isCorrect = (u===q.correct); 
+                    
+                    ansHtml = `<div>Bạn chọn: <b class="${isCorrect?'text-green-600':'text-red-500'}">${userChar}</b> | Đáp án đúng: <b class="text-green-600">${correctChar}</b></div>`; 
+                }
                 else if (q.type==='short') { isCorrect = (q.answer && u && normalize(u)===normalize(q.answer)); ansHtml = `<div>Bạn điền: <b class="${isCorrect?'text-green-600':'text-red-500'}">${u||'Trống'}</b> | Đáp án: <b class="text-green-600">${q.answer}</b></div>`; }
                 else if (q.type==='tf') { let matches=0; ansHtml='<ul class="text-sm mt-2">'; q.statements.forEach((s,i)=>{ const uc = (u&&u[i]!==undefined)?(u[i]?'Đ':'S'):'_'; const tc = s.isTrue?'Đ':'S'; const m = (u&&u[i]===s.isTrue); if(m) matches++; ansHtml+=`<li>- ${window.formatContent(s.text)}: <b class="${m?'text-green-600':'text-red-500'}">${uc}</b> (Đúng: ${tc})</li>`; }); ansHtml+='</ul>'; isCorrect = (matches === q.statements.length); }
 
