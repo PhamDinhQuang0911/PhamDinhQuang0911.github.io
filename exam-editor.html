@@ -488,25 +488,71 @@
         window.convertArrayToMatrix = convertArrayToMatrix; 
 
         // [MỚI] HÀM HỖ TRỢ: PHÂN TÍCH ID CÂU HỎI (VD: 9D1H1-6)
+        // [CẬP NHẬT] HÀM PHÂN TÍCH ID (Dựa trên MapID thực tế)
         const parseQuestionID = (idStr) => {
+            // VD ID: 9D1H1-7
+            // Logic MapID thường là: [Lớp][Môn][Chương][Bài] (VD: 9D11)
+            // Trong ID câu hỏi, ký tự mức độ (N,H,V,C) thường chèn vào giữa
+            
             let subject = 'Khác';
             let level = 'Thông hiểu'; 
-            let levelColor = 'gray';
+            let levelColor = 'blue';
+            let topicName = ''; // Tên bài học lấy từ cây
+
+            // 1. XỬ LÝ MỨC ĐỘ (Dựa vào N, H, V, C)
+            const levelMatch = idStr.match(/[NHVC]/);
+            let levelChar = levelMatch ? levelMatch[0] : '';
             
-            if (idStr.includes('D')) subject = 'Đại số';
-            else if (idStr.includes('H')) subject = 'Hình học';
-            else if (idStr.includes('G')) subject = 'Giải tích';
-            
-            // Logic đoán mức độ dựa trên ký tự cuối
-            const lastChar = idStr.slice(-1);
-            if (!isNaN(lastChar)) {
-                const lv = parseInt(lastChar);
-                if (lv === 1) { level = 'Nhận biết'; levelColor = 'green'; }
-                else if (lv === 2) { level = 'Thông hiểu'; levelColor = 'blue'; }
-                else if (lv === 3) { level = 'Vận dụng'; levelColor = 'orange'; }
-                else if (lv >= 4) { level = 'Vận dụng cao'; levelColor = 'red'; }
+            // Fallback nếu không tìm thấy 1 ký tự đơn lẻ
+            if (!levelChar) {
+                if(idStr.includes('NB')) levelChar = 'N';
+                else if(idStr.includes('TH')) levelChar = 'H';
+                else if(idStr.includes('VDC')) levelChar = 'C';
+                else if(idStr.includes('VD')) levelChar = 'V';
             }
-            return { subject, level, levelColor };
+
+            switch (levelChar) {
+                case 'N': level = 'Nhận biết'; levelColor = 'green'; break;
+                case 'H': level = 'Thông hiểu'; levelColor = 'blue'; break;
+                case 'V': level = 'Vận dụng'; levelColor = 'orange'; break;
+                case 'C': level = 'Vận dụng cao'; levelColor = 'red'; break;
+            }
+
+            // 2. XỬ LÝ MÔN & BÀI HỌC (Tra cứu từ window.globalIdTree)
+            // Giả thuyết: ID bài học trong cây là ID câu hỏi bỏ đi ký tự mức độ và phần đuôi -x
+            // VD: 9D1H1-7 -> Bỏ H, bỏ -7 -> Còn "9D11" (Đây là ID bài học trong cây)
+            
+            // Bước A: Tạo "ID sạch" để tra cứu
+            let cleanId = idStr.split('-')[0]; // Bỏ phần đuôi -7 -> 9D1H1
+            if (levelChar) {
+                cleanId = cleanId.replace(levelChar, ''); // Bỏ mức độ -> 9D11
+            }
+
+            // Bước B: Tra cứu trong cây đã tải
+            if (window.globalIdTree.length > 0) {
+                const foundName = findTopicNameInTree(window.globalIdTree, cleanId);
+                if (foundName) {
+                    topicName = foundName;
+                } else {
+                    // Nếu không tìm thấy bài (9D11), thử tìm chương (9D1)
+                    const chapId = cleanId.slice(0, -1); 
+                    const foundChap = findTopicNameInTree(window.globalIdTree, chapId);
+                    if (foundChap) topicName = foundChap;
+                }
+            }
+
+            // Bước C: Xác định môn (Dựa vào ký tự hoặc tên bài tìm được)
+            if (cleanId.includes('D')) subject = 'Đại số';
+            else if (cleanId.includes('H')) subject = 'Hình học';
+            else if (cleanId.includes('G')) subject = 'Giải tích';
+
+            // Trả về object đầy đủ
+            return { 
+                subject: subject, 
+                level: level, 
+                levelColor: levelColor,
+                topic: topicName || cleanId // Nếu không tìm thấy tên thì hiện tạm ID
+            };
         };
 
     // --- HÀM MỚI: BẬT/TẮT Ô NHẬP LIỆU KẾT QUẢ ---
@@ -557,10 +603,23 @@
         window.customAlert = (message, type = 'info') => { return new Promise((resolve) => { modalTitle.innerText = type === 'error' ? 'Lỗi' : 'Thông báo'; modalMsg.innerText = message; modalIcon.innerHTML = type === 'error' ? '<i class="fa-solid fa-triangle-exclamation text-red-500"></i>' : '<i class="fa-solid fa-bell text-blue-500"></i>'; document.getElementById('modalInput').classList.add('hidden'); btnCancel.classList.add('hidden'); btnConfirm.innerText = "Đã hiểu"; modalEl.classList.remove('opacity-0', 'pointer-events-none'); modalBox.classList.remove('scale-100'); modalBox.classList.add('scale-100'); btnConfirm.onclick = () => { resolve(true); modalResolve = null; closeCustomModal(); }; modalResolve = resolve; }); };
         window.customConfirm = (message) => { return new Promise((resolve) => { modalTitle.innerText = "Xác nhận"; modalMsg.innerText = message; modalIcon.innerHTML = '<i class="fa-solid fa-circle-question text-orange-500"></i>'; document.getElementById('modalInput').classList.add('hidden'); btnCancel.classList.remove('hidden'); btnConfirm.innerText = "Đồng ý"; modalEl.classList.remove('opacity-0', 'pointer-events-none'); modalBox.classList.remove('scale-95'); modalBox.classList.add('scale-100'); btnConfirm.onclick = () => { resolve(true); modalResolve = null; closeCustomModal(); }; btnCancel.onclick = () => { resolve(false); modalResolve = null; closeCustomModal(); }; }); };
 
+        window.globalIdTree = []; 
+
         onAuthStateChanged(auth, async (user) => {
             if (user) {
                 currentUser = user;
-                loadTeacherClasses();
+                
+                // 1. Tải song song: Lớp học + Cây MapID từ Firestore
+                const p1 = loadTeacherClasses();
+                const p2 = getDoc(doc(db, "configurations", "map_id_tree")).then(snap => {
+                    if(snap.exists()) {
+                        window.globalIdTree = snap.data().tree || [];
+                        console.log("Đã tải MapID Tree:", window.globalIdTree);
+                    }
+                }).catch(err => console.log("Lỗi tải MapID:", err));
+                
+                await Promise.all([p1, p2]); // Đợi tải xong
+
                 const urlParams = new URLSearchParams(window.location.search);
                 const examId = urlParams.get('id');
                 if (examId) { currentExamId = examId; loadExamData(examId); }
@@ -2831,6 +2890,18 @@
                     window.showToast("Lỗi: " + e.message, "error");
                 }
             }
+        };
+    // [MỚI] Hàm đệ quy tìm tên bài học trong cây MapID
+        // Input: id (VD: "9D11") -> Output: "Căn bậc hai"
+        const findTopicNameInTree = (tree, targetId) => {
+            for (const node of tree) {
+                if (node.id === targetId) return node.name;
+                if (node.children && node.children.length > 0) {
+                    const found = findTopicNameInTree(node.children, targetId);
+                    if (found) return found;
+                }
+            }
+            return null;
         };
 
     // 1. HÀM PHÂN TÍCH ID (CẬP NHẬT LOGIC N-H-V-C)
