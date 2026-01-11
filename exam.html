@@ -791,12 +791,40 @@ async function loadLobbyData(id) {
                     dom.options.appendChild(div);
                 });
             } else if (q.type === 'tf') {
-                 q.statements.forEach((stmt, i) => {
-                    const val = userAnswers[idx]?userAnswers[idx][i]:null;
-                    const div = document.createElement('div'); div.className = "bg-white border-2 border-gray-100 rounded-xl p-4 hover:border-orange-200 transition-all";
-                    div.innerHTML = `<div class="font-medium text-gray-800 mb-2">${window.formatContent(stmt.text)}</div><div class="flex gap-4"><label class="flex-1 cursor-pointer hover:bg-green-50 p-2 rounded transition-colors"><input type="radio" name="tf-${idx}-${i}" value="true" ${val===true?'checked':''} class="mr-2 accent-green-600">Đúng</label><label class="flex-1 cursor-pointer hover:bg-red-50 p-2 rounded transition-colors"><input type="radio" name="tf-${idx}-${i}" value="false" ${val===false?'checked':''} class="mr-2 accent-red-600">Sai</label></div>`;
+                // --- CẬP NHẬT: LOGIC ĐẢO CÂU HỎI CON (ĐÚNG/SAI) ---
+                // 1. Tạo mảng chỉ số hiển thị [0, 1, 2...]
+                let displayIndices = q.statements.map((_, k) => k);
+
+                // 2. Xử lý đảo trộn (Chỉ đảo 1 lần và lưu lại cache để không bị đổi khi next/prev)
+                if (examData.shuffle) {
+                    if (!q.shuffleMapTF) {
+                        for (let i = displayIndices.length - 1; i > 0; i--) {
+                            const j = Math.floor(Math.random() * (i + 1));
+                            [displayIndices[i], displayIndices[j]] = [displayIndices[j], displayIndices[i]];
+                        }
+                        q.shuffleMapTF = displayIndices; 
+                    }
+                    displayIndices = q.shuffleMapTF;
+                }
+
+                // 3. Render theo thứ tự ĐÃ ĐẢO (displayIndices)
+                displayIndices.forEach((realIdx) => {
+                    const stmt = q.statements[realIdx];
+                    // Lấy đáp án dựa trên REAL INDEX (Index gốc trong Database)
+                    const val = userAnswers[idx] ? userAnswers[idx][realIdx] : null;
+                    
+                    const div = document.createElement('div'); 
+                    div.className = "bg-white border-2 border-gray-100 rounded-xl p-4 hover:border-orange-200 transition-all";
+                    
+                    // Input name vẫn giữ theo realIdx để đảm bảo logic chấm điểm
+                    div.innerHTML = `<div class="font-medium text-gray-800 mb-2">${window.formatContent(stmt.text)}</div><div class="flex gap-4"><label class="flex-1 cursor-pointer hover:bg-green-50 p-2 rounded transition-colors"><input type="radio" name="tf-${idx}-${realIdx}" value="true" ${val===true?'checked':''} class="mr-2 accent-green-600">Đúng</label><label class="flex-1 cursor-pointer hover:bg-red-50 p-2 rounded transition-colors"><input type="radio" name="tf-${idx}-${realIdx}" value="false" ${val===false?'checked':''} class="mr-2 accent-red-600">Sai</label></div>`;
+                    
                     div.querySelectorAll('input').forEach(inp => inp.onchange = (e) => {
-                        if(!userAnswers[idx]) userAnswers[idx]={}; userAnswers[idx][i]=(e.target.value==='true'); updatePalette(); saveLocal();
+                        if(!userAnswers[idx]) userAnswers[idx]={}; 
+                        // Lưu đáp án vào REAL INDEX
+                        userAnswers[idx][realIdx] = (e.target.value==='true'); 
+                        updatePalette(); 
+                        saveLocal();
                     });
                     dom.options.appendChild(div);
                 });
