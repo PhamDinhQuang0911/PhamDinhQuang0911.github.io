@@ -990,11 +990,57 @@ async function loadLobbyData(id) {
             const savedConfig = JSON.parse(localStorage.getItem(shuffleConfigKey) || "null");
             
             // Tính thời gian làm bài (Giây)
+            // Tính thời gian làm bài (Giây)
             const durationSeconds = (examData.duration * 60) - timeLeft;
+
+            // --- [FIX] TỰ ĐỘNG DÒ TÌM LỚP HỌC (CHỐNG LỖI VÃNG LAI) ---
+            let detectedClassId = "vang_lai"; // Mặc định
             
-            // Tạo object dữ liệu chuẩn
+            try {
+                // 1. Nếu trên URL có sẵn classId (Link từ trong lớp) -> Ưu tiên số 1
+                const urlParams = new URLSearchParams(window.location.search);
+                if (urlParams.get('classId')) {
+                    detectedClassId = urlParams.get('classId');
+                } 
+                // 2. Nếu không có, quét DB để xem học sinh thuộc lớp nào đang giao đề này
+                else {
+                    // Truy vấn các lớp mà user là thành viên
+                    const classQuery = query(collection(db, "classes"), where("members", "array-contains", currentUser.uid));
+                    const classSnaps = await getDocs(classQuery);
+                    
+                    for (const clsDoc of classSnaps.docs) {
+                        const clsData = clsDoc.data();
+                        let hasExam = false;
+                        
+                        // Case A: Mảng exams chứa ID string đơn giản
+                        if (clsData.exams && Array.isArray(clsData.exams) && clsData.exams.includes(examId)) {
+                            hasExam = true;
+                        }
+                        // Case B: Mảng exams chứa object {id: "...", ...}
+                        else if (clsData.exams && Array.isArray(clsData.exams)) {
+                            hasExam = clsData.exams.some(e => (e.id === examId || e.examId === examId));
+                        }
+                        // Case C: Kiểm tra trong giáo trình (curriculum)
+                        else if (clsData.curriculum) {
+                             const strCurriculum = JSON.stringify(clsData.curriculum);
+                             if (strCurriculum.includes(examId)) hasExam = true;
+                        }
+
+                        if (hasExam) {
+                            detectedClassId = clsDoc.id;
+                            console.log("Auto-detected Class:", clsData.name);
+                            break; 
+                        }
+                    }
+                }
+            } catch (err) {
+                console.warn("Lỗi dò tìm lớp:", err);
+            }
+            
+            // Tạo object dữ liệu chuẩn (Đã thêm classId)
             const resultData = { 
-                examId, 
+                examId,
+                classId: detectedClassId, // <--- Đã thêm trường này
                 studentId: currentUser.uid, 
                 studentName: currentUser.displayName || currentUser.email, 
                 score, 
