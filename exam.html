@@ -982,8 +982,13 @@ async function loadLobbyData(id) {
                 // 2. LƯU KẾT QUẢ VÀO FIRESTORE (LOGIC CŨ)
                 // 2. LƯU KẾT QUẢ VÀO FIRESTORE (LOGIC CŨ)
             // --- [FIX] LẤY CẤU HÌNH ĐẢO ĐỀ ĐỂ LƯU ---
+            // 2. LƯU KẾT QUẢ VÀO FIRESTORE (LOGIC CŨ)
+            // --- [FIX] LẤY CẤU HÌNH ĐẢO ĐỀ ĐỂ LƯU ---
             const shuffleConfigKey = `examConfig_${currentUser.uid}_${examId}`;
             const savedConfig = JSON.parse(localStorage.getItem(shuffleConfigKey) || "null");
+            
+            // Tính thời gian làm bài (Giây) = Tổng thời gian - Thời gian còn lại
+            const durationSeconds = (examData.duration * 60) - timeLeft;
 
             await addDoc(collection(db, "results"), { 
                 examId, 
@@ -991,12 +996,13 @@ async function loadLobbyData(id) {
                 studentName: currentUser.displayName || currentUser.email, 
                 score, 
                 answers: userAnswers, 
-                shuffleConfig: savedConfig, // <--- THÊM DÒNG QUAN TRỌNG NÀY
+                shuffleConfig: savedConfig, 
                 cheatCount, 
                 correctCount: correct, 
                 totalQuestions: currentQuestions.length, 
                 isPassed: isPassed, 
                 passScoreSnapshot: passScore, 
+                duration: durationSeconds, // <--- THÊM DÒNG NÀY: Lưu thời gian làm bài
                 submittedAt: new Date().toISOString() 
             });
             
@@ -1075,48 +1081,179 @@ async function loadLobbyData(id) {
             } catch(e) { window.customAlert("Lỗi lưu bài: "+e.message, "error"); }
         }
 
+        // --- HÀM XEM LẠI BÀI (ĐÃ NÂNG CẤP: SWITCH LỊCH SỬ & HIỆN THÔNG SỐ) ---
         window.viewDetailSolutions = () => {
-            document.getElementById('resultModal').classList.add('hidden'); document.getElementById('examMain').classList.add('hidden'); document.getElementById('examHeader').classList.add('hidden'); document.getElementById('solutionView').classList.remove('hidden');
-            const list = document.getElementById('solutionList'); const pal = document.getElementById('solutionPalette'); list.innerHTML = ''; pal.innerHTML = '';
-            const historyBody = document.getElementById('historyTableBody'); historyBody.innerHTML = '';
-            if (window.examHistory && window.examHistory.length > 0) { window.examHistory.forEach((h, idx) => { const date = new Date(h.submittedAt); historyBody.innerHTML += `<tr class="border-b border-gray-50"><td class="px-2 py-2">#${window.examHistory.length - idx}</td><td class="px-2 py-2 text-center text-blue-600 font-bold">${h.score}</td><td class="px-2 py-2 text-right text-gray-400 text-xs">${date.getDate()}/${date.getMonth()+1}</td></tr>`; }); }
+            // 1. Chuyển view
+            document.getElementById('resultModal').classList.add('hidden'); 
+            document.getElementById('examMain').classList.add('hidden'); 
+            document.getElementById('examHeader').classList.add('hidden'); 
+            document.getElementById('solutionView').classList.remove('hidden');
 
+            // 2. Render Danh sách lịch sử bên Sidebar
+            const historyBody = document.getElementById('historyTableBody'); 
+            historyBody.innerHTML = '';
+            
+            if (window.examHistory && window.examHistory.length > 0) { 
+                window.examHistory.forEach((h, idx) => { 
+                    const date = new Date(h.submittedAt); 
+                    // Format ngày: DD/MM HH:mm
+                    const dateStr = `${date.getDate()}/${date.getMonth()+1} ${date.getHours()}:${date.getMinutes()<10?'0':''}${date.getMinutes()}`;
+                    
+                    // Tạo dòng lịch sử có thể CLICK
+                    const tr = document.createElement('tr');
+                    tr.className = "border-b border-gray-50 hover:bg-blue-50 cursor-pointer transition-colors";
+                    tr.onclick = () => window.renderAttemptDetail(idx); // Bấm vào để xem chi tiết lần này
+                    
+                    tr.innerHTML = `
+                        <td class="px-2 py-3 font-medium text-gray-500">Lần ${window.examHistory.length - idx}</td>
+                        <td class="px-2 py-3 text-center font-bold ${h.score >= (h.passScoreSnapshot||5) ? 'text-green-600':'text-red-500'}">${h.score}</td>
+                        <td class="px-2 py-3 text-right text-xs text-gray-400">${dateStr}</td>
+                    `;
+                    historyBody.appendChild(tr);
+                }); 
+                
+                // Mặc định load lần thi mới nhất (index 0)
+                window.renderAttemptDetail(0);
+            }
+        };
+
+        // --- HÀM RENDER CHI TIẾT 1 LẦN THI (CORE LOGIC) ---
+        window.renderAttemptDetail = (historyIndex) => {
+            const h = window.examHistory[historyIndex];
+            if (!h) return;
+
+            // A. Highlight dòng đang chọn trong bảng lịch sử
+            const historyRows = document.querySelectorAll('#historyTableBody tr');
+            historyRows.forEach((r, i) => {
+                if (i === historyIndex) r.classList.add('bg-blue-100');
+                else r.classList.remove('bg-blue-100');
+            });
+
+            // B. Khôi phục lại Đề thi đã đảo (QUAN TRỌNG: Logic này chuyển từ loadLobby sang đây)
+            if (h.shuffleConfig) {
+                const config = h.shuffleConfig;
+                currentQuestions = config.questionOrder.map(originalIndex => {
+                    const originalQ = examData.questions[originalIndex];
+                    if (!originalQ) return null;
+                    const newQ = { ...originalQ };
+                    if (config.optionMaps && config.optionMaps[originalIndex]) {
+                        const map = config.optionMaps[originalIndex];
+                        newQ.options = map.map(idx => originalQ.options[idx]);
+                        newQ.shuffleMap = map; 
+                    }
+                    return newQ;
+                }).filter(q => q !== null);
+            } else {
+                currentQuestions = examData.questions || [];
+            }
+
+            // C. Cập nhật userAnswers của lần thi này
+            userAnswers = h.answers || {};
+
+            // D. Hiển thị Header thông số (Điểm, Thời gian,...)
+            const list = document.getElementById('solutionList'); 
+            const pal = document.getElementById('solutionPalette'); 
+            list.innerHTML = ''; 
+            pal.innerHTML = '';
+
+            // Tính thời gian làm (phút:giây)
+            let durationStr = "--:--";
+            if (h.duration) {
+                const mm = Math.floor(h.duration / 60);
+                const ss = h.duration % 60;
+                durationStr = `${mm}p ${ss}s`;
+            }
+
+            // Tạo khung thông tin đầu trang
+            const infoDiv = document.createElement('div');
+            infoDiv.className = "bg-white p-4 rounded-xl shadow-sm border border-gray-200 mb-6 grid grid-cols-2 md:grid-cols-4 gap-4 animate-fade-in";
+            infoDiv.innerHTML = `
+                <div class="text-center border-r border-gray-100 last:border-0">
+                    <p class="text-xs text-gray-400 uppercase font-bold">Lần thi</p>
+                    <p class="font-black text-gray-800 text-lg">#${window.examHistory.length - historyIndex}</p>
+                </div>
+                <div class="text-center border-r border-gray-100 last:border-0">
+                    <p class="text-xs text-gray-400 uppercase font-bold">Điểm số</p>
+                    <p class="font-black ${h.score >= (h.passScoreSnapshot||5)?'text-green-600':'text-red-500'} text-lg">${h.score}</p>
+                </div>
+                <div class="text-center border-r border-gray-100 last:border-0">
+                    <p class="text-xs text-gray-400 uppercase font-bold">Thời gian làm</p>
+                    <p class="font-bold text-blue-600 text-lg">${durationStr}</p>
+                </div>
+                <div class="text-center">
+                    <p class="text-xs text-gray-400 uppercase font-bold">Ngày nộp</p>
+                    <p class="font-bold text-gray-600 text-sm mt-1">${new Date(h.submittedAt).toLocaleDateString('vi-VN')}</p>
+                </div>
+            `;
+            list.appendChild(infoDiv);
+
+            // E. Render danh sách câu hỏi chi tiết
             const normalize = (str) => String(str).replace(/\$| /g, '').toLowerCase().trim();
+            
             currentQuestions.forEach((q, idx) => {
-                const u = userAnswers[idx]; let isCorrect = false; let ansHtml = '';
+                const u = userAnswers[idx]; 
+                let isCorrect = false; 
+                let ansHtml = '';
                 
                 if(q.type==='mc') { 
-                    // Logic tìm ký tự hiển thị (A,B,C,D) dựa trên vị trí đảo
                     const getDisplayChar = (originalIdx) => {
                         if (originalIdx === undefined || originalIdx === null || originalIdx === "") return 'Chưa làm';
-                        // Nếu câu hỏi có map đảo (shuffleMap), ta phải tìm xem index gốc nằm ở vị trí nào
                         if (q.shuffleMap) {
-                            // q.shuffleMap = [2, 0, 3, 1] nghĩa là: Vị trí 0 hiển thị option 2...
-                            // Ta cần tìm: Option X đang nằm ở vị trí nào?
                             const displayIndex = q.shuffleMap.indexOf(originalIdx);
                             return displayIndex !== -1 ? String.fromCharCode(65 + displayIndex) : '?';
                         }
-                        // Không đảo thì hiển thị đúng index
                         return String.fromCharCode(65 + originalIdx);
                     };
-
                     const userChar = getDisplayChar(u);
                     const correctChar = getDisplayChar(q.correct);
-
                     isCorrect = (u===q.correct); 
-                    
                     ansHtml = `<div>Bạn chọn: <b class="${isCorrect?'text-green-600':'text-red-500'}">${userChar}</b> | Đáp án đúng: <b class="text-green-600">${correctChar}</b></div>`; 
                 }
-                else if (q.type==='short') { isCorrect = (q.answer && u && normalize(u)===normalize(q.answer)); ansHtml = `<div>Bạn điền: <b class="${isCorrect?'text-green-600':'text-red-500'}">${u||'Trống'}</b> | Đáp án: <b class="text-green-600">${q.answer}</b></div>`; }
-                else if (q.type==='tf') { let matches=0; ansHtml='<ul class="text-sm mt-2">'; q.statements.forEach((s,i)=>{ const uc = (u&&u[i]!==undefined)?(u[i]?'Đ':'S'):'_'; const tc = s.isTrue?'Đ':'S'; const m = (u&&u[i]===s.isTrue); if(m) matches++; ansHtml+=`<li>- ${window.formatContent(s.text)}: <b class="${m?'text-green-600':'text-red-500'}">${uc}</b> (Đúng: ${tc})</li>`; }); ansHtml+='</ul>'; isCorrect = (matches === q.statements.length); }
+                else if (q.type==='short') { 
+                    isCorrect = (q.answer && u && normalize(u)===normalize(q.answer)); 
+                    ansHtml = `<div>Bạn điền: <b class="${isCorrect?'text-green-600':'text-red-500'}">${u||'Trống'}</b> | Đáp án: <b class="text-green-600">${q.answer}</b></div>`; 
+                }
+                else if (q.type==='tf') { 
+                    let matches=0; 
+                    // Tái tạo logic hiển thị Đúng/Sai có đảo ý
+                    let displayIndices = q.statements.map((_,k)=>k);
+                    if(q.shuffleMapTF) displayIndices = q.shuffleMapTF; // Nếu lúc thi có lưu map đảo ý (cần đảm bảo lưu cái này vào config nếu muốn chính xác 100%)
+                    // *Lưu ý: Hiện tại trong submitReal chúng ta chưa lưu shuffleMapTF vào config.
+                    // Nếu muốn đơn giản, ta cứ render theo thứ tự gốc. 
+                    // Hoặc logic hiện tại ở bước View này ta chấp nhận render theo thứ tự gốc để học sinh dễ so sánh.
+                    
+                    ansHtml='<ul class="text-sm mt-2">'; 
+                    q.statements.forEach((s,i)=>{ 
+                        const uc = (u&&u[i]!==undefined)?(u[i]?'Đ':'S'):'_'; 
+                        const tc = s.isTrue?'Đ':'S'; 
+                        const m = (u&&u[i]===s.isTrue); 
+                        if(m) matches++; 
+                        ansHtml+=`<li>- ${window.formatContent(s.text)}: <b class="${m?'text-green-600':'text-red-500'}">${uc}</b> (Đúng: ${tc})</li>`; 
+                    }); 
+                    ansHtml+='</ul>'; 
+                    isCorrect = (matches === q.statements.length); 
+                }
+                else {
+                    // Tự luận
+                    ansHtml = `<div class="text-gray-500 italic">Câu hỏi tự luận (Cần giáo viên chấm)</div>`;
+                    if(u) ansHtml += `<div class="mt-2 p-2 bg-gray-50 border rounded text-xs">Đã nộp bài</div>`;
+                }
 
-                const btn = document.createElement('button'); btn.className = `q-btn ${isCorrect?'correct':(isCorrect===false?'wrong':'partial')}`; btn.textContent = idx+1; btn.onclick = () => { document.getElementById(`sol-q-${idx}`).scrollIntoView({behavior:'smooth', block:'center'}); closeAllSidebars(); }; pal.appendChild(btn);
-                const item = document.createElement('div'); item.id = `sol-q-${idx}`; item.className = "bg-white p-6 rounded-2xl shadow-sm border border-gray-200";
-                item.innerHTML = `<div class="font-bold text-gray-500 text-sm mb-2">Câu ${idx+1} (${q.type.toUpperCase()})</div><div class="mb-4 text-gray-800 text-lg">${window.formatContent(q.content)}</div><div class="bg-gray-50 p-3 rounded-lg border border-gray-200 mb-3">${ansHtml}</div>${q.solution ? `<div class="solution-box"><div class="font-bold text-green-700 mb-1">Lời giải:</div><div class="text-gray-700">${window.formatContent(q.solution)}</div></div>` : ''}`;
+                const btn = document.createElement('button'); 
+                btn.className = `q-btn ${isCorrect?'correct':(isCorrect===false?'wrong':'partial')}`; 
+                btn.textContent = idx+1; 
+                btn.onclick = () => { document.getElementById(`sol-q-${idx}`).scrollIntoView({behavior:'smooth', block:'center'}); closeAllSidebars(); }; 
+                pal.appendChild(btn);
+
+                const item = document.createElement('div'); 
+                item.id = `sol-q-${idx}`; 
+                item.className = "bg-white p-6 rounded-2xl shadow-sm border border-gray-200 mb-6";
+                item.innerHTML = `<div class="font-bold text-gray-500 text-sm mb-2">Câu ${idx+1} (${q.type ? q.type.toUpperCase() : 'Question'})</div><div class="mb-4 text-gray-800 text-lg">${window.formatContent(q.content)}</div><div class="bg-gray-50 p-3 rounded-lg border border-gray-200 mb-3">${ansHtml}</div>${q.solution ? `<div class="solution-box"><div class="font-bold text-green-700 mb-1">Lời giải:</div><div class="text-gray-700">${window.formatContent(q.solution)}</div></div>` : ''}`;
                 list.appendChild(item);
             });
+
             if(window.MathJax) { MathJax.typesetPromise([list]).then(() => { if(window.renderTikz) window.renderTikz(); if(window.autoScaleTables) window.autoScaleTables(); }).catch(()=>{}); }
-        }
+        };
 
         window.returnToContext = () => { const urlParams = new URLSearchParams(window.location.search); const courseId = urlParams.get('courseId'); const modes = urlParams.getAll('mode'); const isCourseContext = modes.includes('course') || modes.includes('practice') || !!courseId; if (isCourseContext && courseId) { window.location.href = `course-player.html?id=${courseId}`; } else { window.location.href = 'dashboard.html'; } };
         const urlParamsTest = new URLSearchParams(window.location.search); if (urlParamsTest.get('courseId') && document.getElementById('btnBackContext')) { document.getElementById('btnBackContext').innerText = "Quay lại bài học"; }
