@@ -1129,13 +1129,49 @@
                 div.id = `q-preview-${idx}`;
                 div.onclick = () => loadQuestionToEditor(idx);
                 
-                let html = `
-                    <div class="flex justify-between mb-2">
-                        <span class="font-bold text-blue-600">Câu ${idx+1}</span>
-                        <span class="bg-orange-100 text-orange-600 text-xs px-2 py-0.5 rounded font-bold">${q.point || 0}đ</span>
-                    </div>
-                    <div class="mb-3 text-gray-800">${formatContent(q.content)}</div>
-                `;
+                // 1. Tạo Badge ID (Màu xanh đậm)
+             let idBadge = q.mapId 
+                ? `<span class="text-[10px] font-mono font-bold text-blue-700 bg-blue-100 px-1.5 py-0.5 rounded border border-blue-200" title="ID Câu hỏi">${q.mapId}</span>` 
+                : `<span class="text-[10px] font-mono text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200" title="Chưa có ID">No-ID</span>`;
+
+             // 2. Tạo Badge Mức độ (Màu theo mức độ)
+             let levelBadge = '';
+             if (q.level) {
+                 let color = q.levelColor || 'gray'; // Lấy màu đã phân tích
+                 // Fix lại màu nếu chưa có (phòng hờ)
+                 if (q.level === 'Nhận biết') color = 'green';
+                 if (q.level === 'Thông hiểu') color = 'blue';
+                 if (q.level === 'Vận dụng') color = 'orange'; // Dùng orange thay cho yellow để dễ đọc
+                 if (q.level === 'Vận dụng cao') color = 'red';
+                 
+                 // Viết tắt mức độ cho gọn: NB, TH, VD, VDC
+                 let shortLevel = q.level.replace('Nhận biết','NB').replace('Thông hiểu','TH').replace('Vận dụng cao','VDC').replace('Vận dụng','VD');
+                 
+                 levelBadge = `<span class="text-[9px] font-bold text-${color}-600 bg-${color}-50 px-1.5 py-0.5 rounded border border-${color}-100 uppercase tracking-wider">${shortLevel}</span>`;
+             }
+
+             // 3. Tạo Badge Môn (Ẩn bớt nếu cần gọn, hoặc hiện chữ cái đầu Đ/H)
+             let subjectBadge = '';
+             if (q.subject) {
+                 let subShort = q.subject === 'Đại số' ? 'ĐS' : (q.subject === 'Hình học' ? 'HH' : 'GT');
+                 subjectBadge = `<span class="text-[9px] font-bold text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200">${subShort}</span>`;
+             }
+
+             let html = `
+                 <div class="flex justify-between items-start mb-2 gap-2">
+                     <div class="flex flex-col gap-1">
+                        <div class="flex items-center gap-2">
+                            <span class="font-bold text-sm text-gray-800">Câu ${idx+1}</span>
+                            ${idBadge}
+                        </div>
+                        <div class="flex gap-1">
+                            ${subjectBadge} ${levelBadge}
+                        </div>
+                     </div>
+                     <span class="bg-orange-50 text-orange-600 text-[10px] px-2 py-1 rounded font-bold border border-orange-100 shrink-0">${q.point || 0}đ</span>
+                 </div>
+                 <div class="text-xs text-gray-600 line-clamp-2 mb-1" style="max-height: 3em; overflow: hidden;">${formatContent(q.content)}</div>
+             `;
 
                 if (q.type === 'mc' && q.options) {
                     html += `<div class="grid grid-cols-2 gap-2 text-xs text-gray-600">`;
@@ -1193,25 +1229,14 @@
             const editor = document.getElementById('editorArea');
             
             // [MỚI] HIỂN THỊ TAG NẾU CÓ ID
-            let tagHtml = '';
-            if (q.mapId) {
-                let lvColor = q.levelColor || 'gray';
-                tagHtml = `
-                <div class="flex items-center gap-3 mb-4 bg-white p-3 rounded-xl border border-blue-100 shadow-sm">
-                    <div class="flex items-center gap-2">
-                        <span class="text-[10px] font-bold text-gray-400 uppercase tracking-wider">ID:</span>
-                        <span class="font-mono text-sm font-black text-blue-600 bg-blue-50 px-2 py-1 rounded border border-blue-100">${q.mapId}</span>
-                    </div>
-                    <div class="h-4 w-[1px] bg-gray-200"></div>
-                    <div class="flex gap-2">
-                        <span class="text-xs font-bold text-gray-600 bg-gray-100 px-2 py-1 rounded border border-gray-200">${q.subject || 'Khác'}</span>
-                        <span class="text-xs font-bold text-${lvColor}-600 bg-${lvColor}-50 px-2 py-1 rounded border border-${lvColor}-100">${q.level || 'Khác'}</span>
-                    </div>
-                </div>`;
+            // Chỉ hiện cảnh báo nhỏ nếu thiếu ID để giáo viên biết
+            let alertHtml = '';
+            if (!q.mapId) {
+                alertHtml = `<div class="mb-2 text-[10px] text-orange-500 italic bg-orange-50 px-2 py-1 rounded border border-orange-100 flex items-center gap-1"><i class="fa-solid fa-circle-exclamation"></i> Câu này chưa có ID (Sẽ không được lưu vào Ngân hàng)</div>`;
             }
 
             let html = `
-                ${tagHtml}
+                ${alertHtml}
                 <div class="mb-4"><label class="form-group-title">Nội dung</label><textarea id="editContent" class="form-input min-h-[120px]" oninput="autoSaveMemory()">${q.content || ''}</textarea></div>
             `;
             if (q.type === 'mc') {
