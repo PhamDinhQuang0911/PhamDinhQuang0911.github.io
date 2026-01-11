@@ -984,13 +984,16 @@ async function loadLobbyData(id) {
             // --- [FIX] LẤY CẤU HÌNH ĐẢO ĐỀ ĐỂ LƯU ---
             // 2. LƯU KẾT QUẢ VÀO FIRESTORE (LOGIC CŨ)
             // --- [FIX] LẤY CẤU HÌNH ĐẢO ĐỀ ĐỂ LƯU ---
+            // 2. LƯU KẾT QUẢ VÀO FIRESTORE (ĐÃ FIX: CẬP NHẬT LIST NGAY LẬP TỨC)
+            // --- [FIX] LẤY CẤU HÌNH ĐẢO ĐỀ ĐỂ LƯU ---
             const shuffleConfigKey = `examConfig_${currentUser.uid}_${examId}`;
             const savedConfig = JSON.parse(localStorage.getItem(shuffleConfigKey) || "null");
             
-            // Tính thời gian làm bài (Giây) = Tổng thời gian - Thời gian còn lại
+            // Tính thời gian làm bài (Giây)
             const durationSeconds = (examData.duration * 60) - timeLeft;
-
-            await addDoc(collection(db, "results"), { 
+            
+            // Tạo object dữ liệu chuẩn
+            const resultData = { 
                 examId, 
                 studentId: currentUser.uid, 
                 studentName: currentUser.displayName || currentUser.email, 
@@ -1002,9 +1005,16 @@ async function loadLobbyData(id) {
                 totalQuestions: currentQuestions.length, 
                 isPassed: isPassed, 
                 passScoreSnapshot: passScore, 
-                duration: durationSeconds, // <--- THÊM DÒNG NÀY: Lưu thời gian làm bài
+                duration: durationSeconds,
                 submittedAt: new Date().toISOString() 
-            });
+            };
+
+            // Lưu lên Cloud
+            await addDoc(collection(db, "results"), resultData);
+
+            // [QUAN TRỌNG] Đẩy ngay vào đầu danh sách lịch sử trên máy (để hiện list ngay lập tức)
+            if (!window.examHistory) window.examHistory = [];
+            window.examHistory.unshift(resultData);
             
             // 3. [MỚI] XÓA DỮ LIỆU TẠM (CLEANUP)
                 
@@ -1082,6 +1092,7 @@ async function loadLobbyData(id) {
         }
 
         // --- HÀM XEM LẠI BÀI (ĐÃ NÂNG CẤP: SWITCH LỊCH SỬ & HIỆN THÔNG SỐ) ---
+        // --- HÀM XEM LẠI BÀI (ĐÃ FIX: HIỆN DANH SÁCH LỊCH SỬ CHUẨN) ---
         window.viewDetailSolutions = () => {
             // 1. Chuyển view
             document.getElementById('resultModal').classList.add('hidden'); 
@@ -1091,45 +1102,60 @@ async function loadLobbyData(id) {
 
             // 2. Render Danh sách lịch sử bên Sidebar
             const historyBody = document.getElementById('historyTableBody'); 
-            historyBody.innerHTML = '';
             
-            if (window.examHistory && window.examHistory.length > 0) { 
-                window.examHistory.forEach((h, idx) => { 
-                    const date = new Date(h.submittedAt); 
-                    // Format ngày: DD/MM HH:mm
-                    const dateStr = `${date.getDate()}/${date.getMonth()+1} ${date.getHours()}:${date.getMinutes()<10?'0':''}${date.getMinutes()}`;
-                    
-                    // Tạo dòng lịch sử có thể CLICK
-                    const tr = document.createElement('tr');
-                    tr.className = "border-b border-gray-50 hover:bg-blue-50 cursor-pointer transition-colors";
-                    tr.onclick = () => window.renderAttemptDetail(idx); // Bấm vào để xem chi tiết lần này
-                    
-                    tr.innerHTML = `
-                        <td class="px-2 py-3 font-medium text-gray-500">Lần ${window.examHistory.length - idx}</td>
-                        <td class="px-2 py-3 text-center font-bold ${h.score >= (h.passScoreSnapshot||5) ? 'text-green-600':'text-red-500'}">${h.score}</td>
-                        <td class="px-2 py-3 text-right text-xs text-gray-400">${dateStr}</td>
-                    `;
-                    historyBody.appendChild(tr);
-                }); 
+            // Kiểm tra kỹ xem bảng có tồn tại không
+            if (historyBody) {
+                historyBody.innerHTML = ''; // Xóa cũ
                 
-                // Mặc định load lần thi mới nhất (index 0)
-                window.renderAttemptDetail(0);
+                if (window.examHistory && window.examHistory.length > 0) { 
+                    // Sắp xếp lại cho chắc chắn (Mới nhất lên đầu)
+                    window.examHistory.sort((a,b) => new Date(b.submittedAt||0) - new Date(a.submittedAt||0));
+
+                    window.examHistory.forEach((h, idx) => { 
+                        // Xử lý ngày tháng an toàn
+                        let dateStr = "Vừa xong";
+                        if (h.submittedAt) {
+                            const date = new Date(h.submittedAt); 
+                            dateStr = `${date.getDate()}/${date.getMonth()+1} ${date.getHours()}:${date.getMinutes()<10?'0':''}${date.getMinutes()}`;
+                        }
+                        
+                        // Tạo dòng lịch sử có thể CLICK
+                        const tr = document.createElement('tr');
+                        tr.className = "border-b border-gray-50 hover:bg-blue-50 cursor-pointer transition-colors";
+                        tr.id = `history-row-${idx}`; // Đánh dấu ID để highlight
+                        tr.onclick = () => window.renderAttemptDetail(idx); 
+                        
+                        tr.innerHTML = `
+                            <td class="px-2 py-3 font-medium text-gray-500">Lần ${window.examHistory.length - idx}</td>
+                            <td class="px-2 py-3 text-center font-bold ${h.score >= (h.passScoreSnapshot||5) ? 'text-green-600':'text-red-500'}">${h.score}</td>
+                            <td class="px-2 py-3 text-right text-xs text-gray-400">${dateStr}</td>
+                        `;
+                        historyBody.appendChild(tr);
+                    }); 
+                    
+                    // Mặc định load lần thi mới nhất (index 0)
+                    window.renderAttemptDetail(0);
+                } else {
+                    historyBody.innerHTML = '<tr><td colspan="3" class="p-4 text-center text-gray-400 text-xs">Chưa có lịch sử</td></tr>';
+                }
+            } else {
+                console.error("LỖI: Không tìm thấy bảng lịch sử (id='historyTableBody')");
             }
         };
 
-        // --- HÀM RENDER CHI TIẾT 1 LẦN THI (CORE LOGIC) ---
+        // --- HÀM RENDER CHI TIẾT 1 LẦN THI (GIỮ NGUYÊN LOGIC CŨ CỦA BẠN) ---
         window.renderAttemptDetail = (historyIndex) => {
             const h = window.examHistory[historyIndex];
             if (!h) return;
 
-            // A. Highlight dòng đang chọn trong bảng lịch sử
+            // A. Highlight dòng đang chọn
             const historyRows = document.querySelectorAll('#historyTableBody tr');
             historyRows.forEach((r, i) => {
                 if (i === historyIndex) r.classList.add('bg-blue-100');
                 else r.classList.remove('bg-blue-100');
             });
 
-            // B. Khôi phục lại Đề thi đã đảo (QUAN TRỌNG: Logic này chuyển từ loadLobby sang đây)
+            // B. Khôi phục lại Đề thi đã đảo
             if (h.shuffleConfig) {
                 const config = h.shuffleConfig;
                 currentQuestions = config.questionOrder.map(originalIndex => {
@@ -1141,22 +1167,24 @@ async function loadLobbyData(id) {
                         newQ.options = map.map(idx => originalQ.options[idx]);
                         newQ.shuffleMap = map; 
                     }
+                    if(newQ.type === 'tf' && config.optionMapsTF && config.optionMapsTF[originalIndex]) {
+                         // Logic khôi phục cho câu TF nếu có (nâng cao)
+                    }
                     return newQ;
                 }).filter(q => q !== null);
             } else {
                 currentQuestions = examData.questions || [];
             }
 
-            // C. Cập nhật userAnswers của lần thi này
+            // C. Cập nhật userAnswers
             userAnswers = h.answers || {};
 
-            // D. Hiển thị Header thông số (Điểm, Thời gian,...)
+            // D. Hiển thị Header & Nội dung (Dùng lại code đã gửi ở turn trước)
             const list = document.getElementById('solutionList'); 
             const pal = document.getElementById('solutionPalette'); 
             list.innerHTML = ''; 
             pal.innerHTML = '';
 
-            // Tính thời gian làm (phút:giây)
             let durationStr = "--:--";
             if (h.duration) {
                 const mm = Math.floor(h.duration / 60);
@@ -1164,7 +1192,6 @@ async function loadLobbyData(id) {
                 durationStr = `${mm}p ${ss}s`;
             }
 
-            // Tạo khung thông tin đầu trang
             const infoDiv = document.createElement('div');
             infoDiv.className = "bg-white p-4 rounded-xl shadow-sm border border-gray-200 mb-6 grid grid-cols-2 md:grid-cols-4 gap-4 animate-fade-in";
             infoDiv.innerHTML = `
@@ -1182,18 +1209,19 @@ async function loadLobbyData(id) {
                 </div>
                 <div class="text-center">
                     <p class="text-xs text-gray-400 uppercase font-bold">Ngày nộp</p>
-                    <p class="font-bold text-gray-600 text-sm mt-1">${new Date(h.submittedAt).toLocaleDateString('vi-VN')}</p>
+                    <p class="font-bold text-gray-600 text-sm mt-1">${h.submittedAt ? new Date(h.submittedAt).toLocaleDateString('vi-VN') : '---'}</p>
                 </div>
             `;
             list.appendChild(infoDiv);
 
-            // E. Render danh sách câu hỏi chi tiết
-            const normalize = (str) => String(str).replace(/\$| /g, '').toLowerCase().trim();
+            // E. Render câu hỏi (Copy lại logic render của turn trước vào đây)
+            // ... (Phần render câu hỏi trắc nghiệm A,B,C,D và Đúng/Sai bạn đã làm ở Turn trước)
+            // Hãy dán đoạn logic render câu hỏi vào đây (dòng currentQuestions.forEach...)
             
+            // [TỰ ĐỘNG DÁN LẠI LOGIC RENDER ĐỂ BẠN ĐỠ PHẢI TÌM]
+            const normalize = (str) => String(str).replace(/\$| /g, '').toLowerCase().trim();
             currentQuestions.forEach((q, idx) => {
-                const u = userAnswers[idx]; 
-                let isCorrect = false; 
-                let ansHtml = '';
+                const u = userAnswers[idx]; let isCorrect = false; let ansHtml = '';
                 
                 if(q.type==='mc') { 
                     const getDisplayChar = (originalIdx) => {
@@ -1209,45 +1237,19 @@ async function loadLobbyData(id) {
                     isCorrect = (u===q.correct); 
                     ansHtml = `<div>Bạn chọn: <b class="${isCorrect?'text-green-600':'text-red-500'}">${userChar}</b> | Đáp án đúng: <b class="text-green-600">${correctChar}</b></div>`; 
                 }
-                else if (q.type==='short') { 
-                    isCorrect = (q.answer && u && normalize(u)===normalize(q.answer)); 
-                    ansHtml = `<div>Bạn điền: <b class="${isCorrect?'text-green-600':'text-red-500'}">${u||'Trống'}</b> | Đáp án: <b class="text-green-600">${q.answer}</b></div>`; 
-                }
+                else if (q.type==='short') { isCorrect = (q.answer && u && normalize(u)===normalize(q.answer)); ansHtml = `<div>Bạn điền: <b class="${isCorrect?'text-green-600':'text-red-500'}">${u||'Trống'}</b> | Đáp án: <b class="text-green-600">${q.answer}</b></div>`; }
                 else if (q.type==='tf') { 
-                    let matches=0; 
-                    // Tái tạo logic hiển thị Đúng/Sai có đảo ý
-                    let displayIndices = q.statements.map((_,k)=>k);
-                    if(q.shuffleMapTF) displayIndices = q.shuffleMapTF; // Nếu lúc thi có lưu map đảo ý (cần đảm bảo lưu cái này vào config nếu muốn chính xác 100%)
-                    // *Lưu ý: Hiện tại trong submitReal chúng ta chưa lưu shuffleMapTF vào config.
-                    // Nếu muốn đơn giản, ta cứ render theo thứ tự gốc. 
-                    // Hoặc logic hiện tại ở bước View này ta chấp nhận render theo thứ tự gốc để học sinh dễ so sánh.
+                    let matches=0; ansHtml='<ul class="text-sm mt-2">'; 
+                    let displayIndices = q.statements.map((_,k)=>k); 
+                    // Nếu muốn hiển thị lại đúng thứ tự đã đảo (nâng cao), cần lưu shuffleMapTF vào db. 
+                    // Hiện tại hiển thị theo thứ tự gốc để dễ tra cứu.
                     
-                    ansHtml='<ul class="text-sm mt-2">'; 
-                    q.statements.forEach((s,i)=>{ 
-                        const uc = (u&&u[i]!==undefined)?(u[i]?'Đ':'S'):'_'; 
-                        const tc = s.isTrue?'Đ':'S'; 
-                        const m = (u&&u[i]===s.isTrue); 
-                        if(m) matches++; 
-                        ansHtml+=`<li>- ${window.formatContent(s.text)}: <b class="${m?'text-green-600':'text-red-500'}">${uc}</b> (Đúng: ${tc})</li>`; 
-                    }); 
-                    ansHtml+='</ul>'; 
-                    isCorrect = (matches === q.statements.length); 
+                    q.statements.forEach((s,i)=>{ const uc = (u&&u[i]!==undefined)?(u[i]?'Đ':'S'):'_'; const tc = s.isTrue?'Đ':'S'; const m = (u&&u[i]===s.isTrue); if(m) matches++; ansHtml+=`<li>- ${window.formatContent(s.text)}: <b class="${m?'text-green-600':'text-red-500'}">${uc}</b> (Đúng: ${tc})</li>`; }); ansHtml+='</ul>'; isCorrect = (matches === q.statements.length); 
                 }
-                else {
-                    // Tự luận
-                    ansHtml = `<div class="text-gray-500 italic">Câu hỏi tự luận (Cần giáo viên chấm)</div>`;
-                    if(u) ansHtml += `<div class="mt-2 p-2 bg-gray-50 border rounded text-xs">Đã nộp bài</div>`;
-                }
+                else { ansHtml = `<div class="text-gray-500 italic">Câu hỏi tự luận (Cần giáo viên chấm)</div>${u ? `<div class="mt-2 text-xs bg-gray-50 p-2 border">Đã nộp bài</div>` : ''}`; }
 
-                const btn = document.createElement('button'); 
-                btn.className = `q-btn ${isCorrect?'correct':(isCorrect===false?'wrong':'partial')}`; 
-                btn.textContent = idx+1; 
-                btn.onclick = () => { document.getElementById(`sol-q-${idx}`).scrollIntoView({behavior:'smooth', block:'center'}); closeAllSidebars(); }; 
-                pal.appendChild(btn);
-
-                const item = document.createElement('div'); 
-                item.id = `sol-q-${idx}`; 
-                item.className = "bg-white p-6 rounded-2xl shadow-sm border border-gray-200 mb-6";
+                const btn = document.createElement('button'); btn.className = `q-btn ${isCorrect?'correct':(isCorrect===false?'wrong':'partial')}`; btn.textContent = idx+1; btn.onclick = () => { document.getElementById(`sol-q-${idx}`).scrollIntoView({behavior:'smooth', block:'center'}); closeAllSidebars(); }; pal.appendChild(btn);
+                const item = document.createElement('div'); item.id = `sol-q-${idx}`; item.className = "bg-white p-6 rounded-2xl shadow-sm border border-gray-200 mb-6";
                 item.innerHTML = `<div class="font-bold text-gray-500 text-sm mb-2">Câu ${idx+1} (${q.type ? q.type.toUpperCase() : 'Question'})</div><div class="mb-4 text-gray-800 text-lg">${window.formatContent(q.content)}</div><div class="bg-gray-50 p-3 rounded-lg border border-gray-200 mb-3">${ansHtml}</div>${q.solution ? `<div class="solution-box"><div class="font-bold text-green-700 mb-1">Lời giải:</div><div class="text-gray-700">${window.formatContent(q.solution)}</div></div>` : ''}`;
                 list.appendChild(item);
             });
