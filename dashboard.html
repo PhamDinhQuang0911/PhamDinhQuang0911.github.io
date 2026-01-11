@@ -1700,37 +1700,37 @@
         };
         // ============================================================
     // ============================================================
-    // LOGIC KHO CÂU HỎI & BỘ LỌC MAPID (CẬP NHẬT)
+    // ============================================================
+    // [CẬP NHẬT] LOGIC DASHBOARD: NGÂN HÀNG CÂU HỎI & BỘ LỌC MAPID
     // ============================================================
 
-    // 1. Hàm định dạng hiển thị (Fix lỗi Preview trắng trơn)
+    // 1. Hàm định dạng nội dung (Fix lỗi hiển thị công thức toán)
     window.formatContent = (text) => {
         if (!text) return "";
         let formatted = text
-            .replace(/\n/g, "<br>") // Xuống dòng
+            .replace(/\n/g, "<br>")
             .replace(/\\newline/g, "<br>")
-            .replace(/\\dfrac/g, "\\displaystyle\\dfrac"); // Ép hiển thị phân số đẹp
+            .replace(/\\dfrac/g, "\\displaystyle\\dfrac")
+            .replace(/\\begin\{cases\}/g, "\\begin{cases}")
+            .replace(/\\end\{cases\}/g, "\\end{cases}");
         return formatted;
     };
 
-    // 2. Biến lưu trạng thái bộ lọc
-    let mapFilterState = { grade: 'all', subject: 'all', chapter: 'all', lesson: 'all' };
-
-    // 3. Tải dữ liệu và khởi tạo bộ lọc
+    // 2. Tải dữ liệu Ngân hàng & Cây MapID
     window.loadQuestionBank = async () => {
         const list = document.getElementById('bankList');
         const countEl = document.getElementById('bankCount');
         list.innerHTML = '<div class="text-center py-10 text-gray-400 flex flex-col items-center"><i class="fa-solid fa-spinner fa-spin text-2xl mb-2 text-blue-500"></i><span>Đang tải dữ liệu...</span></div>';
 
         try {
-            // Tải danh sách câu hỏi từ R2
+            // Tải câu hỏi từ Cloudflare
             const WORKER_URL = "https://upload-helper.phamngockhanh-942001.workers.dev/bank";
             const res = await fetch(WORKER_URL);
             if (!res.ok) throw new Error("Không kết nối được Server");
             
             window.globalBankQuestions = await res.json(); 
             
-            // Tải cây MapID (nếu chưa có) và khởi tạo bộ lọc
+            // Tải Cây MapID (nếu chưa có) để dùng cho bộ lọc
             if (!window.globalIdTree || window.globalIdTree.length === 0) {
                  const snap = await getDoc(doc(db, "configurations", "map_id_tree"));
                  if(snap.exists()) window.globalIdTree = snap.data().tree || [];
@@ -1739,7 +1739,12 @@
             // Khởi tạo bộ lọc cấp 1 (Lớp)
             initFilterDropdown('f_Grade', window.globalIdTree, 'Lớp');
             
-            window.applyBankFilters(); // Hiển thị danh sách ban đầu
+            // Reset các bộ lọc khác
+            resetSelect('f_Subject', 'Môn');
+            resetSelect('f_Chapter', 'Chương');
+            resetSelect('f_Lesson', 'Bài');
+
+            window.applyBankFilters(); // Hiển thị danh sách lần đầu
 
         } catch (e) {
             console.error(e);
@@ -1748,7 +1753,12 @@
         }
     };
 
-    // 4. Hàm render Dropdown
+    // 3. Hàm hỗ trợ Dropdown
+    function resetSelect(id, label) {
+        const el = document.getElementById(id);
+        if(el) el.innerHTML = `<option value="all">${label}: Tất cả</option>`;
+    }
+
     function initFilterDropdown(elmId, nodes, label) {
         const sel = document.getElementById(elmId);
         if(!sel) return;
@@ -1757,54 +1767,59 @@
         
         nodes.forEach(n => {
             const opt = document.createElement('option');
-            opt.value = n.id;
-            opt.textContent = n.name;
+            opt.value = n.id; // ID của node (VD: 9, D, 1...)
+            opt.textContent = n.name; // Tên hiển thị
+            // Lưu tham chiếu node con vào data để dùng cho cấp sau
+            // (Tuy nhiên lưu object vào DOM không chuẩn, ta sẽ tìm lại trong onFilterChange)
             sel.appendChild(opt);
         });
     }
 
-    // 5. Xử lý sự kiện thay đổi bộ lọc (Cascading)
+    // 4. Xử lý logic bộ lọc thông minh (Cascading)
     window.onFilterChange = (level) => {
         const gradeVal = document.getElementById('f_Grade').value;
         const subjVal = document.getElementById('f_Subject').value;
         const chapVal = document.getElementById('f_Chapter').value;
-        
-        // Reset các cấp con khi cấp cha thay đổi
+
+        // Tìm node Lớp
+        const gradeNode = window.globalIdTree.find(n => n.id == gradeVal);
+
         if (level === 'grade') {
-            document.getElementById('f_Subject').innerHTML = '<option value="all">Môn: Tất cả</option>';
-            document.getElementById('f_Chapter').innerHTML = '<option value="all">Chương: Tất cả</option>';
-            document.getElementById('f_Lesson').innerHTML = '<option value="all">Bài: Tất cả</option>';
-            
-            if (gradeVal !== 'all') {
-                const gradeNode = window.globalIdTree.find(n => n.id == gradeVal);
-                if (gradeNode) initFilterDropdown('f_Subject', gradeNode.children, 'Môn');
+            // Khi chọn Lớp -> Nạp Môn, Reset Chương/Bài
+            if (gradeNode && gradeNode.children) {
+                initFilterDropdown('f_Subject', gradeNode.children, 'Môn');
+            } else {
+                resetSelect('f_Subject', 'Môn');
             }
+            resetSelect('f_Chapter', 'Chương');
+            resetSelect('f_Lesson', 'Bài');
         }
         else if (level === 'subject') {
-            document.getElementById('f_Chapter').innerHTML = '<option value="all">Chương: Tất cả</option>';
-            document.getElementById('f_Lesson').innerHTML = '<option value="all">Bài: Tất cả</option>';
-            
-            if (gradeVal !== 'all' && subjVal !== 'all') {
-                const gradeNode = window.globalIdTree.find(n => n.id == gradeVal);
-                const subjNode = gradeNode?.children.find(n => n.id == subjVal);
-                if (subjNode) initFilterDropdown('f_Chapter', subjNode.children, 'Chương');
+            // Khi chọn Môn -> Nạp Chương, Reset Bài
+            const subjNode = gradeNode?.children?.find(n => n.id == subjVal);
+            if (subjNode && subjNode.children) {
+                initFilterDropdown('f_Chapter', subjNode.children, 'Chương');
+            } else {
+                resetSelect('f_Chapter', 'Chương');
             }
+            resetSelect('f_Lesson', 'Bài');
         }
         else if (level === 'chapter') {
-            document.getElementById('f_Lesson').innerHTML = '<option value="all">Bài: Tất cả</option>';
-            
-            if (gradeVal !== 'all' && subjVal !== 'all' && chapVal !== 'all') {
-                const gradeNode = window.globalIdTree.find(n => n.id == gradeVal);
-                const subjNode = gradeNode?.children.find(n => n.id == subjVal);
-                const chapNode = subjNode?.children.find(n => n.id == chapVal);
-                if (chapNode) initFilterDropdown('f_Lesson', chapNode.children, 'Bài');
+            // Khi chọn Chương -> Nạp Bài
+            const subjNode = gradeNode?.children?.find(n => n.id == subjVal);
+            const chapNode = subjNode?.children?.find(n => n.id == chapVal);
+            if (chapNode && chapNode.children) {
+                initFilterDropdown('f_Lesson', chapNode.children, 'Bài');
+            } else {
+                resetSelect('f_Lesson', 'Bài');
             }
         }
         
+        // Luôn gọi lọc sau khi thay đổi bất kỳ cấp nào
         window.applyBankFilters();
     };
 
-    // 6. Logic Lọc dữ liệu (Quan trọng)
+    // 5. Logic Lọc & Tìm kiếm (Core)
     window.applyBankFilters = () => {
         const data = window.globalBankQuestions;
         const g = document.getElementById('f_Grade').value;
@@ -1814,53 +1829,56 @@
         const lv = document.getElementById('f_Level').value;
         const search = document.getElementById('searchBank').value.toLowerCase();
 
+        // Tạo tiền tố ID cần lọc (VD: 9D1...)
+        let prefix = "";
+        if (g !== 'all') prefix += g;
+        if (s !== 'all') prefix += s;
+        if (c !== 'all') prefix += c;
+        // Bài học (Lesson) trong ID thường bị ngăn cách bởi ký tự mức độ (VD: 9D1H1)
+        // Nên ta xử lý riêng logic bài học bên dưới
+
         const filtered = data.filter(item => {
-            // Lọc theo MapID (Dựa trên quy tắc đặt ID: 9D1H1...)
-            // 9 (Grade) D (Subj) 1 (Chap) ... (Lesson)
-            // Cần kiểm tra xem ID câu hỏi có BẮT ĐẦU bằng chuỗi filter không
-            
-            let matchMap = true;
-            let prefix = "";
-            
-            if (g !== 'all') prefix += g; // VD: "9"
-            if (s !== 'all') prefix += s; // VD: "9D"
-            if (c !== 'all') prefix += c; // VD: "9D1"
-            
-            if (prefix && !item.id.startsWith(prefix)) matchMap = false;
-            
-            if (matchMap && l !== 'all') {
-                // Check bài học: Item ID (9D1H1) có chứa bài 1 không?
-                // Logic tách: Bỏ phần prefix (9D1), còn lại H1-7. Tìm số 1
-                let remaining = item.id.replace(prefix, ''); // H1-7
-                // Regex tìm số bài học (số nằm sau ký tự chữ cái mức độ)
+            // 1. Lọc theo MapID (Tiền tố)
+            if (prefix && !item.id.startsWith(prefix)) return false;
+
+            // 2. Lọc Bài học (Lesson)
+            if (l !== 'all') {
+                // ID: 9D1H1-7. Prefix: 9D1. Còn lại: H1-7. Cần tìm số 1.
+                let remaining = item.id.replace(prefix, ''); 
+                // Regex tìm số bài học (số nằm sau ký tự chữ cái mức độ N/H/V/C)
                 const lessonMatch = remaining.match(/[NHVC](\d+)/);
-                if (!lessonMatch || lessonMatch[1] != l) matchMap = false;
+                if (!lessonMatch || lessonMatch[1] != l) return false;
             }
 
-            // Lọc Mức độ
-            let matchLevel = true;
+            // 3. Lọc Mức độ
             if (lv !== 'all') {
-                if (item.level !== lv) matchLevel = false;
+                // Chuẩn hóa mức độ trong data về dạng text để so sánh
+                let itemLv = item.level || '';
+                if (itemLv === 'NB') itemLv = 'Nhận biết';
+                if (itemLv === 'TH') itemLv = 'Thông hiểu';
+                if (itemLv === 'VD') itemLv = 'Vận dụng';
+                if (itemLv === 'VDC') itemLv = 'Vận dụng cao';
+                
+                if (itemLv !== lv) return false;
             }
 
-            // Lọc Search
-            let matchSearch = true;
-            if (search && !item.id.toLowerCase().includes(search)) matchSearch = false;
+            // 4. Tìm kiếm từ khóa
+            if (search && !item.id.toLowerCase().includes(search) && !item.content.toLowerCase().includes(search)) return false;
 
-            return matchMap && matchLevel && matchSearch;
+            return true;
         });
 
         window.renderBankList(filtered);
     };
 
-    // 7. Render Danh Sách
+    // 6. Render Danh Sách (Cột trái)
     window.renderBankList = (data) => {
         const list = document.getElementById('bankList');
         document.getElementById('bankCount').innerText = data.length;
         list.innerHTML = '';
 
         if(data.length === 0) {
-            list.innerHTML = '<div class="text-center py-10 text-gray-400 text-xs">Không tìm thấy câu hỏi</div>';
+            list.innerHTML = '<div class="text-center py-10 text-gray-400 text-xs">Không tìm thấy câu hỏi phù hợp</div>';
             return;
         }
 
@@ -1871,22 +1889,19 @@
             
             // Màu sắc mức độ
             let levelColor = 'gray';
-            if(q.level === 'Nhận biết') levelColor = 'green';
-            if(q.level === 'Thông hiểu') levelColor = 'blue';
-            if(q.level === 'Vận dụng') levelColor = 'orange';
-            if(q.level === 'Vận dụng cao') levelColor = 'red';
+            let lvText = q.level;
+            if(lvText === 'Nhận biết' || lvText === 'NB') { levelColor = 'green'; lvText = 'NB'; }
+            else if(lvText === 'Thông hiểu' || lvText === 'TH') { levelColor = 'blue'; lvText = 'TH'; }
+            else if(lvText === 'Vận dụng' || lvText === 'VD') { levelColor = 'orange'; lvText = 'VD'; }
+            else if(lvText === 'Vận dụng cao' || lvText === 'VDC') { levelColor = 'red'; lvText = 'VDC'; }
 
-            // Tìm tên bài học để hiển thị (Nếu có cây)
-            // Logic tìm tên: Sử dụng hàm findTopicNameInTree (cần khai báo hoặc copy lại từ Editor)
-            // Vì dashboard chưa có hàm findTopicNameInTree, ta định nghĩa đơn giản ở đây hoặc dùng subject
-            
             div.innerHTML = `
                 <div class="flex justify-between items-center mb-1.5">
                     <span class="font-mono text-[11px] font-black text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100 group-hover:text-blue-800 flex items-center gap-1"><i class="fa-solid fa-hashtag text-[9px] opacity-50"></i>${q.id}</span>
                 </div>
                 <div class="flex gap-1 flex-wrap">
                     <span class="text-[10px] border px-1.5 py-0.5 rounded bg-gray-50 text-gray-600 font-bold">${q.subject || 'Khác'}</span>
-                    <span class="text-[10px] border border-${levelColor}-200 text-${levelColor}-600 px-1.5 py-0.5 rounded bg-${levelColor}-50 font-bold">${q.level}</span>
+                    <span class="text-[10px] border border-${levelColor}-200 text-${levelColor}-600 px-1.5 py-0.5 rounded bg-${levelColor}-50 font-bold">${lvText}</span>
                 </div>
                 <div class="absolute inset-y-0 right-0 w-1 bg-blue-500 transform translate-x-full group-hover:translate-x-0 transition-transform"></div>
             `;
@@ -1894,74 +1909,90 @@
         });
     };
 
-    // 8. Tải chi tiết & Hiển thị Preview (Fix lỗi không hiện nội dung)
+    // 7. Fetch Chi tiết (Giữ nguyên)
     window.fetchAndPreview = async (id) => {
         const preview = document.getElementById('bankPreviewArea');
-        preview.innerHTML = '<div class="h-full flex flex-col items-center justify-center text-blue-500 gap-3"><i class="fa-solid fa-circle-notch fa-spin text-4xl"></i><p class="text-sm font-bold">Đang tải...</p></div>';
+        preview.innerHTML = '<div class="h-full flex flex-col items-center justify-center text-blue-500 gap-3 animate-pulse"><i class="fa-solid fa-circle-notch fa-spin text-4xl"></i><p class="text-sm font-bold">Đang tải nội dung...</p></div>';
         
         try {
             const WORKER_URL = "https://upload-helper.phamngockhanh-942001.workers.dev/bank";
-            // Mã hóa ID để tránh lỗi ký tự đặc biệt
             const res = await fetch(`${WORKER_URL}?id=${encodeURIComponent(id)}`);
-            
-            if(!res.ok) throw new Error("Không tìm thấy file");
-            
+            if(!res.ok) throw new Error("Lỗi tải file");
             const fullData = await res.json();
             previewQuestionBank(fullData); 
         } catch(e) {
-            console.error(e);
-            preview.innerHTML = `<div class="text-center text-red-400 mt-20"><p>Lỗi: Không tải được nội dung câu <b>${id}</b></p></div>`;
+            preview.innerHTML = `<div class="text-center text-red-400 mt-20"><p>Không tải được nội dung.</p></div>`;
         }
     };
 
-    // 9. Render Preview (Biên dịch MathJax & Hiện ảnh)
+    // 8. Render Preview (Fix lỗi MathJax)
     window.previewQuestionBank = (q) => {
         const preview = document.getElementById('bankPreviewArea');
-        // Sử dụng hàm formatContent đã định nghĩa ở trên
         const contentHtml = window.formatContent(q.content);
+        
+        // Diễn giải ID
+        let idExplain = '';
+        if (window.globalIdTree && window.globalIdTree.length > 0) {
+             // Logic tìm tên bài học từ ID (9D1H1) -> 9D11
+             let cleanId = q.id.split('-')[0];
+             const levelChar = cleanId.match(/[NHVC]/)?.[0];
+             let searchId = levelChar ? cleanId.replace(levelChar, '') : cleanId;
+             
+             // Hàm tìm tên đệ quy
+             const findName = (nodes, target) => {
+                 for(let n of nodes) {
+                     if(n.id == target) return n.name;
+                     if(n.children) { let res = findName(n.children, target); if(res) return res; }
+                 }
+                 return null;
+             };
+             
+             const topicName = findName(window.globalIdTree, searchId) || 'Bài học chưa xác định';
+             idExplain = `<span class="text-xs text-gray-500 italic ml-2 border-l pl-2">${topicName}</span>`;
+        }
         
         let optionsHtml = '';
         if (q.options && q.options.length > 0) {
-            optionsHtml = `<div class="grid grid-cols-1 gap-3 mt-4">`;
+            optionsHtml = `<div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-6">`;
             q.options.forEach((opt, idx) => {
                 const isTrue = idx === q.correct; 
                 optionsHtml += `
-                    <div class="p-3 border rounded-lg ${isTrue ? 'bg-green-50 border-green-200 ring-1 ring-green-200' : 'bg-white'}">
-                        <span class="font-bold mr-2 text-sm">${String.fromCharCode(65+idx)}.</span> 
-                        <span class="math-content text-sm text-gray-700">${window.formatContent(opt)}</span>
+                    <div class="p-3 border rounded-xl relative ${isTrue ? 'bg-green-50 border-green-200 ring-1 ring-green-300' : 'bg-white hover:bg-gray-50'} transition-colors">
+                        <span class="absolute top-3 left-3 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${isTrue?'bg-green-500 text-white':'bg-gray-100 text-gray-500'}">${String.fromCharCode(65+idx)}</span>
+                        <div class="pl-8 math-content text-sm text-gray-700">${window.formatContent(opt)}</div>
                     </div>`;
             });
             optionsHtml += `</div>`;
         }
 
         const solutionHtml = q.solution ? `
-            <div class="mt-6 pt-4 border-t border-gray-100">
-                <div class="flex items-center gap-2 mb-2">
+            <div class="mt-8 pt-6 border-t border-gray-100">
+                <div class="flex items-center gap-2 mb-3">
                     <span class="bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded text-xs font-bold uppercase"><i class="fa-regular fa-lightbulb mr-1"></i>Lời giải</span>
                 </div>
-                <div class="bg-yellow-50/50 p-4 rounded-xl border border-yellow-100 text-gray-800 math-content text-sm leading-relaxed text-justify">
+                <div class="bg-yellow-50/50 p-5 rounded-2xl border border-yellow-100 text-gray-800 math-content text-base leading-loose text-justify shadow-sm">
                     ${window.formatContent(q.solution)}
                 </div>
             </div>` : '';
 
         // Badge mức độ
         let levelColor = 'gray';
-        if(q.level === 'Nhận biết') levelColor = 'green';
-        if(q.level === 'Thông hiểu') levelColor = 'blue';
-        if(q.level === 'Vận dụng') levelColor = 'orange';
-        if(q.level === 'Vận dụng cao') levelColor = 'red';
+        if(q.level && (q.level.includes('Nhận biết') || q.level === 'NB')) levelColor = 'green';
+        else if(q.level && (q.level.includes('Thông hiểu') || q.level === 'TH')) levelColor = 'blue';
+        else if(q.level && (q.level.includes('Vận dụng') || q.level === 'VD')) levelColor = 'orange';
+        else if(q.level && (q.level.includes('cao') || q.level === 'VDC')) levelColor = 'red';
 
         preview.innerHTML = `
-            <div class="w-full max-w-4xl bg-white p-8 rounded-2xl shadow-lg border border-gray-100 animate-slideIn">
-                <div class="flex justify-between items-center mb-4 pb-4 border-b border-gray-100">
+            <div class="w-full max-w-4xl bg-white p-8 md:p-10 rounded-3xl shadow-xl border border-gray-100 animate-slideIn">
+                <div class="flex justify-between items-start mb-6 pb-6 border-b border-gray-100">
                     <div class="flex items-center gap-3">
-                        <h3 class="text-xl font-black text-blue-700 font-mono">${q.mapId || q.id}</h3>
-                        <span class="text-xs bg-gray-100 px-2 py-1 rounded border font-bold text-gray-500">${q.subject}</span>
-                        <span class="text-xs bg-blue-50 px-2 py-1 rounded border border-blue-100 font-bold text-blue-600">${q.level}</span>
+                        <h3 class="text-2xl font-black text-blue-700 font-mono tracking-tight">${q.mapId || q.id}</h3>
+                        <span class="text-xs font-bold text-${levelColor}-600 bg-${levelColor}-50 px-2 py-1 rounded border border-${levelColor}-100 uppercase tracking-wide">${q.level || 'Chưa rõ'}</span>
+                        ${idExplain}
                     </div>
                 </div>
                 
-                <div class="text-gray-900 text-base leading-loose math-content font-medium text-justify mb-4">
+                <div class="text-gray-900 text-lg leading-loose math-content font-medium text-justify mb-4">
                     ${contentHtml}
                 </div>
 
@@ -1970,15 +2001,15 @@
             </div>
         `;
 
-        // Kích hoạt MathJax để hiển thị công thức
-        if(window.MathJax) {
-            MathJax.typesetPromise([preview]).then(() => {
-                console.log("MathJax rendered");
-            }).catch(err => console.log("MathJax error:", err));
+        // [FIX] Kích hoạt MathJax để hiển thị công thức
+        if (window.MathJax && window.MathJax.typesetPromise) {
+            window.MathJax.typesetPromise([preview])
+                .then(() => console.log('MathJax rendered'))
+                .catch((err) => console.warn('MathJax error:', err));
         }
         
         // Kích hoạt TikZ nếu có
-        if(window.renderTikz) window.renderTikz();
+        if (window.renderTikz) window.renderTikz();
     };
     </script>
     <div id="notificationPanel" class="hidden fixed z-[150] w-80 bg-white rounded-2xl shadow-2xl border border-gray-200 overflow-hidden animate-fade-in transform transition-all
