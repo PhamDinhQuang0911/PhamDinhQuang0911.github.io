@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Phòng Luyện Tập Thông Minh</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    
+    <script>
+    // Cấu hình MathJax
+    window.MathJax = {
+      loader: { load: ['[tex]/noerrors', '[tex]/noundefined'] },
+      tex: {
+        inlineMath: [['$', '$'], ['\\(', '\\)']],
+        displayMath: [['$$', '$$'], ['\\[', '\\]']],
+        processEscapes: true,
+        packages: {'[+]': ['noerrors', 'noundefined']}
+      },
+      options: { ignoreHtmlClass: 'tex2jax_ignore', processHtmlClass: 'tex2jax_process' }
+    };
+    </script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    
+    <style>
+        body { font-family: 'Nunito', sans-serif; background-color: #F0FDFA; }
+        .checkbox-wrapper:checked + div { background-color: #EFF6FF; border-color: #3B82F6; }
+        .checkbox-wrapper:checked + div .check-icon { opacity: 1; transform: scale(1); }
+        .glass { background: rgba(255, 255, 255, 0.9); backdrop-filter: blur(10px); }
+        /* Ẩn thanh cuộn nhưng vẫn cuộn được */
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col text-gray-800">
+
+    <header class="bg-white border-b border-gray-200 sticky top-0 z-50">
+        <div class="max-w-5xl mx-auto px-4 h-16 flex items-center justify-between">
+            <div class="flex items-center gap-3 cursor-pointer" onclick="window.location.href='student.html'">
+                <div class="w-10 h-10 bg-teal-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-teal-200">
+                    <i class="fa-solid fa-dumbbell"></i>
+                </div>
+                <div>
+                    <h1 class="font-black text-gray-800 text-lg leading-tight">Phòng Luyện Tập</h1>
+                    <p class="text-xs text-gray-500 font-bold">Rèn luyện kỹ năng Toán học</p>
+                </div>
+            </div>
+            <button onclick="window.history.back()" class="w-10 h-10 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center transition-colors">
+                <i class="fa-solid fa-xmark text-gray-500"></i>
+            </button>
+        </div>
+    </header>
+
+    <main class="flex-1 p-4 md:p-8">
+        
+        <div id="configStep" class="max-w-3xl mx-auto space-y-6">
+            
+            <div class="grid grid-cols-2 gap-4">
+                <div class="bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
+                    <label class="block text-xs font-bold text-gray-400 uppercase mb-2">Chọn Khối Lớp</label>
+                    <select id="selGrade" class="w-full text-lg font-bold text-gray-800 bg-transparent outline-none cursor-pointer" onchange="renderTopics()">
+                        <option value="12">Lớp 12</option>
+                        <option value="11">Lớp 11</option>
+                        <option value="10">Lớp 10</option>
+                        <option value="9">Lớp 9</option>
+                    </select>
+                </div>
+                <div class="bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
+                    <label class="block text-xs font-bold text-gray-400 uppercase mb-2">Phân Môn</label>
+                    <select id="selBranch" class="w-full text-lg font-bold text-gray-800 bg-transparent outline-none cursor-pointer" onchange="renderTopics()">
+                        <option value="all">Tất cả</option>
+                        <option value="dai_so">Đại số & Giải tích</option>
+                        <option value="hinh_hoc">Hình học</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col h-[50vh]">
+                <div class="p-4 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
+                    <h3 class="font-bold text-gray-700"><i class="fa-solid fa-list-check mr-2 text-teal-600"></i>Chọn chủ đề ôn tập</h3>
+                    <button onclick="toggleAllTopics()" class="text-xs font-bold text-blue-600 hover:underline">Chọn tất cả</button>
+                </div>
+                <div id="topicList" class="flex-1 overflow-y-auto p-4 space-y-2 custom-scrollbar">
+                    <div class="text-center text-gray-400 py-10"><i class="fa-solid fa-spinner fa-spin mr-2"></i>Đang tải dữ liệu...</div>
+                </div>
+            </div>
+
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                <div class="flex justify-between items-center mb-6">
+                    <div>
+                        <h3 class="font-bold text-gray-800 text-lg">Số lượng câu hỏi</h3>
+                        <p class="text-xs text-gray-500">Hệ thống sẽ lấy ngẫu nhiên từ kho dữ liệu</p>
+                    </div>
+                    <div class="flex items-center gap-2 bg-gray-100 p-1 rounded-xl">
+                        <button onclick="setQCount(10)" class="q-count-btn px-4 py-2 rounded-lg font-bold text-sm bg-white shadow-sm text-teal-700 transition-all">10</button>
+                        <button onclick="setQCount(20)" class="q-count-btn px-4 py-2 rounded-lg font-bold text-sm text-gray-500 hover:bg-white hover:shadow-sm transition-all">20</button>
+                        <button onclick="setQCount(40)" class="q-count-btn px-4 py-2 rounded-lg font-bold text-sm text-gray-500 hover:bg-white hover:shadow-sm transition-all">40</button>
+                    </div>
+                </div>
+                
+                <button onclick="startPractice()" class="w-full py-4 bg-gradient-to-r from-teal-500 to-teal-700 hover:from-teal-600 hover:to-teal-800 text-white font-black rounded-xl shadow-lg shadow-teal-200 transform active:scale-95 transition-all text-lg flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-play"></i> BẮT ĐẦU LUYỆN TẬP
+                </button>
+            </div>
+        </div>
+
+        <div id="practiceStep" class="hidden max-w-4xl mx-auto h-[calc(100vh-100px)] flex flex-col">
+            <div class="mb-4 flex items-center justify-between bg-white p-3 rounded-xl shadow-sm">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center font-black text-sm" id="currentQNum">1</div>
+                    <div class="text-sm">
+                        <p class="text-gray-400 font-bold text-xs uppercase">Thời gian</p>
+                        <p class="font-mono font-bold text-gray-800 text-lg" id="timerDisplay">00:00</p>
+                    </div>
+                </div>
+                <button onclick="finishPractice()" class="px-6 py-2 bg-teal-600 text-white font-bold rounded-lg hover:bg-teal-700 shadow-md">Nộp bài</button>
+            </div>
+
+            <div id="questionContainer" class="flex-1 overflow-y-auto p-1 scroll-smooth">
+                </div>
+            
+            <div id="questionPalette" class="mt-4 p-4 bg-white rounded-xl shadow-sm border border-gray-100 overflow-x-auto whitespace-nowrap flex gap-2 no-scrollbar">
+                </div>
+        </div>
+
+        <div id="resultStep" class="hidden max-w-3xl mx-auto animate-fade-in">
+            <div class="bg-white rounded-3xl shadow-xl overflow-hidden text-center mb-6">
+                <div class="bg-gradient-to-br from-indigo-500 to-purple-600 p-8 text-white relative">
+                    <h2 class="text-3xl font-black mb-2">KẾT QUẢ LUYỆN TẬP</h2>
+                    <div class="w-32 h-32 mx-auto bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center border-4 border-white/30 mb-4">
+                        <div>
+                            <span class="text-4xl font-black" id="resScore">0</span>
+                            <span class="text-sm font-bold block opacity-80">Điểm</span>
+                        </div>
+                    </div>
+                    <div class="flex justify-center gap-8 text-sm font-bold opacity-90">
+                        <div><i class="fa-solid fa-check mr-1"></i>Đúng: <span id="resCorrect">0</span></div>
+                        <div><i class="fa-solid fa-xmark mr-1"></i>Sai: <span id="resWrong">0</span></div>
+                    </div>
+                </div>
+                <div class="p-6">
+                    <button onclick="window.location.reload()" class="px-8 py-3 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-colors mr-2">Luyện tập tiếp</button>
+                    <button onclick="viewSolutions()" class="px-8 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 shadow-lg shadow-blue-200">Xem lời giải</button>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+        import { getFirestore, doc, getDoc, collection, getDocs, query, where } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { formatContent } from "./utils.js"; // Sử dụng hàm format từ utils
+
+        // Cấu hình Firebase (Dùng chung)
+        const firebaseConfig = { apiKey: "AIzaSyCqAX3x1MbJ3do7m3EaH9JA4kFuVhlAc78", authDomain: "lms-thitracnghiem.firebaseapp.com", projectId: "lms-thitracnghiem", storageBucket: "lms-thitracnghiem.firebasestorage.app", messagingSenderId: "760187217240", appId: "1:760187217240:web:d043cd5808c349f87a712d" };
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+
+        let mapTree = [];
+        let selectedQCount = 10;
+        let practiceQuestions = [];
+        let userAnswers = {};
+        let startTime;
+        let timerInterval;
+
+        // 1. KHỞI TẠO & TẢI DỮ LIỆU CÂY THƯ MỤC
+        onAuthStateChanged(auth, async (user) => {
+            if (user) {
+                await loadMapTree();
+            } else {
+                window.location.href = 'index.html';
+            }
+        });
+
+        async function loadMapTree() {
+            try {
+                // Tải cấu trúc cây MapID từ Firestore
+                const docSnap = await getDoc(doc(db, "configurations", "map_id_tree"));
+                if (docSnap.exists()) {
+                    mapTree = docSnap.data().tree || [];
+                    renderTopics(); // Render lần đầu
+                } else {
+                    document.getElementById('topicList').innerHTML = '<p class="text-center text-red-500">Chưa cấu hình MapID.</p>';
+                }
+            } catch (error) {
+                console.error("Lỗi tải MapTree:", error);
+            }
+        }
+
+        // 2. RENDER GIAO DIỆN CHỌN BÀI (RECURSIVE)
+        window.renderTopics = () => {
+            const list = document.getElementById('topicList');
+            const grade = document.getElementById('selGrade').value; // 10, 11, 12
+            const branch = document.getElementById('selBranch').value; // dai_so, hinh_hoc, all
+
+            list.innerHTML = '';
+
+            // Hàm đệ quy để render checkbox
+            function buildTreeHtml(nodes, level = 0) {
+                let html = '';
+                nodes.forEach(node => {
+                    // Filter logic: Kiểm tra xem node này có thuộc Khối/Môn đã chọn không
+                    // Giả sử tên node chứa thông tin (VD: "[12] Hàm số") hoặc cấu trúc cây đã phân chia sẵn
+                    // Ở đây ta hiển thị hết, người dùng tự tích chọn. Hoặc bạn có thể thêm logic lọc tên node.
+                    
+                    const isLeaf = !node.children || node.children.length === 0;
+                    const padding = level * 20 + 10;
+                    
+                    html += `
+                        <label class="flex items-center gap-3 p-3 hover:bg-gray-50 rounded-xl cursor-pointer transition-colors border-b border-gray-50 last:border-0">
+                            <div style="padding-left: ${padding}px" class="flex-1 font-medium text-gray-700 text-sm">
+                                ${node.name}
+                            </div>
+                            <div class="relative w-6 h-6 shrink-0">
+                                <input type="checkbox" class="topic-check checkbox-wrapper peer appearance-none w-full h-full rounded bg-gray-100 border border-gray-300 checked:bg-blue-600 checked:border-blue-600 cursor-pointer transition-all" value="${node.id}">
+                                <i class="fa-solid fa-check absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-white text-xs opacity-0 peer-checked:opacity-100 pointer-events-none transition-opacity"></i>
+                            </div>
+                        </label>
+                    `;
+
+                    if (node.children && node.children.length > 0) {
+                        html += buildTreeHtml(node.children, level + 1);
+                    }
+                });
+                return html;
+            }
+
+            // Lọc sơ bộ node gốc theo khối (Nếu cấu trúc cây của bạn chia theo khối ở root)
+            // Ví dụ: Root -> Lớp 12 -> Đại số -> Chương 1...
+            // Logic dưới đây giả định cây bắt đầu từ Lớp
+            const filteredTree = mapTree.filter(n => n.name.includes(grade)); 
+            
+            if(filteredTree.length > 0) {
+                list.innerHTML = buildTreeHtml(filteredTree);
+            } else {
+                // Fallback nếu cây không chia theo tên lớp: Render hết
+                list.innerHTML = buildTreeHtml(mapTree); 
+            }
+        };
+
+        window.toggleAllTopics = () => {
+            const checkboxes = document.querySelectorAll('.topic-check');
+            const allChecked = Array.from(checkboxes).every(c => c.checked);
+            checkboxes.forEach(c => c.checked = !allChecked);
+        };
+
+        window.setQCount = (n) => {
+            selectedQCount = n;
+            document.querySelectorAll('.q-count-btn').forEach(b => {
+                b.classList.remove('bg-white', 'text-teal-700', 'shadow-sm');
+                b.classList.add('text-gray-500');
+                if(b.textContent == n) {
+                    b.classList.add('bg-white', 'text-teal-700', 'shadow-sm');
+                    b.classList.remove('text-gray-500');
+                }
+            });
+        };
+
+        // 3. BẮT ĐẦU LUYỆN TẬP (QUAN TRỌNG: LẤY CÂU HỎI)
+        window.startPractice = async () => {
+            const selectedTopicIds = Array.from(document.querySelectorAll('.topic-check:checked')).map(c => c.value);
+            
+            if (selectedTopicIds.length === 0) {
+                alert("Vui lòng chọn ít nhất 1 chủ đề!");
+                return;
+            }
+
+            const btn = document.querySelector('button[onclick="startPractice()"]');
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang khởi tạo đề...';
+            btn.disabled = true;
+
+            try {
+                // --- LOGIC LẤY CÂU HỎI ---
+                // Cách 1: Query từ collection 'question_bank' (Nếu bạn đã tách câu hỏi)
+                // Cách 2 (Dùng tạm): Quét từ collection 'exams' và lọc câu hỏi (Hơi chậm nếu dữ liệu lớn)
+                
+                practiceQuestions = [];
+                
+                // Ở đây tôi dùng giả lập quét từ Exam để bạn test được ngay mà không cần migrate DB
+                const qDocs = query(collection(db, "exams"), where("status", "==", "published")); 
+                const querySnapshot = await getDocs(qDocs);
+                
+                let pool = [];
+                querySnapshot.forEach((doc) => {
+                    const exam = doc.data();
+                    if(exam.questions) {
+                        // Lọc câu hỏi có mapId nằm trong danh sách đã chọn
+                        // Lưu ý: Bài toán thực tế cần trường mapId trong từng câu hỏi
+                        // Hiện tại code cũ chưa bắt buộc mapId cho câu hỏi, nên tôi sẽ lấy NGẪU NHIÊN nếu không tìm thấy mapId, 
+                        // hoặc bạn cần cập nhật exam-editor để gắn mapId cho từng câu.
+                        
+                        // GIẢ ĐỊNH: Câu hỏi có trường `mapId` hoặc `tags` chứa ID bài học
+                        const matched = exam.questions.filter(q => {
+                            // Logic ghép: Nếu người dùng chọn Parent Node, lấy cả con? -> Tạm thời khớp chính xác hoặc không
+                            // Để test: Lấy tất cả câu hỏi của khối lớp đang chọn
+                            return true; // (Tạm thời lấy hết để test luồng, sau này bạn thêm điều kiện filter mapId ở đây)
+                        });
+                        pool = pool.concat(matched);
+                    }
+                });
+
+                // Trộn ngẫu nhiên (Fisher-Yates)
+                for (let i = pool.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [pool[i], pool[j]] = [pool[j], pool[i]];
+                }
+
+                // Lấy số lượng yêu cầu
+                practiceQuestions = pool.slice(0, selectedQCount);
+
+                if (practiceQuestions.length === 0) {
+                    alert("Không tìm thấy câu hỏi nào phù hợp với tiêu chí đã chọn.");
+                    btn.innerHTML = 'BẮT ĐẦU LUYỆN TẬP'; btn.disabled = false;
+                    return;
+                }
+
+                // Chuyển view
+                document.getElementById('configStep').classList.add('hidden');
+                document.getElementById('practiceStep').classList.remove('hidden');
+                
+                renderPracticeInterface();
+                startTimer();
+
+            } catch (err) {
+                console.error(err);
+                alert("Lỗi khởi tạo: " + err.message);
+                btn.innerHTML = 'BẮT ĐẦU LUYỆN TẬP'; btn.disabled = false;
+            }
+        };
+
+        // 4. GIAO DIỆN LÀM BÀI
+        function renderPracticeInterface() {
+            const container = document.getElementById('questionContainer');
+            const palette = document.getElementById('questionPalette');
+            container.innerHTML = '';
+            palette.innerHTML = '';
+
+            practiceQuestions.forEach((q, idx) => {
+                // Render Câu hỏi
+                const qDiv = document.createElement('div');
+                qDiv.id = `q-${idx}`;
+                qDiv.className = "mb-8 bg-white p-6 rounded-2xl shadow-sm border border-gray-100 scroll-mt-20";
+                
+                let inputHtml = '';
+                if (q.type === 'mc') {
+                    // Trộn đáp án hiển thị (Logic từ exam.html)
+                    const indices = [0, 1, 2, 3];
+                    indices.sort(() => Math.random() - 0.5);
+                    
+                    inputHtml = `<div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">`;
+                    indices.forEach(i => {
+                        const opt = q.options[i];
+                        if(opt) {
+                            inputHtml += `
+                                <label class="flex items-center gap-3 p-3 border-2 border-gray-100 rounded-xl cursor-pointer hover:bg-blue-50 hover:border-blue-200 transition-all">
+                                    <input type="radio" name="ans-${idx}" value="${i}" class="w-5 h-5 text-blue-600" onchange="selectAnswer(${idx}, ${i})">
+                                    <span class="text-gray-700 font-medium">${window.formatContent(opt)}</span>
+                                </label>
+                            `;
+                        }
+                    });
+                    inputHtml += `</div>`;
+                }
+
+                qDiv.innerHTML = `
+                    <div class="flex items-start gap-3">
+                        <span class="bg-teal-100 text-teal-800 font-black px-2 py-1 rounded text-sm shrink-0">Câu ${idx + 1}</span>
+                        <div class="text-gray-800 text-lg flex-1 math-content">${window.formatContent(q.content)}</div>
+                    </div>
+                    ${inputHtml}
+                `;
+                container.appendChild(qDiv);
+
+                // Render Palette
+                const btn = document.createElement('button');
+                btn.id = `p-btn-${idx}`;
+                btn.className = "w-10 h-10 rounded-lg border border-gray-200 flex items-center justify-center font-bold text-gray-500 hover:bg-gray-100 transition-colors shrink-0";
+                btn.textContent = idx + 1;
+                btn.onclick = () => {
+                    document.getElementById(`q-${idx}`).scrollIntoView({behavior: 'smooth', block: 'center'});
+                };
+                palette.appendChild(btn);
+            });
+
+            // Render MathJax
+            if(window.MathJax) MathJax.typesetPromise();
+        }
+
+        window.selectAnswer = (qIdx, ansIdx) => {
+            userAnswers[qIdx] = ansIdx;
+            // Update UI Palette
+            const btn = document.getElementById(`p-btn-${qIdx}`);
+            btn.classList.add('bg-blue-600', 'text-white', 'border-blue-600');
+            btn.classList.remove('text-gray-500', 'hover:bg-gray-100');
+        };
+
+        function startTimer() {
+            startTime = Date.now();
+            timerInterval = setInterval(() => {
+                const diff = Math.floor((Date.now() - startTime) / 1000);
+                const m = Math.floor(diff / 60).toString().padStart(2, '0');
+                const s = (diff % 60).toString().padStart(2, '0');
+                document.getElementById('timerDisplay').textContent = `${m}:${s}`;
+            }, 1000);
+        }
+
+        // 5. NỘP BÀI & CHẤM ĐIỂM
+        window.finishPractice = () => {
+            clearInterval(timerInterval);
+            let correct = 0;
+            
+            // Chấm điểm
+            practiceQuestions.forEach((q, idx) => {
+                const userAns = userAnswers[idx];
+                if (q.type === 'mc' && userAns === q.correct) {
+                    correct++;
+                }
+                // Xử lý các dạng khác nếu có
+            });
+
+            const score = (correct / practiceQuestions.length) * 10;
+            
+            // Hiển thị kết quả
+            document.getElementById('practiceStep').classList.add('hidden');
+            document.getElementById('resultStep').classList.remove('hidden');
+            
+            document.getElementById('resScore').textContent = score.toFixed(1);
+            document.getElementById('resCorrect').textContent = correct;
+            document.getElementById('resWrong').textContent = practiceQuestions.length - correct;
+        };
+
+        // 6. XEM LỜI GIẢI
+        window.viewSolutions = () => {
+            document.getElementById('resultStep').classList.add('hidden');
+            document.getElementById('practiceStep').classList.remove('hidden');
+            
+            // Ẩn nút nộp bài, ẩn timer
+            document.querySelector('#practiceStep button[onclick="finishPractice()"]').classList.add('hidden');
+            
+            // Duyệt qua từng câu để hiện đúng/sai và lời giải
+            practiceQuestions.forEach((q, idx) => {
+                const qDiv = document.getElementById(`q-${idx}`);
+                const u = userAnswers[idx];
+                const isCorrect = (u === q.correct);
+                
+                let feedbackHtml = '';
+                if(isCorrect) {
+                    feedbackHtml = `<div class="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg text-green-700 font-bold"><i class="fa-solid fa-check mr-2"></i>Chính xác!</div>`;
+                } else {
+                    const correctChar = String.fromCharCode(65 + q.correct);
+                    feedbackHtml = `<div class="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 font-bold"><i class="fa-solid fa-xmark mr-2"></i>Sai rồi. Đáp án đúng là: ${correctChar}</div>`;
+                }
+
+                // Hiện lời giải (nếu có)
+                if(q.solution) {
+                    feedbackHtml += `
+                        <div class="mt-3 pt-3 border-t border-gray-100">
+                            <p class="font-bold text-blue-600 mb-1"><i class="fa-solid fa-lightbulb mr-1"></i> Lời giải chi tiết:</p>
+                            <div class="text-gray-700 math-content text-sm">${window.formatContent(q.solution)}</div>
+                        </div>
+                    `;
+                }
+
+                qDiv.insertAdjacentHTML('beforeend', feedbackHtml);
+            });
+            
+            if(window.MathJax) MathJax.typesetPromise();
+        };
+
+    </script>
+</body>
+</html>
