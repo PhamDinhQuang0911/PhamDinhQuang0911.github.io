@@ -183,15 +183,40 @@
         let userAnswers = {};
         let startTime;
         let timerInterval;
+        // Hàm định dạng nội dung (Đảm bảo hiển thị tốt nhất)
+        window.formatContent = (text) => {
+            if (!text) return "";
+            return text
+                .replace(/\n/g, "<br>")
+                .replace(/\\newline/g, "<br>")
+                .replace(/\\dfrac/g, "\\displaystyle\\dfrac")
+                .replace(/\\begin\{cases\}/g, "\\begin{cases}")
+                .replace(/\\end\{cases\}/g, "\\end{cases}");
+        };
+        // [MỚI] Biến chứa danh sách tổng hợp từ Ngân hàng
+        let globalBankMetadata = []; 
 
         // --- 1. KHỞI TẠO ---
         onAuthStateChanged(auth, async (user) => {
             if (user) {
-                await loadMapTree();
+                // Tải song song: Cây MapID và Danh sách Ngân hàng R2
+                await Promise.all([loadMapTree(), loadBankMetadata()]);
             } else {
                 window.location.href = 'index.html';
             }
         });
+
+        // [MỚI] Hàm tải danh sách ID từ Cloudflare (Chỉ tải ID để lọc cho nhanh)
+        async function loadBankMetadata() {
+            try {
+                const WORKER_URL = "https://upload-helper.phamngockhanh-942001.workers.dev/bank";
+                const res = await fetch(WORKER_URL);
+                if (res.ok) {
+                    globalBankMetadata = await res.json();
+                    console.log("Đã tải xong danh sách ngân hàng:", globalBankMetadata.length, "câu");
+                }
+            } catch (e) { console.error("Lỗi tải bank:", e); }
+        }
 
         async function loadMapTree() {
             try {
@@ -322,76 +347,83 @@
         };
 
         // --- 3. LOGIC LẤY CÂU HỎI (QUAN TRỌNG) ---
+        // --- 3. LOGIC LẤY CÂU HỎI TỪ R2 (CẬP NHẬT) ---
         window.startPractice = async () => {
             const btn = document.querySelector('button[onclick="startPractice()"]');
+            const oldText = btn.innerHTML;
             btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang khởi tạo...'; btn.disabled = true;
 
             try {
-                // 1. Lấy danh sách ID đã chọn
-                const checkedBoxes = Array.from(document.querySelectorAll('.map-check:checked'));
-                let targetMapIds = checkedBoxes.map(cb => cb.value);
-                
-                // 2. Nếu KHÔNG chọn gì -> Lấy TẤT CẢ ID hiển thị trên cây hiện tại
-                // (Tức là lấy random trong Lớp/Môn đang lọc)
-                if (targetMapIds.length === 0) {
-                    const allVisibleChecks = Array.from(document.querySelectorAll('.map-check'));
-                    targetMapIds = allVisibleChecks.map(cb => cb.value);
+                // 1. Lấy điều kiện lọc
+                const grade = document.querySelector('input[name="grade"]:checked').value; // 12, 11...
+                const subject = document.querySelector('input[name="subject"]:checked').value; // dai_so, hinh_hoc, all
+
+                // 2. Xác định tiền tố lọc (VD: 12D, 12H)
+                let filterPrefixes = [];
+                if (subject === 'all') {
+                    filterPrefixes.push(grade + 'D', grade + 'H', grade + 'G'); // Lấy cả Đại và Hình
+                } else {
+                    const char = subject === 'dai_so' ? 'D' : 'H';
+                    filterPrefixes.push(grade + char);
                 }
 
-                // 3. Quét DB lấy câu hỏi
-                // Lưu ý: Để tối ưu, nên có collection 'questions' riêng.
-                // Ở đây ta quét từ Exams public như cũ.
-                
-                const qDocs = query(collection(db, "exams"), where("status", "==", "published"));
-                const snap = await getDocs(qDocs);
-                
-                let pool = [];
-                snap.forEach(doc => {
-                    const exam = doc.data();
-                    if (exam.questions) {
-                        // Lọc câu hỏi có mapId nằm trong targetMapIds
-                        // Nếu câu hỏi CHƯA CÓ mapId, ta có thể dùng fallback (ví dụ lấy random nếu user chọn chế độ Random All)
-                        
-                        exam.questions.forEach(q => {
-                            // Kiểm tra: Câu hỏi phải có mapId VÀ mapId đó phải nằm trong danh sách cần lấy
-                            // Hoặc nếu targetMapIds quá nhiều (chọn all), ta có thể lấy hết
-                            
-                            // Giả định q.mapId là 1 chuỗi hoặc mảng
-                            let isMatch = false;
-                            
-                            if (q.mapId) {
-                                // Nếu mapId của câu hỏi trùng với bất kỳ ID nào trong danh sách đích (Bài hoặc Dạng)
-                                // Logic này bao gồm cả việc: Chọn Bài (Parent ID) -> Câu hỏi thuộc Dạng con (Child ID) cũng nên được lấy?
-                                // -> Với cấu trúc hiện tại: check box cha đã auto-check box con, nên targetMapIds đã chứa cả ID con.
-                                // -> Chỉ cần check q.mapId nằm trong list là đủ.
-                                if (targetMapIds.includes(q.mapId)) isMatch = true;
-                            } else {
-                                // Nếu câu hỏi chưa gắn MapID -> Tạm thời bỏ qua hoặc lấy nếu chế độ Random All
-                                // Để test được ngay khi chưa gắn MapID: Cho phép lấy 10% ngẫu nhiên
-                                if (Math.random() < 0.1) isMatch = true; 
-                            }
+                // 3. Lọc danh sách ID từ bộ nhớ (globalBankMetadata)
+                let pool = globalBankMetadata.filter(q => {
+                    // Check 1: Phải bắt đầu bằng Lớp + Môn (VD: 12D...)
+                    const matchPrefix = filterPrefixes.some(pre => q.id.startsWith(pre));
+                    if (!matchPrefix) return false;
 
-                            if (isMatch) pool.push(q);
-                        });
-                    }
+                    // Check 2: (Nâng cao) Nếu có tích chọn bài học cụ thể
+                    // const checkedIds = Array.from(document.querySelectorAll('.map-check:checked')).map(cb => cb.value);
+                    // if (checkedIds.length > 0) {
+                    //     // Kiểm tra xem ID câu hỏi có chứa ID bài học không
+                    //     // Logic này tùy thuộc vào cách đặt ID của bạn. Tạm thời lọc theo Lớp/Môn trước cho ổn định.
+                    // }
+                    
+                    return true;
                 });
 
-                // 4. Random hóa & Cắt
+                // 4. Kiểm tra số lượng
                 if (pool.length === 0) {
-                    alert("Không tìm thấy câu hỏi phù hợp. Hãy thử chọn mục khác hoặc cập nhật ngân hàng câu hỏi.");
-                    btn.innerHTML = '<i class="fa-solid fa-rocket"></i> BẮT ĐẦU LUYỆN TẬP'; btn.disabled = false;
+                    alert(`Không tìm thấy câu hỏi nào cho Lớp ${grade} - ${subject === 'all' ? 'Tất cả' : (subject==='dai_so'?'Đại số':'Hình học')}.`);
+                    btn.innerHTML = oldText; btn.disabled = false;
                     return;
                 }
 
-                // Shuffle Fisher-Yates
+                // 5. Trộn ngẫu nhiên (Fisher-Yates)
                 for (let i = pool.length - 1; i > 0; i--) {
                     const j = Math.floor(Math.random() * (i + 1));
                     [pool[i], pool[j]] = [pool[j], pool[i]];
                 }
 
-                practiceQuestions = pool.slice(0, selectedQCount);
+                // 6. Cắt lấy số lượng yêu cầu
+                const selectedMeta = pool.slice(0, selectedQCount);
+
+                // 7. [QUAN TRỌNG] Tải nội dung chi tiết của từng câu từ R2
+                // (Vì danh sách ban đầu chỉ có ID, chưa có nội dung đề bài)
+                window.showToast ? window.showToast(`Đang tải nội dung ${selectedMeta.length} câu hỏi...`) : null;
                 
-                // Chuyển màn hình
+                practiceQuestions = [];
+                const WORKER_URL = "https://upload-helper.phamngockhanh-942001.workers.dev/bank";
+
+                // Tải song song (Parallel Fetch) để tốc độ nhanh nhất
+                const fetchPromises = selectedMeta.map(async (meta) => {
+                    try {
+                        const res = await fetch(`${WORKER_URL}?id=${encodeURIComponent(meta.id)}`);
+                        if (res.ok) {
+                            const qData = await res.json();
+                            return qData;
+                        }
+                    } catch (e) { console.error("Lỗi tải câu:", meta.id); }
+                    return null;
+                });
+
+                const results = await Promise.all(fetchPromises);
+                practiceQuestions = results.filter(q => q !== null); // Lọc bỏ câu lỗi
+
+                if (practiceQuestions.length === 0) throw new Error("Không tải được nội dung câu hỏi nào.");
+
+                // 8. Chuyển màn hình
                 document.getElementById('configStep').classList.add('hidden');
                 document.getElementById('practiceStep').classList.remove('hidden');
                 renderPracticeInterface();
@@ -399,8 +431,8 @@
 
             } catch (err) {
                 console.error(err);
-                alert("Lỗi: " + err.message);
-                btn.innerHTML = '<i class="fa-solid fa-rocket"></i> BẮT ĐẦU LUYỆN TẬP'; btn.disabled = false;
+                alert("Có lỗi xảy ra: " + err.message);
+                btn.innerHTML = oldText; btn.disabled = false;
             }
         };
 
