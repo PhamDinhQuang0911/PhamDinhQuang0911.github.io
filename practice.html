@@ -14,9 +14,25 @@
       tex: {
         inlineMath: [['$', '$'], ['\\(', '\\)']],
         displayMath: [['$$', '$$'], ['\\[', '\\]']],
-        processEscapes: true
+        processEscapes: true,
+        packages: {'[+]': ['noerrors', 'noundefined']},
+        macros: {
+          heva: ["\\left\\{\\begin{aligned}#1\\end{aligned}\\right.", 1],
+          hoac: ["\\left[\\begin{aligned}#1\\end{aligned}\\right.", 1],
+          tich: "\\cdot",
+          deg: "^\\circ",
+          R: "\\mathbb{R}",
+          N: "\\mathbb{N}",
+          Z: "\\mathbb{Z}",
+          vectors: ["\\overrightarrow{#1}", 1],
+          mtx: ["\\left[\\begin{matrix}#1\\end{matrix}\\right]", 1]
+        }
       },
-      options: { ignoreHtmlClass: 'tex2jax_ignore', processHtmlClass: 'tex2jax_process' }
+      options: {
+        ignoreHtmlClass: 'tex2jax_ignore',
+        processHtmlClass: 'tex2jax_process'
+      },
+      startup: { typeset: false }
     };
     </script>
     <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
@@ -217,14 +233,34 @@
         }
 
         // [MỚI] Hàm định dạng nội dung (Để đảm bảo Preview không lỗi)
+        // [FIX] Hàm định dạng nội dung: Bảo vệ công thức Toán
         window.formatContent = (text) => {
             if (!text) return "";
-            return text
-                .replace(/\n/g, "<br>")
-                .replace(/\\newline/g, "<br>")
-                .replace(/\\dfrac/g, "\\displaystyle\\dfrac")
-                .replace(/\\begin\{cases\}/g, "\\begin{cases}")
-                .replace(/\\end\{cases\}/g, "\\end{cases}");
+            
+            // 1. Tách chuỗi thành các phần: Văn bản và Công thức ($...$, $$...$$, \begin...)
+            // Regex này tìm các khối Toán học
+            const regex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|\\begin\{[a-zA-Z*]+\}[\s\S]*?\\end\{[a-zA-Z*]+\}|\$[^\$]*?\$)/g;
+            
+            const parts = text.split(regex);
+
+            // 2. Xử lý từng phần
+            return parts.map(part => {
+                // Kiểm tra xem phần này có phải là công thức Toán không
+                const isMath = /^\$|\\\(|\\\[|\\begin/.test(part);
+
+                if (isMath) {
+                    // NẾU LÀ TOÁN: Giữ nguyên, chỉ fix lỗi hiển thị nhỏ (như <)
+                    return part.replace(/</g, ' < '); 
+                } else {
+                    // NẾU LÀ VĂN BẢN: Xử lý xuống dòng (\n hoặc \\) thành <br>
+                    return part
+                        .replace(/</g, '&lt;')
+                        .replace(/>/g, '&gt;')
+                        .replace(/\\\\/g, '<br>') // Chuyển \\ thành xuống dòng
+                        .replace(/\\newline/g, '<br>')
+                        .replace(/\n/g, '<br>');
+                }
+            }).join('');
         };
 
         async function loadMapTree() {
