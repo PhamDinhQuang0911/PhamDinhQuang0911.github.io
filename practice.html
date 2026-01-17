@@ -234,25 +234,37 @@
 
         // [MỚI] Hàm định dạng nội dung (Để đảm bảo Preview không lỗi)
         // [FIX] Hàm định dạng nội dung: Bảo vệ công thức Toán
+        // [FIX HOÀN TOÀN] Hàm định dạng: Toán + Văn bản + Ảnh
         window.formatContent = (text) => {
             if (!text) return "";
             
-            // 1. Tách chuỗi thành các phần: Văn bản và Công thức ($...$, $$...$$, \begin...)
-            // Regex này tìm các khối Toán học
-            const regex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|\\begin\{[a-zA-Z*]+\}[\s\S]*?\\end\{[a-zA-Z*]+\}|\$[^\$]*?\$)/g;
+            // 1. Tách chuỗi thành các phần:
+            // - Khối Toán: $...$, \begin...
+            // - Khối HTML Ảnh (do hệ thống tự chèn): <div...>...</div>
+            // - Văn bản thường
+            
+            // Regex phức tạp hơn để bắt cả thẻ DIV ảnh
+            const regex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|\\begin\{[a-zA-Z*]+\}[\s\S]*?\\end\{[a-zA-Z*]+\}|\$[^\$]*?\$|<div[\s\S]*?<\/div>|<img[^>]*>)/g;
             
             const parts = text.split(regex);
 
-            // 2. Xử lý từng phần
             return parts.map(part => {
-                // Kiểm tra xem phần này có phải là công thức Toán không
+                if (!part) return "";
+
+                // Kiểm tra loại nội dung
                 const isMath = /^\$|\\\(|\\\[|\\begin/.test(part);
+                const isImageHTML = part.trim().startsWith('<div') || part.trim().startsWith('<img');
 
                 if (isMath) {
-                    // NẾU LÀ TOÁN: Giữ nguyên, chỉ fix lỗi hiển thị nhỏ (như <)
+                    // LÀ TOÁN: Giữ nguyên
                     return part.replace(/</g, ' < '); 
-                } else {
-                    // NẾU LÀ VĂN BẢN: Xử lý xuống dòng (\n hoặc \\) thành <br>
+                } 
+                else if (isImageHTML) {
+                    // LÀ HTML ẢNH: Giữ nguyên tuyệt đối để trình duyệt render ảnh
+                    return part;
+                } 
+                else {
+                    // LÀ VĂN BẢN THƯỜNG: Mã hóa < > để tránh lỗi, và xử lý xuống dòng
                     return part
                         .replace(/</g, '&lt;')
                         .replace(/>/g, '&gt;')
