@@ -49,39 +49,53 @@
         .level-checkbox:checked + div { background-color: #EFF6FF; border-color: #3B82F6; color: #1D4ED8; box-shadow: 0 2px 4px rgba(59, 130, 246, 0.1); }
         .level-checkbox:checked + div .check-icon { opacity: 1; transform: scale(1); }
         
-        /* Style Topic Card (Accordion mới) */
-        .topic-card { transition: all 0.3s ease; border: 1px solid #E2E8F0; }
-        .topic-card.active { border-color: #3B82F6; box-shadow: 0 4px 6px -1px rgba(59, 130, 246, 0.1); }
-        .topic-header { cursor: pointer; transition: background 0.2s; }
+        /* --- STYLE MỚI: CÂY THƯ MỤC CHUYÊN NGHIỆP --- */
+        /* 1. Accordion Card */
+        .topic-card { border: 1px solid #E2E8F0; transition: all 0.3s ease; background: white; }
+        .topic-card:hover { border-color: #CBD5E1; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); }
+        .topic-card.active { border-color: #6366F1; box-shadow: 0 10px 15px -3px rgba(99, 102, 241, 0.1); }
+        
+        .topic-header { cursor: pointer; transition: background 0.2s; user-select: none; }
         .topic-header:hover { background-color: #F8FAFC; }
-        .topic-body { max-height: 0; overflow: hidden; transition: max-height 0.3s ease-out; background-color: #F8FAFC; }
-        .topic-card.active .topic-body { max-height: 500px; /* Đủ lớn để hiện nội dung */ overflow-y: auto; }
-        .topic-card.active .arrow-icon { transform: rotate(180deg); color: #3B82F6; }
-
-        /* Animation cho Tutorial */
-        .tutorial-overlay { background: rgba(0,0,0,0.6); backdrop-filter: blur(4px); z-index: 9999; }
-        .step-content { display: none; animation: fadeIn 0.3s; }
-        .step-content.active { display: block; }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .topic-header .arrow-icon { transition: transform 0.3s; }
+        .topic-card.active .arrow-icon { transform: rotate(180deg); color: #6366F1; }
         
-        /* CSS cho nội dung câu hỏi */
-        .question-content img { max-width: 100%; height: auto; border-radius: 0.5rem; display: block; margin: 10px 0; }
-        .question-content table { border-collapse: collapse; width: 100%; margin: 10px 0; }
-        .question-content th, .question-content td { border: 1px solid #e5e7eb; padding: 8px; }
+        /* 2. Nội dung bên trong (Slide animation) */
+        .topic-body { 
+            max-height: 0; 
+            overflow: hidden; 
+            transition: max-height 0.5s cubic-bezier(0.4, 0, 0.2, 1); 
+            opacity: 0.5;
+        }
+        .topic-card.active .topic-body { 
+            max-height: 2000px; /* Đủ lớn để hiện hết */
+            opacity: 1;
+            padding-bottom: 16px;
+        }
 
-       
-        .topic-tree-item { position: relative; border-bottom: 1px dashed #f3f4f6; }
-        .topic-tree-item:last-child { border-bottom: none; }
+        /* 3. Nested Tree (Cây phân cấp) */
+        /* Sử dụng thẻ <details> và <summary> cho native accordion lồng nhau */
+        details > summary { list-style: none; cursor: pointer; transition: color 0.2s; outline: none; }
+        details > summary::-webkit-details-marker { display: none; }
         
-        /* Thụt đầu dòng theo cấp độ */
-        .level-0 { margin-left: 0; } /* Cấp Chương (không dùng trong tree item này vì chương là Card) */
-        .level-1 { margin-left: 0.5rem; border-left: 2px solid #E5E7EB; padding-left: 0.5rem; } /* Bài học */
-        .level-2 { margin-left: 2rem; border-left: 2px solid #E5E7EB; padding-left: 0.5rem; } /* Dạng bài */
-        .level-3 { margin-left: 3.5rem; border-left: 2px solid #E5E7EB; padding-left: 0.5rem; } /* Mức độ con */
-
-        .topic-tree-item:hover { background-color: #F0F9FF; }
-        .topic-tree-item label { transition: color 0.2s; }
-        .topic-tree-item:hover label { color: #2563EB; }
+        details > summary .folder-icon { transition: transform 0.2s; color: #F59E0B; }
+        details[open] > summary .folder-icon { transform: rotate(90deg); }
+        
+        .tree-branch {
+            position: relative;
+            margin-left: 24px; /* Thụt lề */
+            padding-left: 12px;
+            border-left: 1px dashed #CBD5E1; /* Đường kẻ dọc đứt đoạn */
+        }
+        
+        .tree-item {
+            position: relative;
+            padding: 6px 8px;
+            border-radius: 6px;
+            transition: background 0.2s;
+        }
+        .tree-item:hover { background-color: #EFF6FF; }
+        .tree-item:hover .map-text { color: #2563EB; font-weight: 600; }
     </style>
 </head>
 <body class="min-h-screen flex flex-col text-gray-800">
@@ -385,7 +399,7 @@
             } catch (e) { console.error("Lỗi tải Bank:", e); }
         }
 
-        // --- 3. RENDER DANH SÁCH BÀI (FIXED: ĐỆ QUY & MATHJAX) ---
+        // --- 3. RENDER DANH SÁCH BÀI (GIAO DIỆN CÂY PRO) ---
         window.renderTopicList = () => {
             const container = document.getElementById('treeContainer');
             if (!container) return;
@@ -395,7 +409,6 @@
 
             container.innerHTML = '';
             
-            // Nếu chưa có data thì báo đang tải
             if (!mapTree || mapTree.length === 0) {
                 container.innerHTML = '<div class="text-center py-10"><p class="text-gray-400 font-bold">Đang tải dữ liệu...</p></div>';
                 return;
@@ -409,40 +422,62 @@
                 return;
             }
 
-            // --- HÀM CON: ĐỆ QUY VẼ CÂY CON (BÀI -> DẠNG) ---
-            const renderRecursiveChildren = (nodes, level) => {
+            // --- HÀM CON: ĐỆ QUY VẼ CÂY CON (SỬ DỤNG <DETAILS>) ---
+            const renderRecursiveChildren = (nodes) => {
                 if (!nodes || nodes.length === 0) return '';
                 
-                let html = `<div class="space-y-1 mt-1">`;
+                let html = '';
+                
                 nodes.forEach(child => {
+                    const hasChildren = child.children && child.children.length > 0;
                     const cbId = `cb-${child.id}`;
-                    // [QUAN TRỌNG] Format tên để hiển thị công thức Toán
                     const formattedName = window.formatContent(child.name);
                     
-                    html += `
-                        <div class="topic-tree-item level-${level} flex items-start gap-2 p-2 rounded-lg transition-colors cursor-pointer select-none">
-                            <input type="checkbox" id="${cbId}" value="${child.id}" 
-                                class="map-check w-5 h-5 mt-0.5 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500 cursor-pointer flex-shrink-0" 
-                                onchange="handleCheckTree(this)">
-                            <div class="flex-1">
-                                <label for="${cbId}" class="cursor-pointer block math-content leading-snug text-sm text-gray-700 font-medium">
-                                    ${formattedName}
-                                </label>
-                                ${child.children ? renderRecursiveChildren(child.children, level + 1) : ''}
+                    if (hasChildren) {
+                        // NẾU LÀ THƯ MỤC (CHƯƠNG/DẠNG) -> DÙNG DETAILS ĐỂ ĐÓNG MỞ
+                        html += `
+                            <div class="tree-branch mt-1">
+                                <details class="group">
+                                    <summary class="flex items-center gap-2 py-1.5 hover:text-blue-600 select-none">
+                                        <i class="fa-solid fa-caret-right folder-icon text-gray-400 text-xs"></i>
+                                        <input type="checkbox" id="${cbId}" value="${child.id}" 
+                                            class="map-check w-4 h-4 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500 cursor-pointer" 
+                                            onclick="event.stopPropagation()"
+                                            onchange="handleCheckTree(this)">
+                                        <span class="text-sm font-bold text-gray-700 math-content group-open:text-indigo-700">${formattedName}</span>
+                                    </summary>
+                                    <div class="pt-1">
+                                        ${renderRecursiveChildren(child.children)}
+                                    </div>
+                                </details>
                             </div>
-                        </div>
-                    `;
+                        `;
+                    } else {
+                        // NẾU LÀ FILE (BÀI HỌC CUỐI CÙNG)
+                        html += `
+                            <div class="tree-branch mt-1 border-l-0 pl-6 relative">
+                                <div class="absolute left-0 top-1/2 w-4 h-[1px] bg-gray-300 -translate-y-1/2"></div>
+                                <div class="tree-item flex items-start gap-2">
+                                    <input type="checkbox" id="${cbId}" value="${child.id}" 
+                                        class="map-check w-4 h-4 mt-1 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500 cursor-pointer flex-shrink-0" 
+                                        onchange="handleCheckTree(this)">
+                                    <label for="${cbId}" class="map-text cursor-pointer block math-content text-sm text-gray-600 leading-snug">
+                                        ${formattedName}
+                                    </label>
+                                </div>
+                            </div>
+                        `;
+                    }
                 });
-                html += `</div>`;
                 return html;
             };
 
-            // 2. Render Card cho từng Phân môn / Chương
+            // 2. Render Card cho từng Phân môn / Chương Lớn
             let hasContent = false;
             
-            gradeNodes.forEach(rootNode => { // rootNode thường là "Lớp 12"
+            gradeNodes.forEach(rootNode => { 
                 if(rootNode.children) {
-                    rootNode.children.forEach(sectionNode => { // sectionNode là "Đại số", "Hình học"
+                    rootNode.children.forEach(sectionNode => { 
                         
                         // Logic lọc Môn
                         let isVisible = true;
@@ -454,17 +489,19 @@
 
                         if(isVisible) {
                             hasContent = true;
+                            
                             // Tạo Card Accordion
                             const card = document.createElement('div');
-                            card.className = "topic-card bg-white rounded-xl mb-3 overflow-hidden border border-gray-200 shadow-sm";
+                            card.className = "topic-card bg-white rounded-xl mb-3 overflow-hidden";
                             
-                            // Header (Tên Phân môn/Chương)
+                            // Header
                             const header = document.createElement('div');
-                            header.className = "topic-header p-4 flex justify-between items-center bg-gray-50";
-                            card.classList.add('active'); // Mặc định mở
+                            header.className = "topic-header p-4 flex justify-between items-center bg-gray-50 border-b border-gray-100";
+                            
+                            // [THAY ĐỔI]: Mặc định KHÔNG active (đóng)
+                            // card.classList.add('active'); 
                             
                             header.onclick = (e) => {
-                                // Nếu bấm vào checkbox thì không đóng card
                                 if(e.target.type !== 'checkbox') card.classList.toggle('active');
                             };
 
@@ -473,10 +510,10 @@
 
                             header.innerHTML = `
                                 <div class="flex items-center gap-3">
-                                    <div class="w-8 h-8 rounded-lg bg-indigo-100 text-indigo-600 flex items-center justify-center font-bold text-lg shrink-0">
-                                        <i class="fa-solid fa-layer-group"></i>
+                                    <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-50 to-indigo-50 text-indigo-600 flex items-center justify-center font-bold text-lg shrink-0 border border-blue-100 shadow-sm">
+                                        <i class="fa-solid fa-book"></i>
                                     </div>
-                                    <div class="flex items-center gap-2">
+                                    <div class="flex items-center gap-3">
                                         <input type="checkbox" id="${headerId}" class="map-check-parent w-5 h-5 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500 cursor-pointer" 
                                             onchange="toggleAllChildren(this)">
                                         <label for="${headerId}" class="font-bold text-gray-800 text-sm leading-tight cursor-pointer select-none">
@@ -484,16 +521,16 @@
                                         </label>
                                     </div>
                                 </div>
-                                <i class="fa-solid fa-chevron-down arrow-icon text-gray-400 transition-transform duration-300"></i>
+                                <i class="fa-solid fa-chevron-down arrow-icon text-gray-400"></i>
                             `;
                             
-                            // Body (Nội dung bên trong)
+                            // Body
                             const body = document.createElement('div');
-                            body.className = "topic-body px-2 pb-2 bg-white";
+                            body.className = "topic-body";
                             
                             if(sectionNode.children) {
-                                // Bắt đầu render từ cấp con đầu tiên (level 1)
-                                body.innerHTML = renderRecursiveChildren(sectionNode.children, 1);
+                                // Gọi hàm đệ quy mới
+                                body.innerHTML = `<div class="pt-2 pr-2">${renderRecursiveChildren(sectionNode.children)}</div>`;
                             } else {
                                 body.innerHTML = `<p class="text-xs text-gray-400 italic p-4 text-center">Chưa có bài học nào.</p>`;
                             }
@@ -510,7 +547,6 @@
                 container.innerHTML = `<div class="text-center py-10"><p class="text-gray-400">Không tìm thấy chuyên đề phù hợp.</p></div>`;
             }
             
-            // [FIX] Kích hoạt MathJax để hiển thị công thức đẹp
             if(window.MathJax && window.MathJax.typesetPromise) {
                 window.MathJax.typesetPromise([container]).catch((err) => console.log(err));
             }
