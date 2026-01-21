@@ -538,18 +538,55 @@
                 const checkedMapIds = Array.from(document.querySelectorAll('.map-check:checked')).map(cb => cb.value);
 
                 // B. Lọc ID từ Metadata
+                const selectedLevel = document.getElementById('selectLevel').value; // NB, TH, VD, VDC, all
+
                 let pool = globalBankMetadata.filter(q => {
-                    // Lọc Lớp
+                    // 1. Lọc Lớp
                     if (!q.id.startsWith(grade)) return false; 
-                    // Lọc Môn
+                    
+                    // 2. Lọc Môn
                     if (subject === 'dai_so' && !q.id.includes('D') && !q.id.includes('G')) return false;
                     if (subject === 'hinh_hoc' && !q.id.includes('H')) return false;
-                    // Lọc Chuyên đề (Nếu có chọn)
-                    if (checkedMapIds.length > 0) {
-                        // Logic đơn giản: ID câu hỏi chứa ID bài học
-                        // let isMatch = checkedMapIds.some(mId => q.id.includes(mId));
-                        // if (!isMatch) return false;
+
+                    // 3. [MỚI] Lọc Mức độ
+                    if (selectedLevel !== 'all') {
+                        // Check xem ID có chứa ký tự mức độ không (VD: 9D1[H]1 -> H)
+                        // Hoặc check thuộc tính level nếu có trong metadata (tùy cấu trúc data của bạn)
+                        
+                        // Cách 1: Check ID (Nhanh nhất)
+                        // NB, TH, VD, VDC
+                        if (selectedLevel === 'NB' && !q.id.includes('N') && !q.id.includes('NB')) return false;
+                        if (selectedLevel === 'TH' && !q.id.includes('H') && !q.id.includes('TH')) return false;
+                        if (selectedLevel === 'VD' && !q.id.includes('V') && !q.id.includes('VD')) return false;
+                        // VDC thường ký hiệu là C hoặc VDC
+                        if (selectedLevel === 'VDC' && !q.id.includes('C') && !q.id.includes('VDC')) return false;
                     }
+                    
+                    // 4. [MỚI] Lọc theo Chuyên đề (MapID)
+                    if (checkedMapIds.length > 0) {
+                        // Logic: Nếu người dùng chọn Chương 1 (ID: 9D1)
+                        // Thì phải lấy tất cả câu hỏi có ID chứa "9D1" (VD: 9D1H1, 9D1V2...)
+                        
+                        // Kiểm tra xem ID câu hỏi có BẮT ĐẦU bằng một trong các ID đã chọn không
+                        // Lưu ý: ID câu hỏi thường có dạng [Lớp][Môn][Chương]...
+                        // ID Map: 9D1 (Chương 1)
+                        // ID Câu: 9D1H1-5 (Bài 1, Mức H, Câu 5) -> Chứa "9D1" -> OK
+                        
+                        // Tuy nhiên, ID Map có thể là số (1, 2, 3...) nếu cây chưa chuẩn
+                        // Ở đây giả định cây MapID của bạn có ID chuẩn (9D1, 9D11...)
+                        
+                        const isMatchTopic = checkedMapIds.some(mapId => {
+                            // Xử lý ID bài học: 9D11 (Bài 1 chương 1)
+                            // ID câu hỏi: 9D1H1 (Bài 1 mức H)
+                            // Cần khớp lỏng một chút vì có ký tự mức độ chen vào
+                            
+                            // Cách đơn giản nhất:
+                            return q.id.includes(mapId);
+                        });
+
+                        if (!isMatchTopic) return false;
+                    }
+                    
                     return true;
                 });
 
