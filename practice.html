@@ -314,19 +314,6 @@
             } catch (e) { console.error("Lỗi tải Bank:", e); }
         }
 
-        // [MỚI] Hàm tải danh sách ID (Rất nhẹ)
-        async function loadBankMetadata() {
-            try {
-                // Link Worker của bạn
-                const WORKER_URL = "https://upload-helper.phamngockhanh-942001.workers.dev/bank";
-                const res = await fetch(WORKER_URL);
-                if (res.ok) {
-                    globalBankMetadata = await res.json();
-                    console.log("Đã tải xong danh sách:", globalBankMetadata.length, "câu");
-                }
-            } catch (e) { console.error("Lỗi tải Bank:", e); }
-        }
-
         // [MỚI] Hàm định dạng nội dung (Để đảm bảo Preview không lỗi)
         // [FIX] Hàm định dạng nội dung: Bảo vệ công thức Toán
         // [FIX HOÀN TOÀN] Hàm định dạng: Toán + Văn bản + Ảnh
@@ -535,87 +522,126 @@
             return 2; 
         };
 
-        // --- 3. LOGIC LẤY CÂU HỎI TỪ NGÂN HÀNG R2 (CẬP NHẬT) ---
+        // 4. BẮT ĐẦU LUYỆN TẬP (Fetch từ R2)
         window.startPractice = async () => {
             const btn = document.querySelector('button[onclick="startPractice()"]');
-            const oldText = btn.innerHTML;
-            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang tạo đề...'; btn.disabled = true;
+            const oldHtml = btn.innerHTML;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang khởi tạo...'; btn.disabled = true;
 
             try {
-                // 1. Lấy tham số lọc cơ bản
-                const grade = document.querySelector('input[name="grade"]:checked').value; // 12, 11...
-                const subject = document.querySelector('input[name="subject"]:checked').value; // dai_so, hinh_hoc, all
-
-                // 2. Lấy danh sách Bài học (MapID) đã tích chọn
+                // A. Lấy thông số
+                const grade = document.querySelector('input[name="grade"]:checked').value;
+                const subject = document.querySelector('input[name="subject"]:checked').value;
+                const qCount = parseInt(document.getElementById('inputQCount').value) || 10;
+                const customTime = parseInt(document.getElementById('inputTime').value) || 0;
+                const sortDiff = document.getElementById('toggleSortDifficulty').checked;
                 const checkedMapIds = Array.from(document.querySelectorAll('.map-check:checked')).map(cb => cb.value);
-                
-                // 3. Lọc câu hỏi từ bộ nhớ (globalBankMetadata)
+
+                // B. Lọc ID từ Metadata
+                const selectedLevel = document.getElementById('selectLevel').value; // NB, TH, VD, VDC, all
+
                 let pool = globalBankMetadata.filter(q => {
-                    // Lọc Lớp & Môn (Dựa vào tiền tố ID: 12D..., 12H...)
-                    let prefixGrade = grade; 
+                    // 1. Lọc Lớp
+                    if (!q.id.startsWith(grade)) return false; 
                     
-                    if (!q.id.startsWith(prefixGrade)) return false; // Sai lớp -> Loại
+                    // 2. Lọc Môn
+                    if (subject === 'dai_so' && !q.id.includes('D') && !q.id.includes('G')) return false;
+                    if (subject === 'hinh_hoc' && !q.id.includes('H')) return false;
 
-                    if (subject !== 'all') {
-                        // Lưu ý: ID có thể là 12D1... hoặc 12G1... (Giải tích cũng là Đại số)
-                        if (subject === 'dai_so' && !q.id.includes('D') && !q.id.includes('G')) return false;
-                        if (subject === 'hinh_hoc' && !q.id.includes('H')) return false;
+                    // 3. [MỚI] Lọc Mức độ
+                    if (selectedLevel !== 'all') {
+                        // Check xem ID có chứa ký tự mức độ không (VD: 9D1[H]1 -> H)
+                        // Hoặc check thuộc tính level nếu có trong metadata (tùy cấu trúc data của bạn)
+                        
+                        // Cách 1: Check ID (Nhanh nhất)
+                        // NB, TH, VD, VDC
+                        if (selectedLevel === 'NB' && !q.id.includes('N') && !q.id.includes('NB')) return false;
+                        if (selectedLevel === 'TH' && !q.id.includes('H') && !q.id.includes('TH')) return false;
+                        if (selectedLevel === 'VD' && !q.id.includes('V') && !q.id.includes('VD')) return false;
+                        // VDC thường ký hiệu là C hoặc VDC
+                        if (selectedLevel === 'VDC' && !q.id.includes('C') && !q.id.includes('VDC')) return false;
                     }
-
-                    // Lọc theo Bài học (Nếu có tích chọn)
+                    
+                    // 4. [MỚI] Lọc theo Chuyên đề (MapID)
                     if (checkedMapIds.length > 0) {
-                        // Kiểm tra xem ID câu hỏi có chứa chuỗi ID bài học đã chọn không
-                        const isMatch = checkedMapIds.some(mapId => q.id.includes(mapId));
-                        if (!isMatch) return false;
+                        // Logic: Nếu người dùng chọn Chương 1 (ID: 9D1)
+                        // Thì phải lấy tất cả câu hỏi có ID chứa "9D1" (VD: 9D1H1, 9D1V2...)
+                        
+                        // Kiểm tra xem ID câu hỏi có BẮT ĐẦU bằng một trong các ID đã chọn không
+                        // Lưu ý: ID câu hỏi thường có dạng [Lớp][Môn][Chương]...
+                        // ID Map: 9D1 (Chương 1)
+                        // ID Câu: 9D1H1-5 (Bài 1, Mức H, Câu 5) -> Chứa "9D1" -> OK
+                        
+                        // Tuy nhiên, ID Map có thể là số (1, 2, 3...) nếu cây chưa chuẩn
+                        // Ở đây giả định cây MapID của bạn có ID chuẩn (9D1, 9D11...)
+                        
+                        const isMatchTopic = checkedMapIds.some(mapId => {
+                            // Xử lý ID bài học: 9D11 (Bài 1 chương 1)
+                            // ID câu hỏi: 9D1H1 (Bài 1 mức H)
+                            // Cần khớp lỏng một chút vì có ký tự mức độ chen vào
+                            
+                            // Cách đơn giản nhất:
+                            return q.id.includes(mapId);
+                        });
+
+                        if (!isMatchTopic) return false;
                     }
                     
                     return true;
                 });
 
-                // 4. Kiểm tra số lượng
-                if (pool.length === 0) {
-                    alert(`Chưa có câu hỏi nào cho các tiêu chí đã chọn trong kho.`);
-                    btn.innerHTML = oldText; btn.disabled = false;
-                    return;
-                }
+                if (pool.length === 0) throw new Error("Không tìm thấy câu hỏi phù hợp trong kho.");
 
-                // 5. Trộn ngẫu nhiên
+                // C. Trộn ngẫu nhiên
                 for (let i = pool.length - 1; i > 0; i--) {
                     const j = Math.floor(Math.random() * (i + 1));
                     [pool[i], pool[j]] = [pool[j], pool[i]];
                 }
+                
+                // D. Cắt & Sắp xếp
+                let selectedMeta = pool.slice(0, qCount);
+                if (sortDiff) {
+                    selectedMeta.sort((a, b) => getDifficultyLevel(a.id) - getDifficultyLevel(b.id));
+                }
 
-                // 6. Cắt lấy số lượng cần thiết
-                const selectedMeta = pool.slice(0, selectedQCount);
-
-                // 7. Tải nội dung chi tiết từ R2 (Fetch song song)
+                // E. Tải nội dung chi tiết
                 practiceQuestions = [];
                 const WORKER_URL = "https://upload-helper.phamngockhanh-942001.workers.dev/bank";
-
-                // Sử dụng Promise.all để tải nhanh
                 const fetchPromises = selectedMeta.map(async (meta) => {
                     try {
                         const res = await fetch(`${WORKER_URL}?id=${encodeURIComponent(meta.id)}`);
                         if (res.ok) return await res.json();
-                    } catch (e) { console.error("Lỗi tải câu:", meta.id); }
+                    } catch (e) {}
                     return null;
                 });
-
+                
                 const results = await Promise.all(fetchPromises);
                 practiceQuestions = results.filter(q => q !== null);
 
-                if (practiceQuestions.length === 0) throw new Error("Không tải được nội dung câu hỏi.");
+                if (practiceQuestions.length === 0) throw new Error("Lỗi tải nội dung câu hỏi.");
 
-                // 8. Chuyển màn hình & Bắt đầu
+                // F. Tính thời gian (Nếu để 0)
+                let totalMinutes = customTime;
+                if (totalMinutes === 0) {
+                    let totalSeconds = 0;
+                    practiceQuestions.forEach(q => {
+                        if (q.type === 'tf') totalSeconds += 240; // 4 phút
+                        else totalSeconds += 108; // 1.8 phút
+                    });
+                    totalMinutes = Math.ceil(totalSeconds / 60);
+                }
+                
+                // G. Chuyển màn hình & Bắt đầu
                 document.getElementById('configStep').classList.add('hidden');
                 document.getElementById('practiceStep').classList.remove('hidden');
+                
                 renderPracticeInterface();
-                startTimer();
+                startTimer(totalMinutes * 60); // Truyền giây vào timer
 
             } catch (err) {
-                console.error(err);
-                alert("Có lỗi xảy ra: " + err.message);
-                btn.innerHTML = oldText; btn.disabled = false;
+                alert(err.message);
+            } finally {
+                btn.innerHTML = oldHtml; btn.disabled = false;
             }
         };
 
