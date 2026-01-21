@@ -68,6 +68,20 @@
         .question-content img { max-width: 100%; height: auto; border-radius: 0.5rem; display: block; margin: 10px 0; }
         .question-content table { border-collapse: collapse; width: 100%; margin: 10px 0; }
         .question-content th, .question-content td { border: 1px solid #e5e7eb; padding: 8px; }
+
+        /* --- STYLE MỚI CHO CÂY PHÂN CẤP (Dán vào trước </style>) --- */
+        .topic-tree-item { position: relative; border-bottom: 1px dashed #f3f4f6; }
+        .topic-tree-item:last-child { border-bottom: none; }
+        
+        /* Thụt đầu dòng theo cấp độ */
+        .level-0 { margin-left: 0; } /* Cấp Chương (không dùng trong tree item này vì chương là Card) */
+        .level-1 { margin-left: 0.5rem; border-left: 2px solid #E5E7EB; padding-left: 0.5rem; } /* Bài học */
+        .level-2 { margin-left: 2rem; border-left: 2px solid #E5E7EB; padding-left: 0.5rem; } /* Dạng bài */
+        .level-3 { margin-left: 3.5rem; border-left: 2px solid #E5E7EB; padding-left: 0.5rem; } /* Mức độ con */
+
+        .topic-tree-item:hover { background-color: #F0F9FF; }
+        .topic-tree-item label { transition: color 0.2s; }
+        .topic-tree-item:hover label { color: #2563EB; }
     </style>
 </head>
 <body class="min-h-screen flex flex-col text-gray-800">
@@ -371,76 +385,118 @@
             } catch (e) { console.error("Lỗi tải Bank:", e); }
         }
 
-        // --- GIAO DIỆN CHỌN CHUYÊN ĐỀ MỚI (ACCORDION) ---
+        // --- 3. RENDER DANH SÁCH BÀI (FIXED: ĐỆ QUY & MATHJAX) ---
         window.renderTopicList = () => {
             const container = document.getElementById('treeContainer');
+            if (!container) return;
+
             const selectedGrade = document.querySelector('input[name="grade"]:checked').value;
             const selectedSub = document.querySelector('input[name="subject"]:checked').value;
 
             container.innerHTML = '';
             
-            if (mapTree.length === 0) {
+            // Nếu chưa có data thì báo đang tải
+            if (!mapTree || mapTree.length === 0) {
                 container.innerHTML = '<div class="text-center py-10"><p class="text-gray-400 font-bold">Đang tải dữ liệu...</p></div>';
                 return;
             }
 
-            // Lọc Node cấp 1 (Thường là Đại số/Hình học hoặc Chương)
+            // 1. Tìm Node Lớp (Lọc theo tên, VD: "Lớp 12")
             const gradeNodes = mapTree.filter(node => node.name.includes(selectedGrade));
             
             if (gradeNodes.length === 0) {
-                container.innerHTML = '<div class="text-center py-10"><p class="text-gray-400 font-bold">Chưa có dữ liệu cho khối lớp này.</p></div>';
+                container.innerHTML = `<div class="text-center py-10"><p class="text-gray-400 font-bold">Chưa có dữ liệu cho Lớp ${selectedGrade}.</p></div>`;
                 return;
             }
 
-            // Tạo danh sách Card
-            gradeNodes.forEach(rootNode => { // rootNode thường là Lớp hoặc Môn
+            // --- HÀM CON: ĐỆ QUY VẼ CÂY CON (BÀI -> DẠNG) ---
+            const renderRecursiveChildren = (nodes, level) => {
+                if (!nodes || nodes.length === 0) return '';
+                
+                let html = `<div class="space-y-1 mt-1">`;
+                nodes.forEach(child => {
+                    const cbId = `cb-${child.id}`;
+                    // [QUAN TRỌNG] Format tên để hiển thị công thức Toán
+                    const formattedName = window.formatContent(child.name);
+                    
+                    html += `
+                        <div class="topic-tree-item level-${level} flex items-start gap-2 p-2 rounded-lg transition-colors cursor-pointer select-none">
+                            <input type="checkbox" id="${cbId}" value="${child.id}" 
+                                class="map-check w-5 h-5 mt-0.5 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500 cursor-pointer flex-shrink-0" 
+                                onchange="handleCheckTree(this)">
+                            <div class="flex-1">
+                                <label for="${cbId}" class="cursor-pointer block math-content leading-snug text-sm text-gray-700 font-medium">
+                                    ${formattedName}
+                                </label>
+                                ${child.children ? renderRecursiveChildren(child.children, level + 1) : ''}
+                            </div>
+                        </div>
+                    `;
+                });
+                html += `</div>`;
+                return html;
+            };
+
+            // 2. Render Card cho từng Phân môn / Chương
+            let hasContent = false;
+            
+            gradeNodes.forEach(rootNode => { // rootNode thường là "Lớp 12"
                 if(rootNode.children) {
-                    rootNode.children.forEach(chapter => {
+                    rootNode.children.forEach(sectionNode => { // sectionNode là "Đại số", "Hình học"
+                        
                         // Logic lọc Môn
                         let isVisible = true;
+                        const nameLower = sectionNode.name.toLowerCase();
                         if (selectedSub !== 'all') { 
-                            const nameLower = chapter.name.toLowerCase();
                             if (selectedSub === 'dai_so' && (nameLower.includes('hình') || nameLower.includes('không gian'))) isVisible = false;
                             if (selectedSub === 'hinh_hoc' && (nameLower.includes('đại số') || nameLower.includes('giải tích'))) isVisible = false;
                         }
 
                         if(isVisible) {
-                            // Tạo Card cho Chương
+                            hasContent = true;
+                            // Tạo Card Accordion
                             const card = document.createElement('div');
-                            card.className = "topic-card bg-white rounded-xl overflow-hidden";
+                            card.className = "topic-card bg-white rounded-xl mb-3 overflow-hidden border border-gray-200 shadow-sm";
                             
-                            // Header
+                            // Header (Tên Phân môn/Chương)
                             const header = document.createElement('div');
-                            header.className = "topic-header p-4 flex justify-between items-center";
-                            header.onclick = () => card.classList.toggle('active');
+                            header.className = "topic-header p-4 flex justify-between items-center bg-gray-50";
+                            card.classList.add('active'); // Mặc định mở
+                            
+                            header.onclick = (e) => {
+                                // Nếu bấm vào checkbox thì không đóng card
+                                if(e.target.type !== 'checkbox') card.classList.toggle('active');
+                            };
+
+                            const headerId = `cb-header-${sectionNode.id}`;
+                            const formattedHeaderName = window.formatContent(sectionNode.name);
+
                             header.innerHTML = `
                                 <div class="flex items-center gap-3">
-                                    <div class="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center font-bold text-sm"><i class="fa-solid fa-book"></i></div>
-                                    <span class="font-bold text-gray-700 text-sm">${chapter.name}</span>
+                                    <div class="w-8 h-8 rounded-lg bg-indigo-100 text-indigo-600 flex items-center justify-center font-bold text-lg shrink-0">
+                                        <i class="fa-solid fa-layer-group"></i>
+                                    </div>
+                                    <div class="flex items-center gap-2">
+                                        <input type="checkbox" id="${headerId}" class="map-check-parent w-5 h-5 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500 cursor-pointer" 
+                                            onchange="toggleAllChildren(this)">
+                                        <label for="${headerId}" class="font-bold text-gray-800 text-sm leading-tight cursor-pointer select-none">
+                                            ${formattedHeaderName}
+                                        </label>
+                                    </div>
                                 </div>
                                 <i class="fa-solid fa-chevron-down arrow-icon text-gray-400 transition-transform duration-300"></i>
                             `;
                             
-                            // Body (Danh sách bài học)
+                            // Body (Nội dung bên trong)
                             const body = document.createElement('div');
-                            body.className = "topic-body px-4";
+                            body.className = "topic-body px-2 pb-2 bg-white";
                             
-                            let lessonsHtml = `<div class="py-2 space-y-1">`;
-                            if(chapter.children) {
-                                chapter.children.forEach(lesson => {
-                                    lessonsHtml += `
-                                        <div class="flex items-center gap-3 p-2 hover:bg-white rounded-lg transition-colors border border-transparent hover:border-gray-100">
-                                            <input type="checkbox" id="cb-${lesson.id}" value="${lesson.id}" class="map-check w-5 h-5 rounded text-blue-600 focus:ring-blue-500 cursor-pointer" onchange="updateSelectionStatus()">
-                                            <label for="cb-${lesson.id}" class="text-sm text-gray-600 cursor-pointer flex-1 select-none font-medium">${lesson.name}</label>
-                                        </div>
-                                    `;
-                                });
+                            if(sectionNode.children) {
+                                // Bắt đầu render từ cấp con đầu tiên (level 1)
+                                body.innerHTML = renderRecursiveChildren(sectionNode.children, 1);
                             } else {
-                                lessonsHtml += `<p class="text-xs text-gray-400 italic p-2">Không có bài học con</p>`;
+                                body.innerHTML = `<p class="text-xs text-gray-400 italic p-4 text-center">Chưa có bài học nào.</p>`;
                             }
-                            lessonsHtml += `</div>`;
-                            
-                            body.innerHTML = lessonsHtml;
                             
                             card.appendChild(header);
                             card.appendChild(body);
@@ -449,6 +505,32 @@
                     });
                 }
             });
+
+            if (!hasContent) {
+                container.innerHTML = `<div class="text-center py-10"><p class="text-gray-400">Không tìm thấy chuyên đề phù hợp.</p></div>`;
+            }
+            
+            // [FIX] Kích hoạt MathJax để hiển thị công thức đẹp
+            if(window.MathJax && window.MathJax.typesetPromise) {
+                window.MathJax.typesetPromise([container]).catch((err) => console.log(err));
+            }
+            
+            updateSelectionStatus();
+        };
+
+        // --- CÁC HÀM HỖ TRỢ (THÊM MỚI) ---
+        
+        // 1. Chọn cha -> Chọn hết con
+        window.toggleAllChildren = (headerCheckbox) => {
+            const card = headerCheckbox.closest('.topic-card');
+            const body = card.querySelector('.topic-body');
+            const allChecks = body.querySelectorAll('input[type="checkbox"]');
+            allChecks.forEach(cb => cb.checked = headerCheckbox.checked);
+            updateSelectionStatus();
+        };
+
+        // 2. Chọn con -> Cập nhật trạng thái đếm
+        window.handleCheckTree = (cb) => {
             updateSelectionStatus();
         };
 
