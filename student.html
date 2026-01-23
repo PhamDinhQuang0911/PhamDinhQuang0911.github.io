@@ -177,35 +177,42 @@
                         </div>
                     </div>
 
-                    <div class="lg:col-span-2 flex flex-col">
-                        <div class="bg-white rounded-3xl shadow-sm border border-gray-200 flex-1 overflow-hidden flex flex-col h-[500px]">
-                            <div class="p-5 border-b border-gray-100 flex justify-between items-center bg-gray-50">
-                                <h3 class="font-bold text-gray-800 flex items-center gap-2">
-                                    <i class="fa-solid fa-clock-rotate-left text-indigo-600"></i> Lịch sử Luyện tập
+                   <div class="lg:col-span-2 flex flex-col h-[600px]">
+                        <div class="bg-white rounded-3xl shadow-sm border border-gray-200 flex-1 overflow-hidden flex flex-col">
+                            <div class="p-5 border-b border-gray-100 flex flex-col md:flex-row md:items-center justify-between gap-4 bg-gray-50/50">
+                                <h3 class="font-bold text-gray-800 flex items-center gap-2 text-lg">
+                                    <i class="fa-solid fa-clock-rotate-left text-teal-600"></i> Lịch sử Luyện tập
                                 </h3>
-                                <button onclick="loadStudentPracticeHistory()" class="w-8 h-8 rounded-full bg-white border border-gray-200 text-gray-400 hover:text-indigo-600 hover:border-indigo-200 flex items-center justify-center transition-all" title="Làm mới">
-                                    <i class="fa-solid fa-rotate"></i>
-                                </button>
+                                <div class="flex items-center gap-2">
+                                    <select id="historyFilterTime" onchange="loadStudentPracticeHistory()" class="bg-white border border-gray-200 text-gray-600 text-xs font-bold rounded-xl focus:ring-teal-500 focus:border-teal-500 block p-2 outline-none shadow-sm">
+                                        <option value="all">📅 Tất cả</option>
+                                        <option value="today">📆 Hôm nay</option>
+                                        <option value="week">📅 Tuần này</option>
+                                        <option value="month">📅 Tháng này</option>
+                                    </select>
+                                    
+                                    <select id="historySort" onchange="loadStudentPracticeHistory()" class="bg-white border border-gray-200 text-gray-600 text-xs font-bold rounded-xl focus:ring-teal-500 focus:border-teal-500 block p-2 outline-none shadow-sm">
+                                        <option value="newest">🕒 Mới nhất</option>
+                                        <option value="score_high">🏆 Điểm cao nhất</option>
+                                        <option value="score_low">📉 Điểm thấp nhất</option>
+                                    </select>
+
+                                    <button onclick="loadStudentPracticeHistory()" class="w-8 h-8 rounded-full bg-white border border-gray-200 text-gray-400 hover:text-teal-600 hover:border-teal-200 flex items-center justify-center transition-all shadow-sm">
+                                        <i class="fa-solid fa-rotate"></i>
+                                    </button>
+                                </div>
                             </div>
-                            <div class="flex-1 overflow-y-auto custom-scrollbar p-0">
-                                <table class="w-full text-left text-sm">
-                                    <thead class="bg-white sticky top-0 z-10 shadow-sm text-xs font-bold text-gray-500 uppercase tracking-wider">
-                                        <tr>
-                                            <th class="p-4 border-b border-gray-100">Thời gian</th>
-                                            <th class="p-4 border-b border-gray-100">Nội dung</th>
-                                            <th class="p-4 border-b border-gray-100 text-center">Kết quả</th>
-                                            <th class="p-4 border-b border-gray-100 text-center">Điểm</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="practiceHistoryTable" class="divide-y divide-gray-50 text-gray-600">
-                                        <tr><td colspan="4" class="text-center py-10 text-gray-400 italic">Đang tải dữ liệu...</td></tr>
-                                    </tbody>
-                                </table>
+                            
+                            <div class="flex-1 overflow-y-auto custom-scrollbar bg-white relative">
+                                <div id="practiceHistoryList" class="divide-y divide-gray-100">
+                                    <div class="p-10 text-center text-gray-400">
+                                        <i class="fa-solid fa-spinner fa-spin text-2xl text-teal-500"></i>
+                                        <p class="mt-2 text-xs">Đang tải dữ liệu...</p>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
-                </div>
-            </div>
 
             <div id="tab-classes" class="tab-content hidden animate-fade-in">
                 <div class="mb-6 flex flex-col md:flex-row md:items-end justify-between gap-4">
@@ -2080,78 +2087,123 @@
                 btn.disabled = false;
             }
         };
-        // --- [MỚI] HÀM TẢI LỊCH SỬ LUYỆN TẬP ---
+        // --- HÀM TẢI LỊCH SỬ LUYỆN TẬP (CÓ LỌC & SẮP XẾP) ---
         window.loadStudentPracticeHistory = async () => {
-            const tbody = document.getElementById('practiceHistoryTable');
-            if(!tbody) return;
+            const container = document.getElementById('practiceHistoryList');
+            if(!container) return;
             
-            // Hiện trạng thái đang tải
-            tbody.innerHTML = '<tr><td colspan="4" class="text-center py-10"><i class="fa-solid fa-spinner fa-spin text-indigo-500 text-2xl"></i></td></tr>';
-            
+            // 1. Lấy giá trị bộ lọc
+            const filterTime = document.getElementById('historyFilterTime')?.value || 'all';
+            const sortType = document.getElementById('historySort')?.value || 'newest';
+
+            container.innerHTML = '<div class="p-10 text-center"><i class="fa-solid fa-circle-notch fa-spin text-teal-500 text-2xl"></i><p class="mt-2 text-xs text-gray-400">Đang xử lý dữ liệu...</p></div>';
+
             try {
                 const user = auth.currentUser;
                 if(!user) return;
-                
-                // Query vào bảng practice_results, lấy 20 bài mới nhất của user
+
+                // 2. Query cơ bản (Lấy 50 bài gần nhất để lọc client-side cho nhanh)
                 const q = query(
                     collection(db, "practice_results"),
                     where("uid", "==", user.uid),
                     orderBy("createdAt", "desc"),
-                    limit(20)
+                    limit(50)
                 );
                 
                 const snap = await getDocs(q);
+                let results = [];
                 
-                if(snap.empty) {
-                    tbody.innerHTML = `
-                        <tr>
-                            <td colspan="4" class="text-center py-12 text-gray-400">
-                                <div class="flex flex-col items-center">
-                                    <i class="fa-solid fa-clipboard-list text-3xl mb-2 opacity-50"></i>
-                                    <p>Bạn chưa có bài luyện tập nào.</p>
-                                </div>
-                            </td>
-                        </tr>`;
+                snap.forEach(doc => results.push(doc.data()));
+
+                if(results.length === 0) {
+                    container.innerHTML = `
+                        <div class="flex flex-col items-center justify-center h-full py-10 text-gray-400 opacity-60">
+                            <i class="fa-solid fa-clipboard-list text-4xl mb-2"></i>
+                            <p class="text-sm">Chưa có bài luyện tập nào.</p>
+                        </div>`;
                     return;
                 }
-                
+
+                // 3. Lọc theo thời gian (Client-side filtering)
+                const now = new Date();
+                results = results.filter(item => {
+                    if (filterTime === 'all') return true;
+                    const itemDate = new Date(item.timestamp);
+                    
+                    if (filterTime === 'today') {
+                        return itemDate.toDateString() === now.toDateString();
+                    }
+                    if (filterTime === 'week') {
+                        const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+                        return itemDate >= oneWeekAgo;
+                    }
+                    if (filterTime === 'month') {
+                        return itemDate.getMonth() === now.getMonth() && itemDate.getFullYear() === now.getFullYear();
+                    }
+                    return true;
+                });
+
+                // 4. Sắp xếp (Client-side sorting)
+                results.sort((a, b) => {
+                    if (sortType === 'newest') return b.createdAt - a.createdAt; // Mặc định query đã sort, nhưng sort lại cho chắc
+                    if (sortType === 'score_high') return b.score - a.score;
+                    if (sortType === 'score_low') return a.score - b.score;
+                    return 0;
+                });
+
+                // 5. Render Giao diện đẹp
+                if(results.length === 0) {
+                     container.innerHTML = '<div class="p-10 text-center text-gray-400 text-sm">Không tìm thấy bài nào trong khoảng thời gian này.</div>';
+                     return;
+                }
+
                 let html = '';
-                snap.forEach(doc => {
-                    const d = doc.data();
-                    // Format ngày tháng
+                results.forEach(d => {
                     const date = new Date(d.timestamp).toLocaleString('vi-VN', {
                         day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'
                     });
                     
-                    // Tô màu điểm số
-                    let scoreColor = d.score >= 8 ? 'text-green-600' : (d.score >= 5 ? 'text-blue-600' : 'text-red-500');
-                    
+                    // Màu sắc điểm số
+                    let scoreColor = 'text-red-500';
+                    let scoreBg = 'bg-red-50';
+                    if (d.score >= 8) { scoreColor = 'text-green-600'; scoreBg = 'bg-green-50'; }
+                    else if (d.score >= 5) { scoreColor = 'text-blue-600'; scoreBg = 'bg-blue-50'; }
+
+                    // Xử lý hiển thị levels (nếu có)
+                    let levelBadge = '';
+                    if (d.levels) {
+                        levelBadge = `<div class="flex gap-1 mt-1 flex-wrap">${d.levels.split(',').map(l => `<span class="text-[9px] px-1.5 py-0.5 rounded border border-gray-100 bg-gray-50 text-gray-500">${l.trim()}</span>`).join('')}</div>`;
+                    }
+
                     html += `
-                        <tr class="hover:bg-indigo-50/30 transition-colors">
-                            <td class="p-4 font-medium text-gray-500 text-xs">${date}</td>
-                            <td class="p-4">
-                                <span class="font-bold text-gray-700 block text-xs md:text-sm">Lớp ${d.grade}</span>
-                                <span class="text-[10px] uppercase font-bold text-indigo-500 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100">${d.subject}</span>
-                            </td>
-                            <td class="p-4 text-center">
-                                <span class="bg-gray-100 text-gray-600 px-2 py-1 rounded text-xs font-bold">${d.correct}/${d.total} câu</span>
-                            </td>
-                            <td class="p-4 text-center">
-                                <span class="font-black text-lg ${scoreColor}">${d.score}</span>
-                            </td>
-                        </tr>
+                        <div class="p-4 hover:bg-gray-50 transition-colors flex items-center justify-between group">
+                            <div class="flex items-start gap-4">
+                                <div class="w-12 h-12 rounded-2xl ${scoreBg} ${scoreColor} flex flex-col items-center justify-center font-black shadow-sm shrink-0 border border-white">
+                                    <span class="text-lg leading-none">${d.score}</span>
+                                    <span class="text-[8px] uppercase opacity-70">Điểm</span>
+                                </div>
+                                <div>
+                                    <h4 class="font-bold text-gray-800 text-sm">Lớp ${d.grade} - ${d.subject}</h4>
+                                    ${levelBadge}
+                                    <div class="flex items-center gap-3 mt-1.5 text-xs text-gray-400 font-medium">
+                                        <span class="flex items-center gap-1"><i class="fa-regular fa-clock"></i> ${date}</span>
+                                        <span class="flex items-center gap-1"><i class="fa-solid fa-list-check"></i> ${d.correct}/${d.total} câu</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="hidden md:block">
+                                <div class="w-24 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                                    <div class="h-full ${scoreColor.replace('text', 'bg')}" style="width: ${d.score * 10}%"></div>
+                                </div>
+                            </div>
+                        </div>
                     `;
                 });
-                tbody.innerHTML = html;
-                
+                container.innerHTML = html;
+
             } catch(e) {
-                console.error("Lỗi tải Practice History:", e);
-                // Nếu lỗi index (thường gặp lần đầu), hiển thị hướng dẫn
-                if (e.message.includes("index")) {
-                     tbody.innerHTML = '<tr><td colspan="4" class="text-center py-4 text-red-400 text-xs">Cần tạo Index trên Firestore (Xem Console F12 để lấy link).</td></tr>';
-                } else {
-                     tbody.innerHTML = '<tr><td colspan="4" class="text-center py-4 text-red-400 text-xs">Lỗi tải dữ liệu. Vui lòng thử lại.</td></tr>';
-                }
+                console.error("Lỗi:", e);
+                container.innerHTML = `<div class="p-6 text-center text-red-400 text-xs">Lỗi tải dữ liệu. Cần tạo Index Firestore (Xem Console).</div>`;
             }
         };
     </script>
