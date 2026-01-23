@@ -185,7 +185,9 @@
                     <p class="text-xs text-gray-500 font-bold">Toán Học Tư Duy</p>
                 </div>
             </div>
-            <div class="flex gap-2">
+           <div class="flex gap-2">
+                <button onclick="openHistory()" class="w-9 h-9 rounded-full bg-blue-50 hover:bg-blue-100 flex items-center justify-center text-blue-600 border border-blue-200" title="Xem lịch sử"><i class="fa-solid fa-clock-rotate-left"></i></button>
+                
                 <button onclick="openTutorial()" class="w-9 h-9 rounded-full bg-yellow-50 hover:bg-yellow-100 flex items-center justify-center text-yellow-600 border border-yellow-200" title="Xem hướng dẫn"><i class="fa-solid fa-question"></i></button>
                 <button onclick="window.location.reload()" class="w-9 h-9 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-500"><i class="fa-solid fa-rotate"></i></button>
                 <button onclick="window.history.back()" class="w-9 h-9 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-500"><i class="fa-solid fa-xmark"></i></button>
@@ -368,7 +370,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
-        import { getFirestore, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { getFirestore, doc, getDoc, collection, getDocs, query, where, addDoc, orderBy, limit } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
         import { formatContent, renderTikz, autoScaleTables } from "./utils.js"; 
 
         // Gán vào window
@@ -843,9 +845,14 @@
             }, 1000);
         }
 
+        // Biến tạm để lưu dữ liệu kết quả trước khi quyết định lưu hay không
+        let tempResultData = null;
+
         window.finishPractice = () => {
             clearInterval(timerInterval);
             let correctCount = 0;
+            
+            // 1. Tính điểm
             practiceQuestions.forEach((q, idx) => {
                 const u = userAnswers[idx];
                 if (q.type === 'mc') { if (u == q.correct) correctCount++; } 
@@ -856,13 +863,68 @@
                     if (isAllCorrect) correctCount++;
                 }
             });
-            const score = practiceQuestions.length > 0 ? (correctCount / practiceQuestions.length) * 10 : 0;
+
+            const totalQ = practiceQuestions.length;
+            const score = totalQ > 0 ? (correctCount / totalQ) * 10 : 0;
+            const fixedScore = score.toFixed(1);
+
+            // 2. Chuẩn bị dữ liệu để lưu (nhưng chưa lưu ngay)
+            if (auth.currentUser) {
+                try {
+                    const grade = document.querySelector('input[name="grade"]:checked').value;
+                    const subVal = document.querySelector('input[name="subject"]:checked').value;
+                    const subjectMap = {'dai_so': 'Đại số', 'hinh_hoc': 'Hình học', 'all': 'Tổng hợp'};
+                    
+                    tempResultData = {
+                        uid: auth.currentUser.uid,
+                        studentName: auth.currentUser.displayName || "Học sinh",
+                        score: parseFloat(fixedScore),
+                        correct: correctCount,
+                        total: totalQ,
+                        grade: grade,
+                        subject: subjectMap[subVal] || subVal,
+                        timestamp: new Date().toISOString(),
+                        createdAt: Date.now()
+                    };
+                    
+                    // 3. Hiện Modal hỏi ý kiến
+                    document.getElementById('confirmSaveModal').classList.remove('hidden');
+                } catch(e) {
+                    console.error("Lỗi chuẩn bị data:", e);
+                    showResultScreen(fixedScore, correctCount, totalQ); // Lỗi thì hiện kết quả luôn
+                }
+            } else {
+                showResultScreen(fixedScore, correctCount, totalQ);
+            }
+        };
+
+        // Hàm xử lý quyết định của học sinh (Lưu hoặc Không)
+        window.handleSaveDecision = async (shouldSave) => {
+            document.getElementById('confirmSaveModal').classList.add('hidden');
+            
+            if (shouldSave && tempResultData) {
+                try {
+                    await addDoc(collection(db, "practice_results"), tempResultData);
+                    console.log("Đã lưu kết quả vào Firestore");
+                } catch (e) {
+                    console.error("Lỗi lưu Firestore:", e);
+                    alert("Không thể lưu kết quả. Vui lòng kiểm tra kết nối.");
+                }
+            }
+            
+            // Hiển thị màn hình kết quả cuối cùng
+            showResultScreen(tempResultData.score.toFixed(1), tempResultData.correct, tempResultData.total);
+        };
+
+        // Hàm hiển thị màn hình kết quả (Tách ra để tái sử dụng)
+        function showResultScreen(scoreStr, correct, total) {
             document.getElementById('practiceStep').classList.add('hidden');
             document.getElementById('resultStep').classList.remove('hidden');
-            document.getElementById('resScore').textContent = score.toFixed(1);
-            document.getElementById('resCorrect').textContent = correctCount;
-            document.getElementById('resWrong').textContent = practiceQuestions.length - correctCount;
-        };
+            
+            document.getElementById('resScore').textContent = scoreStr;
+            document.getElementById('resCorrect').textContent = correct;
+            document.getElementById('resWrong').textContent = total - correct;
+        }
 
         window.viewSolutions = () => {
             document.getElementById('resultStep').classList.add('hidden');
@@ -902,6 +964,113 @@
             if (el.classList.contains('hidden')) { el.classList.remove('hidden'); icon.style.transform = 'rotate(0deg)'; } 
             else { el.classList.add('hidden'); icon.style.transform = 'rotate(180deg)'; }
         };
+        // --- CHỨC NĂNG XEM LỊCH SỬ ---
+        window.openHistory = async () => {
+            const modal = document.getElementById('historyModal');
+            const tbody = document.getElementById('historyTableContent');
+            const loader = document.getElementById('historyLoading');
+            const empty = document.getElementById('historyEmpty');
+            
+            modal.classList.remove('hidden');
+            tbody.innerHTML = '';
+            loader.classList.remove('hidden');
+            empty.classList.add('hidden');
+
+            try {
+                const user = auth.currentUser;
+                if (!user) return;
+
+                // Lấy 20 bài gần nhất
+                const q = query(
+                    collection(db, "practice_results"), 
+                    where("uid", "==", user.uid),
+                    orderBy("createdAt", "desc"),
+                    limit(20)
+                );
+
+                const querySnapshot = await getDocs(q);
+                loader.classList.add('hidden');
+
+                if (querySnapshot.empty) {
+                    empty.classList.remove('hidden');
+                    return;
+                }
+
+                let html = '';
+                querySnapshot.forEach((doc) => {
+                    const data = doc.data();
+                    const date = new Date(data.timestamp).toLocaleString('vi-VN', {
+                        day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'
+                    });
+                    
+                    let scoreColor = data.score >= 8 ? 'text-green-600' : (data.score >= 5 ? 'text-blue-600' : 'text-red-500');
+
+                    html += `
+                        <tr class="hover:bg-blue-50/50 transition-colors border-b border-gray-50">
+                            <td class="p-4 text-gray-500 font-medium">${date}</td>
+                            <td class="p-4">
+                                <span class="font-bold text-gray-700 block">Lớp ${data.grade}</span>
+                                <span class="text-xs text-gray-400">${data.subject}</span>
+                            </td>
+                            <td class="p-4 text-center">
+                                <span class="bg-gray-100 text-gray-600 px-2.5 py-1 rounded-lg text-xs font-bold">${data.correct}/${data.total}</span>
+                            </td>
+                            <td class="p-4 text-center">
+                                <span class="font-black text-lg ${scoreColor}">${data.score}</span>
+                            </td>
+                        </tr>
+                    `;
+                });
+                tbody.innerHTML = html;
+
+            } catch (error) {
+                console.error("Lỗi tải lịch sử:", error);
+                loader.classList.add('hidden');
+                tbody.innerHTML = `<tr><td colspan="4" class="text-center p-4 text-red-400">Lỗi tải dữ liệu. Có thể cần tạo Index (Xem Console).</td></tr>`;
+            }
+        };
     </script>
+    <div id="confirmSaveModal" class="hidden fixed inset-0 tutorial-overlay flex items-center justify-center p-4 z-[10001]">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 text-center transform transition-all scale-100">
+            <div class="w-16 h-16 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-4 text-3xl">
+                <i class="fa-solid fa-floppy-disk"></i>
+            </div>
+            <h3 class="text-xl font-bold text-gray-800 mb-2">Lưu kết quả luyện tập?</h3>
+            <p class="text-gray-500 text-sm mb-6">Bạn có muốn lưu lại điểm số và chi tiết bài làm này vào Lịch sử không?</p>
+            <div class="grid grid-cols-2 gap-3">
+                <button onclick="handleSaveDecision(false)" class="py-2.5 bg-gray-100 text-gray-600 font-bold rounded-xl hover:bg-gray-200 transition-all">Không lưu</button>
+                <button onclick="handleSaveDecision(true)" class="py-2.5 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all">Lưu lại</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="historyModal" class="hidden fixed inset-0 tutorial-overlay flex items-center justify-center p-4 z-[10002]">
+        <div class="bg-white rounded-3xl shadow-2xl w-full max-w-4xl h-[80vh] flex flex-col overflow-hidden relative">
+            <div class="p-5 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+                <h3 class="font-black text-xl text-gray-800 flex items-center gap-2">
+                    <i class="fa-solid fa-clock-rotate-left text-blue-600"></i> Lịch sử Luyện tập
+                </h3>
+                <button onclick="document.getElementById('historyModal').classList.add('hidden')" class="w-8 h-8 rounded-full bg-white border border-gray-200 flex items-center justify-center text-gray-400 hover:text-red-500 hover:border-red-200 transition-all">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <div class="flex-1 overflow-y-auto p-0 custom-scrollbar">
+                <table class="w-full text-left text-sm">
+                    <thead class="bg-white sticky top-0 z-10 shadow-sm text-xs font-bold text-gray-500 uppercase tracking-wider">
+                        <tr>
+                            <th class="p-4 border-b border-gray-100">Thời gian</th>
+                            <th class="p-4 border-b border-gray-100">Nội dung</th>
+                            <th class="p-4 border-b border-gray-100 text-center">Đúng/Tổng</th>
+                            <th class="p-4 border-b border-gray-100 text-center">Điểm</th>
+                        </tr>
+                    </thead>
+                    <tbody id="historyTableContent" class="divide-y divide-gray-50 text-gray-700">
+                        </tbody>
+                </table>
+                <div id="historyLoading" class="text-center py-10 hidden"><i class="fa-solid fa-spinner fa-spin text-blue-500 text-2xl"></i></div>
+                <div id="historyEmpty" class="text-center py-10 hidden text-gray-400">Chưa có dữ liệu lịch sử.</div>
+            </div>
+        </div>
+    </div>
 </body>
 </html>
