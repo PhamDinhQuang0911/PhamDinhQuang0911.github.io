@@ -262,6 +262,14 @@
                             </div>
                         </div>
 
+                        <div>
+                            <label class="block text-xs font-bold text-gray-400 uppercase mb-2">Dạng đặc biệt (Tùy chọn)</label>
+                            <div class="grid grid-cols-2 gap-2">
+                                <label class="cursor-pointer relative"><input type="checkbox" id="filterTheory" class="level-checkbox peer sr-only" value="theory"><div class="py-2 px-3 rounded-xl border border-gray-200 text-gray-600 font-bold text-xs hover:bg-blue-50 transition-all flex justify-between items-center"><span><i class="fa-solid fa-book-open text-blue-500 mr-1.5"></i>Lý thuyết</span> <i class="fa-solid fa-check check-icon opacity-0 transition-opacity text-blue-600"></i></div></label>
+                                <label class="cursor-pointer relative"><input type="checkbox" id="filterRealWorld" class="level-checkbox peer sr-only" value="realworld"><div class="py-2 px-3 rounded-xl border border-gray-200 text-gray-600 font-bold text-xs hover:bg-green-50 transition-all flex justify-between items-center"><span><i class="fa-solid fa-globe text-green-500 mr-1.5"></i>Thực tế</span> <i class="fa-solid fa-check check-icon opacity-0 transition-opacity text-blue-600"></i></div></label>
+                            </div>
+                        </div>
+
                         <div class="w-full h-[1px] bg-gray-100"></div>
 
                         <div class="grid grid-cols-2 gap-4">
@@ -670,6 +678,20 @@
             return 2; 
         };
 
+        // --- [MỚI] HÀM QUÉT CÂY MAP LẤY CÁC ID CÓ THUỘC TÍNH ĐẶC BIỆT ---
+        const getSpecialTopicIds = (tree, type) => {
+            let ids = [];
+            const traverse = (nodes) => {
+                nodes.forEach(n => {
+                    if (type === 'theory' && n.isTheory) ids.push(n.id);
+                    if (type === 'realworld' && n.isRealWorld) ids.push(n.id);
+                    if (n.children) traverse(n.children);
+                });
+            };
+            traverse(tree);
+            return ids;
+        };
+
         window.startPractice = async () => {
             const btn = document.querySelector('button[onclick="startPractice()"]');
             const oldHtml = btn.innerHTML;
@@ -682,8 +704,20 @@
                 const customTime = parseInt(document.getElementById('inputTime').value) || 0;
                 const sortDiff = document.getElementById('toggleSortDifficulty').checked;
                 
-                const checkedLevels = Array.from(document.querySelectorAll('.level-checkbox:checked')).map(cb => cb.value);
+                // Loại trừ các giá trị 'theory' và 'realworld' ra khỏi mảng mức độ
+                const checkedLevels = Array.from(document.querySelectorAll('.level-checkbox:checked'))
+                                          .map(cb => cb.value)
+                                          .filter(val => !['theory', 'realworld'].includes(val));
+                
                 const checkedMapIds = Array.from(document.querySelectorAll('.map-check:checked')).map(cb => cb.value);
+
+                // Lấy cấu hình lọc đặc biệt
+                const reqTheory = document.getElementById('filterTheory').checked;
+                const reqRealWorld = document.getElementById('filterRealWorld').checked;
+                
+                // Quét trước danh sách ID bài học từ Map Tree
+                const theoryMapIds = reqTheory ? getSpecialTopicIds(mapTree, 'theory') : [];
+                const realWorldMapIds = reqRealWorld ? getSpecialTopicIds(mapTree, 'realworld') : [];
 
                 // Lọc câu hỏi
                 let pool = globalBankMetadata.filter(q => {
@@ -706,10 +740,31 @@
                         const isMatchTopic = checkedMapIds.some(mapId => q.id.includes(mapId));
                         if (!isMatchTopic) return false;
                     }
+
+                    // [MỚI] BỘ LỌC DẠNG ĐẶC BIỆT KẾT HỢP (Map ID + Tag cá nhân)
+                    if (reqTheory || reqRealWorld) {
+                        let matchSpecial = false;
+                        
+                        if (reqTheory) {
+                            const isMapTheory = theoryMapIds.some(mapId => q.id.includes(mapId));
+                            const isTagTheory = q.tags && (q.tags.includes('ly-thuyet') || q.tags.includes('theory'));
+                            if (isMapTheory || isTagTheory) matchSpecial = true;
+                        }
+                        
+                        if (reqRealWorld) {
+                            const isMapReal = realWorldMapIds.some(mapId => q.id.includes(mapId));
+                            const isTagReal = q.tags && (q.tags.includes('thuc-te') || q.tags.includes('realworld'));
+                            if (isMapReal || isTagReal) matchSpecial = true;
+                        }
+
+                        // Nếu đã check yêu cầu lọc mà không thỏa mãn -> Loại bỏ câu này
+                        if (!matchSpecial) return false;
+                    }
+
                     return true;
                 });
 
-                if (pool.length === 0) throw new Error("Không tìm thấy câu hỏi phù hợp.");
+                if (pool.length === 0) throw new Error("Không tìm thấy câu hỏi phù hợp với các tiêu chí bạn chọn.");
 
                 for (let i = pool.length - 1; i > 0; i--) {
                     const j = Math.floor(Math.random() * (i + 1));
