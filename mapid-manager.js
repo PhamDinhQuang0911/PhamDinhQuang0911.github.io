@@ -18,7 +18,7 @@ enableIndexedDbPersistence(db).catch((err) => {
 let mapData = { metadata: [], tree: [] };
 let selectedNode = null;
 let expandedNodes = new Set(); 
-let toastTimeout = null; // [MỚI] Biến lưu timer của thông báo
+let toastTimeout = null;
 
 // --- 3. XỬ LÝ DỮ LIỆU (CORE) ---
 function parseMapID(text) {
@@ -34,7 +34,7 @@ function parseMapID(text) {
         if (match) {
             const dashes = match[1].length;
             const level = Math.round((dashes - 1) / 3);
-            const node = { id: match[2], name: match[3], level: level, children: [] };
+            const node = { id: match[2], name: match[3], level: level, children: [], isTheory: false, isRealWorld: false };
             if (level === 0) { root.push(node); stack[0] = node; stack.length = 1; } 
             else { const p = stack[level - 1]; if (p) { p.children.push(node); stack[level] = node; stack.length = level + 1; } }
         }
@@ -117,23 +117,29 @@ function renderTree() {
         const nameSpan = document.createElement('span');
         nameSpan.className = "node-name text-sm flex-1 break-words hover:text-blue-700 outline-none border-b border-transparent hover:border-dashed hover:border-gray-300";
         nameSpan.contentEditable = true;
-        nameSpan.textContent = node.name; // Text gốc cho MathJax
+        nameSpan.textContent = node.name; 
         
         nameSpan.onfocus = () => { nameSpan.textContent = node.name; };
         nameSpan.onblur = () => { node.name = nameSpan.textContent.trim(); updateRightPanel(); renderTree(); };
         nameSpan.onclick = e => e.stopPropagation();
         nameSpan.onkeydown = e => { if(e.key==='Enter') { e.preventDefault(); nameSpan.blur(); }};
 
+        // --- [MỚI] HIỂN THỊ BADGE TAGS ---
+        const tagsDiv = document.createElement('div');
+        tagsDiv.className = "flex gap-1 mx-1";
+        if (node.isTheory) tagsDiv.innerHTML += '<span class="px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 text-[9px] font-bold shadow-sm" title="Lý thuyết">LT</span>';
+        if (node.isRealWorld) tagsDiv.innerHTML += '<span class="px-1.5 py-0.5 rounded bg-green-100 text-green-700 text-[9px] font-bold shadow-sm" title="Thực tế">TT</span>';
+
         const addBtn = document.createElement('button');
         addBtn.className = "w-6 h-6 rounded flex items-center justify-center text-gray-300 hover:text-green-600 hover:bg-green-100 opacity-0 group-hover:opacity-100 transition-all";
         addBtn.innerHTML = '<i class="fa-solid fa-plus text-xs"></i>';
-        addBtn.onclick = (e) => { e.stopPropagation(); if (!node.children) node.children = []; node.children.push({ id: "?", name: "Mục mới", level: node.level + 1, children: [] }); expandedNodes.add(currentPathId); renderTree(); };
+        addBtn.onclick = (e) => { e.stopPropagation(); if (!node.children) node.children = []; node.children.push({ id: "?", name: "Mục mới", level: node.level + 1, children: [], isTheory: false, isRealWorld: false }); expandedNodes.add(currentPathId); renderTree(); };
 
         row.onclick = () => { selectedNode = node; renderTree(); updateRightPanel(); };
         row.classList.add('group');
         row.append(toggleBtn); 
         const iconDiv = document.createElement('div'); iconDiv.className = "w-5 text-center"; iconDiv.innerHTML = iconHtml; row.append(iconDiv);
-        row.append(idBadge, nameSpan, addBtn);
+        row.append(idBadge, nameSpan, tagsDiv, addBtn); // Đã chèn tagsDiv vào giao diện
         wrapper.appendChild(row);
 
         if (hasChildren && isExpanded) {
@@ -188,6 +194,28 @@ function updateRightPanel() {
     const elTotal = document.getElementById('statTotalChild');
     if(elDirect) elDirect.innerText = selectedNode.children ? selectedNode.children.length : 0;
     if(elTotal) elTotal.innerText = countTotalChildren(selectedNode);
+
+    // --- [MỚI] XỬ LÝ CHECKBOX THUỘC TÍNH (TAGS VĨ MÔ) ---
+    const chkTheory = document.getElementById('chkTheory');
+    const chkRealWorld = document.getElementById('chkRealWorld');
+    
+    if (chkTheory) {
+        chkTheory.checked = !!selectedNode.isTheory;
+        chkTheory.onchange = (e) => {
+            selectedNode.isTheory = e.target.checked;
+            renderTree(); // Cập nhật lại UI để hiện/ẩn Badge LT
+            showToast(`Đã ${e.target.checked ? 'gắn' : 'bỏ'} thẻ Lý thuyết cho nhánh này.`);
+        };
+    }
+    
+    if (chkRealWorld) {
+        chkRealWorld.checked = !!selectedNode.isRealWorld;
+        chkRealWorld.onchange = (e) => {
+            selectedNode.isRealWorld = e.target.checked;
+            renderTree(); // Cập nhật lại UI để hiện/ẩn Badge TT
+            showToast(`Đã ${e.target.checked ? 'gắn' : 'bỏ'} thẻ Thực tế cho nhánh này.`);
+        };
+    }
 }
 
 // --- 5. EVENTS ---
@@ -200,11 +228,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const file = e.target.files[0];
         if (!file) return;
         
-        showToast('Đang đọc file...', 'info'); // [MỚI] Báo đang đọc
+        showToast('Đang đọc file...', 'info');
 
         const reader = new FileReader();
         reader.onload = (evt) => {
             try {
+                // Việc import text cũ không làm mất tag nếu ta bổ sung sau,
+                // Nhưng nếu ghi đè hoàn toàn bằng file txt sẽ reset lại tag.
                 mapData = parseMapID(evt.target.result);
                 expandedNodes.clear();
                 renderTree();
@@ -236,7 +266,7 @@ document.addEventListener('DOMContentLoaded', () => {
         btnSave.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
         btnSave.disabled = true;
         
-        showToast('Đang lưu dữ liệu...', 'info'); // [MỚI] Báo đang lưu
+        showToast('Đang lưu dữ liệu...', 'info');
 
         try {
             const cleanData = JSON.parse(JSON.stringify(mapData.tree));
@@ -293,20 +323,16 @@ onAuthStateChanged(auth, async (user) => {
     }
 });
 
-// [MỚI] Hàm thông báo nâng cấp
 function showToast(msg) {
     const t = document.getElementById('toast');
     if (t) {
         const msgEl = document.getElementById('toastMsg');
         if(msgEl) msgEl.innerText = msg;
         
-        // Reset timeout cũ nếu có (để tránh bị ẩn oan)
         if (toastTimeout) clearTimeout(toastTimeout);
 
-        // Hiện
         t.classList.remove('translate-x-full', 'opacity-0');
         
-        // Ẩn sau 3s
         toastTimeout = setTimeout(() => {
             t.classList.add('translate-x-full', 'opacity-0');
         }, 3000);
