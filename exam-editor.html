@@ -2959,6 +2959,9 @@
         };
     // ============================================================
     // --- [MỚI] HÀM LƯU VÀO NGÂN HÀNG (R2) ---
+        // ============================================================
+        // --- [FIX LỖI] HÀM LƯU VÀO NGÂN HÀNG (R2) ---
+        // ============================================================
         window.saveCurrentQuestionsToBank = async () => {
             // 1. Lọc ra các câu có ID hợp lệ
             const validQuestions = window.questions.filter(q => q.mapId && q.mapId.trim() !== "");
@@ -2976,34 +2979,53 @@
             });
 
             // 3. Hỏi xác nhận
-            const confirmMsg = `Tìm thấy ${validQuestions.length} câu có ID hợp lệ:\n- Đại số: ${countDai} câu\n- Hình học: ${countHinh} câu\n\nBạn có muốn lưu vào Ngân hàng Cloudflare không?`;
+            const confirmMsg = `Tìm thấy ${validQuestions.length} câu có ID hợp lệ:\n- Đại số: ${countDai} câu\n- Hình học: ${countHinh} câu\n\nBạn có đồng ý đẩy dữ liệu này lên Kho Cloudflare không?`;
             if (!await window.customConfirm(confirmMsg)) return;
 
             // 4. Gửi lên Cloudflare Worker
             const btn = document.querySelector('button[onclick="saveCurrentQuestionsToBank()"]');
             const oldHtml = btn.innerHTML;
-            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang lưu...'; btn.disabled = true;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang đẩy lên...'; 
+            btn.disabled = true;
 
             try {
-                // Link Worker của bạn
+                // [QUAN TRỌNG 1]: Chuẩn hóa dữ liệu khớp 100% với Dashboard Bank
+                // Đổi 'mapId' thành 'id' để Dashboard có thể nhận diện được
+                const payload = validQuestions.map(q => ({
+                    id: q.mapId, 
+                    type: q.type,
+                    content: q.content || "",
+                    solution: q.solution || "",
+                    options: q.options || [],
+                    statements: q.statements || [],
+                    answer: q.answer || "",
+                    subject: q.subject || "Khác",
+                    level: q.level || "Thông hiểu",
+                    levelColor: q.levelColor || "blue",
+                    point: q.point || 0,
+                    createdAt: new Date().toISOString()
+                }));
+
                 const WORKER_URL = "https://upload-helper.phamngockhanh-942001.workers.dev/bank";
                 
+                // [QUAN TRỌNG 2]: Dùng POST và đổi Content-Type thành text/plain để lách luật CORS của trình duyệt
                 const response = await fetch(WORKER_URL, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(validQuestions) 
+                    method: 'POST', 
+                    headers: { 'Content-Type': 'text/plain' }, 
+                    body: JSON.stringify(payload) 
                 });
 
-                if (!response.ok) throw new Error("Server Error: " + response.statusText);
+                if (!response.ok) throw new Error("Server Cloudflare phản hồi lỗi: " + response.statusText);
                 
                 const result = await response.json();
-                window.showToast(`Thành công! Đã lưu ${result.count} câu vào Ngân hàng.`, "success");
+                window.showToast(`Thành công! Đã đẩy ${payload.length} câu lên Kho.`, "success");
 
             } catch (err) {
                 console.error("Lỗi lưu Bank:", err);
-                window.customAlert("Lỗi khi lưu: " + err.message, "error");
+                window.customAlert("Không thể lưu lên Bank: " + err.message, "error");
             } finally {
-                btn.innerHTML = oldHtml; btn.disabled = false;
+                btn.innerHTML = oldHtml; 
+                btn.disabled = false;
             }
         };
     </script>
