@@ -2960,6 +2960,9 @@
     // ============================================================
         // --- [FIX LỖI 500] ĐÓNG GÓI JSON THÀNH FILE ĐỂ UPLOAD ---
         // ============================================================
+       // ============================================================
+        // --- [FIX ĐỒNG BỘ] TẢI KHO CŨ -> THÊM CÂU MỚI -> ĐẨY LÊN ---
+        // ============================================================
         window.saveCurrentQuestionsToBank = async () => {
             // 1. Lọc ra các câu có ID hợp lệ
             const validQuestions = window.questions.filter(q => q.mapId && q.mapId.trim() !== "");
@@ -2985,13 +2988,26 @@
             let oldHtml = '<i class="fa-solid fa-cloud-arrow-up mr-1"></i> Lưu Bank';
             if (btn) {
                 oldHtml = btn.innerHTML;
-                btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang đẩy...'; 
+                btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang đồng bộ...'; 
                 btn.disabled = true;
             }
 
             try {
-                // Chuẩn hóa dữ liệu
-                const payload = validQuestions.map(q => ({
+                const BANK_API_URL = "https://upload-helper.phamngockhanh-942001.workers.dev/bank";
+                
+                // [QUAN TRỌNG NHẤT]: TẢI NGÂN HÀNG CŨ VỀ TRƯỚC
+                let currentBank = [];
+                try {
+                    const resBank = await fetch(BANK_API_URL);
+                    if (resBank.ok) {
+                        currentBank = await resBank.json();
+                    }
+                } catch (e) {
+                    console.warn("Chưa có kho cũ hoặc kho rỗng, sẽ tạo kho mới.");
+                }
+
+                // Chuẩn hóa dữ liệu mới
+                const newQuestions = validQuestions.map(q => ({
                     id: q.mapId, 
                     type: q.type,
                     content: q.content || "",
@@ -3003,34 +3019,42 @@
                     level: q.level || "Thông hiểu",
                     levelColor: q.levelColor || "blue",
                     point: q.point || 0,
-                    createdAt: new Date().toISOString()
+                    updatedAt: new Date().toISOString()
                 }));
 
-                // BÍ QUYẾT TẠI ĐÂY: Đóng gói JSON thành 1 file ảo tên là 'bank'
-                const jsonString = JSON.stringify(payload);
+                // TIẾN HÀNH TRỘN DỮ LIỆU (Merge)
+                newQuestions.forEach(newQ => {
+                    // Kiểm tra xem ID này đã có trong kho chưa
+                    const existingIndex = currentBank.findIndex(q => q.id === newQ.id);
+                    if (existingIndex !== -1) {
+                        // Nếu có rồi -> Ghi đè cập nhật nội dung mới
+                        currentBank[existingIndex] = { ...currentBank[existingIndex], ...newQ };
+                    } else {
+                        // Nếu chưa có -> Thêm mới vào kho
+                        currentBank.push(newQ);
+                    }
+                });
+
+                // ĐÓNG GÓI THÀNH FILE JSON VÀ TẢI LÊN
+                const jsonString = JSON.stringify(currentBank);
                 const blob = new Blob([jsonString], { type: 'application/json' });
                 const formData = new FormData();
-                
-                // Đặt tên file là 'bank' để ghi đè đúng file mà Dashboard đang gọi
-                formData.append('file', blob, 'bank');
+                formData.append('file', blob, 'bank'); // Tên file bắt buộc là 'bank'
 
-                // Gọi lên link gốc (giống như tải ảnh), KHÔNG có chữ /bank ở đuôi
-                const WORKER_URL = "https://upload-helper.phamngockhanh-942001.workers.dev/";
-                
-                const response = await fetch(WORKER_URL, {
+                const UPLOAD_URL = "https://upload-helper.phamngockhanh-942001.workers.dev/";
+                const response = await fetch(UPLOAD_URL, {
                     method: 'PUT', 
                     body: formData 
                 });
 
                 if (!response.ok) throw new Error("Server Cloudflare phản hồi lỗi: " + response.statusText);
                 
-                window.showToast(`Thành công! Đã đẩy ${payload.length} câu lên Kho.`, "success");
+                window.showToast(`Tuyệt vời! Đã đồng bộ ${validQuestions.length} câu. (Tổng kho hiện tại: ${currentBank.length} câu)`, "success");
 
             } catch (err) {
                 console.error("Lỗi lưu Bank:", err);
                 window.customAlert("Không thể lưu lên Bank: " + err.message, "error");
             } finally {
-                // Khôi phục lại nút bấm
                 if (btn) {
                     btn.innerHTML = oldHtml; 
                     btn.disabled = false;
