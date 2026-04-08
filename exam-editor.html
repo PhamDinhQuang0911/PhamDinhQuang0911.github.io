@@ -2959,51 +2959,92 @@
         };
     // ============================================================
     // --- [MỚI] HÀM LƯU VÀO NGÂN HÀNG (R2) ---
+// ============================================================
+        // --- [BẢN CHUẨN R2] LƯU TỪNG CÂU HỎI THÀNH FILE JSON RIÊNG BIỆT ---
+        // ============================================================
         window.saveCurrentQuestionsToBank = async () => {
-            // 1. Lọc ra các câu có ID hợp lệ
+            // 1. Lọc các câu có mã ID (mapId)
             const validQuestions = window.questions.filter(q => q.mapId && q.mapId.trim() !== "");
             
             if (validQuestions.length === 0) {
-                window.customAlert("Không tìm thấy câu hỏi nào có ID hợp lệ (VD: [9D1...]) để lưu!", "error");
+                window.customAlert("Không tìm thấy câu hỏi nào có ID (VD: [9D1...]) để lưu!", "error");
                 return;
             }
 
-            // 2. Thống kê
-            let countDai = 0, countHinh = 0;
-            validQuestions.forEach(q => {
-                if (q.subject === 'Đại số') countDai++;
-                else if (q.subject === 'Hình học') countHinh++;
-            });
-
-            // 3. Hỏi xác nhận
-            const confirmMsg = `Tìm thấy ${validQuestions.length} câu có ID hợp lệ:\n- Đại số: ${countDai} câu\n- Hình học: ${countHinh} câu\n\nBạn có muốn lưu vào Ngân hàng Cloudflare không?`;
+            // 2. Hỏi xác nhận
+            const confirmMsg = `Hệ thống tìm thấy ${validQuestions.length} câu hỏi có mã ID.\nBạn có đồng ý đẩy các câu này vào thư mục "bank" trên Cloudflare R2 không?`;
             if (!await window.customConfirm(confirmMsg)) return;
 
-            // 4. Gửi lên Cloudflare Worker
-            const btn = document.querySelector('button[onclick="saveCurrentQuestionsToBank()"]');
-            const oldHtml = btn.innerHTML;
-            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang lưu...'; btn.disabled = true;
+            // 3. UI Loading (Hỗ trợ cả ID hoặc tìm thẻ button)
+            const btn = document.getElementById('btnSaveBank') || document.querySelector('button[onclick*="saveCurrentQuestionsToBank"]');
+            const oldHtml = btn ? btn.innerHTML : 'Lưu Bank';
+            if (btn) {
+                btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang tải lên...'; 
+                btn.disabled = true;
+            }
 
             try {
-                // Link Worker của bạn
-                const WORKER_URL = "https://upload-helper.phamngockhanh-942001.workers.dev/bank";
-                
-                const response = await fetch(WORKER_URL, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(validQuestions) 
+                const BASE_URL = "https://upload-helper.phamngockhanh-942001.workers.dev/";
+                let successCount = 0;
+
+                // 4. DUYỆT VÀ ĐẨY TỪNG CÂU LÊN R2 (Chạy song song siêu tốc)
+                const uploadPromises = validQuestions.map(async (q) => {
+                    // Đóng gói dữ liệu câu hỏi chuẩn
+                    const qData = {
+                        id: q.mapId, 
+                        type: q.type,
+                        content: q.content || "",
+                        solution: q.solution || "",
+                        options: q.options || [],
+                        statements: q.statements || [],
+                        answer: q.answer || "",
+                        subject: q.subject || "Khác",
+                        level: q.level || "Thông hiểu",
+                        levelColor: q.levelColor || "blue",
+                        point: q.point || 0,
+                        updatedAt: new Date().toISOString()
+                    };
+
+                    // Chuyển thành file ảo JSON
+                    const jsonString = JSON.stringify(qData);
+                    const blob = new Blob([jsonString], { type: 'application/json' });
+                    const formData = new FormData();
+                    
+                    // Đặt tên file chính xác theo cấu trúc trên R2 (VD: bank/9D1H1-6.json)
+                    const fileName = `bank/${q.mapId}.json`;
+                    formData.append('file', blob, fileName);
+
+                    // Tải lên bằng PUT (Giống hệt cách tải ảnh)
+                    const response = await fetch(BASE_URL, {
+                        method: 'PUT', 
+                        body: formData 
+                    });
+
+                    if (response.ok) {
+                        successCount++;
+                    } else {
+                        console.error(`Lỗi tải lên câu ${q.mapId}:`, response.statusText);
+                    }
                 });
 
-                if (!response.ok) throw new Error("Server Error: " + response.statusText);
-                
-                const result = await response.json();
-                window.showToast(`Thành công! Đã lưu ${result.count} câu vào Ngân hàng.`, "success");
+                // Chờ tất cả các câu được tải lên xong
+                await Promise.all(uploadPromises);
+
+                // 5. Báo cáo kết quả
+                if (successCount === validQuestions.length) {
+                    window.showToast(`Tuyệt vời! Đã lưu thành công ${successCount} tệp JSON vào kho.`, "success");
+                } else {
+                    window.showToast(`Đã lưu ${successCount}/${validQuestions.length} câu. Có lỗi mạng với một số câu.`, "warning");
+                }
 
             } catch (err) {
                 console.error("Lỗi lưu Bank:", err);
-                window.customAlert("Lỗi khi lưu: " + err.message, "error");
+                window.customAlert("Lỗi quá trình tải lên: " + err.message, "error");
             } finally {
-                btn.innerHTML = oldHtml; btn.disabled = false;
+                if (btn) {
+                    btn.innerHTML = oldHtml; 
+                    btn.disabled = false;
+                }
             }
         };
     </script>
