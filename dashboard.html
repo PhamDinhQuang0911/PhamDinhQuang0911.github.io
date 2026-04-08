@@ -137,7 +137,8 @@
                                 <button onclick="window.addExistingStudent()" class="flex-1 md:flex-none text-xs px-3 py-1.5 bg-purple-100 border border-purple-200 text-purple-700 rounded-lg hover:bg-purple-200 font-bold justify-center flex"><i class="fa-solid fa-magnifying-glass-plus mr-1"></i> Tìm & Thêm HS</button>
                                 <button onclick="window.downloadTemplate()" class="flex-1 md:flex-none text-xs px-3 py-1.5 bg-white border border-green-500 text-green-600 rounded-lg hover:bg-green-50 font-bold justify-center flex"><i class="fa-solid fa-download mr-1"></i> File mẫu</button>
                                 <label for="excelInput" class="flex-1 md:flex-none text-xs px-3 py-1.5 bg-green-500 text-white rounded-lg cursor-pointer hover:bg-green-600 flex items-center gap-1 font-bold shadow-green-200 shadow-sm justify-center"><i class="fa-solid fa-file-excel"></i> Nhập Excel</label>
-                                <input type="file" id="excelInput" accept=".xlsx, .xls" class="hidden" onchange="window.handleFileUpload(this)">
+<input type="file" id="excelInput" accept=".xlsx, .xls" class="hidden" onchange="window.handleFileUpload(this)">
+<button onclick="window.exportStudentsExcel()" class="flex-1 md:flex-none text-xs px-3 py-1.5 bg-blue-500 text-white rounded-lg hover:bg-blue-600 flex items-center gap-1 font-bold shadow-blue-200 shadow-sm justify-center"><i class="fa-solid fa-file-export"></i> Xuất Excel</button>
                             </div>
                         </div>
                         <div class="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4 mb-4">
@@ -1021,7 +1022,37 @@
 
         window.downloadTemplate = () => { const data = [["Họ và tên", "Tên đăng nhập", "Mật khẩu", "SBD", "Giới tính", "SĐT HS", "SĐT PHHS"], ["Nguyễn Văn A", "nguyenvana", "123456", "001", "Nam", "098...", "091..."]]; const ws = XLSX.utils.aoa_to_sheet(data); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "DanhSach"); XLSX.writeFile(wb, "Mau_DS_Hoc_Sinh.xlsx"); }
         window.handleFileUpload = (input) => { const file = input.files[0]; if (!file) return; const reader = new FileReader(); reader.onload = async function(e) { const data = new Uint8Array(e.target.result); const workbook = XLSX.read(data, {type: 'array'}); const jsonData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], {header: 1}); let addedCount = 0; for(let i = 1; i < jsonData.length; i++) { const row = jsonData[i]; if(row[0] && row[1]) { try { const name = row[0]; const user = row[1]; const pass = String(row[2] || '123456'); const fakeEmail = `${user}@hocsinh.com`; try { await createStudentAuth(fakeEmail, pass, name); } catch(e) { console.log("User exists or error", e); } const newStudent = { name, username: user, password: pass, email: fakeEmail, sbd: row[3]||'', gender: row[4]||'Nam', phoneStudent: row[5]||'', phoneParent: row[6]||'', createdAt: new Date().toISOString() }; await updateDoc(doc(db, "classes", currentViewingClassId), { students: arrayUnion(newStudent) }); currentClassStudents.push(newStudent); addedCount++; } catch(e) { console.error(e); } } } if(addedCount > 0) { renderStudentList(currentClassStudents); await updateDoc(doc(db, "classes", currentViewingClassId), { studentCount: currentClassStudents.length }); window.showNotification(`Đã thêm ${addedCount} học sinh!`, "success"); } input.value = ""; }; reader.readAsArrayBuffer(file); }
+        // --- TÍNH NĂNG XUẤT EXCEL DANH SÁCH HỌC SINH ---
+        window.exportStudentsExcel = () => {
+            if (!currentClassStudents || currentClassStudents.length === 0) {
+                return window.showNotification("Lớp hiện chưa có học sinh nào để xuất!", "error");
+            }
 
+            // Chuyển đổi dữ liệu chuẩn khớp với Form mẫu của bạn
+            const dataToExport = currentClassStudents.map(s => ({
+                "Họ và tên": s.name || "",
+                "Tên đăng nhập": s.username || s.email || "",
+                "Mật khẩu": s.password || "********", 
+                "SBD": s.sbd || "",
+                "Giới tính": s.gender || "",
+                "SĐT HS": s.phoneStudent || "",
+                "SĐT PHHS": s.phoneParent || ""
+            }));
+
+            // Tạo file Excel
+            const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, "DanhSachHocSinh");
+
+            // Tự động căn chỉnh độ rộng cột
+            const wscols = [{wch: 25}, {wch: 20}, {wch: 15}, {wch: 10}, {wch: 10}, {wch: 15}, {wch: 15}];
+            worksheet['!cols'] = wscols;
+
+            // Xuất file tải về
+            const className = document.getElementById('teacherClassTitle').textContent || "Lop_Hoc";
+            XLSX.writeFile(workbook, `DS_HocSinh_${className.replace(/\s+/g, '_')}.xlsx`);
+            window.showNotification("Đã xuất danh sách thành công!", "success");
+        };
         async function loadClassExams(classId) {
             const container = document.getElementById('tabContentExams');
             if (!container) return;
