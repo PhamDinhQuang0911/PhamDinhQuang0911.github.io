@@ -246,7 +246,7 @@
                 <div class="p-3 border-b border-gray-200 flex justify-between items-center bg-gray-50 shrink-0">
                     <h3 class="font-bold text-gray-700 text-sm"><i class="fa-solid fa-list-ol mr-2"></i>Danh sách (<span id="totalQCount">0</span>)</h3>
                     <div class="flex gap-2">
-                       <button id="btnSaveBank" onclick="window.saveCurrentQuestionsToBank()" class="px-3 py-1.5 bg-indigo-100 text-indigo-700 rounded text-xs font-bold hover:bg-indigo-200 border border-indigo-200" title="Lưu các câu có ID vào kho"><i class="fa-solid fa-cloud-arrow-up mr-1"></i> Lưu Bank</button>
+                        <button onclick="saveCurrentQuestionsToBank()" class="px-3 py-1.5 bg-indigo-100 text-indigo-700 rounded text-xs font-bold hover:bg-indigo-200 border border-indigo-200" title="Lưu các câu có ID vào kho"><i class="fa-solid fa-cloud-arrow-up mr-1"></i> Lưu Bank</button>
                         <button onclick="openScoringModal()" class="px-3 py-1.5 bg-yellow-100 text-yellow-700 rounded text-xs font-bold hover:bg-yellow-200"><i class="fa-solid fa-calculator mr-1"></i> Chia điểm</button>
                         <button onclick="document.getElementById('texInput').click()" class="px-3 py-1.5 bg-green-100 text-green-700 rounded text-xs font-bold hover:bg-green-200"><i class="fa-solid fa-file-import mr-1"></i> LaTeX</button>
                         <input type="file" id="texInput" accept=".tex,.txt" class="hidden" onchange="handleTexUpload(this)">
@@ -2958,11 +2958,7 @@
             return { subject, level, levelColor };
         };
     // ============================================================
-        // --- [FIX LỖI 500] ĐÓNG GÓI JSON THÀNH FILE ĐỂ UPLOAD ---
-        // ============================================================
-       // ============================================================
-        // --- [FIX ĐỒNG BỘ] TẢI KHO CŨ -> THÊM CÂU MỚI -> ĐẨY LÊN ---
-        // ============================================================
+    // --- [MỚI] HÀM LƯU VÀO NGÂN HÀNG (R2) ---
         window.saveCurrentQuestionsToBank = async () => {
             // 1. Lọc ra các câu có ID hợp lệ
             const validQuestions = window.questions.filter(q => q.mapId && q.mapId.trim() !== "");
@@ -2980,85 +2976,34 @@
             });
 
             // 3. Hỏi xác nhận
-            const confirmMsg = `Tìm thấy ${validQuestions.length} câu có ID hợp lệ:\n- Đại số: ${countDai} câu\n- Hình học: ${countHinh} câu\n\nBạn có đồng ý đẩy dữ liệu này lên Kho Cloudflare không?`;
+            const confirmMsg = `Tìm thấy ${validQuestions.length} câu có ID hợp lệ:\n- Đại số: ${countDai} câu\n- Hình học: ${countHinh} câu\n\nBạn có muốn lưu vào Ngân hàng Cloudflare không?`;
             if (!await window.customConfirm(confirmMsg)) return;
 
-            // 4. Tìm nút bằng ID cực kỳ an toàn
-            const btn = document.getElementById('btnSaveBank');
-            let oldHtml = '<i class="fa-solid fa-cloud-arrow-up mr-1"></i> Lưu Bank';
-            if (btn) {
-                oldHtml = btn.innerHTML;
-                btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang đồng bộ...'; 
-                btn.disabled = true;
-            }
+            // 4. Gửi lên Cloudflare Worker
+            const btn = document.querySelector('button[onclick="saveCurrentQuestionsToBank()"]');
+            const oldHtml = btn.innerHTML;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang lưu...'; btn.disabled = true;
 
             try {
-                const BANK_API_URL = "https://upload-helper.phamngockhanh-942001.workers.dev/bank";
+                // Link Worker của bạn
+                const WORKER_URL = "https://upload-helper.phamngockhanh-942001.workers.dev/bank";
                 
-                // [QUAN TRỌNG NHẤT]: TẢI NGÂN HÀNG CŨ VỀ TRƯỚC
-                let currentBank = [];
-                try {
-                    const resBank = await fetch(BANK_API_URL);
-                    if (resBank.ok) {
-                        currentBank = await resBank.json();
-                    }
-                } catch (e) {
-                    console.warn("Chưa có kho cũ hoặc kho rỗng, sẽ tạo kho mới.");
-                }
-
-                // Chuẩn hóa dữ liệu mới
-                const newQuestions = validQuestions.map(q => ({
-                    id: q.mapId, 
-                    type: q.type,
-                    content: q.content || "",
-                    solution: q.solution || "",
-                    options: q.options || [],
-                    statements: q.statements || [],
-                    answer: q.answer || "",
-                    subject: q.subject || "Khác",
-                    level: q.level || "Thông hiểu",
-                    levelColor: q.levelColor || "blue",
-                    point: q.point || 0,
-                    updatedAt: new Date().toISOString()
-                }));
-
-                // TIẾN HÀNH TRỘN DỮ LIỆU (Merge)
-                newQuestions.forEach(newQ => {
-                    // Kiểm tra xem ID này đã có trong kho chưa
-                    const existingIndex = currentBank.findIndex(q => q.id === newQ.id);
-                    if (existingIndex !== -1) {
-                        // Nếu có rồi -> Ghi đè cập nhật nội dung mới
-                        currentBank[existingIndex] = { ...currentBank[existingIndex], ...newQ };
-                    } else {
-                        // Nếu chưa có -> Thêm mới vào kho
-                        currentBank.push(newQ);
-                    }
+                const response = await fetch(WORKER_URL, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(validQuestions) 
                 });
 
-                // ĐÓNG GÓI THÀNH FILE JSON VÀ TẢI LÊN
-                const jsonString = JSON.stringify(currentBank);
-                const blob = new Blob([jsonString], { type: 'application/json' });
-                const formData = new FormData();
-                formData.append('file', blob, 'bank'); // Tên file bắt buộc là 'bank'
-
-                const UPLOAD_URL = "https://upload-helper.phamngockhanh-942001.workers.dev/";
-                const response = await fetch(UPLOAD_URL, {
-                    method: 'PUT', 
-                    body: formData 
-                });
-
-                if (!response.ok) throw new Error("Server Cloudflare phản hồi lỗi: " + response.statusText);
+                if (!response.ok) throw new Error("Server Error: " + response.statusText);
                 
-                window.showToast(`Tuyệt vời! Đã đồng bộ ${validQuestions.length} câu. (Tổng kho hiện tại: ${currentBank.length} câu)`, "success");
+                const result = await response.json();
+                window.showToast(`Thành công! Đã lưu ${result.count} câu vào Ngân hàng.`, "success");
 
             } catch (err) {
                 console.error("Lỗi lưu Bank:", err);
-                window.customAlert("Không thể lưu lên Bank: " + err.message, "error");
+                window.customAlert("Lỗi khi lưu: " + err.message, "error");
             } finally {
-                if (btn) {
-                    btn.innerHTML = oldHtml; 
-                    btn.disabled = false;
-                }
+                btn.innerHTML = oldHtml; btn.disabled = false;
             }
         };
     </script>
