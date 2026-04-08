@@ -991,28 +991,60 @@ function renderCurriculumTree() {
             }
         };
 
-        // --- PDF UPLOAD HANDLER ---
-        window.handlePdfUpload = (input) => {
+        // --- PDF UPLOAD HANDLER (ĐÃ NỐI VỚI CLOUDFLARE R2) ---
+        window.handlePdfUpload = async (input) => {
             const file = input.files[0];
             if(!file) return;
 
-            // Show Fake Progress
+            // Hiện thanh tiến trình
             document.getElementById('pdfUploadProgress').classList.remove('hidden');
-            
-            // SIMULATE UPLOAD (Thay bằng API thật của bạn)
-            setTimeout(() => {
-                // Giả sử server trả về URL này
-                const fakeUrl = URL.createObjectURL(file); // Dùng Blob URL để preview tạm
-                
-                // Save to State
-                currentCurriculum[activeChapIdx].lessons[activeLesIdx].items[activeItemIdx].content = fakeUrl;
-                
-                // Update UI
-                document.getElementById('pdfUploadProgress').classList.add('hidden');
-                document.getElementById('pdfFrame').src = fakeUrl;
+
+            try {
+                // 1. Tạo tên file chuẩn (Tạo thư mục pdfs riêng trên Cloudflare)
+                const now = new Date();
+                const year = now.getFullYear();
+                const month = String(now.getMonth() + 1).padStart(2, '0');
+                const timestamp = now.getTime();
+                const cleanName = file.name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, '_').replace(/[^a-zA-Z0-9._-]/g, '');
+                const fileName = `pdfs/${year}/${month}/${timestamp}_${cleanName}`;
+
+                const formData = new FormData();
+                // Không nén PDF, đẩy thẳng file gốc lên
+                formData.append('file', file, fileName);
+
+                // 2. Gửi lên Cloudflare Worker của bạn
+                const res = await fetch("https://upload-helper.phamngockhanh-942001.workers.dev/", {
+                    method: 'PUT',
+                    body: formData
+                });
+
+                if (!res.ok) throw new Error("Lỗi Server Cloudflare");
+
+                const data = await res.json();
+                const finalUrl = data.url;
+
+                // 3. Xóa file cũ trên Cloudflare nếu có (để tiết kiệm dung lượng)
+                const oldUrl = currentCurriculum[activeChapIdx].lessons[activeLesIdx].items[activeItemIdx].content;
+                if (oldUrl && oldUrl.includes('phamngockhanh-942001.workers.dev')) {
+                    await window.deleteFileFromR2(oldUrl);
+                }
+
+                // 4. Lưu Link thật vào Giáo án
+                currentCurriculum[activeChapIdx].lessons[activeLesIdx].items[activeItemIdx].content = finalUrl;
+
+                // 5. Cập nhật giao diện
+                document.getElementById('pdfFrame').src = finalUrl;
                 document.getElementById('pdfPreviewArea').classList.remove('hidden');
-                window.showToast("Đã tải file lên (URL tạm)", "success");
-            }, 1500);
+                window.showToast("Tải file PDF lên thành công!", "success");
+
+            } catch (e) {
+                console.error("Lỗi upload PDF:", e);
+                window.showToast("Lỗi tải file: " + e.message, "error");
+            } finally {
+                // Ẩn thanh tiến trình
+                document.getElementById('pdfUploadProgress').classList.add('hidden');
+                input.value = '';
+            }
         };
 
         // --- EXAM SELECTOR ---
