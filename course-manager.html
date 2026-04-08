@@ -1818,11 +1818,79 @@ window.importCurriculum = (input) => {
                 window.showToast("Lỗi khi xóa: " + e.message, "error");
             }
         };
-
+    
        // ==========================================
-        // THÊM HỌC VIÊN KHÓA HỌC BẰNG EXCEL
+        // 1. THÊM HỌC VIÊN THỦ CÔNG (TỪNG NGƯỜI) - ĐÃ FIX LỖI
         // ==========================================
+        window.addStudentToCourse = async () => {
+            let inputValue = document.getElementById('inputStudentEmail').value.trim();
+            if (!inputValue) return window.showToast("Vui lòng nhập tên đăng nhập!", "error");
 
+            // Tự động chuẩn hóa đuôi email của hệ thống
+            let targetEmail = inputValue.toLowerCase();
+            if (!targetEmail.includes('@')) targetEmail = targetEmail + "@hocsinh.com";
+
+            const btn = document.querySelector('button[onclick="window.addStudentToCourse()"]');
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+            btn.disabled = true;
+
+            try {
+                // 1. Tìm User trên DB
+                const qUser = query(collection(db, "users"), where("email", "==", targetEmail));
+                const userSnap = await getDocs(qUser);
+
+                if (userSnap.empty) {
+                    alert(`Không tìm thấy tài khoản "${targetEmail}".\nHọc viên cần đăng nhập web ít nhất 1 lần.`);
+                    btn.innerHTML = originalText; btn.disabled = false; return;
+                }
+
+                const userData = userSnap.docs[0].data();
+                const userId = userSnap.docs[0].id;
+
+                // 2. Kiểm tra xem đã có trong khóa chưa
+                const qCheck = query(collection(db, "orders"), where("courseId", "==", currentManageCourseId), where("userId", "==", userId));
+                const checkSnap = await getDocs(qCheck);
+                
+                let exists = false;
+                checkSnap.forEach(d => {
+                    const st = d.data().status;
+                    if(st === 'paid' || st === 'approved') exists = true;
+                });
+
+                if (exists) {
+                    window.showToast("Học viên này đã có trong khóa học!", "info");
+                } else {
+                    // 3. Ghi nhận vào DB
+                    await setDoc(doc(collection(db, "orders")), {
+                        userId: userId,
+                        userEmail: targetEmail, 
+                        userName: userData.displayName || "Học viên",
+                        courseId: currentManageCourseId,
+                        courseTitle: currentManageCourseTitle,
+                        amount: 0,
+                        status: 'approved',
+                        createdAt: new Date().toISOString(),
+                        note: 'Thêm thủ công bởi Admin'
+                    });
+                    
+                    window.showToast(`Đã thêm thành công: ${targetEmail}`, "success");
+                    document.getElementById('inputStudentEmail').value = '';
+                    window.openStudentManager(currentManageCourseId);
+                }
+
+            } catch (e) {
+                console.error(e);
+                window.showToast("Lỗi: " + e.message, "error");
+            } finally {
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+            }
+        };
+
+        // ==========================================
+        // 2. THÊM HỌC VIÊN BẰNG EXCEL & BÁO CÁO LỖI
+        // ==========================================
         window.downloadCourseStudentTemplate = () => {
             const data = [
                 ["Họ và tên", "Tên đăng nhập", "Mật khẩu", "SBD", "Giới tính", "SĐT HS", "SĐT PHHS"],
@@ -1844,7 +1912,7 @@ window.importCurriculum = (input) => {
                 input.value = ''; return;
             }
 
-            window.showToast("Đang quét dữ liệu, vui lòng không đóng trang...", "info");
+            window.showToast("Đang quét dữ liệu Excel, vui lòng không đóng trang...", "info");
 
             const reader = new FileReader();
             reader.onload = async function(e) {
@@ -1854,33 +1922,29 @@ window.importCurriculum = (input) => {
                     const jsonData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], {header: 1});
                     
                     let addedCount = 0;
-                    let notFoundCount = 0;
-                    let existCount = 0;
+                    let existList = [];    // Mảng lưu tên đăng nhập trùng
+                    let notFoundList = []; // Mảng lưu tên đăng nhập không tồn tại
 
                     const batch = writeBatch(db);
 
-                    // 1. Lấy danh sách ID học viên ĐÃ CÓ trong khóa học này để check siêu tốc
+                    // Tải danh sách UID hiện có để kiểm tra trùng
                     const qCheck = query(collection(db, "orders"), where("courseId", "==", currentManageCourseId));
                     const checkSnap = await getDocs(qCheck);
                     const existingUserIds = new Set();
                     checkSnap.forEach(d => {
                         const st = d.data().status;
-                        if(st === 'paid' || st === 'approved') {
-                            existingUserIds.add(d.data().userId);
-                        }
+                        if(st === 'paid' || st === 'approved') existingUserIds.add(d.data().userId);
                     });
 
-                    // 2. Duyệt từng dòng trong Excel (Từ dòng 2)
+                    // Duyệt Excel
                     for(let i = 1; i < jsonData.length; i++) {
                         const row = jsonData[i];
-                        const username = row[1]; // Cột B luôn là tên đăng nhập (Theo mẫu)
+                        const username = row[1]; // Cột B
                         
                         if (username && String(username).trim() !== '') {
                             let cleanUsername = String(username).trim().toLowerCase();
-                            // Tự động bổ sung đuôi @hocsinh.com nếu thầy quên gõ
                             let targetEmail = cleanUsername.includes('@') ? cleanUsername : `${cleanUsername}@hocsinh.com`;
                             
-                            // Tìm xem User này có tồn tại trong hệ thống Thầy Choang không
                             const qUser = query(collection(db, "users"), where("email", "==", targetEmail));
                             const snapUser = await getDocs(qUser);
                             
@@ -1888,11 +1952,9 @@ window.importCurriculum = (input) => {
                                 const userData = snapUser.docs[0].data();
                                 const userId = snapUser.docs[0].id;
                                 
-                                // Kiểm tra xem học sinh này đã có trong khóa chưa
                                 if (existingUserIds.has(userId)) {
-                                    existCount++;
+                                    existList.push(cleanUsername); // Ghi nhận trùng
                                 } else {
-                                    // Tạo 1 đơn hàng "Approved" cho học viên này
                                     const newOrderRef = doc(collection(db, "orders"));
                                     batch.set(newOrderRef, {
                                         userId: userId,
@@ -1905,32 +1967,92 @@ window.importCurriculum = (input) => {
                                         createdAt: new Date().toISOString(),
                                         note: 'Thêm hàng loạt bằng Excel'
                                     });
-                                    existingUserIds.add(userId); // Chống trùng lặp nếu file Excel có 2 dòng giống hệt nhau
+                                    existingUserIds.add(userId); 
                                     addedCount++;
                                 }
                             } else {
-                                notFoundCount++;
+                                notFoundList.push(cleanUsername); // Ghi nhận sai tên
                             }
                         }
                     }
                     
-                    // 3. Đẩy lên server
+                    // Thực thi lưu
                     if (addedCount > 0) {
                         await batch.commit();
-                        window.openStudentManager(currentManageCourseId); // Render lại bảng UI
-                        window.showToast(`Đã thêm thành công ${addedCount} Học viên! (Bỏ qua: ${existCount} đã có sẵn, ${notFoundCount} sai tên đăng nhập)`, "success");
-                    } else {
-                        window.showToast(`Không có ai được thêm! (Đã có sẵn: ${existCount}, Sai tên: ${notFoundCount})`, "warning");
+                        window.openStudentManager(currentManageCourseId); 
                     }
+
+                    // GỌI GIAO DIỆN BÁO CÁO LỖI
+                    window.showImportReport(addedCount, existList, notFoundList);
 
                 } catch(err) {
                     console.error("Lỗi Import:", err);
                     window.showToast("File Excel không hợp lệ hoặc bị lỗi!", "error");
                 } finally {
-                    input.value = ''; // Reset input để thầy có thể chọn lại file đó
+                    input.value = ''; 
                 }
             };
             reader.readAsArrayBuffer(file);
+        };
+
+        // ==========================================
+        // 3. GIAO DIỆN MODAL BÁO CÁO EXCEL
+        // ==========================================
+        window.showImportReport = (added, existList, notFoundList) => {
+            const oldModal = document.getElementById('importReportModal');
+            if (oldModal) oldModal.remove();
+
+            let errorHtml = '';
+            
+            // Render phần trùng lặp
+            if (existList.length > 0) {
+                errorHtml += `
+                    <div class="mb-4 text-left">
+                        <p class="text-xs font-bold text-orange-600 mb-1 uppercase tracking-wide"><i class="fa-solid fa-triangle-exclamation"></i> Bỏ qua ${existList.length} tài khoản ĐÃ CÓ SẴN TRONG KHÓA:</p>
+                        <div class="bg-orange-50 p-3 rounded-lg border border-orange-100 max-h-32 overflow-y-auto text-xs text-gray-700 font-mono leading-relaxed custom-scrollbar">
+                            ${existList.join(', ')}
+                        </div>
+                    </div>`;
+            }
+            
+            // Render phần không tồn tại
+            if (notFoundList.length > 0) {
+                errorHtml += `
+                    <div class="text-left">
+                        <p class="text-xs font-bold text-red-600 mb-1 uppercase tracking-wide"><i class="fa-solid fa-circle-xmark"></i> Bỏ qua ${notFoundList.length} tài khoản KHÔNG TỒN TẠI (Sai tên):</p>
+                        <div class="bg-red-50 p-3 rounded-lg border border-red-100 max-h-32 overflow-y-auto text-xs text-gray-700 font-mono leading-relaxed custom-scrollbar">
+                            ${notFoundList.join(', ')}
+                        </div>
+                        <p class="text-[10px] text-gray-400 mt-1 italic">*Học sinh cần đăng nhập web 1 lần để hệ thống nhận diện tài khoản.</p>
+                    </div>`;
+            }
+
+            // Nếu hoàn hảo 100%
+            if(existList.length === 0 && notFoundList.length === 0 && added > 0) {
+                errorHtml = `<div class="bg-green-50 text-green-700 p-3 rounded-lg font-bold mt-4 text-sm"><i class="fa-solid fa-check-circle mr-1"></i> Tuyệt vời! Tất cả học viên trong Excel đều được thêm thành công.</div>`;
+            } else if (added === 0 && existList.length === 0 && notFoundList.length === 0) {
+                errorHtml = `<div class="bg-gray-50 text-gray-600 p-3 rounded-lg font-bold mt-4 text-sm">File Excel trống hoặc không đúng định dạng.</div>`;
+            }
+
+            const modalHtml = `
+                <div id="importReportModal" class="fixed inset-0 z-[300] flex items-center justify-center bg-gray-900/80 backdrop-blur-sm p-4 animate-fade-in-up">
+                    <div class="bg-white rounded-2xl shadow-2xl p-6 max-w-md w-full text-center border border-gray-100">
+                        <div class="w-16 h-16 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-4 text-3xl">
+                            <i class="fa-solid fa-file-invoice"></i>
+                        </div>
+                        <h3 class="text-xl font-black text-gray-800 mb-1">Báo cáo Thêm Excel</h3>
+                        <p class="text-sm text-gray-500 mb-6">Đã thêm thành công <span class="font-black text-green-600 text-lg">${added}</span> học viên.</p>
+                        
+                        ${errorHtml}
+                        
+                        <button onclick="document.getElementById('importReportModal').remove()" class="mt-6 w-full py-3 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-colors shadow-sm hover:shadow">
+                            Xác nhận & Đóng
+                        </button>
+                    </div>
+                </div>
+            `;
+
+            document.body.insertAdjacentHTML('beforeend', modalHtml);
         };
         // ==========================================
         // VOUCHER MANAGER LOGIC
