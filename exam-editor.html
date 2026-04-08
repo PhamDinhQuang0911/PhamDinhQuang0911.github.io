@@ -246,7 +246,7 @@
                 <div class="p-3 border-b border-gray-200 flex justify-between items-center bg-gray-50 shrink-0">
                     <h3 class="font-bold text-gray-700 text-sm"><i class="fa-solid fa-list-ol mr-2"></i>Danh sách (<span id="totalQCount">0</span>)</h3>
                     <div class="flex gap-2">
-                        <button onclick="window.saveCurrentQuestionsToBank()" class="px-3 py-1.5 bg-indigo-100 text-indigo-700 rounded text-xs font-bold hover:bg-indigo-200 border border-indigo-200" title="Lưu các câu có ID vào kho"><i class="fa-solid fa-cloud-arrow-up mr-1"></i> Lưu Bank</button>
+                       <button id="btnSaveBank" onclick="window.saveCurrentQuestionsToBank()" class="px-3 py-1.5 bg-indigo-100 text-indigo-700 rounded text-xs font-bold hover:bg-indigo-200 border border-indigo-200" title="Lưu các câu có ID vào kho"><i class="fa-solid fa-cloud-arrow-up mr-1"></i> Lưu Bank</button>
                         <button onclick="openScoringModal()" class="px-3 py-1.5 bg-yellow-100 text-yellow-700 rounded text-xs font-bold hover:bg-yellow-200"><i class="fa-solid fa-calculator mr-1"></i> Chia điểm</button>
                         <button onclick="document.getElementById('texInput').click()" class="px-3 py-1.5 bg-green-100 text-green-700 rounded text-xs font-bold hover:bg-green-200"><i class="fa-solid fa-file-import mr-1"></i> LaTeX</button>
                         <input type="file" id="texInput" accept=".tex,.txt" class="hidden" onchange="handleTexUpload(this)">
@@ -2962,7 +2962,7 @@
         // ============================================================
         // --- [FIX LỖI] HÀM LƯU VÀO NGÂN HÀNG (R2) ---
         // ============================================================
-        window.saveCurrentQuestionsToBank = async () => {
+       window.saveCurrentQuestionsToBank = async () => {
             // 1. Lọc ra các câu có ID hợp lệ
             const validQuestions = window.questions.filter(q => q.mapId && q.mapId.trim() !== "");
             
@@ -2982,15 +2982,17 @@
             const confirmMsg = `Tìm thấy ${validQuestions.length} câu có ID hợp lệ:\n- Đại số: ${countDai} câu\n- Hình học: ${countHinh} câu\n\nBạn có đồng ý đẩy dữ liệu này lên Kho Cloudflare không?`;
             if (!await window.customConfirm(confirmMsg)) return;
 
-            // 4. Gửi lên Cloudflare Worker
-            const btn = document.querySelector('button[onclick="window.saveCurrentQuestionsToBank()"]');
-            const oldHtml = btn.innerHTML;
-            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang đẩy lên...'; 
-            btn.disabled = true;
+            // 4. Tìm nút bằng ID cực kỳ an toàn
+            const btn = document.getElementById('btnSaveBank');
+            let oldHtml = '<i class="fa-solid fa-cloud-arrow-up mr-1"></i> Lưu Bank';
+            if (btn) {
+                oldHtml = btn.innerHTML;
+                btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang đẩy...'; 
+                btn.disabled = true;
+            }
 
             try {
-                // [QUAN TRỌNG 1]: Chuẩn hóa dữ liệu khớp 100% với Dashboard Bank
-                // Đổi 'mapId' thành 'id' để Dashboard có thể nhận diện được
+                // Chuẩn hóa dữ liệu khớp 100% với Dashboard Bank (Đổi mapId thành id)
                 const payload = validQuestions.map(q => ({
                     id: q.mapId, 
                     type: q.type,
@@ -3008,7 +3010,7 @@
 
                 const WORKER_URL = "https://upload-helper.phamngockhanh-942001.workers.dev/bank";
                 
-                // [QUAN TRỌNG 2]: Dùng POST và đổi Content-Type thành text/plain để lách luật CORS của trình duyệt
+                // Dùng POST và text/plain để lách luật chặn CORS của trình duyệt
                 const response = await fetch(WORKER_URL, {
                     method: 'POST', 
                     headers: { 'Content-Type': 'text/plain' }, 
@@ -3024,8 +3026,11 @@
                 console.error("Lỗi lưu Bank:", err);
                 window.customAlert("Không thể lưu lên Bank: " + err.message, "error");
             } finally {
-                btn.innerHTML = oldHtml; 
-                btn.disabled = false;
+                // Khôi phục lại nút bấm
+                if (btn) {
+                    btn.innerHTML = oldHtml; 
+                    btn.disabled = false;
+                }
             }
         };
     </script>
