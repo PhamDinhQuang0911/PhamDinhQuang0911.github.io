@@ -2958,11 +2958,9 @@
             return { subject, level, levelColor };
         };
     // ============================================================
-    // --- [MỚI] HÀM LƯU VÀO NGÂN HÀNG (R2) ---
+        // --- [FIX LỖI 500] ĐÓNG GÓI JSON THÀNH FILE ĐỂ UPLOAD ---
         // ============================================================
-        // --- [FIX LỖI] HÀM LƯU VÀO NGÂN HÀNG (R2) ---
-        // ============================================================
-       window.saveCurrentQuestionsToBank = async () => {
+        window.saveCurrentQuestionsToBank = async () => {
             // 1. Lọc ra các câu có ID hợp lệ
             const validQuestions = window.questions.filter(q => q.mapId && q.mapId.trim() !== "");
             
@@ -2992,7 +2990,7 @@
             }
 
             try {
-                // Chuẩn hóa dữ liệu khớp 100% với Dashboard Bank (Đổi mapId thành id)
+                // Chuẩn hóa dữ liệu
                 const payload = validQuestions.map(q => ({
                     id: q.mapId, 
                     type: q.type,
@@ -3008,18 +3006,24 @@
                     createdAt: new Date().toISOString()
                 }));
 
-                const WORKER_URL = "https://upload-helper.phamngockhanh-942001.workers.dev/bank";
+                // BÍ QUYẾT TẠI ĐÂY: Đóng gói JSON thành 1 file ảo tên là 'bank'
+                const jsonString = JSON.stringify(payload);
+                const blob = new Blob([jsonString], { type: 'application/json' });
+                const formData = new FormData();
                 
-                // [ĐÃ SỬA] Đổi thành PUT để khớp với cấu hình Cloudflare Worker của bạn
+                // Đặt tên file là 'bank' để ghi đè đúng file mà Dashboard đang gọi
+                formData.append('file', blob, 'bank');
+
+                // Gọi lên link gốc (giống như tải ảnh), KHÔNG có chữ /bank ở đuôi
+                const WORKER_URL = "https://upload-helper.phamngockhanh-942001.workers.dev/";
+                
                 const response = await fetch(WORKER_URL, {
                     method: 'PUT', 
-                    headers: { 'Content-Type': 'text/plain' }, 
-                    body: JSON.stringify(payload) 
+                    body: formData 
                 });
 
                 if (!response.ok) throw new Error("Server Cloudflare phản hồi lỗi: " + response.statusText);
                 
-                const result = await response.json();
                 window.showToast(`Thành công! Đã đẩy ${payload.length} câu lên Kho.`, "success");
 
             } catch (err) {
