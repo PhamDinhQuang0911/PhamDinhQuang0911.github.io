@@ -1287,16 +1287,22 @@
             const q = window.questions[index];
             const editor = document.getElementById('editorArea');
             
-            // [MỚI] HIỂN THỊ TAG NẾU CÓ ID
-            // Chỉ hiện cảnh báo nhỏ nếu thiếu ID để giáo viên biết
             let alertHtml = '';
             if (!q.mapId) {
                 alertHtml = `<div class="mb-2 text-[10px] text-orange-500 italic bg-orange-50 px-2 py-1 rounded border border-orange-100 flex items-center gap-1"><i class="fa-solid fa-circle-exclamation"></i> Câu này chưa có ID (Sẽ không được lưu vào Ngân hàng)</div>`;
             }
 
+            // [FIX LỖI XEM TRƯỚC]: Bổ sung Khối Xem trước HTML/Ảnh nằm trên Textarea
             let html = `
                 ${alertHtml}
-                <div class="mb-4"><label class="form-group-title">Nội dung</label><textarea id="editContent" class="form-input min-h-[120px]" oninput="autoSaveMemory()">${q.content || ''}</textarea></div>
+                <div class="mb-4">
+                    <div class="flex justify-between items-center mb-1">
+                        <label class="form-group-title mb-0">Nội dung</label>
+                        <button onclick="document.getElementById('contentLivePreview').classList.toggle('hidden')" class="text-xs text-blue-600 font-bold hover:bg-blue-50 px-2 py-1 rounded transition-colors"><i class="fa-solid fa-eye"></i> Bật/Tắt xem trước</button>
+                    </div>
+                    <div id="contentLivePreview" class="mb-2 p-4 bg-gray-50 border border-gray-200 rounded-lg text-sm math-content text-gray-800 hidden shadow-inner">${window.formatContent(q.content || 'Chưa có nội dung')}</div>
+                    <textarea id="editContent" class="form-input min-h-[120px]" oninput="autoSaveMemory(); document.getElementById('contentLivePreview').innerHTML = window.formatContent(this.value); if(window.MathJax) MathJax.typesetPromise([document.getElementById('contentLivePreview')]);">${q.content || ''}</textarea>
+                </div>
             `;
             if (q.type === 'mc') {
                 html += `<div class="grid grid-cols-1 gap-3 mb-4">`;
@@ -1311,9 +1317,21 @@
             } else if (q.type === 'short') {
                 html += `<div class="mb-4"><label class="form-group-title">Đáp án mẫu</label><input type="text" id="editShortAns" class="form-input font-bold text-green-700" value="${q.answer || ''}" oninput="autoSaveMemory()"></div>`;
             }
-            html += `<div class="mb-4"><label class="form-group-title">Lời giải</label><textarea id="editSolution" class="form-input min-h-[80px]" oninput="autoSaveMemory()">${q.solution || ''}</textarea></div>`;
+            
+            html += `
+                <div class="mb-4">
+                    <div class="flex justify-between items-center mb-1">
+                        <label class="form-group-title mb-0">Lời giải</label>
+                        <button onclick="document.getElementById('solLivePreview').classList.toggle('hidden')" class="text-xs text-green-600 font-bold hover:bg-green-50 px-2 py-1 rounded transition-colors"><i class="fa-solid fa-eye"></i> Bật/Tắt xem trước</button>
+                    </div>
+                    <div id="solLivePreview" class="mb-2 p-4 bg-gray-50 border border-gray-200 rounded-lg text-sm math-content text-gray-800 hidden shadow-inner">${window.formatContent(q.solution || 'Chưa có lời giải')}</div>
+                    <textarea id="editSolution" class="form-input min-h-[80px]" oninput="autoSaveMemory(); document.getElementById('solLivePreview').innerHTML = window.formatContent(this.value); if(window.MathJax) MathJax.typesetPromise([document.getElementById('solLivePreview')]);">${q.solution || ''}</textarea>
+                </div>
+            `;
             html += `<div class="mb-4 w-1/3"><label class="form-group-title">Điểm</label><input type="number" id="editPoint" class="form-input font-bold text-orange-600" value="${q.point || 0}" step="0.1" oninput="autoSaveMemory()"></div>`;
+            
             editor.innerHTML = html;
+            if(window.MathJax) MathJax.typesetPromise([editor]).catch(()=>{});
             setTimeout(() => window.renderTikz(), 200);
         };
 
@@ -2212,7 +2230,33 @@
         window.toggleSidebar = () => { const s = document.getElementById('mainSidebar'); const o = document.getElementById('sidebarOverlay'); if (s.classList.contains('-translate-x-full')) { s.classList.remove('-translate-x-full'); o.classList.remove('hidden'); } else { s.classList.add('-translate-x-full'); o.classList.add('hidden'); } };
         window.openScoringModal = () => { document.getElementById('scoringModal').classList.remove('opacity-0', 'pointer-events-none'); document.getElementById('scoringModal').querySelector('div').classList.add('scale-100'); let cM=0, cTF=0, cE=0; let h=''; window.questions.forEach((q,i)=>{ if(q.type==='essay'){ cE++; h+=`<div class="flex items-center gap-2 text-sm"><span class="w-16 font-bold">Câu ${i+1}</span><input type="number" id="essay-score-${i}" class="form-input h-8 text-right w-20" value="${q.point||0}" step="0.1"></div>`; } else if(q.type==='tf') cTF++; else cM++; }); document.getElementById('countMcShort').textContent=cM; document.getElementById('countTF').textContent=cTF; document.getElementById('countEssay').textContent=cE; document.getElementById('essayScoreList').innerHTML = cE>0 ? h : '<p class="text-xs text-gray-400 italic">Không có câu tự luận.</p>'; };
         window.closeScoringModal = () => { document.getElementById('scoringModal').classList.add('opacity-0', 'pointer-events-none'); };
-        window.applyScoring = () => { const tM = parseFloat(document.getElementById('scoreTotalMcShort').value)||0; const tTF = parseFloat(document.getElementById('scoreTotalTF').value)||0; let cM=0, cTF=0; window.questions.forEach(q=>{if(q.type==='mc'||q.type==='short')cM++; else if(q.type==='tf')cTF++;}); const pM=cM>0?(tM/cM):0; const pTF=cTF>0?(tTF/cTF):0; window.questions.forEach((q,i)=>{ if(q.type==='mc'||q.type==='short') q.point=parseFloat(pM.toFixed(2)); else if(q.type==='tf') q.point=parseFloat(pTF.toFixed(2)); else if(q.type==='essay'){ const inp=document.getElementById(`essay-score-${i}`); if(inp) q.point=parseFloat(inp.value)||0; } }); closeScoringModal(); renderPreviewList(); window.showToast("Đã chia điểm!"); };
+        window.applyScoring = () => { 
+            const tM = parseFloat(document.getElementById('scoreTotalMcShort').value)||0; 
+            const tTF = parseFloat(document.getElementById('scoreTotalTF').value)||0; 
+            let cM=0, cTF=0; 
+            window.questions.forEach(q=>{if(q.type==='mc'||q.type==='short')cM++; else if(q.type==='tf')cTF++;}); 
+            const pM=cM>0?(tM/cM):0; 
+            const pTF=cTF>0?(tTF/cTF):0; 
+            
+            window.questions.forEach((q,i)=>{ 
+                if(q.type==='mc'||q.type==='short') q.point=parseFloat(pM.toFixed(2)); 
+                else if(q.type==='tf') q.point=parseFloat(pTF.toFixed(2)); 
+                else if(q.type==='essay'){ 
+                    const inp=document.getElementById(`essay-score-${i}`); 
+                    if(inp) q.point=parseFloat(inp.value)||0; 
+                } 
+            }); 
+            
+            // [FIX LỖI F5]: Cập nhật trực tiếp điểm vào ô input đang mở trên màn hình
+            if (window.currentQIndex !== -1) {
+                const pInput = document.getElementById('editPoint');
+                if(pInput) pInput.value = window.questions[window.currentQIndex].point;
+            }
+
+            closeScoringModal(); 
+            renderPreviewList(); 
+            window.showToast("Đã chia điểm!"); 
+        };
         // --- 1. HÀM TẠO ĐỀ MỚI (QUICK ACCESS) ---
         window.handleNewExam = async () => {
             const hasUnsavedChanges = JSON.stringify(window.questions) !== JSON.stringify(window.originalQuestionsData);
@@ -2962,8 +3006,10 @@
 // ============================================================
         // --- [BẢN CHUẨN R2] LƯU TỪNG CÂU HỎI THÀNH FILE JSON RIÊNG BIỆT ---
         // ============================================================
+// ============================================================
+        // --- [BẢN CHUẨN R2] CẤP "CCCD" ĐỘC LẬP CHO TỪNG CÂU HỎI ---
+        // ============================================================
         window.saveCurrentQuestionsToBank = async () => {
-            // 1. Lọc các câu có mã ID (mapId)
             const validQuestions = window.questions.filter(q => q.mapId && q.mapId.trim() !== "");
             
             if (validQuestions.length === 0) {
@@ -2971,27 +3017,28 @@
                 return;
             }
 
-            // 2. Hỏi xác nhận
-            const confirmMsg = `Hệ thống tìm thấy ${validQuestions.length} câu hỏi có mã ID.\nBạn có đồng ý đẩy các câu này vào thư mục "bank" trên Cloudflare R2 không?`;
+            const confirmMsg = `Hệ thống sẽ đẩy ${validQuestions.length} câu hỏi vào Ngân hàng.\nCác câu này sẽ được cấp mã định danh độc lập để không ghi đè lên câu cũ.\nBạn đồng ý chứ?`;
             if (!await window.customConfirm(confirmMsg)) return;
 
-            // 3. UI Loading (Hỗ trợ cả ID hoặc tìm thẻ button)
             const btn = document.getElementById('btnSaveBank') || document.querySelector('button[onclick*="saveCurrentQuestionsToBank"]');
             const oldHtml = btn ? btn.innerHTML : 'Lưu Bank';
-            if (btn) {
-                btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang tải lên...'; 
-                btn.disabled = true;
-            }
+            if (btn) { btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang tải lên...'; btn.disabled = true; }
 
             try {
                 const BASE_URL = "https://upload-helper.phamngockhanh-942001.workers.dev/";
                 let successCount = 0;
 
-                // 4. DUYỆT VÀ ĐẨY TỪNG CÂU LÊN R2 (Chạy song song siêu tốc)
                 const uploadPromises = validQuestions.map(async (q) => {
-                    // Đóng gói dữ liệu câu hỏi chuẩn
+                    // [BÍ QUYẾT Ở ĐÂY]: Cấp Căn cước công dân (bankId)
+                    // Nếu chưa có, tạo mới bằng mapId + Chuỗi ngẫu nhiên (VD: 9D1H1-6_17a8bc)
+                    if (!q.bankId) {
+                        const uniqueSuffix = Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
+                        q.bankId = `${q.mapId}_${uniqueSuffix}`;
+                    }
+
                     const qData = {
-                        id: q.mapId, 
+                        id: q.bankId,     // Trở thành ID duy nhất của file
+                        mapId: q.mapId,   // Vẫn giữ mã Phân dạng để Dashboard lọc
                         type: q.type,
                         content: q.content || "",
                         solution: q.solution || "",
@@ -3005,46 +3052,29 @@
                         updatedAt: new Date().toISOString()
                     };
 
-                    // Chuyển thành file ảo JSON
                     const jsonString = JSON.stringify(qData);
                     const blob = new Blob([jsonString], { type: 'application/json' });
                     const formData = new FormData();
                     
-                    // Đặt tên file chính xác theo cấu trúc trên R2 (VD: bank/9D1H1-6.json)
-                    const fileName = `bank/${q.mapId}.json`;
-                    formData.append('file', blob, fileName);
+                    formData.append('file', blob, `bank/${q.bankId}.json`);
 
-                    // Tải lên bằng PUT (Giống hệt cách tải ảnh)
-                    const response = await fetch(BASE_URL, {
-                        method: 'PUT', 
-                        body: formData 
-                    });
-
-                    if (response.ok) {
-                        successCount++;
-                    } else {
-                        console.error(`Lỗi tải lên câu ${q.mapId}:`, response.statusText);
-                    }
+                    const response = await fetch(BASE_URL, { method: 'PUT', body: formData });
+                    if (response.ok) successCount++;
                 });
 
-                // Chờ tất cả các câu được tải lên xong
                 await Promise.all(uploadPromises);
 
-                // 5. Báo cáo kết quả
                 if (successCount === validQuestions.length) {
-                    window.showToast(`Tuyệt vời! Đã lưu thành công ${successCount} tệp JSON vào kho.`, "success");
+                    window.showToast(`Đã lưu thành công ${successCount} câu vào kho chung!`, "success");
                 } else {
-                    window.showToast(`Đã lưu ${successCount}/${validQuestions.length} câu. Có lỗi mạng với một số câu.`, "warning");
+                    window.showToast(`Lưu được ${successCount}/${validQuestions.length} câu. Có lỗi mạng.`, "warning");
                 }
 
             } catch (err) {
                 console.error("Lỗi lưu Bank:", err);
                 window.customAlert("Lỗi quá trình tải lên: " + err.message, "error");
             } finally {
-                if (btn) {
-                    btn.innerHTML = oldHtml; 
-                    btn.disabled = false;
-                }
+                if (btn) { btn.innerHTML = oldHtml; btn.disabled = false; }
             }
         };
     </script>
