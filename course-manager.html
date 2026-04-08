@@ -338,7 +338,17 @@
         <div class="p-4 bg-white border-b border-gray-100 space-y-3 shrink-0">
             <div class="flex gap-2">
                 <input type="text" id="inputStudentEmail" class="flex-1 px-4 py-2 border border-green-200 rounded-xl focus:ring-2 focus:ring-green-500 outline-none text-sm" placeholder="Nhập tên đăng nhập để thêm (VD: hocsinh123)">
-                <button onclick="window.addStudentToCourse()" class="px-4 py-2 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700 shadow-md text-sm whitespace-nowrap"><i class="fa-solid fa-plus mr-1"></i> Thêm thủ công</button>
+                <button onclick="window.addStudentToCourse()" class="px-4 py-2 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700 shadow-md text-sm whitespace-nowrap"><i class="fa-solid fa-plus mr-1"></i> Thêm tay</button>
+            </div>
+            
+            <div class="flex gap-2">
+                <button onclick="window.downloadCourseStudentTemplate()" class="flex-1 py-2 bg-white border border-green-500 text-green-600 rounded-xl hover:bg-green-50 font-bold text-sm flex items-center justify-center gap-1 shadow-sm transition-colors">
+                    <i class="fa-solid fa-download"></i> File Mẫu
+                </button>
+                <label for="importCourseStudent" class="flex-1 py-2 bg-green-500 text-white rounded-xl cursor-pointer hover:bg-green-600 flex items-center justify-center gap-1 font-bold text-sm shadow-sm transition-colors mb-0">
+                    <i class="fa-solid fa-file-excel"></i> Nhập Excel
+                </label>
+                <input type="file" id="importCourseStudent" accept=".xlsx, .xls" class="hidden" onchange="window.importCourseStudentsExcel(this)">
             </div>
             
             <div class="flex gap-2">
@@ -1809,72 +1819,119 @@ window.importCurriculum = (input) => {
             }
         };
 
-       window.addStudentToCourse = async () => {
-            let inputValue = document.getElementById('inputStudentEmail').value.trim();
-            if (!inputValue) return window.showToast("Vui lòng nhập tên đăng nhập!", "error");
+       // ==========================================
+        // THÊM HỌC VIÊN KHÓA HỌC BẰNG EXCEL
+        // ==========================================
 
-            let email = inputValue;
-            if (!email.includes('@')) email = inputValue + "@gmail.com";
+        window.downloadCourseStudentTemplate = () => {
+            const data = [
+                ["Họ và tên", "Tên đăng nhập", "Mật khẩu", "SBD", "Giới tính", "SĐT HS", "SĐT PHHS"],
+                ["Trần Văn A", "quang123", "", "", "", "", ""],
+                ["Nguyễn Thị B", "anh456", "", "", "", "", ""]
+            ];
+            const ws = XLSX.utils.aoa_to_sheet(data);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "DanhSach");
+            XLSX.writeFile(wb, "Mau_Them_HS_Khoa_Hoc.xlsx");
+        };
 
-            const btn = document.querySelector('button[onclick="window.addStudentToCourse()"]');
-            const originalText = btn.innerHTML;
-            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
-            btn.disabled = true;
+        window.importCourseStudentsExcel = async (input) => {
+            const file = input.files[0];
+            if (!file) return;
 
-            try {
-                // 1. Tìm User
-                const qUser = query(collection(db, "users"), where("email", "==", email));
-                const userSnap = await getDocs(qUser);
-
-                if (userSnap.empty) {
-                    alert(`Không tìm thấy user "${email}".\nHọc viên cần đăng nhập web ít nhất 1 lần.`);
-                    btn.innerHTML = originalText; btn.disabled = false; return;
-                }
-
-                const userData = userSnap.docs[0].data();
-                const userId = userSnap.docs[0].id;
-
-                // 2. Kiểm tra xem đã có trong khóa chưa (CHECK CẢ PAID VÀ APPROVED)
-                // Lưu ý: Firestore JS SDK cũ khó dùng OR trong query phức tạp, nên ta query theo course+user rồi lọc JS
-                const qCheck = query(collection(db, "orders"), where("courseId", "==", currentManageCourseId), where("userId", "==", userId));
-                const checkSnap = await getDocs(qCheck);
-                
-                let exists = false;
-                checkSnap.forEach(d => {
-                    const st = d.data().status;
-                    if(st === 'paid' || st === 'approved') exists = true;
-                });
-
-                if (exists) {
-                    window.showToast("Học viên này đã có trong khóa học!", "info");
-                } else {
-                    // 3. Tạo Order Approved
-                    await setDoc(doc(collection(db, "orders")), {
-                        userId: userId,
-                        userEmail: email,
-                        userName: userData.displayName || "Học viên",
-                        courseId: currentManageCourseId,
-                        courseTitle: currentManageCourseTitle,
-                        amount: 0,
-                        status: 'approved',
-                        createdAt: new Date().toISOString(),
-                        note: 'Thêm thủ công bởi Admin'
-                    });
-                    
-                    window.showToast(`Đã thêm: ${email}`, "success");
-                    document.getElementById('inputStudentEmail').value = '';
-                    // Reload
-                    window.openStudentManager(currentManageCourseId);
-                }
-
-            } catch (e) {
-                console.error(e);
-                window.showToast("Lỗi: " + e.message, "error");
-            } finally {
-                btn.innerHTML = originalText;
-                btn.disabled = false;
+            if (!currentManageCourseId) {
+                window.showToast("Lỗi: Không tìm thấy ID khóa học!", "error");
+                input.value = ''; return;
             }
-        };   
+
+            window.showToast("Đang quét dữ liệu, vui lòng không đóng trang...", "info");
+
+            const reader = new FileReader();
+            reader.onload = async function(e) {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, {type: 'array'});
+                    const jsonData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], {header: 1});
+                    
+                    let addedCount = 0;
+                    let notFoundCount = 0;
+                    let existCount = 0;
+
+                    const batch = writeBatch(db);
+
+                    // 1. Lấy danh sách ID học viên ĐÃ CÓ trong khóa học này để check siêu tốc
+                    const qCheck = query(collection(db, "orders"), where("courseId", "==", currentManageCourseId));
+                    const checkSnap = await getDocs(qCheck);
+                    const existingUserIds = new Set();
+                    checkSnap.forEach(d => {
+                        const st = d.data().status;
+                        if(st === 'paid' || st === 'approved') {
+                            existingUserIds.add(d.data().userId);
+                        }
+                    });
+
+                    // 2. Duyệt từng dòng trong Excel (Từ dòng 2)
+                    for(let i = 1; i < jsonData.length; i++) {
+                        const row = jsonData[i];
+                        const username = row[1]; // Cột B luôn là tên đăng nhập (Theo mẫu)
+                        
+                        if (username && String(username).trim() !== '') {
+                            let cleanUsername = String(username).trim().toLowerCase();
+                            // Tự động bổ sung đuôi @hocsinh.com nếu thầy quên gõ
+                            let targetEmail = cleanUsername.includes('@') ? cleanUsername : `${cleanUsername}@hocsinh.com`;
+                            
+                            // Tìm xem User này có tồn tại trong hệ thống Thầy Choang không
+                            const qUser = query(collection(db, "users"), where("email", "==", targetEmail));
+                            const snapUser = await getDocs(qUser);
+                            
+                            if (!snapUser.empty) {
+                                const userData = snapUser.docs[0].data();
+                                const userId = snapUser.docs[0].id;
+                                
+                                // Kiểm tra xem học sinh này đã có trong khóa chưa
+                                if (existingUserIds.has(userId)) {
+                                    existCount++;
+                                } else {
+                                    // Tạo 1 đơn hàng "Approved" cho học viên này
+                                    const newOrderRef = doc(collection(db, "orders"));
+                                    batch.set(newOrderRef, {
+                                        userId: userId,
+                                        userEmail: targetEmail,
+                                        userName: userData.displayName || "Học viên",
+                                        courseId: currentManageCourseId,
+                                        courseTitle: currentManageCourseTitle,
+                                        amount: 0,
+                                        status: 'approved',
+                                        createdAt: new Date().toISOString(),
+                                        note: 'Thêm hàng loạt bằng Excel'
+                                    });
+                                    existingUserIds.add(userId); // Chống trùng lặp nếu file Excel có 2 dòng giống hệt nhau
+                                    addedCount++;
+                                }
+                            } else {
+                                notFoundCount++;
+                            }
+                        }
+                    }
+                    
+                    // 3. Đẩy lên server
+                    if (addedCount > 0) {
+                        await batch.commit();
+                        window.openStudentManager(currentManageCourseId); // Render lại bảng UI
+                        window.showToast(`Đã thêm thành công ${addedCount} Học viên! (Bỏ qua: ${existCount} đã có sẵn, ${notFoundCount} sai tên đăng nhập)`, "success");
+                    } else {
+                        window.showToast(`Không có ai được thêm! (Đã có sẵn: ${existCount}, Sai tên: ${notFoundCount})`, "warning");
+                    }
+
+                } catch(err) {
+                    console.error("Lỗi Import:", err);
+                    window.showToast("File Excel không hợp lệ hoặc bị lỗi!", "error");
+                } finally {
+                    input.value = ''; // Reset input để thầy có thể chọn lại file đó
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        };
         // ==========================================
         // VOUCHER MANAGER LOGIC
         // ==========================================
