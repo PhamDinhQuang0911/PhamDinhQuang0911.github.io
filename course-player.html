@@ -392,6 +392,26 @@
 
         // --- 4. PLAYER & LOGIC XỬ LÝ (QUAN TRỌNG) ---
         // --- 4. PLAYER & LOGIC XỬ LÝ (QUAN TRỌNG) ---
+        // --- [THÊM MỚI] HÀM XỬ LÝ LINK PDF THÔNG MINH ---
+        window.getSafeEmbedUrl = (url) => {
+            if (!url) return '';
+            
+            // 1. Xử lý link Google Drive
+            if (url.includes('drive.google.com')) {
+                let embedUrl = url;
+                if (embedUrl.includes('/view')) embedUrl = embedUrl.replace(/\/view.*/, '/preview');
+                if (embedUrl.includes('?usp=sharing')) embedUrl = embedUrl.split('?usp=sharing')[0];
+                return embedUrl;
+            }
+            
+            // 2. Xử lý link trực tiếp (Firebase, Cloudflare R2, đuôi .pdf)
+            if (url.toLowerCase().includes('.pdf') || url.includes('firebasestorage') || url.includes('r2.dev')) {
+                // Dùng Google Docs Viewer để ép trình duyệt hiển thị PDF mượt mà
+                return `https://docs.google.com/viewer?url=${encodeURIComponent(url)}&embedded=true`;
+            }
+            
+            return url;
+        };
         window.playItem = async (index) => {
             if(index < 0 || index >= flatItems.length) return;
             
@@ -488,11 +508,12 @@
                 }
             
             // --- TRƯỜNG HỢP 2: PDF ---
+            // --- TRƯỜNG HỢP 2: PDF ---
             } else if(item.type === 'pdf') {
                 pdfFrame.classList.remove('hidden');
-                let url = item.content;
-                if(url && url.includes('drive.google.com')) url = url.replace(/\/view.*/, '/preview');
-                pdfFrame.src = url;
+                
+                // [ĐÃ SỬA] Dùng hàm xử lý link thông minh vừa tạo ở trên
+                pdfFrame.src = window.getSafeEmbedUrl(item.content);
                 
                 // PDF: Tự động hoàn thành sau 10 giây xem
                 if(!completedItems.has(index)) {
