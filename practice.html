@@ -686,7 +686,8 @@
         window.startPractice = async () => {
             const btn = document.querySelector('button[onclick="startPractice()"]');
             const oldHtml = btn.innerHTML;
-            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang khởi tạo...'; btn.disabled = true;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang khởi tạo...'; 
+            btn.disabled = true;
 
             try {
                 const grade = document.querySelector('input[name="grade"]:checked').value;
@@ -695,13 +696,11 @@
                 const customTime = parseInt(document.getElementById('inputTime').value) || 0;
                 const sortDiff = document.getElementById('toggleSortDifficulty').checked;
                 
-                // Loại trừ các giá trị 'theory' và 'realworld' ra khỏi mảng mức độ
                 const checkedLevels = Array.from(document.querySelectorAll('.level-checkbox:checked'))
-                                          .map(cb => cb.value)
-                                          .filter(val => !['theory', 'realworld'].includes(val));
+                                           .map(cb => cb.value)
+                                           .filter(val => !['theory', 'realworld'].includes(val));
                 
-                // Lọc bỏ giá trị rỗng để ngăn hệ thống lấy ngẫu nhiên toàn bộ ngân hàng
-                // Lọc bỏ giá trị rỗng hoặc giá trị "on" để ngăn hệ thống lấy ngẫu nhiên
+                // [FIX LỖI NGẪU NHIÊN]: Lọc bỏ triệt để các giá trị rỗng "" hoặc "on"
                 const checkedMapIds = Array.from(document.querySelectorAll('.map-check:checked'))
                                            .map(cb => cb.value)
                                            .filter(val => val && val !== "on" && val.trim() !== "");
@@ -712,38 +711,37 @@
                 const theoryMapIds = reqTheory ? getSpecialTopicIds(mapTree, 'theory') : [];
                 const realWorldMapIds = reqRealWorld ? getSpecialTopicIds(mapTree, 'realworld') : [];
 
-                // LỌC CÂU HỎI (ĐÃ FIX TẬN GỐC LỖI GHÉP SỐ UUID)
+                // Hàm làm sạch ID dùng chung
+                const getCleanId = (id) => {
+                    const raw = String(id || "").split('-')[0].split('_')[0]; 
+                    const m = raw.match(/^(\d+[a-zA-Z])(.*)$/); 
+                    if (m) return m[1] + String(m[2] || "").replace(/[a-zA-Z]/g, ''); 
+                    return raw;
+                };
+
+                const checkedCleanIds = checkedMapIds.map(id => getCleanId(id));
+
+                // LỌC CÂU HỎI (CHUẨN XÁC TUYỆT ĐỐI)
                 let pool = globalBankMetadata.filter(q => {
-                    const actualMapId = q.mapId || q.id || ""; 
-                    const actualLevel = q.level || "";
-                    
-                    // [BÍ QUYẾT BÓC TÁCH ID CỰC CHUẨN]
-                    const getBase = (id) => {
-                        // 1. Chặt đứt ngay phần câu hỏi (-1) và UUID (_p7ngy8) để không bị lẫn số
-                        let cleanId = id.split('-')[0].split('_')[0]; 
-                        // 2. Chỉ xóa các chữ cái N, H, V, C ở phần đuôi
-                        const match = cleanId.match(/^(\d+[a-zA-Z])(.*)$/);
-                        if (match) {
-                            return match[1] + match[2].replace(/[a-zA-Z]/g, ''); 
-                        }
-                        return cleanId;
-                    };
-                    
-                    const qBaseId = getBase(actualMapId); // Kết quả chuẩn: 12H12
-                    const subjectChar = actualMapId.replace(/^\d+/, '')[0]?.toUpperCase();
+                    const actualMapId = String(q.mapId || q.id || "").trim(); 
+                    const actualLevel = String(q.level || "").trim();
+                    if (!actualMapId) return false;
 
-                    // 1. Lọc theo Khối Lớp
+                    const qBaseId = getCleanId(actualMapId); 
+                    
+                    let idLevel = "";
+                    const mLevel = actualMapId.split('-')[0].split('_')[0].match(/^\d+[a-zA-Z].*([NHVCnhvc])/);
+                    if (mLevel) idLevel = mLevel[1].toUpperCase();
+
+                    const subjectChar = actualMapId.replace(/^\d+/, '')[0]?.toUpperCase(); 
+
+                    // 1. Lọc Khối Lớp & Phân Môn
                     if (!actualMapId.startsWith(grade)) return false; 
-
-                    // 2. Lọc theo Phân môn
                     if (subject === 'dai_so' && subjectChar !== 'D' && subjectChar !== 'G') return false;
                     if (subject === 'hinh_hoc' && subjectChar !== 'H') return false;
 
-                    // 3. Lọc theo Mức độ
+                    // 2. Lọc Mức độ
                     if (checkedLevels.length > 0) {
-                        const idLevelMatch = actualMapId.split('-')[0].match(/^\d+[a-zA-Z]\d+([a-zA-Z])/);
-                        const idLevel = idLevelMatch ? idLevelMatch[1].toUpperCase() : "";
-                        
                         let isLevelMatch = checkedLevels.some(code => {
                             if (code === 'NB' && (actualLevel.includes('Nhận biết') || actualLevel === 'NB' || idLevel === 'N')) return true;
                             if (code === 'TH' && (actualLevel.includes('Thông hiểu') || actualLevel === 'TH' || idLevel === 'H')) return true;
@@ -754,24 +752,25 @@
                         if (!isLevelMatch) return false;
                     }
 
-                    // 4. Lọc theo Cây ID (BẢO VỆ TUYỆT ĐỐI)
-                    if (checkedMapIds.length > 0) {
-                        const isMatchTopic = checkedMapIds.some(tId => {
-                            return qBaseId.startsWith(getBase(tId));
+                    // 3. Lọc theo Cây ID
+                    if (checkedCleanIds.length > 0) {
+                        const isMatchTopic = checkedCleanIds.some(tBaseId => {
+                            return qBaseId === tBaseId || qBaseId.startsWith(tBaseId);
                         });
                         if (!isMatchTopic) return false;
                     }
 
-                    // 5. Lọc Đặc biệt
+                    // 4. Lọc Dạng đặc biệt
                     if (reqTheory || reqRealWorld) {
                         let matchSpecial = false;
-                        if (reqTheory && (q.tags?.includes('theory') || actualMapId.includes('LT'))) matchSpecial = true;
-                        if (reqRealWorld && (q.tags?.includes('realworld') || actualMapId.includes('TT'))) matchSpecial = true;
+                        if (reqTheory && (String(q.tags).includes('theory') || actualMapId.includes('LT'))) matchSpecial = true;
+                        if (reqRealWorld && (String(q.tags).includes('realworld') || actualMapId.includes('TT'))) matchSpecial = true;
                         if (!matchSpecial) return false;
                     }
 
                     return true;
                 });
+
                 if (pool.length === 0) throw new Error("Không tìm thấy câu hỏi phù hợp với các tiêu chí bạn chọn.");
 
                 for (let i = pool.length - 1; i > 0; i--) {
