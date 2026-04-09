@@ -699,7 +699,7 @@
                                            .map(cb => cb.value)
                                            .filter(val => !['theory', 'realworld'].includes(val));
                 
-                // [FIX LỖI NGẪU NHIÊN]: Lọc bỏ triệt để các giá trị rỗng "" hoặc "on"
+                // [ĐÃ FIX LỖI CHECKBOX THEO DẠNG TOÁN]
                 const checkedMapIds = Array.from(document.querySelectorAll('.map-check:checked'))
                                            .map(cb => cb.value)
                                            .filter(val => val && val !== "on" && val.trim() !== "");
@@ -710,27 +710,11 @@
                 const theoryMapIds = reqTheory ? getSpecialTopicIds(mapTree, 'theory') : [];
                 const realWorldMapIds = reqRealWorld ? getSpecialTopicIds(mapTree, 'realworld') : [];
 
-                // Hàm làm sạch ID dùng chung
-                const getCleanId = (id) => {
-                    const raw = String(id || "").split('-')[0].split('_')[0]; 
-                    const m = raw.match(/^(\d+[a-zA-Z])(.*)$/); 
-                    if (m) return m[1] + String(m[2] || "").replace(/[a-zA-Z]/g, ''); 
-                    return raw;
-                };
-
-                const checkedCleanIds = checkedMapIds.map(id => getCleanId(id));
-
-                // LỌC CÂU HỎI (CHUẨN XÁC TUYỆT ĐỐI)
+                // LỌC CÂU HỎI (TRẢ VỀ ĐÚNG BẢN GỐC, LỌC AN TOÀN TUYỆT ĐỐI)
                 let pool = globalBankMetadata.filter(q => {
                     const actualMapId = String(q.mapId || q.id || "").trim(); 
                     const actualLevel = String(q.level || "").trim();
                     if (!actualMapId) return false;
-
-                    const qBaseId = getCleanId(actualMapId); 
-                    
-                    let idLevel = "";
-                    const mLevel = actualMapId.split('-')[0].split('_')[0].match(/^\d+[a-zA-Z].*([NHVCnhvc])/);
-                    if (mLevel) idLevel = mLevel[1].toUpperCase();
 
                     const subjectChar = actualMapId.replace(/^\d+/, '')[0]?.toUpperCase(); 
 
@@ -741,6 +725,11 @@
 
                     // 2. Lọc Mức độ
                     if (checkedLevels.length > 0) {
+                        // Tách riêng chữ cái mức độ ra (Ký tự chữ cái cuối cùng nằm trước dấu gạch ngang)
+                        let idLevel = "";
+                        const mLevel = actualMapId.split('-')[0].match(/[a-zA-Z]/g);
+                        if (mLevel) idLevel = mLevel[mLevel.length - 1].toUpperCase();
+
                         let isLevelMatch = checkedLevels.some(code => {
                             if (code === 'NB' && (actualLevel.includes('Nhận biết') || actualLevel === 'NB' || idLevel === 'N')) return true;
                             if (code === 'TH' && (actualLevel.includes('Thông hiểu') || actualLevel === 'TH' || idLevel === 'H')) return true;
@@ -751,10 +740,10 @@
                         if (!isLevelMatch) return false;
                     }
 
-                    // 3. Lọc theo Cây ID
-                    if (checkedCleanIds.length > 0) {
-                        const isMatchTopic = checkedCleanIds.some(tBaseId => {
-                            return qBaseId === tBaseId || qBaseId.startsWith(tBaseId);
+                    // 3. Lọc theo Cây ID Dạng Toán (ĐÃ SỬA THÀNH STARTSWITH ĐỂ KHÔNG MATCH RÁC)
+                    if (checkedMapIds.length > 0) {
+                        const isMatchTopic = checkedMapIds.some(mapId => {
+                            return actualMapId === mapId || actualMapId.startsWith(mapId);
                         });
                         if (!isMatchTopic) return false;
                     }
@@ -770,8 +759,12 @@
                     return true;
                 });
 
-                if (pool.length === 0) throw new Error("Không tìm thấy câu hỏi phù hợp với các tiêu chí bạn chọn.");
+                if (pool.length === 0) {
+                    alert("Không tìm thấy câu hỏi phù hợp với các tiêu chí bạn chọn.");
+                    return;
+                }
 
+                // Phần xáo trộn và lấy câu hỏi giữ nguyên...
                 for (let i = pool.length - 1; i > 0; i--) {
                     const j = Math.floor(Math.random() * (i + 1));
                     [pool[i], pool[j]] = [pool[j], pool[i]];
@@ -793,7 +786,10 @@
                 const results = await Promise.all(fetchPromises);
                 practiceQuestions = results.filter(q => q !== null);
 
-                if (practiceQuestions.length === 0) throw new Error("Lỗi tải nội dung câu hỏi.");
+                if (practiceQuestions.length === 0) {
+                    alert("Lỗi tải nội dung câu hỏi.");
+                    return;
+                }
 
                 let totalMinutes = customTime;
                 if (totalMinutes === 0) {
