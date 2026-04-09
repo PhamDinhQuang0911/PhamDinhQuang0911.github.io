@@ -3023,18 +3023,21 @@
 // ============================================================
         // --- [BẢN CHUẨN R2] CẤP "CCCD" ĐỘC LẬP CHO TỪNG CÂU HỎI ---
         // ============================================================
+        // ============================================================
+        // --- [BẢN CHUẨN R2] CẤP "CCCD" ĐỘC LẬP & LƯU ĐẦY ĐỦ ĐÁP ÁN ---
+        // ============================================================
         window.saveCurrentQuestionsToBank = async () => {
             const validQuestions = window.questions.filter(q => q.mapId && q.mapId.trim() !== "");
             
             if (validQuestions.length === 0) {
-                window.customAlert("Không tìm thấy câu hỏi nào có ID (VD: [9D1...]) để lưu!", "error");
+                window.customAlert("Không tìm thấy câu hỏi nào có ID hợp lệ (VD: [9D1...]) để lưu!", "error");
                 return;
             }
 
-            const confirmMsg = `Hệ thống sẽ đẩy ${validQuestions.length} câu hỏi vào Ngân hàng.\nCác câu này sẽ được cấp mã định danh độc lập để không ghi đè lên câu cũ.\nBạn đồng ý chứ?`;
+            const confirmMsg = `Hệ thống sẽ đẩy ${validQuestions.length} câu hỏi vào Ngân hàng.\nMỗi câu sẽ được cấp mã định danh độc lập để không ghi đè lên câu cũ.\nBạn đồng ý chứ?`;
             if (!await window.customConfirm(confirmMsg)) return;
 
-            const btn = document.getElementById('btnSaveBank') || document.querySelector('button[onclick*="saveCurrentQuestionsToBank"]');
+            const btn = document.querySelector('button[onclick*="saveCurrentQuestionsToBank"]');
             const oldHtml = btn ? btn.innerHTML : 'Lưu Bank';
             if (btn) { btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang tải lên...'; btn.disabled = true; }
 
@@ -3043,20 +3046,21 @@
                 let successCount = 0;
 
                 const uploadPromises = validQuestions.map(async (q) => {
-                    // [BÍ QUYẾT Ở ĐÂY]: Cấp Căn cước công dân (bankId)
-                    // Nếu chưa có, tạo mới bằng mapId + Chuỗi ngẫu nhiên (VD: 9D1H1-6_17a8bc)
+                    // Cấp Căn cước công dân (bankId)
                     if (!q.bankId) {
                         const uniqueSuffix = Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
                         q.bankId = `${q.mapId}_${uniqueSuffix}`;
                     }
 
+                    // ĐÓNG GÓI DỮ LIỆU ĐẦY ĐỦ
                     const qData = {
-                        id: q.bankId,     // Trở thành ID duy nhất của file
-                        mapId: q.mapId,   // Vẫn giữ mã Phân dạng để Dashboard lọc
+                        id: q.bankId,     
+                        mapId: q.mapId,   
                         type: q.type,
                         content: q.content || "",
                         solution: q.solution || "",
                         options: q.options || [],
+                        correct: q.correct, // <--- [FIX QUAN TRỌNG LÀ Ở ĐÂY]: Lưu lại vị trí đáp án đúng
                         statements: q.statements || [],
                         answer: q.answer || "",
                         subject: q.subject || "Khác",
@@ -3070,6 +3074,7 @@
                     const blob = new Blob([jsonString], { type: 'application/json' });
                     const formData = new FormData();
                     
+                    // Lưu file bằng bankId
                     formData.append('file', blob, `bank/${q.bankId}.json`);
 
                     const response = await fetch(BASE_URL, { method: 'PUT', body: formData });
