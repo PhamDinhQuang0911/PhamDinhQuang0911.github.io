@@ -465,7 +465,12 @@
             const activeNav = document.getElementById(`nav-${viewName}`);
             if(activeNav) activeNav.classList.add('active');
 
-            // [MỚI] Nếu chuyển sang tab Kho câu hỏi -> Tải dữ liệu ngay
+            // [TỐI ƯU] Chỉ gọi tải Ngân hàng đề khi bấm vào tab này
+            if (viewName === 'exambank') {
+                loadFileManager();
+            }
+
+            // [TỐI ƯU] Tải Kho câu hỏi
             if (viewName === 'questionbank') {
                 loadQuestionBank();
             }
@@ -539,14 +544,14 @@
                 // Sau đó Firebase tự động tải ngầm cái mới về để cập nhật sau
 // 2. KÍCH HOẠT TẢI DỮ LIỆU SONG SONG
                 const task1 = loadClasses();       
-                const task2 = loadFileManager();
+                
                 
                 // [MỚI] Tải cây MapID
                 const task3 = getDoc(doc(db, "configurations", "map_id_tree")).then(snap => {
                     if(snap.exists()) window.globalIdTree = snap.data().tree || [];
                 }).catch(e => console.log("Lỗi MapID:", e));
                 
-                await Promise.all([task1, task2, task3]);
+                await Promise.all([task1, task3]);
                 
                 // 3. Gán sự kiện
                 const createBtn = document.getElementById('createClassBtn');
@@ -1186,33 +1191,49 @@
         };
         
         // --- LOGIC FILE EXPLORER (ĐÃ TỐI ƯU SONG SONG) ---
+        // --- HÀM TẢI NGÂN HÀNG ĐỀ THI (SIÊU TỐC VỚI SESSION CACHE) ---
         async function loadFileManager() { 
-            // THÊM ĐOẠN NÀY: Hiện Skeleton ngay lập tức để người dùng thấy phản hồi
             const container = document.getElementById('explorerGrid');
-            if (container && container.innerHTML === '') {
+
+            // 1. KIỂM TRA BỘ NHỚ ĐỆM (CACHE)
+            const cachedF = sessionStorage.getItem('bank_folders');
+            const cachedE = sessionStorage.getItem('bank_exams');
+
+            if (cachedF && cachedE) {
+                // Nếu có cache -> Render ngay lập tức trong 0s
+                folderData = JSON.parse(cachedF);
+                examData = JSON.parse(cachedE);
+                renderExplorer();
+            } else if (container && container.innerHTML === '') {
                 container.innerHTML = `<div class="col-span-full grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 animate-pulse">${'<div class="bg-gray-200 rounded-xl aspect-square"></div>'.repeat(6)}</div>`;
             }
 
+            // 2. TẢI NGẦM TỪ FIREBASE ĐỂ LẤY DỮ LIỆU MỚI (Lấy cái đề bạn vừa tạo)
             try { 
-                // Tạo 2 truy vấn cùng lúc
                 const qFolders = query(collection(db, "folders"), where("teacherId", "==", currentUserUid), limit(100)); 
                 const qExams = query(collection(db, "exams"), where("teacherId", "==", currentUserUid), limit(100)); 
                 
-                // Bắn request song song và đợi cả 2 trả về
                 const [snapFolders, snapExams] = await Promise.all([
                     getDocs(qFolders),
                     getDocs(qExams)
                 ]);
                 
-                // Xử lý dữ liệu Folders
-                folderData = []; 
-                snapFolders.forEach(d => folderData.push({id: d.id, ...d.data()})); 
+                const newFolderData = []; 
+                snapFolders.forEach(d => newFolderData.push({id: d.id, ...d.data()})); 
                 
-                // Xử lý dữ liệu Exams
-                examData = []; 
-                snapExams.forEach(d => examData.push({id: d.id, ...d.data()})); 
+                const newExamData = []; 
+                snapExams.forEach(d => newExamData.push({id: d.id, ...d.data()})); 
                 
-                renderExplorer(); 
+                // Cập nhật lại mảng và Cache
+                folderData = newFolderData; 
+                examData = newExamData;
+                sessionStorage.setItem('bank_folders', JSON.stringify(folderData));
+                sessionStorage.setItem('bank_exams', JSON.stringify(examData));
+
+                // Vẽ lại giao diện (chỉ khi đang ở tab Ngân hàng)
+                if (!document.getElementById('view-exambank').classList.contains('hidden')) {
+                    renderExplorer(); 
+                }
             } catch (e) { console.error(e); } 
         }
         function renderExplorer() { 
@@ -1753,6 +1774,10 @@
 
     // 2. Tải dữ liệu Ngân hàng & Cây MapID
     window.loadQuestionBank = async () => {
+        if (window.globalBankQuestions && window.globalBankQuestions.length > 0) {
+                window.applyBankFilters();
+                return;
+            }
         const list = document.getElementById('bankList');
         const countEl = document.getElementById('bankCount');
         list.innerHTML = '<div class="text-center py-10 text-gray-400 flex flex-col items-center"><i class="fa-solid fa-spinner fa-spin text-2xl mb-2 text-blue-500"></i><span>Đang tải dữ liệu...</span></div>';
