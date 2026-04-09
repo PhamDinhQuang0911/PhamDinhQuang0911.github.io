@@ -1153,79 +1153,138 @@
         // ============================================================
         // --- [BẢN SỬA LỖI PREVIEW] HIỂN THỊ HÌNH ẢNH VÀ TIKZ BÊN TRÁI ---
         // ============================================================
-        window.renderPreviewList = () => {
+        // ============================================================
+        // --- [FIX HOÀN CHỈNH] PREVIEW BÊN TRÁI ĐẦY ĐỦ ẢNH + LỜI GIẢI ---
+        // ============================================================
+        window.renderPreviewList = () => { 
             const list = document.getElementById('previewList');
-            const totalQInput = document.getElementById('totalQ');
-            if (totalQInput) totalQInput.value = window.questions.length;
-
-            list.innerHTML = '';
+            const palette = document.getElementById('quickPalette');
+            document.getElementById('totalQCount').textContent = window.questions.length;
+            list.innerHTML = ''; 
+            if(palette) palette.innerHTML = '';
             
-            // Tính toán thống kê
-            let counts = { mc: 0, tf: 0, short: 0, essay: 0 };
-            let totalPoints = 0;
-            window.questions.forEach(q => {
-                counts[q.type]++;
-                totalPoints += (q.point || 0);
-            });
+            if (window.questions.length === 0) {
+                list.innerHTML = '<div class="text-center py-10 text-gray-400 text-sm">Chưa có câu hỏi nào.<br>Hãy thêm câu hỏi hoặc Import Tex.</div>';
+                document.getElementById('editorArea').innerHTML = '<div class="absolute inset-0 flex items-center justify-center text-gray-300 text-sm"><p>Chọn câu hỏi bên trái để sửa</p></div>';
+                document.getElementById('quickPaletteContainer').classList.add('hidden');
+                window.currentQIndex = -1;
+                return;
+            }
 
-            // Cập nhật giao diện thống kê
-            const stats = [
-                {id: 'countMcShort', val: counts.mc + counts.short},
-                {id: 'countTF', val: counts.tf},
-                {id: 'countEssay', val: counts.essay},
-                {id: 'totalScoreText', val: parseFloat(totalPoints.toFixed(2))}
-            ];
-            stats.forEach(s => {
-                const el = document.getElementById(s.id);
-                if(el) el.innerText = s.val;
-            });
+            document.getElementById('quickPaletteContainer').classList.remove('hidden');
+            let currentType = '';
+            
+            window.questions.forEach((q, idx) => {
+                if(palette) {
+                    const pBtn = document.createElement('button');
+                    pBtn.className = `palette-btn ${idx === window.currentQIndex ? 'active' : ''}`;
+                    pBtn.textContent = idx + 1;
+                    pBtn.onclick = () => loadQuestionToEditor(idx);
+                    palette.appendChild(pBtn);
+                }
 
-            // Vẽ danh sách câu hỏi
-            window.questions.forEach((q, i) => {
-                const isActive = i === window.currentQIndex;
+                let typeLabel = q.type === 'mc' ? 'TRẮC NGHIỆM' : (q.type === 'tf' ? 'ĐÚNG/SAI' : (q.type === 'short' ? 'TRẢ LỜI NGẮN' : 'TỰ LUẬN'));
+                if (q.type !== currentType) {
+                    currentType = q.type;
+                    const header = document.createElement('div');
+                    header.className = "group-header text-xs font-bold text-gray-500 uppercase mb-2 pl-1";
+                    header.textContent = `PHẦN: ${typeLabel}`;
+                    list.appendChild(header);
+                }
+
                 const div = document.createElement('div');
-                div.id = `q-preview-${i}`;
-                // Thêm class 'math-content' và 'text-sm' để định dạng cho công thức và hình ảnh nhỏ lại
-                div.className = `p-3 rounded-lg border cursor-pointer relative math-content text-sm ${isActive ? 'bg-blue-50 border-blue-300 ring-1 ring-blue-100' : 'bg-white border-gray-200 hover:border-blue-100 hover:bg-gray-50'}`;
+                div.className = `preview-item p-4 rounded-lg mb-3 text-sm relative ${idx === window.currentQIndex ? 'active' : ''}`;
+                div.id = `q-preview-${idx}`;
+                div.onclick = () => loadQuestionToEditor(idx);
                 
-                // Hiển thị một đoạn nội dung ngắn gọn
-                // [FIX LỖI PREVIEW]: Gọi hàm window.formatContent() để vẽ hình ảnh và công thức toán
-                // Chúng ta cũng giới hạn độ dài hiển thị để danh sách gọn gàng
-                const contentToShow = q.content ? window.formatContent(q.content) : '<span class="italic text-gray-400">Chưa có nội dung</span>';
-                
-                let iconHtml = '<i class="fa-solid fa-list-ol text-blue-500"></i>';
-                if(q.type === 'tf') iconHtml = '<i class="fa-solid fa-check-double text-green-500"></i>';
-                if(q.type === 'short') iconHtml = '<i class="fa-solid fa-pen-to-square text-purple-500"></i>';
-                if(q.type === 'essay') iconHtml = '<i class="fa-solid fa-file-signature text-orange-500"></i>';
+                // 1. Tạo Badge ID (Màu xanh đậm)
+                let idBadge = q.mapId 
+                    ? `<span class="text-[10px] font-mono font-bold text-blue-700 bg-blue-100 px-1.5 py-0.5 rounded border border-blue-200" title="ID Câu hỏi">${q.mapId}</span>` 
+                    : `<span class="text-[10px] font-mono text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200" title="Chưa có ID">No-ID</span>`;
 
-                div.innerHTML = `
-                    <div class="flex items-center gap-2 mb-1.5 pb-1.5 border-b border-gray-100">
-                        <span class="font-bold text-xs text-blue-800">Câu ${i + 1}</span>
-                        <span class="w-px h-3 bg-gray-200"></span>
-                        <span class="text-[11px] font-medium text-gray-600 flex items-center gap-1">${iconHtml} ${(q.type||'').toUpperCase()}</span>
-                        ${q.point ? `<span class="ml-auto text-xs font-bold text-orange-600">${q.point}đ</span>` : ''}
+                // 2. Tạo Badge Mức độ
+                let levelBadge = '';
+                if (q.level) {
+                    let color = q.levelColor || 'gray'; 
+                    if (q.level === 'Nhận biết') color = 'green';
+                    if (q.level === 'Thông hiểu') color = 'blue';
+                    if (q.level === 'Vận dụng') color = 'orange'; 
+                    if (q.level === 'Vận dụng cao') color = 'red';
+                    let shortLevel = q.level.replace('Nhận biết','NB').replace('Thông hiểu','TH').replace('Vận dụng cao','VDC').replace('Vận dụng','VD');
+                    levelBadge = `<span class="text-[9px] font-bold text-${color}-600 bg-${color}-50 px-1.5 py-0.5 rounded border border-${color}-100 uppercase tracking-wider">${shortLevel}</span>`;
+                }
+
+                // 3. Tạo Badge Môn
+                let subjectBadge = '';
+                if (q.subject) {
+                    let subShort = q.subject === 'Đại số' ? 'ĐS' : (q.subject === 'Hình học' ? 'HH' : 'GT');
+                    subjectBadge = `<span class="text-[9px] font-bold text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200">${subShort}</span>`;
+                }
+
+                // 4. Ghép phần Tiêu đề và Nội dung câu hỏi (Cho phép hiện ảnh/công thức)
+                let html = `
+                    <div class="flex justify-between items-start mb-2 gap-2">
+                        <div class="flex flex-col gap-1">
+                            <div class="flex items-center gap-2">
+                                <span class="font-bold text-sm text-gray-800">Câu ${idx+1}</span>
+                                ${idBadge}
+                            </div>
+                            <div class="flex gap-1">
+                                ${subjectBadge} ${levelBadge}
+                            </div>
+                        </div>
+                        <span class="bg-orange-50 text-orange-600 text-[10px] px-2 py-1 rounded font-bold border border-orange-100 shrink-0">${q.point || 0}đ</span>
                     </div>
-                    <div class="text-gray-700 leading-relaxed q-content-preview-list line-clamp-3">${contentToShow}</div>
                     
-                    ${q.mapId ? `<div class="mt-2 text-[10px] font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded-sm inline-block border border-indigo-100"><i class="fa-solid fa-tag"></i> ${q.mapId}</div>` : ''}
-                    <button onclick="window.duplicateQuestion(${i}); event.stopPropagation();" class="absolute top-2 right-2 w-6 h-6 rounded-full bg-white/70 border flex items-center justify-center text-gray-400 hover:text-blue-600 hover:bg-white hover:border-blue-200 transition-all opacity-0 group-hover:opacity-100" title="Nhân bản câu hỏi"><i class="fa-solid fa-clone text-xs"></i></button>
+                    <div class="text-xs text-gray-800 math-content mb-2 max-h-48 overflow-hidden relative pointer-events-none [&_img]:max-h-24 [&_img]:w-auto [&_img]:mx-auto">
+                        ${window.formatContent(q.content)}
+                        <div class="absolute bottom-0 left-0 w-full h-6 bg-gradient-to-t from-gray-50 to-transparent"></div>
+                    </div>
                 `;
-                
-                div.onclick = () => window.loadQuestionToEditor(i);
+
+                // 5. KHÔI PHỤC: Ghép phần Đáp án (A,B,C,D / Đúng Sai)
+                if (q.type === 'mc' && q.options) {
+                    html += `<div class="grid grid-cols-2 gap-2 text-xs text-gray-600 mt-2">`;
+                    q.options.forEach((o, i) => {
+                        const isCorrect = i === q.correct;
+                        html += `<div class="${isCorrect ? 'text-green-600 font-bold' : ''}">${String.fromCharCode(65+i)}. ${window.formatContent(o)}</div>`;
+                    });
+                    html += `</div>`;
+                } else if (q.type === 'tf' && q.statements) {
+                    html += `<div class="mt-2 space-y-1">`;
+                    q.statements.forEach((s, i) => {
+                        html += `<div class="flex justify-between text-xs border-b border-dashed border-gray-100 pb-1">
+                            <span class="flex-1 mr-2 text-gray-700">- ${window.formatContent(s.text)}</span>
+                            <span class="font-bold ${s.isTrue ? 'text-green-600' : 'text-red-500'} whitespace-nowrap">${s.isTrue ? 'Đúng' : 'Sai'}</span>
+                        </div>`;
+                    });
+                    html += `</div>`;
+                } else if (q.type === 'short') {
+                    html += `<div class="text-xs text-green-600 mt-2"><b>Đ/A:</b> ${q.answer}</div>`;
+                }
+
+                // 6. KHÔI PHỤC: Ghép phần Lời giải
+                if (q.solution) {
+                    html += `
+                    <div class="mt-3 pt-2 border-t border-dashed border-gray-200 text-xs text-gray-500">
+                        <b class="text-green-600"><i class="fa-solid fa-lightbulb"></i> Lời giải:</b> 
+                        <div class="mt-1 max-h-32 overflow-hidden relative pointer-events-none [&_img]:max-h-20 [&_img]:w-auto [&_img]:mx-auto">
+                            ${window.formatContent(q.solution)}
+                            <div class="absolute bottom-0 left-0 w-full h-6 bg-gradient-to-t from-gray-50 to-transparent"></div>
+                        </div>
+                    </div>`;
+                }
+
+                div.innerHTML = html;
                 list.appendChild(div);
             });
-
-            // Yêu cầu MathJax và TikZ xử lý công thức và hình ảnh sau khi đã vẽ xong HTML
-            if (window.MathJax) {
-                MathJax.typesetPromise([list]).then(() => {
-                    // Sau khi MathJax xong, gọi tiếp TikZ để vẽ hình
-                    if (window.renderTikz) {
-                        window.renderTikz();
-                    }
-                }).catch(()=>{});
-            } else if (window.renderTikz) {
-                window.renderTikz();
-            }
+            
+            // Render MathJax và TikZ sau khi đã nạp HTML xong
+            if(window.MathJax) MathJax.typesetPromise([list]).catch(e=>{});
+            setTimeout(() => {
+                if(window.renderTikz) window.renderTikz();
+                if(window.autoScaleTables) window.autoScaleTables(); 
+            }, 500);
         };
 
         window.saveCurrentQuestionToMemory = () => { 
