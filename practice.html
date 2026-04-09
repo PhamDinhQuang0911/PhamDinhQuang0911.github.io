@@ -682,13 +682,14 @@
             return ids;
         };
 
-        window.startPractice = async () => {
+        window.startPractice = async () => {window.startPractice = async () => {
             const btn = document.querySelector('button[onclick="startPractice()"]');
             const oldHtml = btn.innerHTML;
             btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang khởi tạo...'; 
             btn.disabled = true;
 
             try {
+                // 1. LẤY CÁC ĐIỀU KIỆN LỌC Ở CỘT BÊN TRÁI
                 const grade = document.querySelector('input[name="grade"]:checked').value;
                 const subject = document.querySelector('input[name="subject"]:checked').value;
                 const qCount = parseInt(document.getElementById('inputQCount').value) || 10;
@@ -698,78 +699,89 @@
                 const checkedLevels = Array.from(document.querySelectorAll('.level-checkbox:checked'))
                                            .map(cb => cb.value)
                                            .filter(val => !['theory', 'realworld'].includes(val));
-                
-                // [ĐÃ FIX LỖI CHECKBOX THEO DẠNG TOÁN]
-                const checkedMapIds = Array.from(document.querySelectorAll('.map-check:checked'))
-                                           .map(cb => cb.value)
-                                           .filter(val => val && val !== "on" && val.trim() !== "");
 
                 const reqTheory = document.getElementById('filterTheory').checked;
                 const reqRealWorld = document.getElementById('filterRealWorld').checked;
+
+                // 2. LẤY ĐIỀU KIỆN LỌC Ở CÂY THƯ MỤC BÊN PHẢI
+                const checkedMapIds = Array.from(document.querySelectorAll('.map-check:checked'))
+                                           .map(cb => cb.value)
+                                           .filter(val => val && val !== "on" && val.trim() !== "");
                 
                 const theoryMapIds = reqTheory ? getSpecialTopicIds(mapTree, 'theory') : [];
                 const realWorldMapIds = reqRealWorld ? getSpecialTopicIds(mapTree, 'realworld') : [];
 
-                // LỌC CÂU HỎI (TRẢ VỀ ĐÚNG BẢN GỐC, LỌC AN TOÀN TUYỆT ĐỐI)
-                // LỌC CÂU HỎI (PHIÊN BẢN AN TOÀN TUYỆT ĐỐI)
+                // --- HÀM CHUYỂN ĐỔI ID CÂU HỎI THÀNH ID BÀI HỌC (ĐỘC QUYỀN VÀ CHUẨN XÁC) ---
+                // ID câu hỏi: "9D1H1-7" (Lớp 9, Đại số, Chương 1, Mức H, Bài 1) -> Trả về: "9D11" (Khớp với cây)
+                const getTreeFormatId = (rawId) => {
+                    let base = String(rawId || "").split('-')[0].split('_')[0]; 
+                    // Tách thành 2 nhóm: (Lớp+Môn+Chương) và (Phần Bài học đuôi)
+                    // Xóa bỏ đoạn chữ cái mức độ (N, H, V, C, NB, TH...) ở giữa
+                    let match = base.match(/^(\d+[a-zA-Z]\d+)[a-zA-Z]+(.*)$/);
+                    if (match) {
+                        return match[1] + match[2]; // Trả về (9D1) + (1) = 9D11
+                    }
+                    return base;
+                };
+
+                // --- BẮT ĐẦU ĐƯA CÂU HỎI QUA 4 TRẠM KIỂM DUYỆT ---
                 let pool = globalBankMetadata.filter(q => {
                     const actualMapId = String(q.mapId || q.id || "").trim(); 
                     const actualLevel = String(q.level || "").trim();
                     if (!actualMapId) return false;
 
-                    // Chỉ lấy phần ID chính, bỏ đuôi -cauhoi và _uuid
-                    const baseIdRaw = actualMapId.split('-')[0].split('_')[0];
-                    const subjectChar = actualMapId.replace(/^\d+/, '')[0]?.toUpperCase(); 
-
-                    // 1. Lọc Khối Lớp & Phân Môn
+                    // [TRẠM 1]: KIỂM TRA LỚP VÀ PHÂN MÔN
                     if (!actualMapId.startsWith(grade)) return false; 
+                    
+                    const subjMatch = actualMapId.match(/^\d+([a-zA-Z])/);
+                    const subjectChar = subjMatch ? subjMatch[1].toUpperCase() : ""; 
                     if (subject === 'dai_so' && subjectChar !== 'D' && subjectChar !== 'G') return false;
                     if (subject === 'hinh_hoc' && subjectChar !== 'H') return false;
 
-                    // 2. Lọc Mức độ
+                    // [TRẠM 2]: KIỂM TRA MỨC ĐỘ
                     if (checkedLevels.length > 0) {
+                        let idLevel = "";
+                        const levelMatch = actualMapId.match(/^\d+[a-zA-Z]\d+([a-zA-Z]+)/);
+                        if (levelMatch) idLevel = levelMatch[1].toUpperCase();
+
                         let isLevelMatch = checkedLevels.some(code => {
-                            if (code === 'NB' && (actualLevel.includes('Nhận biết') || actualLevel === 'NB' || baseIdRaw.includes('N'))) return true;
-                            if (code === 'TH' && (actualLevel.includes('Thông hiểu') || actualLevel === 'TH' || baseIdRaw.includes('H'))) return true;
-                            if (code === 'VD' && (actualLevel === 'Vận dụng' || actualLevel === 'VD' || baseIdRaw.includes('V'))) return true;
-                            if (code === 'VDC' && (actualLevel.includes('cao') || actualLevel === 'VDC' || baseIdRaw.includes('C'))) return true;
+                            if (code === 'NB' && (actualLevel.includes('Nhận biết') || actualLevel === 'NB' || idLevel === 'N' || idLevel === 'NB')) return true;
+                            if (code === 'TH' && (actualLevel.includes('Thông hiểu') || actualLevel === 'TH' || idLevel === 'H' || idLevel === 'TH')) return true;
+                            if (code === 'VD' && ((actualLevel.includes('Vận dụng') && !actualLevel.includes('cao')) || actualLevel === 'VD' || idLevel === 'V' || idLevel === 'VD')) return true;
+                            if (code === 'VDC' && (actualLevel.includes('cao') || actualLevel === 'VDC' || idLevel === 'C' || idLevel === 'VDC')) return true;
                             return false;
                         });
                         if (!isLevelMatch) return false;
                     }
 
-                    // 3. Lọc theo Cây ID Dạng Toán (SO KHỚP TRỰC TIẾP)
+                    // [TRẠM 3]: KIỂM TRA CÂY THƯ MỤC (CHUYÊN ĐỀ / BÀI HỌC)
                     if (checkedMapIds.length > 0) {
-                        const isMatchTopic = checkedMapIds.some(targetMapId => {
-                            // Xóa đuôi của targetMapId (phòng trường hợp ID trên cây có chứa ký tự lạ)
-                            const cleanTarget = targetMapId.split('-')[0].split('_')[0];
-                            
-                            // KIỂM TRA QUAN TRỌNG: ID câu hỏi (đã bỏ phần đuôi -1_uuid) CÓ CHỨA ID của dạng bài không?
-                            // Dùng includes thay vì startsWith hoặc exact match để bỏ qua sự sai lệch do ký tự Mức độ (N,H,V,C) chèn vào giữa.
-                            // VD: ID câu hỏi là "12H1H2", ID Dạng là "12H12". 
-                            // Nếu bỏ ký tự mức độ đi, nó phải match.
-                            
-                            // Tạo ID so sánh bằng cách bỏ đi các chữ cái mức độ N,H,V,C ở phần sau của chuỗi
-                            let comparableQId = baseIdRaw;
-                            const matchPrefix = baseIdRaw.match(/^(\d+[a-zA-Z])/);
-                            if(matchPrefix) {
-                                // Giữ lại "12H", xóa N,H,V,C ở phần còn lại "1H2" -> "12"
-                                comparableQId = matchPrefix[1] + baseIdRaw.substring(matchPrefix[1].length).replace(/[NHVCnhvc]/g, '');
-                            }
-
-                            return comparableQId.startsWith(cleanTarget);
+                        const treeFormatId = getTreeFormatId(actualMapId); // ID đã được lọc sạch mức độ
+                        const isMatchTopic = checkedMapIds.some(tId => {
+                            return treeFormatId.startsWith(tId) || actualMapId.startsWith(tId);
                         });
                         if (!isMatchTopic) return false;
                     }
 
-                    // 4. Lọc Dạng đặc biệt
+                    // [TRẠM 4]: KIỂM TRA NHÃN LÝ THUYẾT / THỰC TẾ
                     if (reqTheory || reqRealWorld) {
                         let matchSpecial = false;
-                        if (reqTheory && (String(q.tags).includes('theory') || actualMapId.includes('LT'))) matchSpecial = true;
-                        if (reqRealWorld && (String(q.tags).includes('realworld') || actualMapId.includes('TT'))) matchSpecial = true;
+                        const treeFormatId = getTreeFormatId(actualMapId);
+                        
+                        if (reqTheory) {
+                            const isMapTheory = theoryMapIds.some(tId => treeFormatId.startsWith(tId) || actualMapId.startsWith(tId));
+                            const isTagTheory = String(q.tags || "").includes('theory') || actualMapId.includes('LT');
+                            if (isMapTheory || isTagTheory) matchSpecial = true;
+                        }
+                        if (reqRealWorld) {
+                            const isMapReal = realWorldMapIds.some(tId => treeFormatId.startsWith(tId) || actualMapId.startsWith(tId));
+                            const isTagReal = String(q.tags || "").includes('realworld') || actualMapId.includes('TT');
+                            if (isMapReal || isTagReal) matchSpecial = true;
+                        }
                         if (!matchSpecial) return false;
                     }
 
+                    // VƯỢT QUA HẾT 4 TRẠM THÌ MỚI ĐƯỢC CHỌN!
                     return true;
                 });
 
@@ -778,12 +790,13 @@
                     return;
                 }
 
-                // Phần xáo trộn và lấy câu hỏi giữ nguyên...
+                // Trộn ngẫu nhiên câu hỏi trong nhóm đã lọc
                 for (let i = pool.length - 1; i > 0; i--) {
                     const j = Math.floor(Math.random() * (i + 1));
                     [pool[i], pool[j]] = [pool[j], pool[i]];
                 }
                 
+                // Cắt lấy số lượng câu theo yêu cầu
                 let selectedMeta = pool.slice(0, qCount);
                 if (sortDiff) selectedMeta.sort((a, b) => getDifficultyLevel(a.id) - getDifficultyLevel(b.id));
 
