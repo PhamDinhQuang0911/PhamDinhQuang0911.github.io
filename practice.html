@@ -720,39 +720,55 @@
                 const realWorldMapIds = reqRealWorld ? getSpecialTopicIds(mapTree, 'realworld') : [];
 
                 // Lọc câu hỏi
+                // Lọc câu hỏi (ĐÃ FIX LỖI LẤY NGẪU NHIÊN - LỌC CỰC CHUẨN)
                 let pool = globalBankMetadata.filter(q => {
-                    if (!q.id.startsWith(grade)) return false; 
-                    if (subject === 'dai_so' && !q.id.includes('D') && !q.id.includes('G')) return false;
-                    if (subject === 'hinh_hoc' && !q.id.includes('H')) return false;
+                    const actualMapId = q.mapId || q.id || ""; // Lấy mapId gốc (VD: 9D1H1-6)
+                    const actualLevel = q.level || ""; // Lấy mức độ gốc (VD: "Thông hiểu")
+                    
+                    // Tạo ra ID "sạch" để khớp với cây thư mục (Xóa bỏ N, H, V, C)
+                    // VD: 9D1H1-6 -> Tách phần trước dấu '-' -> 9D1H1 -> Bỏ H -> 9D11
+                    const prefixMatch = actualMapId.split('-')[0];
+                    const cleanBaseId = prefixMatch.replace(/[NHVC]/g, '');
 
+                    // 1. Lọc theo Khối Lớp
+                    if (!actualMapId.startsWith(grade)) return false; 
+
+                    // 2. Lọc theo Phân môn
+                    if (subject === 'dai_so' && !actualMapId.includes('D') && !actualMapId.includes('G')) return false;
+                    if (subject === 'hinh_hoc' && !actualMapId.includes('H')) return false;
+
+                    // 3. Lọc theo Mức độ (So sánh chính xác tuyệt đối, không dùng includes hên xui)
                     if (checkedLevels.length > 0) {
-                        let isLevelMatch = false;
-                        for (let code of checkedLevels) {
-                            let charCode = code === 'NB' ? 'N' : (code === 'TH' ? 'H' : (code === 'VD' ? 'V' : 'C'));
-                            if (q.id.includes(charCode) || q.id.includes(code)) {
-                                isLevelMatch = true; break;
-                            }
-                        }
+                        let isLevelMatch = checkedLevels.some(code => {
+                            if (code === 'NB' && (actualLevel.includes('Nhận biết') || actualLevel === 'NB' || actualMapId.includes('N'))) return true;
+                            if (code === 'TH' && (actualLevel.includes('Thông hiểu') || actualLevel === 'TH' || actualMapId.includes('H'))) return true;
+                            if (code === 'VD' && (actualLevel === 'Vận dụng' || actualLevel === 'VD' || actualMapId.includes('V'))) return true;
+                            if (code === 'VDC' && (actualLevel.includes('Vận dụng cao') || actualLevel === 'VDC' || actualMapId.includes('C'))) return true;
+                            return false;
+                        });
                         if (!isLevelMatch) return false;
                     }
 
+                    // 4. Lọc theo Dạng toán / Chuyên đề (Khớp chính xác bằng ID sạch)
                     if (checkedMapIds.length > 0) {
-                        const isMatchTopic = checkedMapIds.some(mapId => q.id.includes(mapId));
+                        const isMatchTopic = checkedMapIds.some(mapId => {
+                            return cleanBaseId.startsWith(mapId) || actualMapId.startsWith(mapId);
+                        });
                         if (!isMatchTopic) return false;
                     }
 
-                    // [MỚI] BỘ LỌC DẠNG ĐẶC BIỆT KẾT HỢP (Map ID + Tag cá nhân)
+                    // 5. Lọc Dạng đặc biệt (Lý thuyết / Thực tế)
                     if (reqTheory || reqRealWorld) {
                         let matchSpecial = false;
                         
                         if (reqTheory) {
-                            const isMapTheory = theoryMapIds.some(mapId => q.id.includes(mapId));
+                            const isMapTheory = theoryMapIds.some(mapId => cleanBaseId.startsWith(mapId) || actualMapId.startsWith(mapId));
                             const isTagTheory = q.tags && (q.tags.includes('ly-thuyet') || q.tags.includes('theory'));
                             if (isMapTheory || isTagTheory) matchSpecial = true;
                         }
                         
                         if (reqRealWorld) {
-                            const isMapReal = realWorldMapIds.some(mapId => q.id.includes(mapId));
+                            const isMapReal = realWorldMapIds.some(mapId => cleanBaseId.startsWith(mapId) || actualMapId.startsWith(mapId));
                             const isTagReal = q.tags && (q.tags.includes('thuc-te') || q.tags.includes('realworld'));
                             if (isMapReal || isTagReal) matchSpecial = true;
                         }
