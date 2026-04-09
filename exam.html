@@ -968,10 +968,34 @@ async function loadLobbyData(id) {
 
             currentQuestions.forEach((q, i) => {
                 const u = userAnswers[i]; let isCorrect = false;
-                if (q.type === 'mc' && u === q.correct) isCorrect = true;
-                else if (q.type === 'short' && q.answer && u && normalize(u) === normalize(q.answer)) isCorrect = true;
-                else if (q.type === 'tf' && u && q.statements) { let matches = 0; q.statements.forEach((s, si) => { if (u[si] === s.isTrue) matches++; }); if (matches === q.statements.length) isCorrect = true; }
-                if (isCorrect) { correct++; totalScore += (q.point && parseFloat(q.point) > 0) ? parseFloat(q.point) : defaultPointPerQuestion; }
+                
+                // [BỨC TƯỜNG BẢO VỆ]: Chỉ chấm điểm khi học sinh thực sự có chọn/nhập đáp án
+                if (u !== undefined && u !== null && u !== "") {
+                    if (q.type === 'mc') { 
+                        // Ép kiểu về số để so sánh chắc chắn nhất
+                        if (Number(u) === Number(q.correct)) isCorrect = true; 
+                    }
+                    else if (q.type === 'short') { 
+                        if (q.answer && normalize(u) === normalize(q.answer)) isCorrect = true; 
+                    }
+                    else if (q.type === 'tf') { 
+                        if (typeof u === 'object' && Object.keys(u).length > 0 && q.statements) {
+                            let isAllCorrect = true; 
+                            q.statements.forEach((s, si) => { 
+                                // Nếu học sinh chưa chọn ý này hoặc chọn sai -> Đánh dấu là sai
+                                if (u[si] === undefined || u[si] !== s.isTrue) {
+                                    isAllCorrect = false;
+                                }
+                            }); 
+                            if (isAllCorrect) isCorrect = true; 
+                        }
+                    }
+                }
+
+                if (isCorrect) { 
+                    correct++; 
+                    totalScore += (q.point && parseFloat(q.point) > 0) ? parseFloat(q.point) : defaultPointPerQuestion; 
+                }
             });
 
             const score = parseFloat(totalScore.toFixed(2));
