@@ -709,77 +709,90 @@
                                           .map(cb => cb.value)
                                           .filter(val => !['theory', 'realworld'].includes(val));
                 
-                const checkedMapIds = Array.from(document.querySelectorAll('.map-check:checked')).map(cb => cb.value);
+                // Lọc bỏ giá trị rỗng để ngăn hệ thống lấy ngẫu nhiên toàn bộ ngân hàng
+                const checkedMapIds = Array.from(document.querySelectorAll('.map-check:checked'))
+                                           .map(cb => cb.value)
+                                           .filter(val => val && val.trim() !== "");
 
                 // Lấy cấu hình lọc đặc biệt
                 const reqTheory = document.getElementById('filterTheory').checked;
                 const reqRealWorld = document.getElementById('filterRealWorld').checked;
                 
-                // Quét trước danh sách ID bài học từ Map Tree
                 const theoryMapIds = reqTheory ? getSpecialTopicIds(mapTree, 'theory') : [];
                 const realWorldMapIds = reqRealWorld ? getSpecialTopicIds(mapTree, 'realworld') : [];
 
-                // Lọc câu hỏi
-                // Lọc câu hỏi (ĐÃ FIX LỖI LẤY NGẪU NHIÊN - LỌC CỰC CHUẨN)
+                // LỌC CÂU HỎI (ĐÃ FIX LỖI "CHỮ H" VÀ LỖI LẤY NGẪU NHIÊN)
                 let pool = globalBankMetadata.filter(q => {
-                    const actualMapId = q.mapId || q.id || ""; // Lấy mapId gốc (VD: 9D1H1-6)
-                    const actualLevel = q.level || ""; // Lấy mức độ gốc (VD: "Thông hiểu")
+                    const actualMapId = q.mapId || q.id || ""; 
+                    const actualLevel = q.level || "";
                     
-                    // Tạo ra ID "sạch" để khớp với cây thư mục (Xóa bỏ N, H, V, C)
-                    // VD: 9D1H1-6 -> Tách phần trước dấu '-' -> 9D1H1 -> Bỏ H -> 9D11
-                    const prefixMatch = actualMapId.split('-')[0];
-                    const cleanBaseId = prefixMatch.replace(/[NHVC]/g, '');
+                    // 1. Hàm chuẩn hóa ID siêu an toàn: Bảo vệ Lớp+Môn, chỉ xóa N,H,V,C ở khúc sau
+                    const normalizeId = (id) => {
+                        let base = id.split('_')[0].split('-')[0]; // Bỏ UUID và số câu
+                        // Tách phần đầu (VD: 12H) và phần đuôi (VD: 1H2)
+                        const match = base.match(/^(\d+[a-zA-Z]+)(.*)$/);
+                        if (match) {
+                            let suffix = match[2].replace(/[NHVCnhvc]/g, ''); // Chỉ xóa ở đuôi
+                            return match[1] + suffix; // Ghép lại thành 12H12
+                        }
+                        return base;
+                    };
+                    
+                    // 2. Hàm trích xuất chính xác chữ cái Mức độ (Nằm giữa 2 số)
+                    const extractLevel = (id) => {
+                        let base = id.split('_')[0].split('-')[0];
+                        const match = base.match(/^\d+[a-zA-Z]+\d+([NHVCnhvc])/);
+                        return match ? match[1].toUpperCase() : "";
+                    };
 
-                    // 1. Lọc theo Khối Lớp
+                    const normQ = normalizeId(actualMapId); // ID câu hỏi đã làm sạch
+                    const idLevel = extractLevel(actualMapId); // Mức độ câu hỏi
+                    const subjectChar = actualMapId.replace(/^\d+/, '')[0]?.toUpperCase(); 
+
+                    // 3. Lọc theo Khối Lớp & Môn
                     if (!actualMapId.startsWith(grade)) return false; 
+                    if (subject === 'dai_so' && subjectChar !== 'D' && subjectChar !== 'G') return false;
+                    if (subject === 'hinh_hoc' && subjectChar !== 'H') return false;
 
-                    // 2. Lọc theo Phân môn
-                    if (subject === 'dai_so' && !actualMapId.includes('D') && !actualMapId.includes('G')) return false;
-                    if (subject === 'hinh_hoc' && !actualMapId.includes('H')) return false;
-
-                    // 3. Lọc theo Mức độ (So sánh chính xác tuyệt đối, không dùng includes hên xui)
+                    // 4. Lọc theo Mức độ
                     if (checkedLevels.length > 0) {
                         let isLevelMatch = checkedLevels.some(code => {
-                            if (code === 'NB' && (actualLevel.includes('Nhận biết') || actualLevel === 'NB' || actualMapId.includes('N'))) return true;
-                            if (code === 'TH' && (actualLevel.includes('Thông hiểu') || actualLevel === 'TH' || actualMapId.includes('H'))) return true;
-                            if (code === 'VD' && (actualLevel === 'Vận dụng' || actualLevel === 'VD' || actualMapId.includes('V'))) return true;
-                            if (code === 'VDC' && (actualLevel.includes('Vận dụng cao') || actualLevel === 'VDC' || actualMapId.includes('C'))) return true;
+                            if (code === 'NB' && (actualLevel.includes('Nhận biết') || actualLevel === 'NB' || idLevel === 'N')) return true;
+                            if (code === 'TH' && (actualLevel.includes('Thông hiểu') || actualLevel === 'TH' || idLevel === 'H')) return true;
+                            if (code === 'VD' && (actualLevel === 'Vận dụng' || actualLevel === 'VD' || idLevel === 'V')) return true;
+                            if (code === 'VDC' && (actualLevel.includes('cao') || actualLevel === 'VDC' || idLevel === 'C')) return true;
                             return false;
                         });
                         if (!isLevelMatch) return false;
                     }
 
-                    // 4. Lọc theo Dạng toán / Chuyên đề (Khớp chính xác bằng ID sạch)
+                    // 5. Lọc theo Dạng toán / Chuyên đề (So khớp thông minh)
                     if (checkedMapIds.length > 0) {
                         const isMatchTopic = checkedMapIds.some(mapId => {
-                            return cleanBaseId.startsWith(mapId) || actualMapId.startsWith(mapId);
+                            const normTopic = normalizeId(mapId);
+                            return normQ.startsWith(normTopic) || actualMapId.startsWith(mapId);
                         });
                         if (!isMatchTopic) return false;
                     }
 
-                    // 5. Lọc Dạng đặc biệt (Lý thuyết / Thực tế)
+                    // 6. Lọc Dạng đặc biệt (Lý thuyết / Thực tế)
                     if (reqTheory || reqRealWorld) {
                         let matchSpecial = false;
-                        
                         if (reqTheory) {
-                            const isMapTheory = theoryMapIds.some(mapId => cleanBaseId.startsWith(mapId) || actualMapId.startsWith(mapId));
+                            const isMapTheory = theoryMapIds.some(mapId => normQ.startsWith(normalizeId(mapId)) || actualMapId.startsWith(mapId));
                             const isTagTheory = q.tags && (q.tags.includes('ly-thuyet') || q.tags.includes('theory'));
                             if (isMapTheory || isTagTheory) matchSpecial = true;
                         }
-                        
                         if (reqRealWorld) {
-                            const isMapReal = realWorldMapIds.some(mapId => cleanBaseId.startsWith(mapId) || actualMapId.startsWith(mapId));
+                            const isMapReal = realWorldMapIds.some(mapId => normQ.startsWith(normalizeId(mapId)) || actualMapId.startsWith(mapId));
                             const isTagReal = q.tags && (q.tags.includes('thuc-te') || q.tags.includes('realworld'));
                             if (isMapReal || isTagReal) matchSpecial = true;
                         }
-
-                        // Nếu đã check yêu cầu lọc mà không thỏa mãn -> Loại bỏ câu này
                         if (!matchSpecial) return false;
                     }
 
-                    return true;
+                    return true; // Qua hết các ải trên thì lấy câu hỏi này!
                 });
-
                 if (pool.length === 0) throw new Error("Không tìm thấy câu hỏi phù hợp với các tiêu chí bạn chọn.");
 
                 for (let i = pool.length - 1; i > 0; i--) {
