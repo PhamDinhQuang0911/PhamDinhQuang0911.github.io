@@ -711,11 +711,14 @@
                 const realWorldMapIds = reqRealWorld ? getSpecialTopicIds(mapTree, 'realworld') : [];
 
                 // LỌC CÂU HỎI (TRẢ VỀ ĐÚNG BẢN GỐC, LỌC AN TOÀN TUYỆT ĐỐI)
+                // LỌC CÂU HỎI (PHIÊN BẢN AN TOÀN TUYỆT ĐỐI)
                 let pool = globalBankMetadata.filter(q => {
                     const actualMapId = String(q.mapId || q.id || "").trim(); 
                     const actualLevel = String(q.level || "").trim();
                     if (!actualMapId) return false;
 
+                    // Chỉ lấy phần ID chính, bỏ đuôi -cauhoi và _uuid
+                    const baseIdRaw = actualMapId.split('-')[0].split('_')[0];
                     const subjectChar = actualMapId.replace(/^\d+/, '')[0]?.toUpperCase(); 
 
                     // 1. Lọc Khối Lớp & Phân Môn
@@ -725,25 +728,36 @@
 
                     // 2. Lọc Mức độ
                     if (checkedLevels.length > 0) {
-                        // Tách riêng chữ cái mức độ ra (Ký tự chữ cái cuối cùng nằm trước dấu gạch ngang)
-                        let idLevel = "";
-                        const mLevel = actualMapId.split('-')[0].match(/[a-zA-Z]/g);
-                        if (mLevel) idLevel = mLevel[mLevel.length - 1].toUpperCase();
-
                         let isLevelMatch = checkedLevels.some(code => {
-                            if (code === 'NB' && (actualLevel.includes('Nhận biết') || actualLevel === 'NB' || idLevel === 'N')) return true;
-                            if (code === 'TH' && (actualLevel.includes('Thông hiểu') || actualLevel === 'TH' || idLevel === 'H')) return true;
-                            if (code === 'VD' && (actualLevel === 'Vận dụng' || actualLevel === 'VD' || idLevel === 'V')) return true;
-                            if (code === 'VDC' && (actualLevel.includes('cao') || actualLevel === 'VDC' || idLevel === 'C')) return true;
+                            if (code === 'NB' && (actualLevel.includes('Nhận biết') || actualLevel === 'NB' || baseIdRaw.includes('N'))) return true;
+                            if (code === 'TH' && (actualLevel.includes('Thông hiểu') || actualLevel === 'TH' || baseIdRaw.includes('H'))) return true;
+                            if (code === 'VD' && (actualLevel === 'Vận dụng' || actualLevel === 'VD' || baseIdRaw.includes('V'))) return true;
+                            if (code === 'VDC' && (actualLevel.includes('cao') || actualLevel === 'VDC' || baseIdRaw.includes('C'))) return true;
                             return false;
                         });
                         if (!isLevelMatch) return false;
                     }
 
-                    // 3. Lọc theo Cây ID Dạng Toán (ĐÃ SỬA THÀNH STARTSWITH ĐỂ KHÔNG MATCH RÁC)
+                    // 3. Lọc theo Cây ID Dạng Toán (SO KHỚP TRỰC TIẾP)
                     if (checkedMapIds.length > 0) {
-                        const isMatchTopic = checkedMapIds.some(mapId => {
-                            return actualMapId === mapId || actualMapId.startsWith(mapId);
+                        const isMatchTopic = checkedMapIds.some(targetMapId => {
+                            // Xóa đuôi của targetMapId (phòng trường hợp ID trên cây có chứa ký tự lạ)
+                            const cleanTarget = targetMapId.split('-')[0].split('_')[0];
+                            
+                            // KIỂM TRA QUAN TRỌNG: ID câu hỏi (đã bỏ phần đuôi -1_uuid) CÓ CHỨA ID của dạng bài không?
+                            // Dùng includes thay vì startsWith hoặc exact match để bỏ qua sự sai lệch do ký tự Mức độ (N,H,V,C) chèn vào giữa.
+                            // VD: ID câu hỏi là "12H1H2", ID Dạng là "12H12". 
+                            // Nếu bỏ ký tự mức độ đi, nó phải match.
+                            
+                            // Tạo ID so sánh bằng cách bỏ đi các chữ cái mức độ N,H,V,C ở phần sau của chuỗi
+                            let comparableQId = baseIdRaw;
+                            const matchPrefix = baseIdRaw.match(/^(\d+[a-zA-Z])/);
+                            if(matchPrefix) {
+                                // Giữ lại "12H", xóa N,H,V,C ở phần còn lại "1H2" -> "12"
+                                comparableQId = matchPrefix[1] + baseIdRaw.substring(matchPrefix[1].length).replace(/[NHVCnhvc]/g, '');
+                            }
+
+                            return comparableQId.startsWith(cleanTarget);
                         });
                         if (!isMatchTopic) return false;
                     }
