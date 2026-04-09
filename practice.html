@@ -458,6 +458,7 @@
         }
 
         // --- 3. RENDER DANH SÁCH BÀI (GIAO DIỆN CÂY PRO) ---
+        window.renderTopicList = () => {// --- 3. RENDER DANH SÁCH BÀI (GIAO DIỆN CÂY PRO) ---
         window.renderTopicList = () => {
             const container = document.getElementById('treeContainer');
             if (!container) return;
@@ -472,7 +473,6 @@
                 return;
             }
 
-            // 1. Tìm Node Lớp (Lọc theo tên, VD: "Lớp 12")
             const gradeNodes = mapTree.filter(node => node.name.includes(selectedGrade));
             
             if (gradeNodes.length === 0) {
@@ -480,12 +480,9 @@
                 return;
             }
 
-            // --- HÀM CON: ĐỆ QUY VẼ CÂY CON (SỬ DỤNG <DETAILS>) ---
             const renderRecursiveChildren = (nodes) => {
                 if (!nodes || nodes.length === 0) return '';
-                
                 let html = '';
-                
                 nodes.forEach(child => {
                     const hasChildren = child.children && child.children.length > 0;
                     const cbId = `cb-${child.id}`;
@@ -528,14 +525,12 @@
                 return html;
             };
 
-            // 2. Render Card cho từng Phân môn / Chương Lớn
             let hasContent = false;
             
             gradeNodes.forEach(rootNode => { 
                 if(rootNode.children) {
                     rootNode.children.forEach(sectionNode => { 
                         
-                        // Logic lọc Môn
                         let isVisible = true;
                         const nameLower = sectionNode.name.toLowerCase();
                         if (selectedSub !== 'all') { 
@@ -545,8 +540,6 @@
 
                         if(isVisible) {
                             hasContent = true;
-                            
-                            // Tạo Card Accordion
                             const card = document.createElement('div');
                             card.className = "topic-card bg-white rounded-xl mb-3 overflow-hidden";
                             
@@ -560,6 +553,7 @@
                             const headerId = `cb-header-${sectionNode.id}`;
                             const formattedHeaderName = window.formatContent(sectionNode.name);
 
+                            // [FIX QUAN TRỌNG 1]: Tước bỏ class 'map-check' khỏi Tiêu đề Môn học để ngăn bộ lọc thu thập ID rác
                             header.innerHTML = `
                                 <div class="flex items-center gap-3">
                                     <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-50 to-indigo-50 text-indigo-600 flex items-center justify-center font-bold text-lg shrink-0 border border-blue-100 shadow-sm">
@@ -600,11 +594,7 @@
             updateSelectionStatus();
         };
 
-            
-
-        // --- CÁC HÀM HỖ TRỢ (THÊM MỚI) ---
-        
-        // 1. Chọn cha -> Chọn hết con
+        // --- CÁC HÀM HỖ TRỢ ---
         window.toggleAllChildren = (headerCheckbox) => {
             const card = headerCheckbox.closest('.topic-card');
             const body = card.querySelector('.topic-body');
@@ -613,31 +603,32 @@
             updateSelectionStatus();
         };
 
-        // 2. Xử lý logic chọn cây (Chọn Cha -> Chọn hết Con)
+        // [FIX QUAN TRỌNG 2]: Xử lý chuẩn phân cấp Cha-Con
         window.handleCheckTree = (el) => {
             const isChecked = el.checked;
-
-            // Tìm thẻ <details> bao quanh checkbox này
             const parentDetails = el.closest('details');
 
-            // Nếu checkbox này nằm trong <details> (tức là nó có thể là mục cha hoặc con)
             if (parentDetails) {
                 const summary = parentDetails.querySelector('summary');
-                
-                // Kiểm tra: Nếu checkbox được click nằm ngay trong thẻ <summary> 
-                // => Nghĩa là người dùng đang click vào MỤC CHA
                 if (summary && summary.contains(el)) {
-                    // Tìm tất cả checkbox con nằm trong nội dung chi tiết của mục này
-                    // (Lưu ý: querySelectorAll sẽ tìm sâu xuống tất cả các cấp con cháu)
+                    // Click vào Chương -> Check/Uncheck tất cả các Bài học con
                     const allChildCheckboxes = parentDetails.querySelectorAll('input[type="checkbox"]');
-                    
-                    allChildCheckboxes.forEach(cb => {
-                        cb.checked = isChecked;
-                    });
+                    allChildCheckboxes.forEach(cb => { cb.checked = isChecked; });
+                } else if (summary && !summary.contains(el)) {
+                    // Click vào Bài học -> Nếu Bài học bị bỏ chọn, thì Chương cũng phải bị bỏ chọn
+                    const parentCb = summary.querySelector('input[type="checkbox"]');
+                    if (!isChecked && parentCb) parentCb.checked = false;
                 }
             }
-
-            // Cập nhật số lượng đã chọn trên UI
+            
+            // Nếu bỏ chọn bất cứ thứ gì, bỏ chọn luôn Tiêu đề Môn học bên ngoài
+            if (!isChecked) {
+                const card = el.closest('.topic-card');
+                if (card) {
+                    const headerCb = card.querySelector('.map-check-parent');
+                    if (headerCb) headerCb.checked = false;
+                }
+            }
             updateSelectionStatus();
         };
 
@@ -648,11 +639,10 @@
             else statusEl.innerHTML = `Đã chọn: <span class="text-indigo-600">${count} mục</span>`;
         };
 
-        // --- LOGIC LUYỆN TẬP ---
         window.selectMode = (mode) => {
             document.getElementById('landingStep').classList.add('hidden');
             document.getElementById('configStep').classList.remove('hidden');
-            renderTopicList(); // Đảm bảo render khi chuyển tab
+            renderTopicList(); 
         };
 
         window.backToLanding = () => {
@@ -668,7 +658,6 @@
             return 2; 
         };
 
-        // --- [MỚI] HÀM QUÉT CÂY MAP LẤY CÁC ID CÓ THUỘC TÍNH ĐẶC BIỆT ---
         const getSpecialTopicIds = (tree, type) => {
             let ids = [];
             const traverse = (nodes) => {
@@ -682,6 +671,7 @@
             return ids;
         };
 
+        // --- BỘ LỌC CHUẨN XÁC TUYỆT ĐỐI ---
         window.startPractice = async () => {
             const btn = document.querySelector('button[onclick="startPractice()"]');
             const oldHtml = btn.innerHTML;
@@ -689,7 +679,6 @@
             btn.disabled = true;
 
             try {
-                // 1. LẤY CÁC ĐIỀU KIỆN LỌC Ở CỘT BÊN TRÁI
                 const grade = document.querySelector('input[name="grade"]:checked').value;
                 const subject = document.querySelector('input[name="subject"]:checked').value;
                 const qCount = parseInt(document.getElementById('inputQCount').value) || 10;
@@ -703,7 +692,7 @@
                 const reqTheory = document.getElementById('filterTheory').checked;
                 const reqRealWorld = document.getElementById('filterRealWorld').checked;
 
-                // 2. LẤY ĐIỀU KIỆN LỌC Ở CÂY THƯ MỤC BÊN PHẢI
+                // CHỈ Thu thập các ID thực sự của Chương và Bài học (đã loại bỏ ID Môn Học rác)
                 const checkedMapIds = Array.from(document.querySelectorAll('.map-check:checked'))
                                            .map(cb => cb.value)
                                            .filter(val => val && val !== "on" && val.trim() !== "");
@@ -711,80 +700,78 @@
                 const theoryMapIds = reqTheory ? getSpecialTopicIds(mapTree, 'theory') : [];
                 const realWorldMapIds = reqRealWorld ? getSpecialTopicIds(mapTree, 'realworld') : [];
 
-                // --- HÀM CHUYỂN ĐỔI ID CÂU HỎI THÀNH ID BÀI HỌC (ĐỘC QUYỀN VÀ CHUẨN XÁC) ---
+                // Hàm chặt đuôi rác và ký tự mức độ
                 const getBaseIdForMatch = (id) => {
                     let raw = String(id || "").split('-')[0].split('_')[0]; 
                     const subMatch = raw.match(/[A-Z]/);
                     if (!subMatch) return raw; 
-
                     const subIndex = subMatch.index;
-                    const prefix = raw.substring(0, subIndex + 1); // VD: "12D"
-                    let suffix = raw.substring(subIndex + 1);      // VD: "1H2"
-
-                    // XÓA SẠCH N, H, V, C, NB, TH, VD, VDC ở phần đuôi
-                    suffix = suffix.replace(/NB|TH|VDC|VD|[NHVC]/gi, ''); // "1H2" -> "12"
-                    
-                    return prefix + suffix; // Ghép lại: "12D12" 
+                    const prefix = raw.substring(0, subIndex + 1); 
+                    let suffix = raw.substring(subIndex + 1);      
+                    suffix = suffix.replace(/NB|TH|VDC|VD|[NHVC]/gi, ''); 
+                    return prefix + suffix; 
                 };
 
                 const checkedCleanIds = checkedMapIds.map(id => getBaseIdForMatch(id));
 
-                // --- BẮT ĐẦU ĐƯA CÂU HỎI QUA 4 TRẠM KIỂM DUYỆT ---
                 let pool = globalBankMetadata.filter(q => {
                     const actualMapId = String(q.mapId || q.id || "").trim(); 
                     const actualLevel = String(q.level || "").trim();
                     if (!actualMapId) return false;
 
-                    const qBaseId = getBaseIdForMatch(actualMapId); // Biến thành "12D12"
+                    const qBaseId = getBaseIdForMatch(actualMapId); 
                     const subjectChar = actualMapId.replace(/^\d+/, '')[0]?.toUpperCase(); 
 
-                    // [TRẠM 1]: KIỂM TRA LỚP VÀ PHÂN MÔN
+                    // 1. Lọc Lớp & Môn
                     if (!actualMapId.startsWith(grade)) return false; 
                     if (subject === 'dai_so' && subjectChar !== 'D' && subjectChar !== 'G') return false;
                     if (subject === 'hinh_hoc' && subjectChar !== 'H') return false;
 
-                    // [TRẠM 2]: KIỂM TRA MỨC ĐỘ
+                    // 2. Lọc Mức độ
                     if (checkedLevels.length > 0) {
+                        let idLevel = "";
+                        const levelMatch = actualMapId.match(/^\d+[a-zA-Z]\d+([a-zA-Z]+)/);
+                        if (levelMatch) idLevel = levelMatch[1].toUpperCase();
+
                         let isLevelMatch = checkedLevels.some(code => {
                             const hasN = actualMapId.includes('NB') || actualMapId.includes('N');
                             const hasH = actualMapId.includes('TH') || actualMapId.includes('H');
                             const hasV = actualMapId.includes('VDC') ? false : (actualMapId.includes('VD') || actualMapId.includes('V'));
                             const hasC = actualMapId.includes('VDC') || actualMapId.includes('C');
 
-                            if (code === 'NB' && (actualLevel.includes('Nhận biết') || actualLevel === 'NB' || hasN)) return true;
-                            if (code === 'TH' && (actualLevel.includes('Thông hiểu') || actualLevel === 'TH' || hasH)) return true;
-                            if (code === 'VD' && (actualLevel === 'Vận dụng' || actualLevel === 'VD' || hasV)) return true;
-                            if (code === 'VDC' && (actualLevel.includes('cao') || actualLevel === 'VDC' || hasC)) return true;
+                            if (code === 'NB' && (actualLevel.includes('Nhận biết') || actualLevel === 'NB' || idLevel === 'N' || idLevel === 'NB' || hasN)) return true;
+                            if (code === 'TH' && (actualLevel.includes('Thông hiểu') || actualLevel === 'TH' || idLevel === 'H' || idLevel === 'TH' || hasH)) return true;
+                            if (code === 'VD' && ((actualLevel.includes('Vận dụng') && !actualLevel.includes('cao')) || actualLevel === 'VD' || idLevel === 'V' || idLevel === 'VD' || hasV)) return true;
+                            if (code === 'VDC' && (actualLevel.includes('cao') || actualLevel === 'VDC' || idLevel === 'C' || idLevel === 'VDC' || hasC)) return true;
                             return false;
                         });
                         if (!isLevelMatch) return false;
                     }
 
-                    // [TRẠM 3]: KIỂM TRA CÂY THƯ MỤC (CHUYÊN ĐỀ / BÀI HỌC)
+                    // 3. Lọc theo Cây Thư Mục (Đã khử nhiễu hoàn toàn)
                     if (checkedCleanIds.length > 0) {
                         const isMatchTopic = checkedCleanIds.some(tId => {
-                            return qBaseId.startsWith(tId);
+                            return qBaseId === tId || qBaseId.startsWith(tId);
                         });
                         if (!isMatchTopic) return false;
                     }
 
-                    // [TRẠM 4]: KIỂM TRA NHÃN LÝ THUYẾT / THỰC TẾ
+                    // 4. Lọc Thẻ đặc biệt
                     if (reqTheory || reqRealWorld) {
                         let matchSpecial = false;
                         if (reqTheory) {
-                            const isMapTheory = theoryMapIds.some(tId => qBaseId.startsWith(tId) || actualMapId.startsWith(tId));
+                            const isMapTheory = theoryMapIds.some(tId => qBaseId === tId || qBaseId.startsWith(tId) || actualMapId.startsWith(tId));
                             const isTagTheory = String(q.tags || "").includes('theory') || actualMapId.includes('LT');
                             if (isMapTheory || isTagTheory) matchSpecial = true;
                         }
                         if (reqRealWorld) {
-                            const isMapReal = realWorldMapIds.some(tId => qBaseId.startsWith(tId) || actualMapId.startsWith(tId));
+                            const isMapReal = realWorldMapIds.some(tId => qBaseId === tId || qBaseId.startsWith(tId) || actualMapId.startsWith(tId));
                             const isTagReal = String(q.tags || "").includes('realworld') || actualMapId.includes('TT');
                             if (isMapReal || isTagReal) matchSpecial = true;
                         }
                         if (!matchSpecial) return false;
                     }
 
-                    // VƯỢT QUA HẾT 4 TRẠM THÌ MỚI ĐƯỢC CHỌN!
                     return true;
                 });
 
@@ -793,7 +780,7 @@
                     return;
                 }
 
-                // Trộn ngẫu nhiên câu hỏi
+                // Trộn câu hỏi
                 for (let i = pool.length - 1; i > 0; i--) {
                     const j = Math.floor(Math.random() * (i + 1));
                     [pool[i], pool[j]] = [pool[j], pool[i]];
