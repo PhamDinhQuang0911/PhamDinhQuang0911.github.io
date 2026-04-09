@@ -601,16 +601,7 @@
                 }
             });
 
-            if (!hasContent) {
-                container.innerHTML = `<div class="text-center py-10"><p class="text-gray-400">Không tìm thấy chuyên đề phù hợp.</p></div>`;
-            }
             
-            if(window.MathJax && window.MathJax.typesetPromise) {
-                window.MathJax.typesetPromise([container]).catch((err) => console.log(err));
-            }
-            
-            updateSelectionStatus();
-        };
 
         // --- CÁC HÀM HỖ TRỢ (THÊM MỚI) ---
         
@@ -710,52 +701,49 @@
                                           .filter(val => !['theory', 'realworld'].includes(val));
                 
                 // Lọc bỏ giá trị rỗng để ngăn hệ thống lấy ngẫu nhiên toàn bộ ngân hàng
+                // Lọc bỏ giá trị rỗng hoặc giá trị "on" để ngăn hệ thống lấy ngẫu nhiên
                 const checkedMapIds = Array.from(document.querySelectorAll('.map-check:checked'))
                                            .map(cb => cb.value)
-                                           .filter(val => val && val.trim() !== "");
+                                           .filter(val => val && val !== "on" && val.trim() !== "");
 
-                // Lấy cấu hình lọc đặc biệt
                 const reqTheory = document.getElementById('filterTheory').checked;
                 const reqRealWorld = document.getElementById('filterRealWorld').checked;
                 
                 const theoryMapIds = reqTheory ? getSpecialTopicIds(mapTree, 'theory') : [];
                 const realWorldMapIds = reqRealWorld ? getSpecialTopicIds(mapTree, 'realworld') : [];
 
-                // LỌC CÂU HỎI (ĐÃ FIX LỖI "CHỮ H" VÀ LỖI LẤY NGẪU NHIÊN)
+                // LỌC CÂU HỎI (ĐÃ FIX TẬN GỐC LỖI GHÉP SỐ UUID)
                 let pool = globalBankMetadata.filter(q => {
                     const actualMapId = q.mapId || q.id || ""; 
                     const actualLevel = q.level || "";
                     
-                    // 1. Hàm chuẩn hóa ID siêu an toàn: Bảo vệ Lớp+Môn, chỉ xóa N,H,V,C ở khúc sau
-                    const normalizeId = (id) => {
-                        let base = id.split('_')[0].split('-')[0]; // Bỏ UUID và số câu
-                        // Tách phần đầu (VD: 12H) và phần đuôi (VD: 1H2)
-                        const match = base.match(/^(\d+[a-zA-Z]+)(.*)$/);
+                    // [BÍ QUYẾT BÓC TÁCH ID CỰC CHUẨN]
+                    const getBase = (id) => {
+                        // 1. Chặt đứt ngay phần câu hỏi (-1) và UUID (_p7ngy8) để không bị lẫn số
+                        let cleanId = id.split('-')[0].split('_')[0]; 
+                        // 2. Chỉ xóa các chữ cái N, H, V, C ở phần đuôi
+                        const match = cleanId.match(/^(\d+[a-zA-Z])(.*)$/);
                         if (match) {
-                            let suffix = match[2].replace(/[NHVCnhvc]/g, ''); // Chỉ xóa ở đuôi
-                            return match[1] + suffix; // Ghép lại thành 12H12
+                            return match[1] + match[2].replace(/[a-zA-Z]/g, ''); 
                         }
-                        return base;
+                        return cleanId;
                     };
                     
-                    // 2. Hàm trích xuất chính xác chữ cái Mức độ (Nằm giữa 2 số)
-                    const extractLevel = (id) => {
-                        let base = id.split('_')[0].split('-')[0];
-                        const match = base.match(/^\d+[a-zA-Z]+\d+([NHVCnhvc])/);
-                        return match ? match[1].toUpperCase() : "";
-                    };
+                    const qBaseId = getBase(actualMapId); // Kết quả chuẩn: 12H12
+                    const subjectChar = actualMapId.replace(/^\d+/, '')[0]?.toUpperCase();
 
-                    const normQ = normalizeId(actualMapId); // ID câu hỏi đã làm sạch
-                    const idLevel = extractLevel(actualMapId); // Mức độ câu hỏi
-                    const subjectChar = actualMapId.replace(/^\d+/, '')[0]?.toUpperCase(); 
-
-                    // 3. Lọc theo Khối Lớp & Môn
+                    // 1. Lọc theo Khối Lớp
                     if (!actualMapId.startsWith(grade)) return false; 
+
+                    // 2. Lọc theo Phân môn
                     if (subject === 'dai_so' && subjectChar !== 'D' && subjectChar !== 'G') return false;
                     if (subject === 'hinh_hoc' && subjectChar !== 'H') return false;
 
-                    // 4. Lọc theo Mức độ
+                    // 3. Lọc theo Mức độ
                     if (checkedLevels.length > 0) {
+                        const idLevelMatch = actualMapId.split('-')[0].match(/^\d+[a-zA-Z]\d+([a-zA-Z])/);
+                        const idLevel = idLevelMatch ? idLevelMatch[1].toUpperCase() : "";
+                        
                         let isLevelMatch = checkedLevels.some(code => {
                             if (code === 'NB' && (actualLevel.includes('Nhận biết') || actualLevel === 'NB' || idLevel === 'N')) return true;
                             if (code === 'TH' && (actualLevel.includes('Thông hiểu') || actualLevel === 'TH' || idLevel === 'H')) return true;
@@ -766,32 +754,23 @@
                         if (!isLevelMatch) return false;
                     }
 
-                    // 5. Lọc theo Dạng toán / Chuyên đề (So khớp thông minh)
+                    // 4. Lọc theo Cây ID (BẢO VỆ TUYỆT ĐỐI)
                     if (checkedMapIds.length > 0) {
-                        const isMatchTopic = checkedMapIds.some(mapId => {
-                            const normTopic = normalizeId(mapId);
-                            return normQ.startsWith(normTopic) || actualMapId.startsWith(mapId);
+                        const isMatchTopic = checkedMapIds.some(tId => {
+                            return qBaseId.startsWith(getBase(tId));
                         });
                         if (!isMatchTopic) return false;
                     }
 
-                    // 6. Lọc Dạng đặc biệt (Lý thuyết / Thực tế)
+                    // 5. Lọc Đặc biệt
                     if (reqTheory || reqRealWorld) {
                         let matchSpecial = false;
-                        if (reqTheory) {
-                            const isMapTheory = theoryMapIds.some(mapId => normQ.startsWith(normalizeId(mapId)) || actualMapId.startsWith(mapId));
-                            const isTagTheory = q.tags && (q.tags.includes('ly-thuyet') || q.tags.includes('theory'));
-                            if (isMapTheory || isTagTheory) matchSpecial = true;
-                        }
-                        if (reqRealWorld) {
-                            const isMapReal = realWorldMapIds.some(mapId => normQ.startsWith(normalizeId(mapId)) || actualMapId.startsWith(mapId));
-                            const isTagReal = q.tags && (q.tags.includes('thuc-te') || q.tags.includes('realworld'));
-                            if (isMapReal || isTagReal) matchSpecial = true;
-                        }
+                        if (reqTheory && (q.tags?.includes('theory') || actualMapId.includes('LT'))) matchSpecial = true;
+                        if (reqRealWorld && (q.tags?.includes('realworld') || actualMapId.includes('TT'))) matchSpecial = true;
                         if (!matchSpecial) return false;
                     }
 
-                    return true; // Qua hết các ải trên thì lấy câu hỏi này!
+                    return true;
                 });
                 if (pool.length === 0) throw new Error("Không tìm thấy câu hỏi phù hợp với các tiêu chí bạn chọn.");
 
