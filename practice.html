@@ -457,7 +457,7 @@
             } catch (e) { console.error("Lỗi tải Bank:", e); }
         }
 
-        // --- 3. RENDER DANH SÁCH BÀI (GIAO DIỆN CÂY PRO) ---
+// --- 3. RENDER DANH SÁCH BÀI (ĐÃ FIX LAG) ---
         window.renderTopicList = () => {
             const container = document.getElementById('treeContainer');
             if (!container) return;
@@ -472,7 +472,6 @@
                 return;
             }
 
-            // 1. Tìm Node Lớp (Lọc theo tên, VD: "Lớp 12")
             const gradeNodes = mapTree.filter(node => node.name.includes(selectedGrade));
             
             if (gradeNodes.length === 0) {
@@ -480,16 +479,14 @@
                 return;
             }
 
-            // --- HÀM CON: ĐỆ QUY VẼ CÂY CON (SỬ DỤNG <DETAILS>) ---
             const renderRecursiveChildren = (nodes) => {
                 if (!nodes || nodes.length === 0) return '';
-                
                 let html = '';
-                
                 nodes.forEach(child => {
                     const hasChildren = child.children && child.children.length > 0;
                     const cbId = `cb-${child.id}`;
-                    const formattedName = window.formatContent(child.name);
+                    // [FIX LAG]: Tắt dịch MathJax ở đây để load siêu tốc
+                    const formattedName = child.name; 
                     
                     if (hasChildren) {
                         html += `
@@ -497,45 +494,31 @@
                                 <details class="group">
                                     <summary class="flex items-center gap-2 py-1.5 hover:text-blue-600 select-none">
                                         <i class="fa-solid fa-caret-right folder-icon text-gray-400 text-xs"></i>
-                                        <input type="checkbox" id="${cbId}" value="${child.id}" 
-                                            class="map-check w-4 h-4 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500 cursor-pointer" 
-                                            onclick="event.stopPropagation()"
-                                            onchange="handleCheckTree(this)">
+                                        <input type="checkbox" id="${cbId}" value="${child.id}" class="map-check w-4 h-4 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500 cursor-pointer" onclick="event.stopPropagation()" onchange="handleCheckTree(this)">
                                         <span class="text-sm font-bold text-gray-700 math-content group-open:text-indigo-700">${formattedName}</span>
                                     </summary>
-                                    <div class="pt-1">
-                                        ${renderRecursiveChildren(child.children)}
-                                    </div>
+                                    <div class="pt-1">${renderRecursiveChildren(child.children)}</div>
                                 </details>
-                            </div>
-                        `;
+                            </div>`;
                     } else {
                         html += `
                             <div class="tree-branch mt-1 border-l-0 pl-6 relative">
                                 <div class="absolute left-0 top-1/2 w-4 h-[1px] bg-gray-300 -translate-y-1/2"></div>
                                 <div class="tree-item flex items-start gap-2">
-                                    <input type="checkbox" id="${cbId}" value="${child.id}" 
-                                        class="map-check w-4 h-4 mt-1 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500 cursor-pointer flex-shrink-0" 
-                                        onchange="handleCheckTree(this)">
-                                    <label for="${cbId}" class="map-text cursor-pointer block math-content text-sm text-gray-600 leading-snug">
-                                        ${formattedName}
-                                    </label>
+                                    <input type="checkbox" id="${cbId}" value="${child.id}" class="map-check w-4 h-4 mt-1 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500 cursor-pointer flex-shrink-0" onchange="handleCheckTree(this)">
+                                    <label for="${cbId}" class="map-text cursor-pointer block math-content text-sm text-gray-600 leading-snug">${formattedName}</label>
                                 </div>
-                            </div>
-                        `;
+                            </div>`;
                     }
                 });
                 return html;
             };
 
-            // 2. Render Card cho từng Phân môn / Chương Lớn
             let hasContent = false;
             
             gradeNodes.forEach(rootNode => { 
                 if(rootNode.children) {
                     rootNode.children.forEach(sectionNode => { 
-                        
-                        // Logic lọc Môn
                         let isVisible = true;
                         const nameLower = sectionNode.name.toLowerCase();
                         if (selectedSub !== 'all') { 
@@ -545,58 +528,39 @@
 
                         if(isVisible) {
                             hasContent = true;
-                            
-                            // Tạo Card Accordion
                             const card = document.createElement('div');
                             card.className = "topic-card bg-white rounded-xl mb-3 overflow-hidden";
                             
                             const header = document.createElement('div');
                             header.className = "topic-header p-4 flex justify-between items-center bg-gray-50 border-b border-gray-100";
-                            
-                            header.onclick = (e) => {
-                                if(e.target.type !== 'checkbox') card.classList.toggle('active');
-                            };
+                            header.onclick = (e) => { if(e.target.type !== 'checkbox') card.classList.toggle('active'); };
 
                             const headerId = `cb-header-${sectionNode.id}`;
-                            const formattedHeaderName = window.formatContent(sectionNode.name);
+                            const formattedHeaderName = sectionNode.name; // Tắt MathJax
 
+                            // [FIX UX]: Thẻ Đại số/Hình học KHÔNG CÒN class 'map-check' để tránh nhặt ID rác
                             header.innerHTML = `
                                 <div class="flex items-center gap-3">
-                                    <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-50 to-indigo-50 text-indigo-600 flex items-center justify-center font-bold text-lg shrink-0 border border-blue-100 shadow-sm">
-                                        <i class="fa-solid fa-book"></i>
-                                    </div>
+                                    <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-50 to-indigo-50 text-indigo-600 flex items-center justify-center font-bold text-lg shrink-0 border border-blue-100 shadow-sm"><i class="fa-solid fa-book"></i></div>
                                     <div class="flex items-center gap-3">
-                                        <input type="checkbox" id="${headerId}" class="map-check-parent w-5 h-5 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500 cursor-pointer" 
-                                            onchange="toggleAllChildren(this)">
-                                        <label for="${headerId}" class="font-bold text-gray-800 text-sm leading-tight cursor-pointer select-none">
-                                            ${formattedHeaderName}
-                                        </label>
+                                        <input type="checkbox" id="${headerId}" class="map-check-parent w-5 h-5 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500 cursor-pointer" onchange="toggleAllChildren(this)">
+                                        <label for="${headerId}" class="font-bold text-gray-800 text-sm leading-tight cursor-pointer select-none">${formattedHeaderName}</label>
                                     </div>
                                 </div>
-                                <i class="fa-solid fa-chevron-down arrow-icon text-gray-400"></i>
-                            `;
+                                <i class="fa-solid fa-chevron-down arrow-icon text-gray-400"></i>`;
                             
                             const body = document.createElement('div');
                             body.className = "topic-body";
+                            if(sectionNode.children) { body.innerHTML = `<div class="pt-2 pr-2">${renderRecursiveChildren(sectionNode.children)}</div>`; } 
+                            else { body.innerHTML = `<p class="text-xs text-gray-400 italic p-4 text-center">Chưa có bài học nào.</p>`; }
                             
-                            if(sectionNode.children) {
-                                body.innerHTML = `<div class="pt-2 pr-2">${renderRecursiveChildren(sectionNode.children)}</div>`;
-                            } else {
-                                body.innerHTML = `<p class="text-xs text-gray-400 italic p-4 text-center">Chưa có bài học nào.</p>`;
-                            }
-                            
-                            card.appendChild(header);
-                            card.appendChild(body);
-                            container.appendChild(card);
+                            card.appendChild(header); card.appendChild(body); container.appendChild(card);
                         }
                     });
                 }
             });
 
-            if (!hasContent) {
-                container.innerHTML = `<div class="text-center py-10"><p class="text-gray-400">Không tìm thấy chuyên đề phù hợp.</p></div>`;
-            }
-            
+            if (!hasContent) container.innerHTML = `<div class="text-center py-10"><p class="text-gray-400">Không tìm thấy chuyên đề phù hợp.</p></div>`;
             updateSelectionStatus();
         };
 
@@ -682,7 +646,8 @@
             return ids;
         };
 
-       window.startPractice = async () => {
+      // --- BỘ LỌC CHUẨN XÁC TUYỆT ĐỐI ---
+        window.startPractice = async () => {
             const btn = document.querySelector('button[onclick="startPractice()"]');
             const oldHtml = btn.innerHTML;
             btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang khởi tạo...'; 
@@ -695,146 +660,105 @@
                 const customTime = parseInt(document.getElementById('inputTime').value) || 0;
                 const sortDiff = document.getElementById('toggleSortDifficulty').checked;
                 
-                const checkedLevels = Array.from(document.querySelectorAll('.level-checkbox:checked'))
-                                           .map(cb => cb.value)
-                                           .filter(val => !['theory', 'realworld'].includes(val));
-
+                const checkedLevels = Array.from(document.querySelectorAll('.level-checkbox:checked')).map(cb => cb.value).filter(val => !['theory', 'realworld'].includes(val));
                 const reqTheory = document.getElementById('filterTheory').checked;
                 const reqRealWorld = document.getElementById('filterRealWorld').checked;
-
-                // Lấy ID đã check bên cây (loại rỗng và "on")
-                const checkedMapIds = Array.from(document.querySelectorAll('.map-check:checked'))
-                                           .map(cb => cb.value)
-                                           .filter(val => val && val !== "on" && val.trim() !== "");
+                const checkedMapIds = Array.from(document.querySelectorAll('.map-check:checked')).map(cb => cb.value).filter(val => val && val !== "on" && val.trim() !== "");
                 
                 const theoryMapIds = reqTheory ? getSpecialTopicIds(mapTree, 'theory') : [];
                 const realWorldMapIds = reqRealWorld ? getSpecialTopicIds(mapTree, 'realworld') : [];
 
-                // LỌC CÂU HỎI
+                const getBaseIdForMatch = (id) => {
+                    let raw = String(id || "").split('-')[0].split('_')[0]; 
+                    const subMatch = raw.match(/[A-Z]/i);
+                    if (!subMatch) return raw; 
+                    const subIndex = subMatch.index;
+                    const prefix = raw.substring(0, subIndex + 1).toUpperCase(); 
+                    let suffix = raw.substring(subIndex + 1);      
+                    suffix = suffix.replace(/NB|TH|VDC|VD|[NHVC]/gi, ''); 
+                    return prefix + suffix; 
+                };
+
+                const checkedCleanIds = checkedMapIds.map(id => getBaseIdForMatch(id));
+
                 let pool = globalBankMetadata.filter(q => {
                     const actualMapId = String(q.mapId || q.id || "").trim(); 
                     const actualLevel = String(q.level || "").trim();
                     if (!actualMapId) return false;
 
-                    // 1. Tách phần trước dấu gạch ngang/dấu gạch dưới (VD: 9D1H1-7_abc -> 9D1H1)
-                    const baseIdRaw = actualMapId.split('-')[0].split('_')[0];
+                    const qBaseId = getBaseIdForMatch(actualMapId); 
                     const subjectChar = actualMapId.replace(/^\d+/, '')[0]?.toUpperCase(); 
 
-                    // --- TRẠM 1: Lọc Khối Lớp & Phân Môn ---
                     if (!actualMapId.startsWith(grade)) return false; 
                     if (subject === 'dai_so' && subjectChar !== 'D' && subjectChar !== 'G') return false;
                     if (subject === 'hinh_hoc' && subjectChar !== 'H') return false;
 
-                    // --- TRẠM 2: Lọc Mức độ ---
                     if (checkedLevels.length > 0) {
+                        let idLevel = "";
+                        const levelMatch = actualMapId.match(/^\d+[A-Za-z]\d+([A-Za-z]+)/);
+                        if (levelMatch) idLevel = levelMatch[1].toUpperCase();
+
                         let isLevelMatch = checkedLevels.some(code => {
-                            if (code === 'NB' && (actualLevel.includes('Nhận biết') || actualLevel === 'NB' || baseIdRaw.includes('N'))) return true;
-                            if (code === 'TH' && (actualLevel.includes('Thông hiểu') || actualLevel === 'TH' || baseIdRaw.includes('H'))) return true;
-                            if (code === 'VD' && (actualLevel === 'Vận dụng' || actualLevel === 'VD' || baseIdRaw.includes('V'))) return true;
-                            if (code === 'VDC' && (actualLevel.includes('cao') || actualLevel === 'VDC' || baseIdRaw.includes('C'))) return true;
+                            const hasN = actualMapId.includes('NB') || actualMapId.includes('N');
+                            const hasH = actualMapId.includes('TH') || actualMapId.includes('H');
+                            const hasV = actualMapId.includes('VDC') ? false : (actualMapId.includes('VD') || actualMapId.includes('V'));
+                            const hasC = actualMapId.includes('VDC') || actualMapId.includes('C');
+
+                            if (code === 'NB' && (actualLevel.includes('Nhận biết') || actualLevel === 'NB' || idLevel === 'N' || idLevel === 'NB' || hasN)) return true;
+                            if (code === 'TH' && (actualLevel.includes('Thông hiểu') || actualLevel === 'TH' || idLevel === 'H' || idLevel === 'TH' || hasH)) return true;
+                            if (code === 'VD' && ((actualLevel.includes('Vận dụng') && !actualLevel.includes('cao')) || actualLevel === 'VD' || idLevel === 'V' || idLevel === 'VD' || hasV)) return true;
+                            if (code === 'VDC' && (actualLevel.includes('cao') || actualLevel === 'VDC' || idLevel === 'C' || idLevel === 'VDC' || hasC)) return true;
                             return false;
                         });
                         if (!isLevelMatch) return false;
                     }
 
-                    // --- TRẠM 3: Lọc theo Cây ID Dạng Toán ---
-                    if (checkedMapIds.length > 0) {
-                        const isMatchTopic = checkedMapIds.some(targetMapId => {
-                            // Xóa đuôi của target (nếu có)
-                            const cleanTarget = targetMapId.split('-')[0].split('_')[0];
-                            
-                            // Xóa N, H, V, C ở nửa sau của baseIdRaw để tạo ra ID gốc có thể so sánh
-                            let comparableQId = baseIdRaw;
-                            const matchPrefix = baseIdRaw.match(/^(\d+[a-zA-Z])/);
-                            if(matchPrefix) {
-                                // "12H1H2" -> Giữ "12H", Xóa 'H' trong "1H2" -> "12H12"
-                                comparableQId = matchPrefix[1] + baseIdRaw.substring(matchPrefix[1].length).replace(/[NHVCnhvc]/g, '');
-                            }
-
-                            // Câu hỏi có bắt đầu bằng mã dạng toán hay không?
-                            return comparableQId.startsWith(cleanTarget);
-                        });
+                    if (checkedCleanIds.length > 0) {
+                        const isMatchTopic = checkedCleanIds.some(tId => qBaseId === tId || qBaseId.startsWith(tId));
                         if (!isMatchTopic) return false;
                     }
 
-                    // --- TRẠM 4: Lọc Dạng đặc biệt (Lý thuyết / Thực tế) ---
                     if (reqTheory || reqRealWorld) {
                         let matchSpecial = false;
-                        
-                        let comparableQId = baseIdRaw;
-                        const matchPrefix = baseIdRaw.match(/^(\d+[a-zA-Z])/);
-                        if(matchPrefix) {
-                            comparableQId = matchPrefix[1] + baseIdRaw.substring(matchPrefix[1].length).replace(/[NHVCnhvc]/g, '');
-                        }
-
                         if (reqTheory) {
-                            const isMapTheory = theoryMapIds.some(tId => comparableQId.startsWith(tId.split('-')[0]));
+                            const isMapTheory = theoryMapIds.some(tId => qBaseId === tId || qBaseId.startsWith(tId) || actualMapId.startsWith(tId));
                             const isTagTheory = String(q.tags || "").includes('theory') || actualMapId.includes('LT');
                             if (isMapTheory || isTagTheory) matchSpecial = true;
                         }
                         if (reqRealWorld) {
-                            const isMapReal = realWorldMapIds.some(tId => comparableQId.startsWith(tId.split('-')[0]));
+                            const isMapReal = realWorldMapIds.some(tId => qBaseId === tId || qBaseId.startsWith(tId) || actualMapId.startsWith(tId));
                             const isTagReal = String(q.tags || "").includes('realworld') || actualMapId.includes('TT');
                             if (isMapReal || isTagReal) matchSpecial = true;
                         }
                         if (!matchSpecial) return false;
                     }
-
                     return true;
                 });
 
-                if (pool.length === 0) {
-                    alert("Không tìm thấy câu hỏi phù hợp với các tiêu chí bạn chọn.");
-                    return;
-                }
+                if (pool.length === 0) { alert("Không tìm thấy câu hỏi phù hợp với các tiêu chí bạn chọn."); return; }
 
-                // Trộn câu hỏi
-                for (let i = pool.length - 1; i > 0; i--) {
-                    const j = Math.floor(Math.random() * (i + 1));
-                    [pool[i], pool[j]] = [pool[j], pool[i]];
-                }
-                
+                for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
                 let selectedMeta = pool.slice(0, qCount);
                 if (sortDiff) selectedMeta.sort((a, b) => getDifficultyLevel(a.id) - getDifficultyLevel(b.id));
 
                 practiceQuestions = [];
                 const WORKER_URL = "https://upload-helper.phamngockhanh-942001.workers.dev/bank";
-                const fetchPromises = selectedMeta.map(async (meta) => {
-                    try {
-                        const res = await fetch(`${WORKER_URL}?id=${encodeURIComponent(meta.id)}`);
-                        if (res.ok) return await res.json();
-                    } catch (e) {}
-                    return null;
-                });
-                
+                const fetchPromises = selectedMeta.map(async (meta) => { try { const res = await fetch(`${WORKER_URL}?id=${encodeURIComponent(meta.id)}`); if (res.ok) return await res.json(); } catch (e) {} return null; });
                 const results = await Promise.all(fetchPromises);
                 practiceQuestions = results.filter(q => q !== null);
 
-                if (practiceQuestions.length === 0) {
-                    alert("Lỗi tải nội dung câu hỏi.");
-                    return;
-                }
+                if (practiceQuestions.length === 0) { alert("Lỗi tải nội dung câu hỏi."); return; }
 
                 let totalMinutes = customTime;
                 if (totalMinutes === 0) {
                     let totalSeconds = 0;
-                    practiceQuestions.forEach(q => {
-                        if (q.type === 'tf') totalSeconds += 240; 
-                        else totalSeconds += 108; 
-                    });
+                    practiceQuestions.forEach(q => { if (q.type === 'tf') totalSeconds += 240; else totalSeconds += 108; });
                     totalMinutes = Math.ceil(totalSeconds / 60);
                 }
                 
-                document.getElementById('configStep').classList.add('hidden');
-                document.getElementById('practiceStep').classList.remove('hidden');
-                renderPracticeInterface();
-                startTimer(totalMinutes * 60);
-
-            } catch (err) {
-                alert(err.message);
-            } finally {
-                btn.innerHTML = oldHtml; btn.disabled = false;
-            }
+                document.getElementById('configStep').classList.add('hidden'); document.getElementById('practiceStep').classList.remove('hidden');
+                renderPracticeInterface(); startTimer(totalMinutes * 60);
+            } catch (err) { alert(err.message); } finally { btn.innerHTML = oldHtml; btn.disabled = false; }
         };
 
         function renderPracticeInterface() {
