@@ -457,7 +457,7 @@
             } catch (e) { console.error("Lỗi tải Bank:", e); }
         }
 
-// --- 3. RENDER DANH SÁCH BÀI (ĐÃ FIX LAG) ---
+// --- 3. RENDER DANH SÁCH BÀI (CHỈ LẤY ID BÀI HỌC CHI TIẾT) ---
         window.renderTopicList = () => {
             const container = document.getElementById('treeContainer');
             if (!container) return;
@@ -485,8 +485,7 @@
                 nodes.forEach(child => {
                     const hasChildren = child.children && child.children.length > 0;
                     const cbId = `cb-${child.id}`;
-                    // [FIX LAG]: Tắt dịch MathJax ở đây để load siêu tốc
-                    const formattedName = child.name; 
+                    const formattedName = child.name; // Tắt MathJax để load siêu tốc
                     
                     if (hasChildren) {
                         html += `
@@ -494,7 +493,7 @@
                                 <details class="group">
                                     <summary class="flex items-center gap-2 py-1.5 hover:text-blue-600 select-none">
                                         <i class="fa-solid fa-caret-right folder-icon text-gray-400 text-xs"></i>
-                                        <input type="checkbox" id="${cbId}" value="${child.id}" class="map-check w-4 h-4 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500 cursor-pointer" onclick="event.stopPropagation()" onchange="handleCheckTree(this)">
+                                        <input type="checkbox" id="${cbId}" value="${child.id}" class="map-check-parent-node w-4 h-4 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500 cursor-pointer" onclick="event.stopPropagation()" onchange="handleCheckTree(this)">
                                         <span class="text-sm font-bold text-gray-700 math-content group-open:text-indigo-700">${formattedName}</span>
                                     </summary>
                                     <div class="pt-1">${renderRecursiveChildren(child.children)}</div>
@@ -536,9 +535,8 @@
                             header.onclick = (e) => { if(e.target.type !== 'checkbox') card.classList.toggle('active'); };
 
                             const headerId = `cb-header-${sectionNode.id}`;
-                            const formattedHeaderName = sectionNode.name; // Tắt MathJax
+                            const formattedHeaderName = sectionNode.name; 
 
-                            // [FIX UX]: Thẻ Đại số/Hình học KHÔNG CÒN class 'map-check' để tránh nhặt ID rác
                             header.innerHTML = `
                                 <div class="flex items-center gap-3">
                                     <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-50 to-indigo-50 text-indigo-600 flex items-center justify-center font-bold text-lg shrink-0 border border-blue-100 shadow-sm"><i class="fa-solid fa-book"></i></div>
@@ -663,6 +661,8 @@
                 const checkedLevels = Array.from(document.querySelectorAll('.level-checkbox:checked')).map(cb => cb.value).filter(val => !['theory', 'realworld'].includes(val));
                 const reqTheory = document.getElementById('filterTheory').checked;
                 const reqRealWorld = document.getElementById('filterRealWorld').checked;
+                
+                // Mảng này giờ đây CHỈ chứa ID của các bài học chi tiết (Leaf nodes)
                 const checkedMapIds = Array.from(document.querySelectorAll('.map-check:checked')).map(cb => cb.value).filter(val => val && val !== "on" && val.trim() !== "");
                 
                 const theoryMapIds = reqTheory ? getSpecialTopicIds(mapTree, 'theory') : [];
@@ -714,7 +714,8 @@
                     }
 
                     if (checkedCleanIds.length > 0) {
-                        const isMatchTopic = checkedCleanIds.some(tId => qBaseId === tId || qBaseId.startsWith(tId));
+                        // FIX: Kiểm tra 2 chiều để đảm bảo không bị lọt câu hỏi
+                        const isMatchTopic = checkedCleanIds.some(tId => qBaseId === tId || qBaseId.startsWith(tId) || tId.startsWith(qBaseId));
                         if (!isMatchTopic) return false;
                     }
 
