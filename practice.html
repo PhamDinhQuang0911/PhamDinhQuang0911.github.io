@@ -644,122 +644,176 @@
             return ids;
         };
 
-      // --- BỘ LỌC CHUẨN XÁC TUYỆT ĐỐI ---
+      // =======================================================================
+        // KIẾN TRÚC BỘ LỌC MỚI (VIẾT LẠI HOÀN TOÀN)
+        // Đảm bảo tính khắt khe: Phải thỏa mãn ĐỒNG THỜI Cột Trái VÀ Cột Phải
+        // =======================================================================
         window.startPractice = async () => {
             const btn = document.querySelector('button[onclick="startPractice()"]');
             const oldHtml = btn.innerHTML;
-            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang khởi tạo...'; 
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang xử lý...'; 
             btn.disabled = true;
 
             try {
+                // --- BƯỚC 1: THU THẬP THÔNG SỐ CỘT BÊN TRÁI ---
                 const grade = document.querySelector('input[name="grade"]:checked').value;
                 const subject = document.querySelector('input[name="subject"]:checked').value;
                 const qCount = parseInt(document.getElementById('inputQCount').value) || 10;
                 const customTime = parseInt(document.getElementById('inputTime').value) || 0;
                 const sortDiff = document.getElementById('toggleSortDifficulty').checked;
                 
-                const checkedLevels = Array.from(document.querySelectorAll('.level-checkbox:checked')).map(cb => cb.value).filter(val => !['theory', 'realworld'].includes(val));
+                const checkedLevels = Array.from(document.querySelectorAll('.level-checkbox:checked'))
+                                           .map(cb => cb.value)
+                                           .filter(val => ['NB', 'TH', 'VD', 'VDC'].includes(val));
+
                 const reqTheory = document.getElementById('filterTheory').checked;
                 const reqRealWorld = document.getElementById('filterRealWorld').checked;
-                
-                // Mảng này giờ đây CHỈ chứa ID của các bài học chi tiết (Leaf nodes)
-                const checkedMapIds = Array.from(document.querySelectorAll('.map-check:checked')).map(cb => cb.value).filter(val => val && val !== "on" && val.trim() !== "");
-                
-                const theoryMapIds = reqTheory ? getSpecialTopicIds(mapTree, 'theory') : [];
-                const realWorldMapIds = reqRealWorld ? getSpecialTopicIds(mapTree, 'realworld') : [];
 
-                const getBaseIdForMatch = (id) => {
-                    let raw = String(id || "").split('-')[0].split('_')[0]; 
-                    const subMatch = raw.match(/[A-Z]/i);
-                    if (!subMatch) return raw; 
-                    const subIndex = subMatch.index;
-                    const prefix = raw.substring(0, subIndex + 1).toUpperCase(); 
-                    let suffix = raw.substring(subIndex + 1);      
+                // --- BƯỚC 2: THU THẬP THÔNG SỐ CÂY THƯ MỤC CỘT BÊN PHẢI ---
+                // [SỬA LỖI CỐT LÕI]: Chỉ lấy checkbox nằm trong class .tree-item (tức là bài học chi tiết)
+                // Tuyệt đối không lấy checkbox của thư mục cha để tránh lỗi "hút" toàn bộ môn.
+                const checkedMapIds = Array.from(document.querySelectorAll('.tree-item .map-check:checked'))
+                                           .map(cb => cb.value)
+                                           .filter(val => val && val.trim() !== "");
+
+                // --- BƯỚC 3: HÀM CHUẨN HÓA ID ---
+                // Dùng để gọt ID câu hỏi "12D1H2-7_abc" thành "12D12"
+                const normalizeId = (rawId) => {
+                    if (!rawId) return "";
+                    let base = rawId.split('-')[0].split('_')[0]; 
+                    const matchSubj = base.match(/[A-Z]/i); // Tìm chữ D, H, G
+                    if (!matchSubj) return base; 
+                    
+                    const subIndex = matchSubj.index;
+                    const prefix = base.substring(0, subIndex + 1).toUpperCase(); // VD: "12D"
+                    let suffix = base.substring(subIndex + 1); // VD: "1H2"
+                    
+                    // Gọt sạch các ký tự đánh dấu mức độ ở phần đuôi
                     suffix = suffix.replace(/NB|TH|VDC|VD|[NHVC]/gi, ''); 
-                    return prefix + suffix; 
+                    return prefix + suffix; // VD: "12D12"
                 };
 
-                const checkedCleanIds = checkedMapIds.map(id => getBaseIdForMatch(id));
-
+                // --- BƯỚC 4: CHẠY BỘ LỌC DỮ LIỆU ---
                 let pool = globalBankMetadata.filter(q => {
-                    const actualMapId = String(q.mapId || q.id || "").trim(); 
-                    const actualLevel = String(q.level || "").trim();
-                    if (!actualMapId) return false;
+                    const qId = String(q.mapId || q.id || "").trim(); 
+                    const qLevelText = String(q.level || "").trim().toUpperCase();
+                    if (!qId) return false;
 
-                    const qBaseId = getBaseIdForMatch(actualMapId); 
-                    const subjectChar = actualMapId.replace(/^\d+/, '')[0]?.toUpperCase(); 
+                    const normQId = normalizeId(qId); 
+                    const subjChar = qId.replace(/^\d+/, '')[0]?.toUpperCase(); 
 
-                    if (!actualMapId.startsWith(grade)) return false; 
-                    if (subject === 'dai_so' && subjectChar !== 'D' && subjectChar !== 'G') return false;
-                    if (subject === 'hinh_hoc' && subjectChar !== 'H') return false;
+                    // TRẠM 1: LỌC KHỐI LỚP (Bắt buộc)
+                    if (!qId.startsWith(grade)) return false; 
 
+                    // TRẠM 2: LỌC MÔN HỌC (Bắt buộc nếu không chọn Tất cả)
+                    if (subject === 'dai_so' && !['D', 'G'].includes(subjChar)) return false;
+                    if (subject === 'hinh_hoc' && subjChar !== 'H') return false;
+
+                    // TRẠM 3: LỌC MỨC ĐỘ (Bắt buộc khớp ít nhất 1 mức độ)
                     if (checkedLevels.length > 0) {
-                        let idLevel = "";
-                        const levelMatch = actualMapId.match(/^\d+[A-Za-z]\d+([A-Za-z]+)/);
-                        if (levelMatch) idLevel = levelMatch[1].toUpperCase();
+                        let idLevelChar = "";
+                        // Tìm chữ cái đứng trước dấu gạch ngang (N, H, V, C)
+                        const levelMatch = qId.split('-')[0].match(/[NHVC]$/i);
+                        if (levelMatch) idLevelChar = levelMatch[0].toUpperCase();
 
                         let isLevelMatch = checkedLevels.some(code => {
-                            const hasN = actualMapId.includes('NB') || actualMapId.includes('N');
-                            const hasH = actualMapId.includes('TH') || actualMapId.includes('H');
-                            const hasV = actualMapId.includes('VDC') ? false : (actualMapId.includes('VD') || actualMapId.includes('V'));
-                            const hasC = actualMapId.includes('VDC') || actualMapId.includes('C');
-
-                            if (code === 'NB' && (actualLevel.includes('Nhận biết') || actualLevel === 'NB' || idLevel === 'N' || idLevel === 'NB' || hasN)) return true;
-                            if (code === 'TH' && (actualLevel.includes('Thông hiểu') || actualLevel === 'TH' || idLevel === 'H' || idLevel === 'TH' || hasH)) return true;
-                            if (code === 'VD' && ((actualLevel.includes('Vận dụng') && !actualLevel.includes('cao')) || actualLevel === 'VD' || idLevel === 'V' || idLevel === 'VD' || hasV)) return true;
-                            if (code === 'VDC' && (actualLevel.includes('cao') || actualLevel === 'VDC' || idLevel === 'C' || idLevel === 'VDC' || hasC)) return true;
+                            if (code === 'NB' && (qLevelText.includes('NHẬN BIẾT') || qLevelText === 'NB' || idLevelChar === 'N')) return true;
+                            if (code === 'TH' && (qLevelText.includes('THÔNG HIỂU') || qLevelText === 'TH' || idLevelChar === 'H')) return true;
+                            if (code === 'VD' && (qLevelText === 'VẬN DỤNG' || qLevelText === 'VD' || idLevelChar === 'V')) return true;
+                            if (code === 'VDC' && (qLevelText.includes('CAO') || qLevelText === 'VDC' || idLevelChar === 'C')) return true;
                             return false;
                         });
-                        if (!isLevelMatch) return false;
+                        if (!isLevelMatch) return false; // Không khớp -> Loại!
                     }
 
-                    if (checkedCleanIds.length > 0) {
-                        // FIX: Kiểm tra 2 chiều để đảm bảo không bị lọt câu hỏi
-                        const isMatchTopic = checkedCleanIds.some(tId => qBaseId === tId || qBaseId.startsWith(tId) || tId.startsWith(qBaseId));
-                        if (!isMatchTopic) return false;
+                    // TRẠM 4: LỌC THEO CÂY THƯ MỤC (TRẠM QUYẾT ĐỊNH)
+                    // Câu hỏi PHẢI nằm trong danh sách các ID Bài học chi tiết đã được chọn
+                    if (checkedMapIds.length > 0) {
+                        const isMatchTopic = checkedMapIds.some(targetId => {
+                            // Cắt đuôi targetId phòng trường hợp trên cây khai báo sai
+                            const cleanTarget = targetId.split('-')[0].split('_')[0];
+                            return normQId.startsWith(cleanTarget);
+                        });
+                        if (!isMatchTopic) return false; // Không thuộc bài đã chọn -> Loại!
                     }
 
+                    // TRẠM 5: LỌC NHÃN ĐẶC BIỆT
                     if (reqTheory || reqRealWorld) {
                         let matchSpecial = false;
+                        const qTags = String(q.tags || "").toLowerCase();
+
                         if (reqTheory) {
-                            const isMapTheory = theoryMapIds.some(tId => qBaseId === tId || qBaseId.startsWith(tId) || actualMapId.startsWith(tId));
-                            const isTagTheory = String(q.tags || "").includes('theory') || actualMapId.includes('LT');
-                            if (isMapTheory || isTagTheory) matchSpecial = true;
+                            const isTagTheory = qTags.includes('theory') || qTags.includes('ly-thuyet') || qId.includes('LT');
+                            if (isTagTheory) matchSpecial = true;
                         }
                         if (reqRealWorld) {
-                            const isMapReal = realWorldMapIds.some(tId => qBaseId === tId || qBaseId.startsWith(tId) || actualMapId.startsWith(tId));
-                            const isTagReal = String(q.tags || "").includes('realworld') || actualMapId.includes('TT');
-                            if (isMapReal || isTagReal) matchSpecial = true;
+                            const isTagReal = qTags.includes('realworld') || qTags.includes('thuc-te') || qId.includes('TT');
+                            if (isTagReal) matchSpecial = true;
                         }
-                        if (!matchSpecial) return false;
+                        if (!matchSpecial) return false; // Không có nhãn yêu cầu -> Loại!
                     }
+
+                    // Sống sót qua 5 trạm -> Đưa vào danh sách chờ thi!
                     return true;
                 });
 
-                if (pool.length === 0) { alert("Không tìm thấy câu hỏi phù hợp với các tiêu chí bạn chọn."); return; }
+                // --- BƯỚC 5: TẠO ĐỀ & TẢI CÂU HỎI ---
+                if (pool.length === 0) { 
+                    alert("Không tìm thấy câu hỏi phù hợp. Vui lòng thay đổi tùy chọn!"); 
+                    return; 
+                }
 
-                for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
+                // Trộn đề
+                for (let i = pool.length - 1; i > 0; i--) { 
+                    const j = Math.floor(Math.random() * (i + 1)); 
+                    [pool[i], pool[j]] = [pool[j], pool[i]]; 
+                }
+                
+                // Cắt số lượng
                 let selectedMeta = pool.slice(0, qCount);
                 if (sortDiff) selectedMeta.sort((a, b) => getDifficultyLevel(a.id) - getDifficultyLevel(b.id));
 
                 practiceQuestions = [];
                 const WORKER_URL = "https://upload-helper.phamngockhanh-942001.workers.dev/bank";
-                const fetchPromises = selectedMeta.map(async (meta) => { try { const res = await fetch(`${WORKER_URL}?id=${encodeURIComponent(meta.id)}`); if (res.ok) return await res.json(); } catch (e) {} return null; });
+                const fetchPromises = selectedMeta.map(async (meta) => { 
+                    try { 
+                        const res = await fetch(`${WORKER_URL}?id=${encodeURIComponent(meta.id)}`); 
+                        if (res.ok) return await res.json(); 
+                    } catch (e) {} 
+                    return null; 
+                });
+                
                 const results = await Promise.all(fetchPromises);
                 practiceQuestions = results.filter(q => q !== null);
 
-                if (practiceQuestions.length === 0) { alert("Lỗi tải nội dung câu hỏi."); return; }
+                if (practiceQuestions.length === 0) { 
+                    alert("Lỗi tải nội dung câu hỏi từ máy chủ."); 
+                    return; 
+                }
 
+                // Tính thời gian
                 let totalMinutes = customTime;
                 if (totalMinutes === 0) {
                     let totalSeconds = 0;
-                    practiceQuestions.forEach(q => { if (q.type === 'tf') totalSeconds += 240; else totalSeconds += 108; });
+                    practiceQuestions.forEach(q => { 
+                        if (q.type === 'tf') totalSeconds += 240; 
+                        else totalSeconds += 108; 
+                    });
                     totalMinutes = Math.ceil(totalSeconds / 60);
                 }
                 
-                document.getElementById('configStep').classList.add('hidden'); document.getElementById('practiceStep').classList.remove('hidden');
-                renderPracticeInterface(); startTimer(totalMinutes * 60);
-            } catch (err) { alert(err.message); } finally { btn.innerHTML = oldHtml; btn.disabled = false; }
+                // Chuyển màn hình
+                document.getElementById('configStep').classList.add('hidden'); 
+                document.getElementById('practiceStep').classList.remove('hidden');
+                renderPracticeInterface(); 
+                startTimer(totalMinutes * 60);
+
+            } catch (err) { 
+                alert(err.message); 
+            } finally { 
+                btn.innerHTML = oldHtml; 
+                btn.disabled = false; 
+            }
         };
 
         function renderPracticeInterface() {
