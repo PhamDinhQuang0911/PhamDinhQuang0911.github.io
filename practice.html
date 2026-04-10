@@ -646,8 +646,8 @@
 
       // =======================================================================
       // =======================================================================
-        // KIẾN TRÚC BỘ LỌC MỚI (VIẾT LẠI HOÀN TOÀN & KHẮT KHE 100%)
-        // Đảm bảo tính AND: Câu hỏi phải sống sót qua toàn bộ 4 Trạm kiểm duyệt
+// =======================================================================
+        // KIẾN TRÚC BỘ LỌC MỚI (CHẶN ĐỨNG LỖI LẤY NHẦM THƯ MỤC CHA)
         // =======================================================================
         window.startPractice = async () => {
             const btn = document.querySelector('button[onclick="startPractice()"]');
@@ -656,7 +656,7 @@
             btn.disabled = true;
 
             try {
-                // --- THU THẬP THÔNG SỐ CỘT TRÁI ---
+                // 1. CỘT TRÁI: Lấy thông số chung
                 const grade = document.querySelector('input[name="grade"]:checked').value;
                 const subject = document.querySelector('input[name="subject"]:checked').value;
                 const qCount = parseInt(document.getElementById('inputQCount').value) || 10;
@@ -670,9 +670,9 @@
                 const reqTheory = document.getElementById('filterTheory').checked;
                 const reqRealWorld = document.getElementById('filterRealWorld').checked;
 
-                // --- THU THẬP THÔNG SỐ CÂY THƯ MỤC CỘT PHẢI ---
-                // [ĐỘT PHÁ 1]: CHỈ thu thập checkbox nằm trong '.tree-item' (Bài học chi tiết)
-                // Loại bỏ hoàn toàn khả năng thu thập nhầm ID của Chương (nằm ở thẻ <summary>)
+                // 2. CỘT PHẢI: Lấy ID từ Cây Thư Mục
+                // [CHỐT CHẶN QUAN TRỌNG]: Chỉ quét '.tree-item .map-check:checked' 
+                // Tuyệt đối không quét checkbox của thẻ <summary> (Chương lớn) để tránh lọt ID rác như '9D'.
                 const checkedMapIds = Array.from(document.querySelectorAll('.tree-item .map-check:checked'))
                                            .map(cb => cb.value)
                                            .filter(val => val && val !== "on" && val.trim() !== "");
@@ -680,32 +680,21 @@
                 const theoryMapIds = reqTheory ? getSpecialTopicIds(mapTree, 'theory') : [];
                 const realWorldMapIds = reqRealWorld ? getSpecialTopicIds(mapTree, 'realworld') : [];
 
-                // --- HÀM CHUẨN HÓA ID CÂU HỎI ---
-                // Nhiệm vụ: Gọt bỏ rác và chữ cái mức độ để đối chiếu 1:1 với Cây thư mục
-                // Ví dụ: "9D4H1-7_xyz" -> Trả về: "9D41"
+                // 3. HÀM GỌT ID SẠCH
                 const getBaseIdForMatch = (id) => {
                     let raw = String(id || "").split('-')[0].split('_')[0]; 
-                    const subMatch = raw.match(/[A-Z]/i); 
+                    const subMatch = raw.match(/[A-Z]/i);
                     if (!subMatch) return raw; 
-
                     const subIndex = subMatch.index;
-                    const prefix = raw.substring(0, subIndex + 1).toUpperCase(); // "9D"
-                    let suffix = raw.substring(subIndex + 1); // "4H1"
-                    
-                    // Gọt sạch chữ cái mức độ
-                    suffix = suffix.replace(/NB|TH|VDC|VD|[NHVC]/gi, ''); // "41"
-                    return prefix + suffix; // "9D41"
+                    const prefix = raw.substring(0, subIndex + 1).toUpperCase(); 
+                    let suffix = raw.substring(subIndex + 1);      
+                    suffix = suffix.replace(/NB|TH|VDC|VD|[NHVC]/gi, ''); 
+                    return prefix + suffix; 
                 };
 
                 const checkedCleanIds = checkedMapIds.map(id => getBaseIdForMatch(id));
 
-                console.log("🎯 [BỘ LỌC] Bắt đầu quét Ngân hàng...");
-                console.log("👉 Lớp:", grade, "| Môn:", subject, "| Mức độ:", checkedLevels);
-                console.log("👉 Dạng toán được chọn (Đã làm sạch):", checkedCleanIds);
-
-                let stats = { total: globalBankMetadata.length, pass1: 0, pass2: 0, pass3: 0, pass4: 0 };
-
-                // --- BẮT ĐẦU ĐƯA CÂU HỎI QUA 4 TRẠM KIỂM DUYỆT (LOGIC AND) ---
+                // 4. KIỂM DUYỆT CÂU HỎI
                 let pool = globalBankMetadata.filter(q => {
                     const actualMapId = String(q.mapId || q.id || "").trim(); 
                     const actualLevel = String(q.level || "").trim().toUpperCase();
@@ -715,13 +704,12 @@
                     const subjectCharMatch = actualMapId.match(/^\d+([a-zA-Z])/);
                     const subjectChar = subjectCharMatch ? subjectCharMatch[1].toUpperCase() : ""; 
 
-                    // [TRẠM 1]: LỚP & PHÂN MÔN
+                    // TRẠM 1: Lớp & Môn
                     if (!actualMapId.startsWith(grade)) return false; 
                     if (subject === 'dai_so' && !['D', 'G'].includes(subjectChar)) return false;
                     if (subject === 'hinh_hoc' && subjectChar !== 'H') return false;
-                    stats.pass1++;
 
-                    // [TRẠM 2]: MỨC ĐỘ
+                    // TRẠM 2: Mức độ
                     if (checkedLevels.length > 0) {
                         let idLevelChar = "";
                         const levelMatch = actualMapId.split('-')[0].match(/[NHVC]$/i);
@@ -741,21 +729,14 @@
                         });
                         if (!isLevelMatch) return false;
                     }
-                    stats.pass2++;
 
-                    // [TRẠM 3]: CÂY THƯ MỤC DẠNG TOÁN (TRẠM KHẮT KHE NHẤT)
+                    // TRẠM 3: Dạng Toán (Chỉ lọc khi có tích chọn bên cây)
                     if (checkedCleanIds.length > 0) {
-                        const isMatchTopic = checkedCleanIds.some(tId => {
-                            // Câu hỏi chỉ được duyệt nếu ID gốc của nó BẮT ĐẦU BẰNG Target ID.
-                            // VD: tId = "9D41", qBaseId = "9D41" -> TRUE
-                            // VD: tId = "9D41", qBaseId = "9D31" -> FALSE
-                            return qBaseId.startsWith(tId);
-                        });
-                        if (!isMatchTopic) return false;
+                        const isMatchTopic = checkedCleanIds.some(tId => qBaseId.startsWith(tId));
+                        if (!isMatchTopic) return false; 
                     }
-                    stats.pass3++;
 
-                    // [TRẠM 4]: NHÃN LÝ THUYẾT / THỰC TẾ
+                    // TRẠM 4: Lý Thuyết / Thực Tế
                     if (reqTheory || reqRealWorld) {
                         let matchSpecial = false;
                         const qTags = String(q.tags || "").toLowerCase();
@@ -772,20 +753,16 @@
                         }
                         if (!matchSpecial) return false;
                     }
-                    stats.pass4++;
 
-                    // Nếu câu hỏi sống sót qua cả 4 trạm, lấy nó!
-                    return true;
+                    return true; // Thoát khỏi 4 trạm thành công!
                 });
 
-                console.log(`✅ [BỘ LỌC HOÀN TẤT] Tổng: ${stats.total} -> Qua Lớp/Môn: ${stats.pass1} -> Qua Mức độ: ${stats.pass2} -> Qua Dạng Toán: ${stats.pass3} -> Chung cuộc chốt được: ${stats.pass4} câu.`);
-
                 if (pool.length === 0) {
-                    alert("Không tìm thấy câu hỏi phù hợp với tùy chọn của bạn. Vui lòng nới lỏng bộ lọc.");
+                    alert("Không tìm thấy câu hỏi phù hợp với các tiêu chí bạn chọn.");
                     return;
                 }
 
-                // Trộn ngẫu nhiên
+                // Xáo trộn và cắt số lượng
                 for (let i = pool.length - 1; i > 0; i--) {
                     const j = Math.floor(Math.random() * (i + 1));
                     [pool[i], pool[j]] = [pool[j], pool[i]];
@@ -808,7 +785,7 @@
                 practiceQuestions = results.filter(q => q !== null);
 
                 if (practiceQuestions.length === 0) {
-                    alert("Lỗi tải nội dung câu hỏi từ máy chủ.");
+                    alert("Lỗi tải nội dung câu hỏi.");
                     return;
                 }
 
