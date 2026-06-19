@@ -698,28 +698,44 @@ window.toggleProductFields = () => {
     }
 };
 
+// Script điều khiển ẩn/hiện form động
+window.toggleProductFields = () => {
+    const type = document.getElementById('cType').value;
+    const softDocFields = document.getElementById('softDocFields');
+    const hardBookFields = document.getElementById('hardBookFields');
+    
+    if(softDocFields) softDocFields.classList.add('hidden');
+    if(hardBookFields) hardBookFields.classList.add('hidden');
+    
+    if (type === 'document_soft' && softDocFields) {
+        softDocFields.classList.remove('hidden');
+    } else if (type === 'document_hard' && hardBookFields) {
+        hardBookFields.classList.remove('hidden');
+    }
+};
+
 // Hàm tải dữ liệu lên form sửa
 window.editCourse = async (id) => {
     const d = await getDoc(doc(db, "public_courses", id));
     if(d.exists()) {
         const dt = d.data();
         document.getElementById('courseId').value = id;
-        document.getElementById('cType').value = dt.type || 'course';
+        document.getElementById('cType').value = dt.type || 'course'; // Lấy phân loại sản phẩm
         document.getElementById('cTitle').value = dt.title;
         
         // Cập nhật giá gốc
         document.getElementById('cOriginalPrice').value = dt.originalPrice || '';
         document.getElementById('cPrice').value = dt.price;
         
-        document.getElementById('cStudents').value = dt.students;
+        document.getElementById('cStudents').value = dt.students || 0;
         document.getElementById('cDesc').value = dt.desc || '';
         document.getElementById('cThumb').value = dt.thumbnail || '';
         
-        // Các trường mới thêm
-        document.getElementById('cDocFileUrl').value = dt.fileUrl || '';
-        document.getElementById('cBookWeight').value = dt.weight || '';
+        // Cập nhật các trường đặc thù mới
+        if(document.getElementById('cDocFileUrl')) document.getElementById('cDocFileUrl').value = dt.fileUrl || '';
+        if(document.getElementById('cBookWeight')) document.getElementById('cBookWeight').value = dt.weight || '';
         
-        // Cập nhật giao diện ẩn hiện form
+        // Cập nhật giao diện form để các ô nhập ẩn/hiện chính xác
         window.toggleProductFields();
         
         // Preview ảnh
@@ -738,10 +754,10 @@ window.editCourse = async (id) => {
 // Hàm lưu dữ liệu
 window.saveCourseBasic = async () => {
     const id = document.getElementById('courseId').value;
-    const type = document.getElementById('cType').value;
+    const type = document.getElementById('cType').value; // Lấy type từ Dropdown
     
     const data = {
-        type: type, // <-- Trọng tâm logic phân loại nằm ở đây
+        type: type, // <-- BẮT BUỘC PHẢI LƯU TRƯỜNG NÀY ĐỂ INDEX.HTML HIỂU ĐƯỢC
         title: document.getElementById('cTitle').value,
         originalPrice: parseInt(document.getElementById('cOriginalPrice').value) || 0,
         price: parseInt(document.getElementById('cPrice').value) || 0,
@@ -750,13 +766,18 @@ window.saveCourseBasic = async () => {
         thumbnail: document.getElementById('cThumb').value,
         
         // Lưu trường đặc thù tùy theo phân loại
-        fileUrl: type === 'document_soft' ? document.getElementById('cDocFileUrl').value.trim() : null,
-        weight: type === 'document_hard' ? parseInt(document.getElementById('cBookWeight').value) || 0 : null,
+        fileUrl: type === 'document_soft' ? (document.getElementById('cDocFileUrl')?.value.trim() || '') : null,
+        weight: type === 'document_hard' ? (parseInt(document.getElementById('cBookWeight')?.value) || 0) : null,
         
         updatedAt: new Date().toISOString()
     };
     
     if(!data.title) return window.showToast("Vui lòng nhập tên khóa học", "error");
+
+    // Thêm hiệu ứng loading cho nút lưu
+    const btn = document.querySelector('.bg-brand[onclick="window.saveCourseBasic()"]');
+    const originalText = btn ? btn.innerHTML : '';
+    if(btn) { btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang lưu...'; btn.disabled = true; }
 
     try {
         if(id) {
@@ -766,10 +787,12 @@ window.saveCourseBasic = async () => {
             await setDoc(doc(collection(db, "public_courses")), data); 
         }
         window.showToast("Đã lưu thiết lập thành công!");
-        window.toggleModal('courseModal', false); // Đảm bảo truyền tham số false
+        window.toggleModal('courseModal', false);
         loadCourses();
     } catch(e) { 
         window.showToast(e.message, 'error'); 
+    } finally {
+        if(btn) { btn.innerHTML = originalText; btn.disabled = false; }
     }
 };
 
