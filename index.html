@@ -319,17 +319,11 @@
             
             <div class="lg:col-span-7 space-y-6">
                 <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-                    <h3 class="font-bold text-gray-800 mb-4 border-b pb-2 flex items-center gap-2"><i class="fa-solid fa-user-circle text-blue-600"></i> Thông tin đăng ký</h3>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                            <label class="block text-xs font-bold text-gray-500 mb-1">Họ và tên</label>
-                            <input type="text" id="payUserName" class="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg text-gray-700 font-bold" readonly>
+                    <h3 class="font-bold text-gray-800 mb-4 border-b pb-2 flex items-center gap-2"><i class="fa-solid fa-user-circle text-blue-600"></i> Thông tin nhận hàng</h3>
+                    
+                    <div id="dynamicCheckoutFields" class="flex flex-col flex-wrap w-full">
                         </div>
-                        <div>
-                            <label class="block text-xs font-bold text-gray-500 mb-1">Số điện thoại / Email</label>
-                            <input type="text" id="payUserContact" class="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg text-gray-700" readonly>
-                        </div>
-                    </div>
+
                 </div>
 
                 <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100 relative overflow-hidden">
@@ -832,11 +826,14 @@
                                 </div>
                                 ${priceHtml}
                             </div>
-                            <div class="mt-4">
-                            <button onclick="openPaymentModal('${c.id}')" class="w-full py-2 bg-orange-50 text-accent font-bold rounded-lg text-sm hover:bg-accent hover:text-white transition-all flex justify-center items-center gap-2 shadow-sm">
-                                Đăng ký ngay <i class="fa-solid fa-cart-shopping"></i>
-                            </button>
-                        </div>
+                            <div class="mt-4 flex gap-2">
+                                <button onclick="openPaymentModal('${c.id}')" class="flex-1 py-2 bg-orange-50 text-accent font-bold rounded-lg text-sm hover:bg-accent hover:text-white transition-all flex justify-center items-center gap-2 shadow-sm">
+                                    Mua ngay <i class="fa-solid fa-cart-shopping"></i>
+                                </button>
+                                <button onclick="copyProductLink('${c.id}')" class="px-4 py-2 bg-teal-50 text-teal-600 font-bold rounded-lg text-sm hover:bg-teal-600 hover:text-white transition-colors shadow-sm" title="Copy link chia sẻ để gửi cho học sinh">
+                                    <i class="fa-solid fa-share-nodes"></i>
+                                </button>
+                            </div>
                         </div>
                     </div>`;
                 });
@@ -978,92 +975,107 @@
         let currentPayingCourse = null;
         let dynamicBankConfig = null;
 
+        // Hàm hỗ trợ Copy Link sản phẩm
+        window.copyProductLink = (id) => {
+            const url = window.location.origin + window.location.pathname + '?product=' + id;
+            navigator.clipboard.writeText(url);
+            window.showNotification("Đã copy link sản phẩm! Bạn có thể dán gửi cho học sinh.", "success");
+        };
+
         window.openPaymentModal = async (courseId) => {
-            // 1. Kiểm tra đăng nhập -> Chuyển hướng ĐĂNG KÝ nếu chưa có acc
-            if (!auth.currentUser) {
-                if(window.toggleRegisterModal) {
-                    window.toggleRegisterModal(true); 
-                    window.showNotification("Vui lòng Đăng ký tài khoản để tiếp tục!", "info");
-                } else {
-                    alert("Vui lòng Đăng ký tài khoản!");
+            document.getElementById('paymentModal').classList.remove('opacity-0', 'pointer-events-none');
+            document.getElementById('qrLoading').classList.remove('hidden');
+
+            try {
+                const snap = await getDoc(doc(db, "public_courses", courseId));
+                if(snap.exists()){
+                    const c = snap.data();
+                    currentPayingCourse = { id: snap.id, ...c };
+                    const isDoc = c.type === 'document_soft' || c.type === 'document_hard';
+                    
+                    // 1. KIỂM TRA ĐĂNG NHẬP (Chỉ bắt buộc với Khóa Học)
+                    if (!isDoc && !auth.currentUser) {
+                        window.closePaymentModal();
+                        if(window.toggleRegisterModal) {
+                            window.toggleRegisterModal(true); 
+                            window.showNotification("Khóa học yêu cầu tạo tài khoản để theo dõi tiến độ!", "info");
+                        } else { alert("Vui lòng Đăng ký tài khoản!"); }
+                        return;
+                    }
+
+                    const user = auth.currentUser;
+
+                    // 2. RENDER FORM THÔNG TIN ĐỘNG THEO LOẠI SẢN PHẨM
+                    const fieldContainer = document.getElementById('dynamicCheckoutFields');
+                    if (!isDoc) { 
+                        // KHÓA HỌC: Lấy sẵn thông tin từ account
+                        fieldContainer.innerHTML = `
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 w-full">
+                                <div><label class="block text-xs font-bold text-gray-500 mb-1">Họ và tên</label><input type="text" id="payUserName" class="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg text-gray-700 font-bold" value="${user.displayName}" readonly></div>
+                                <div><label class="block text-xs font-bold text-gray-500 mb-1">Tài khoản</label><input type="text" id="payUserContact" class="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg text-gray-700" value="${user.email || ''}" readonly></div>
+                            </div>
+                        `;
+                    } else if (c.type === 'document_soft') {
+                        // TÀI LIỆU MỀM: Cần Email nhận file
+                        fieldContainer.innerHTML = `
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 w-full">
+                                <div><label class="block text-xs font-bold text-gray-500 mb-1">Họ tên người mua</label><input type="text" id="payUserName" class="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg focus:border-blue-500 outline-none" value="${user ? user.displayName : ''}" required></div>
+                                <div><label class="block text-xs font-bold text-blue-600 mb-1">Email nhận file PDF (Bắt buộc)</label><input type="email" id="payUserEmail" class="w-full px-4 py-2 bg-blue-50 border border-blue-200 rounded-lg focus:border-blue-500 outline-none font-bold" value="${user ? (user.email||'') : ''}" placeholder="Nhập chính xác email..." required></div>
+                            </div>
+                            <p class="text-[11px] text-orange-600 mt-2 italic w-full">* Tài liệu sẽ được đóng dấu bản quyền và gửi tự động vào Email này.</p>
+                        `;
+                    } else if (c.type === 'document_hard') {
+                        // SÁCH IN: Cần Số điện thoại & Địa chỉ ship
+                        fieldContainer.innerHTML = `
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 w-full mb-4">
+                                <div><label class="block text-xs font-bold text-gray-500 mb-1">Người nhận sách</label><input type="text" id="payUserName" class="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg focus:border-amber-500 outline-none" value="${user ? user.displayName : ''}" required></div>
+                                <div><label class="block text-xs font-bold text-amber-600 mb-1">SĐT liên hệ (Bắt buộc)</label><input type="tel" id="payUserPhone" class="w-full px-4 py-2 bg-amber-50 border border-amber-200 rounded-lg focus:border-amber-500 outline-none font-bold" placeholder="Nhập SĐT..." required></div>
+                            </div>
+                            <div class="w-full"><label class="block text-xs font-bold text-amber-600 mb-1">Địa chỉ giao hàng (Bắt buộc)</label><input type="text" id="payUserAddress" class="w-full px-4 py-2 bg-amber-50 border border-amber-200 rounded-lg focus:border-amber-500 outline-none font-bold" placeholder="Số nhà, đường, phường/xã, quận/huyện, tỉnh/TP..." required></div>
+                        `;
+                    }
+
+                    // 3. Xử lý giá tiền & Tiêu đề
+                    document.getElementById('payCourseTitle').innerText = c.title;
+                    document.getElementById('payCourseImg').src = c.thumbnail || 'https://placehold.co/150';
+                    let rawPrice = parseInt(String(c.price).replace(/\D/g, '')) || 0;
+                    document.getElementById('payFinalPrice').innerText = rawPrice.toLocaleString('vi-VN') + 'đ';
+
+                    // 4. Tạo Cú pháp chuyển khoản & VietQR
+                    if (!dynamicBankConfig) {
+                        try {
+                            const s = await getDoc(doc(db, "site_settings", "payment_config"));
+                            dynamicBankConfig = s.exists() ? s.data() : { BANK_ID: "970422", BANK_NAME: "MB Bank", ACCOUNT_NO: "0000", ACCOUNT_NAME: "ADMIN", TEMPLATE: "compact2" };
+                        } catch (e) { dynamicBankConfig = { BANK_ID: "970422", BANK_NAME: "Lỗi", ACCOUNT_NO: "0000", ACCOUNT_NAME: "ERR", TEMPLATE: "compact2" }; }
+                    }
+
+                    // Sinh UID tạm nếu là khách vãng lai
+                    const uidStr = user ? user.uid : "GUEST" + Math.random().toString(36).substring(2,7);
+                    const cleanUid = uidStr.substring(0,5).toUpperCase().replace(/[^A-Z0-9]/g, "");
+                    const cleanCourseId = c.id.substring(0,5).toUpperCase().replace(/[^A-Z0-9]/g, "");
+                    
+                    // Phân loại cú pháp cho App Script quét
+                    const prefixCode = isDoc ? "TLIEU" : "TTOAN"; 
+                    const content = `${prefixCode} ${cleanUid} ${cleanCourseId}`;
+                    
+                    document.getElementById('bankNameDisplay').innerText = dynamicBankConfig.BANK_NAME || dynamicBankConfig.BANK_ID;
+                    document.getElementById('accountNoDisplay').innerText = dynamicBankConfig.ACCOUNT_NO;
+                    document.getElementById('transferContentDisplay').innerText = content;
+                    
+                    const bankId = dynamicBankConfig.BANK_ID;
+                    const accNo = dynamicBankConfig.ACCOUNT_NO;
+                    const template = dynamicBankConfig.TEMPLATE || 'compact2';
+                    const qrUrl = `https://img.vietqr.io/image/${bankId}-${accNo}-${template}.png?amount=${rawPrice}&addInfo=${encodeURIComponent(content)}&accountName=${encodeURIComponent(dynamicBankConfig.ACCOUNT_NAME)}`;
+
+                    const qrImg = document.getElementById('vietQrImage');
+                    qrImg.onload = () => document.getElementById('qrLoading').classList.add('hidden');
+                    qrImg.src = qrUrl;
                 }
-                return;
-            }
-
-            // 2. Tải cấu hình ngân hàng (Có dự phòng lỗi)
-           if (!dynamicBankConfig) {
-        try {
-            const s = await getDoc(doc(db, "site_settings", "payment_config"));
-            // Fallback nếu chưa cấu hình
-            dynamicBankConfig = s.exists() ? s.data() : { BANK_ID: "970422", BANK_NAME: "MB Bank", ACCOUNT_NO: "0000", ACCOUNT_NAME: "ADMIN", TEMPLATE: "compact2" };
-        } catch (e) { dynamicBankConfig = { BANK_ID: "970422", BANK_NAME: "Lỗi Tải", ACCOUNT_NO: "0000", ACCOUNT_NAME: "ERR", TEMPLATE: "compact2" }; }
-    }
-
-    document.getElementById('paymentModal').classList.remove('opacity-0', 'pointer-events-none');
-    document.getElementById('qrLoading').classList.remove('hidden');
-
-    try {
-        const snap = await getDoc(doc(db, "public_courses", courseId));
-        if(snap.exists()){
-            const c = snap.data();
-            currentPayingCourse = { id: snap.id, ...c };
-            const user = auth.currentUser;
-            
-            // 1. Hiển thị thông tin cơ bản
-            document.getElementById('payCourseTitle').innerText = c.title;
-            document.getElementById('payCourseImg').src = c.thumbnail || 'https://placehold.co/150';
-            
-            // Xử lý hiển thị giá (Format VND)
-            let rawPrice = c.price;
-            // Chuyển đổi giá về số nguyên sạch (loại bỏ dấu chấm, phẩy, chữ đ)
-            if (typeof rawPrice === 'string') {
-                rawPrice = parseInt(rawPrice.replace(/\D/g, '')) || 0;
-            }
-            
-            document.getElementById('payFinalPrice').innerText = rawPrice.toLocaleString('vi-VN') + 'đ';
-            document.getElementById('payUserName').innerText = user.displayName;
-
-            // 2. Tạo nội dung chuyển khoản (Content)
-            // Cú pháp: TTOAN <UID_NGAN> <COURSE_ID_NGAN>
-            // Loại bỏ ký tự đặc biệt để tránh lỗi URL
-            const cleanUid = user.uid.substring(0,5).replace(/[^a-zA-Z0-9]/g, "");
-            const cleanCourseId = c.id.substring(0,5).toUpperCase().replace(/[^a-zA-Z0-9]/g, "");
-            const content = `TTOAN ${cleanUid} ${cleanCourseId}`;
-            
-            // 3. Điền thông tin ngân hàng lên giao diện
-            // Ưu tiên hiển thị Tên ngân hàng (MB Bank) thay vì mã BIN (970422)
-            document.getElementById('bankNameDisplay').innerText = dynamicBankConfig.BANK_NAME || dynamicBankConfig.BANK_ID;
-            document.getElementById('accountNoDisplay').innerText = dynamicBankConfig.ACCOUNT_NO;
-            document.getElementById('transferContentDisplay').innerText = content;
-            
-            // 4. TẠO URL QR CODE VIETQR (FIX QUAN TRỌNG)
-            // Cấu trúc: https://img.vietqr.io/image/<BANK_ID>-<ACCOUNT_NO>-<TEMPLATE>.png?amount=<AMOUNT>&addInfo=<CONTENT>&accountName=<NAME>
-            
-            const bankId = dynamicBankConfig.BANK_ID;       // Mã BIN (VD: 970422)
-            const accNo = dynamicBankConfig.ACCOUNT_NO;     // Số TK
-            const template = dynamicBankConfig.TEMPLATE;    // Template (compact2)
-            const amount = rawPrice;                        // Số tiền (Integer)
-            const addInfo = encodeURIComponent(content);    // Nội dung (URL Encoded)
-            const accName = encodeURIComponent(dynamicBankConfig.ACCOUNT_NAME); // Tên chủ TK (URL Encoded)
-
-            const qrUrl = `https://img.vietqr.io/image/${bankId}-${accNo}-${template}.png?amount=${amount}&addInfo=${addInfo}&accountName=${accName}`;
-            
-            // Debug link để kiểm tra
-            console.log("Generated QR Link:", qrUrl);
-
-            const qrImg = document.getElementById('vietQrImage');
-            qrImg.onload = () => document.getElementById('qrLoading').classList.add('hidden');
-            qrImg.onerror = () => {
-                document.getElementById('qrLoading').innerHTML = '<span class="text-red-500 font-bold">Lỗi tạo mã QR</span>';
-            };
-            qrImg.src = qrUrl;
-        }
-    } catch(e){ console.error(e); }
-};
+            } catch(e){ console.error(e); }
+        };
 
         window.closePaymentModal = () => {
-            const modal = document.getElementById('paymentModal');
-            modal.classList.add('opacity-0', 'pointer-events-none');
+            document.getElementById('paymentModal').classList.add('opacity-0', 'pointer-events-none');
         };
 
         window.copyText = (id) => { 
@@ -1073,153 +1085,75 @@
 
         window.confirmPayment = async () => {
             if(!currentPayingCourse) return;
+            
+            // Lấy thông tin vận chuyển
+            let shippingInfo = {};
+            const isDoc = currentPayingCourse.type === 'document_soft' || currentPayingCourse.type === 'document_hard';
+            
+            if (isDoc) {
+                const nameInp = document.getElementById('payUserName').value;
+                if(!nameInp) return alert("Vui lòng nhập Họ Tên người nhận!");
+                shippingInfo.name = nameInp;
+
+                if (currentPayingCourse.type === 'document_soft') {
+                    const emailInp = document.getElementById('payUserEmail').value;
+                    if(!emailInp || !emailInp.includes('@')) return alert("Vui lòng nhập Email hợp lệ để nhận file PDF!");
+                    shippingInfo.email = emailInp;
+                } else {
+                    const phoneInp = document.getElementById('payUserPhone').value;
+                    const addrInp = document.getElementById('payUserAddress').value;
+                    if(!phoneInp || !addrInp) return alert("Vui lòng nhập đủ SĐT và Địa chỉ giao hàng!");
+                    shippingInfo.phone = phoneInp;
+                    shippingInfo.address = addrInp;
+                    shippingInfo.nameAndPhone = `${nameInp} - ${phoneInp}`; // Format cũ cho dashboard
+                }
+            }
+
             const btn = document.querySelector('button[onclick="confirmPayment()"]');
             const originText = btn.innerHTML;
-            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang xử lý...'; btn.disabled = true;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang gửi...'; btn.disabled = true;
+            
             try {
-                // Lưu vào Firestore
+                // Tự sinh UserID giả nếu khách không đăng nhập
+                const userIdToSave = auth.currentUser ? auth.currentUser.uid : 'guest_' + Date.now();
+
                 await addDoc(collection(db, "orders"), {
-                    userId: auth.currentUser.uid,
+                    userId: userIdToSave,
                     courseId: currentPayingCourse.id,
+                    documentId: isDoc ? currentPayingCourse.id : null, 
                     courseTitle: currentPayingCourse.title,
-                    amount: parseInt(currentPayingCourse.price),
+                    amount: parseInt(String(currentPayingCourse.price).replace(/\D/g, '')) || 0,
                     status: 'pending',
                     content: document.getElementById('transferContentDisplay').innerText,
+                    orderType: isDoc ? "document" : "course",
+                    deliveryType: currentPayingCourse.type || 'course',
+                    shippingInfo: shippingInfo,
                     createdAt: new Date().toISOString()
                 });
                 
-                // Đóng modal và thông báo
                 window.closePaymentModal();
-                // Hiển thị Modal thành công hoặc thông báo to
-                alert("Gửi xác nhận thành công! Khóa học sẽ được kích hoạt sau 5-10 phút.");
+                alert("Hệ thống đã ghi nhận đơn hàng! Đơn sẽ tự động kích hoạt sau khi giao dịch ngân hàng thành công (tầm 1-5 phút).");
             } catch(e) { 
                 alert("Lỗi: " + e.message); 
             } finally { 
                 btn.innerHTML = originText; btn.disabled = false; 
             }
         };
-        // ================= LOGIC MUA TÀI LIỆU (MỚI) =================
-        let currentDocOrder = null;
 
-        window.openDocumentPaymentModal = async (docId) => {
-            if (!auth.currentUser) {
-                toggleRegisterModal(true);
-                alert("Vui lòng Đăng ký/Đăng nhập để mua tài liệu!");
-                return;
+        // KÍCH HOẠT MỞ MODAL TỪ LINK CHIA SẺ
+        // Bắt sự kiện URL có biến ?product=ID_SAN_PHAM
+        document.addEventListener('DOMContentLoaded', () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            const productId = urlParams.get('product');
+            if (productId) {
+                // Đợi Firebase load xong mới mở form
+                setTimeout(() => {
+                    window.openPaymentModal(productId);
+                }, 1000);
             }
+        });
 
-            // Tải cấu hình ngân hàng (dùng chung với khóa học)
-            if (!dynamicBankConfig) {
-                try {
-                    const s = await getDoc(doc(db, "site_settings", "payment_config"));
-                    dynamicBankConfig = s.exists() ? s.data() : { BANK_ID: "970422", ACCOUNT_NO: "0000", ACCOUNT_NAME: "ADMIN", TEMPLATE: "compact2" };
-                } catch (e) { dynamicBankConfig = { BANK_ID: "970422", ACCOUNT_NO: "0000", ACCOUNT_NAME: "ERR", TEMPLATE: "compact2" }; }
-            }
-
-            try {
-                // Lấy thông tin tài liệu từ collection public_documents
-                const snap = await getDoc(doc(db, "public_documents", docId));
-                if (!snap.exists()) { alert("Tài liệu không tồn tại!"); return; }
-
-                const docData = snap.data();
-                const finalPrice = parseInt(docData.price) || 0; 
-
-                // Sinh mã đơn hàng ngẫu nhiên (UID + Ngẫu nhiên)
-                const shortUid = auth.currentUser.uid.substring(0, 5).toUpperCase().replace(/[^A-Z0-9]/g, "");
-                const shortDoc = docId.substring(0, 5).toUpperCase().replace(/[^A-Z0-9]/g, "");
-                const transferContent = `TLIEU ${shortUid} ${shortDoc}`;
-
-                currentDocOrder = {
-                    documentId: docId,
-                    title: docData.title,
-                    price: finalPrice,
-                    content: transferContent,
-                    type: docData.type || 'soft_copy'
-                };
-
-                // Hiển thị form nhập liệu tùy theo loại tài liệu
-                const infoContainer = document.getElementById('dynamicShippingFields');
-                if (currentDocOrder.type === 'soft_copy') {
-                    infoContainer.innerHTML = `
-                        <div>
-                            <label class="block text-xs font-bold text-gray-500 mb-1 uppercase">Email nhận tài liệu (Bắt buộc)</label>
-                            <input type="email" id="payDocEmail" value="${auth.currentUser.email || ''}" required class="w-full px-4 py-3 border border-gray-200 rounded-xl text-gray-700 outline-none focus:border-brand bg-white">
-                            <p class="text-[11px] text-orange-600 italic mt-2">* Bản quyền tài liệu sẽ được đóng dấu bằng Email này và gửi tự động cho bạn.</p>
-                        </div>
-                    `;
-                } else {
-                    infoContainer.innerHTML = `
-                        <div>
-                            <input type="text" id="payDocName" placeholder="Tên và SĐT người nhận" required class="w-full px-4 py-3 border border-gray-200 rounded-xl mb-3 outline-none focus:border-brand bg-white">
-                            <input type="text" id="payDocAddress" placeholder="Địa chỉ nhận sách chi tiết..." required class="w-full px-4 py-3 border border-gray-200 rounded-xl outline-none focus:border-brand bg-white">
-                        </div>
-                    `;
-                }
-
-                // Cập nhật text & QR Code
-                document.getElementById('docPayAmount').innerText = finalPrice.toLocaleString('vi-VN') + ' VNĐ';
-                document.getElementById('docPayContent').innerText = transferContent;
-
-                const qrUrl = `https://img.vietqr.io/image/${dynamicBankConfig.BANK_ID}-${dynamicBankConfig.ACCOUNT_NO}-${dynamicBankConfig.TEMPLATE}.png?amount=${finalPrice}&addInfo=${encodeURIComponent(transferContent)}&accountName=${encodeURIComponent(dynamicBankConfig.ACCOUNT_NAME)}`;
-                
-                const qrImg = document.getElementById('docQrImage');
-                const qrLoading = document.getElementById('docQrLoading');
-                qrImg.onload = () => { qrLoading.classList.add('hidden'); qrImg.classList.remove('hidden'); };
-                qrImg.src = qrUrl;
-
-                document.getElementById('docPaymentModal').classList.remove('opacity-0', 'pointer-events-none');
-
-            } catch (e) { console.error(e); alert("Lỗi tải thông tin tài liệu"); }
-        };
-
-        window.closeDocPaymentModal = () => {
-            document.getElementById('docPaymentModal').classList.add('opacity-0', 'pointer-events-none');
-        };
-
-        window.confirmDocPayment = async () => {
-            if (!currentDocOrder) return;
-            const btn = document.querySelector('button[onclick="confirmDocPayment()"]');
-            
-            let shippingInfo = {};
-            if (currentDocOrder.type === 'soft_copy') {
-                const emailVal = document.getElementById('payDocEmail').value;
-                if (!emailVal) { alert("Vui lòng nhập Email!"); return; }
-                shippingInfo.email = emailVal;
-            } else {
-                const nameVal = document.getElementById('payDocName').value;
-                const addrVal = document.getElementById('payDocAddress').value;
-                if (!nameVal || !addrVal) { alert("Nhập đủ thông tin giao hàng!"); return; }
-                shippingInfo.nameAndPhone = nameVal;
-                shippingInfo.address = addrVal;
-            }
-
-            const originText = btn.innerHTML;
-            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang xử lý...'; btn.disabled = true;
-
-            try {
-                // LƯU VÀO CHUNG BẢNG 'orders' CHO APP SCRIPT CŨ QUÉT ĐƯỢC
-                await addDoc(collection(db, "orders"), {
-                    userId: auth.currentUser.uid,
-                    documentId: currentDocOrder.documentId,
-                    courseTitle: `[Tài liệu] ${currentDocOrder.title}`, // Mượn trường này cho dễ nhìn ở Admin
-                    orderType: "document", // ĐÂY LÀ CỜ PHÂN BIỆT TÀI LIỆU VỚI KHÓA HỌC
-                    deliveryType: currentDocOrder.type,
-                    shippingInfo: shippingInfo,
-                    amount: currentDocOrder.price,
-                    content: currentDocOrder.content,
-                    status: "pending", 
-                    createdAt: new Date().toISOString()
-                });
-
-                closeDocPaymentModal();
-                alert("Đã gửi yêu cầu mua Tài liệu! Hệ thống đang chờ ngân hàng xác nhận (5-10 phút).");
-            } catch (error) {
-                console.error(error); alert("Lỗi khi tạo đơn hàng");
-            } finally {
-                btn.innerHTML = originText; btn.disabled = false;
-            }
-        };
-        // ================= END LOGIC TÀI LIỆU =================
+    </script>
     </script>
 </body>
 </html>
