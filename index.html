@@ -271,6 +271,36 @@
         function switchModal() { toggleRegisterModal(false); toggleLoginModal(true); }
         function toggleMobileMenu() { document.getElementById('mobile-menu').classList.toggle('open'); }
     </script>
+    <div id="docPaymentModal" class="modal opacity-0 pointer-events-none fixed inset-0 z-[105] flex items-center justify-center bg-teal-900/60 backdrop-blur-sm p-4 transition-all duration-300">
+        <div class="bg-white rounded-2xl w-full max-w-4xl flex flex-col md:flex-row overflow-hidden shadow-2xl relative">
+            <button onclick="closeDocPaymentModal()" class="absolute top-4 right-4 text-gray-400 hover:text-gray-600 z-10 bg-white rounded-full p-1"><i class="fas fa-times text-xl"></i></button>
+
+            <div class="w-full md:w-1/2 p-6 md:p-8 bg-gray-50 flex flex-col justify-center border-r border-gray-100">
+                <h2 class="text-2xl font-bold text-gray-800 mb-2">Thông tin nhận tài liệu</h2>
+                <p class="text-sm text-gray-500 mb-6">Vui lòng điền chính xác thông tin để hệ thống gửi tài liệu.</p>
+                <div id="dynamicShippingFields" class="space-y-4">
+                    </div>
+            </div>
+
+            <div class="w-full md:w-1/2 p-6 md:p-8 bg-white flex flex-col items-center justify-center">
+                <h3 class="text-xl font-bold text-gray-800 mb-2">Thanh toán chuyển khoản</h3>
+                <div class="bg-blue-50 text-blue-800 text-sm py-2 px-4 rounded-lg mb-6 w-full text-center font-medium">Mở App Ngân hàng và quét mã QR</div>
+                
+                <div class="relative w-48 h-48 mb-6 bg-white p-2 rounded-xl shadow-sm border border-gray-100">
+                    <img id="docQrImage" src="" alt="QR Code" class="w-full h-full object-contain hidden">
+                    <div id="docQrLoading" class="absolute inset-0 flex flex-col items-center justify-center bg-white"><div class="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div></div>
+                </div>
+
+                <div class="w-full bg-gray-50 p-4 rounded-xl border border-gray-100">
+                    <div class="flex justify-between items-center mb-2"><span class="text-sm text-gray-500">Số tiền:</span><span id="docPayAmount" class="font-bold text-lg text-orange-600">...</span></div>
+                    <div class="flex justify-between items-center"><span class="text-sm text-gray-500">Nội dung CK:</span><span id="docPayContent" class="font-mono font-bold text-blue-700">...</span></div>
+                </div>
+                <button onclick="confirmDocPayment()" class="mt-6 w-full py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-bold rounded-xl shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 transition-all duration-200">
+                    Tôi đã chuyển khoản
+                </button>
+            </div>
+        </div>
+    </div>
     <div id="paymentModal" class="modal opacity-0 pointer-events-none fixed inset-0 z-[100] bg-gray-50 flex flex-col transition-all duration-300 overflow-y-auto">
         <div class="bg-white border-b border-gray-200 px-6 py-4 flex justify-between items-center sticky top-0 z-10 shadow-sm">
             <div class="flex items-center gap-3">
@@ -1068,6 +1098,128 @@
                 btn.innerHTML = originText; btn.disabled = false; 
             }
         };
+        // ================= LOGIC MUA TÀI LIỆU (MỚI) =================
+        let currentDocOrder = null;
+
+        window.openDocumentPaymentModal = async (docId) => {
+            if (!auth.currentUser) {
+                toggleRegisterModal(true);
+                alert("Vui lòng Đăng ký/Đăng nhập để mua tài liệu!");
+                return;
+            }
+
+            // Tải cấu hình ngân hàng (dùng chung với khóa học)
+            if (!dynamicBankConfig) {
+                try {
+                    const s = await getDoc(doc(db, "site_settings", "payment_config"));
+                    dynamicBankConfig = s.exists() ? s.data() : { BANK_ID: "970422", ACCOUNT_NO: "0000", ACCOUNT_NAME: "ADMIN", TEMPLATE: "compact2" };
+                } catch (e) { dynamicBankConfig = { BANK_ID: "970422", ACCOUNT_NO: "0000", ACCOUNT_NAME: "ERR", TEMPLATE: "compact2" }; }
+            }
+
+            try {
+                // Lấy thông tin tài liệu từ collection public_documents
+                const snap = await getDoc(doc(db, "public_documents", docId));
+                if (!snap.exists()) { alert("Tài liệu không tồn tại!"); return; }
+
+                const docData = snap.data();
+                const finalPrice = parseInt(docData.price) || 0; 
+
+                // Sinh mã đơn hàng ngẫu nhiên (UID + Ngẫu nhiên)
+                const shortUid = auth.currentUser.uid.substring(0, 5).toUpperCase().replace(/[^A-Z0-9]/g, "");
+                const shortDoc = docId.substring(0, 5).toUpperCase().replace(/[^A-Z0-9]/g, "");
+                const transferContent = `TLIEU ${shortUid} ${shortDoc}`;
+
+                currentDocOrder = {
+                    documentId: docId,
+                    title: docData.title,
+                    price: finalPrice,
+                    content: transferContent,
+                    type: docData.type || 'soft_copy'
+                };
+
+                // Hiển thị form nhập liệu tùy theo loại tài liệu
+                const infoContainer = document.getElementById('dynamicShippingFields');
+                if (currentDocOrder.type === 'soft_copy') {
+                    infoContainer.innerHTML = `
+                        <div>
+                            <label class="block text-xs font-bold text-gray-500 mb-1 uppercase">Email nhận tài liệu (Bắt buộc)</label>
+                            <input type="email" id="payDocEmail" value="${auth.currentUser.email || ''}" required class="w-full px-4 py-3 border border-gray-200 rounded-xl text-gray-700 outline-none focus:border-brand bg-white">
+                            <p class="text-[11px] text-orange-600 italic mt-2">* Bản quyền tài liệu sẽ được đóng dấu bằng Email này và gửi tự động cho bạn.</p>
+                        </div>
+                    `;
+                } else {
+                    infoContainer.innerHTML = `
+                        <div>
+                            <input type="text" id="payDocName" placeholder="Tên và SĐT người nhận" required class="w-full px-4 py-3 border border-gray-200 rounded-xl mb-3 outline-none focus:border-brand bg-white">
+                            <input type="text" id="payDocAddress" placeholder="Địa chỉ nhận sách chi tiết..." required class="w-full px-4 py-3 border border-gray-200 rounded-xl outline-none focus:border-brand bg-white">
+                        </div>
+                    `;
+                }
+
+                // Cập nhật text & QR Code
+                document.getElementById('docPayAmount').innerText = finalPrice.toLocaleString('vi-VN') + ' VNĐ';
+                document.getElementById('docPayContent').innerText = transferContent;
+
+                const qrUrl = `https://img.vietqr.io/image/${dynamicBankConfig.BANK_ID}-${dynamicBankConfig.ACCOUNT_NO}-${dynamicBankConfig.TEMPLATE}.png?amount=${finalPrice}&addInfo=${encodeURIComponent(transferContent)}&accountName=${encodeURIComponent(dynamicBankConfig.ACCOUNT_NAME)}`;
+                
+                const qrImg = document.getElementById('docQrImage');
+                const qrLoading = document.getElementById('docQrLoading');
+                qrImg.onload = () => { qrLoading.classList.add('hidden'); qrImg.classList.remove('hidden'); };
+                qrImg.src = qrUrl;
+
+                document.getElementById('docPaymentModal').classList.remove('opacity-0', 'pointer-events-none');
+
+            } catch (e) { console.error(e); alert("Lỗi tải thông tin tài liệu"); }
+        };
+
+        window.closeDocPaymentModal = () => {
+            document.getElementById('docPaymentModal').classList.add('opacity-0', 'pointer-events-none');
+        };
+
+        window.confirmDocPayment = async () => {
+            if (!currentDocOrder) return;
+            const btn = document.querySelector('button[onclick="confirmDocPayment()"]');
+            
+            let shippingInfo = {};
+            if (currentDocOrder.type === 'soft_copy') {
+                const emailVal = document.getElementById('payDocEmail').value;
+                if (!emailVal) { alert("Vui lòng nhập Email!"); return; }
+                shippingInfo.email = emailVal;
+            } else {
+                const nameVal = document.getElementById('payDocName').value;
+                const addrVal = document.getElementById('payDocAddress').value;
+                if (!nameVal || !addrVal) { alert("Nhập đủ thông tin giao hàng!"); return; }
+                shippingInfo.nameAndPhone = nameVal;
+                shippingInfo.address = addrVal;
+            }
+
+            const originText = btn.innerHTML;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang xử lý...'; btn.disabled = true;
+
+            try {
+                // LƯU VÀO CHUNG BẢNG 'orders' CHO APP SCRIPT CŨ QUÉT ĐƯỢC
+                await addDoc(collection(db, "orders"), {
+                    userId: auth.currentUser.uid,
+                    documentId: currentDocOrder.documentId,
+                    courseTitle: `[Tài liệu] ${currentDocOrder.title}`, // Mượn trường này cho dễ nhìn ở Admin
+                    orderType: "document", // ĐÂY LÀ CỜ PHÂN BIỆT TÀI LIỆU VỚI KHÓA HỌC
+                    deliveryType: currentDocOrder.type,
+                    shippingInfo: shippingInfo,
+                    amount: currentDocOrder.price,
+                    content: currentDocOrder.content,
+                    status: "pending", 
+                    createdAt: new Date().toISOString()
+                });
+
+                closeDocPaymentModal();
+                alert("Đã gửi yêu cầu mua Tài liệu! Hệ thống đang chờ ngân hàng xác nhận (5-10 phút).");
+            } catch (error) {
+                console.error(error); alert("Lỗi khi tạo đơn hàng");
+            } finally {
+                btn.innerHTML = originText; btn.disabled = false;
+            }
+        };
+        // ================= END LOGIC TÀI LIỆU =================
     </script>
 </body>
 </html>
