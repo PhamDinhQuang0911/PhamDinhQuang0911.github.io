@@ -976,6 +976,16 @@
         let dynamicBankConfig = null;
 
         // Hàm hỗ trợ Copy Link sản phẩm
+        // =========================================================================
+        // LOGIC THANH TOÁN (ĐÃ FIX LỖI TREO FORM VÀ HỖ TRỢ KHÁCH VÃNG LAI)
+        // =========================================================================
+
+        // Bổ sung hàm thông báo mini nếu trang chủ chưa có
+        window.showNotification = window.showNotification || function(msg, type) { 
+            alert(msg); 
+        };
+
+        // Hàm hỗ trợ Copy Link sản phẩm
         window.copyProductLink = (id) => {
             const url = window.location.origin + window.location.pathname + '?product=' + id;
             navigator.clipboard.writeText(url);
@@ -1004,6 +1014,8 @@
                     }
 
                     const user = auth.currentUser;
+                    const userName = (user && user.displayName) ? user.displayName : '';
+                    const userEmail = (user && user.email) ? user.email : '';
 
                     // 2. RENDER FORM THÔNG TIN ĐỘNG THEO LOẠI SẢN PHẨM
                     const fieldContainer = document.getElementById('dynamicCheckoutFields');
@@ -1011,16 +1023,16 @@
                         // KHÓA HỌC: Lấy sẵn thông tin từ account
                         fieldContainer.innerHTML = `
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-4 w-full">
-                                <div><label class="block text-xs font-bold text-gray-500 mb-1">Họ và tên</label><input type="text" id="payUserName" class="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg text-gray-700 font-bold" value="${user.displayName}" readonly></div>
-                                <div><label class="block text-xs font-bold text-gray-500 mb-1">Tài khoản</label><input type="text" id="payUserContact" class="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg text-gray-700" value="${user.email || ''}" readonly></div>
+                                <div><label class="block text-xs font-bold text-gray-500 mb-1">Họ và tên</label><input type="text" id="payUserName" class="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg text-gray-700 font-bold" value="${userName}" readonly></div>
+                                <div><label class="block text-xs font-bold text-gray-500 mb-1">Tài khoản</label><input type="text" id="payUserContact" class="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg text-gray-700" value="${userEmail}" readonly></div>
                             </div>
                         `;
                     } else if (c.type === 'document_soft') {
                         // TÀI LIỆU MỀM: Cần Email nhận file
                         fieldContainer.innerHTML = `
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-4 w-full">
-                                <div><label class="block text-xs font-bold text-gray-500 mb-1">Họ tên người mua</label><input type="text" id="payUserName" class="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg focus:border-blue-500 outline-none" value="${user ? user.displayName : ''}" required></div>
-                                <div><label class="block text-xs font-bold text-blue-600 mb-1">Email nhận file PDF (Bắt buộc)</label><input type="email" id="payUserEmail" class="w-full px-4 py-2 bg-blue-50 border border-blue-200 rounded-lg focus:border-blue-500 outline-none font-bold" value="${user ? (user.email||'') : ''}" placeholder="Nhập chính xác email..." required></div>
+                                <div><label class="block text-xs font-bold text-gray-500 mb-1">Họ tên người mua</label><input type="text" id="payUserName" class="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg focus:border-blue-500 outline-none" value="${userName}" required></div>
+                                <div><label class="block text-xs font-bold text-blue-600 mb-1">Email nhận file PDF (Bắt buộc)</label><input type="email" id="payUserEmail" class="w-full px-4 py-2 bg-blue-50 border border-blue-200 rounded-lg focus:border-blue-500 outline-none font-bold" value="${userEmail}" placeholder="Nhập chính xác email..." required></div>
                             </div>
                             <p class="text-[11px] text-orange-600 mt-2 italic w-full">* Tài liệu sẽ được đóng dấu bản quyền và gửi tự động vào Email này.</p>
                         `;
@@ -1028,7 +1040,7 @@
                         // SÁCH IN: Cần Số điện thoại & Địa chỉ ship
                         fieldContainer.innerHTML = `
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-4 w-full mb-4">
-                                <div><label class="block text-xs font-bold text-gray-500 mb-1">Người nhận sách</label><input type="text" id="payUserName" class="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg focus:border-amber-500 outline-none" value="${user ? user.displayName : ''}" required></div>
+                                <div><label class="block text-xs font-bold text-gray-500 mb-1">Người nhận sách</label><input type="text" id="payUserName" class="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg focus:border-amber-500 outline-none" value="${userName}" required></div>
                                 <div><label class="block text-xs font-bold text-amber-600 mb-1">SĐT liên hệ (Bắt buộc)</label><input type="tel" id="payUserPhone" class="w-full px-4 py-2 bg-amber-50 border border-amber-200 rounded-lg focus:border-amber-500 outline-none font-bold" placeholder="Nhập SĐT..." required></div>
                             </div>
                             <div class="w-full"><label class="block text-xs font-bold text-amber-600 mb-1">Địa chỉ giao hàng (Bắt buộc)</label><input type="text" id="payUserAddress" class="w-full px-4 py-2 bg-amber-50 border border-amber-200 rounded-lg focus:border-amber-500 outline-none font-bold" placeholder="Số nhà, đường, phường/xã, quận/huyện, tỉnh/TP..." required></div>
@@ -1036,9 +1048,9 @@
                     }
 
                     // 3. Xử lý giá tiền & Tiêu đề
-                    document.getElementById('payCourseTitle').innerText = c.title;
+                    document.getElementById('payCourseTitle').innerText = c.title || 'Sản phẩm';
                     document.getElementById('payCourseImg').src = c.thumbnail || 'https://placehold.co/150';
-                    let rawPrice = parseInt(String(c.price).replace(/\D/g, '')) || 0;
+                    let rawPrice = parseInt(String(c.price || '0').replace(/\D/g, '')) || 0;
                     document.getElementById('payFinalPrice').innerText = rawPrice.toLocaleString('vi-VN') + 'đ';
 
                     // 4. Tạo Cú pháp chuyển khoản & VietQR
@@ -1049,10 +1061,11 @@
                         } catch (e) { dynamicBankConfig = { BANK_ID: "970422", BANK_NAME: "Lỗi", ACCOUNT_NO: "0000", ACCOUNT_NAME: "ERR", TEMPLATE: "compact2" }; }
                     }
 
-                    // Sinh UID tạm nếu là khách vãng lai
+                    // Sinh UID an toàn (Đã fix lỗi bị undefined)
                     const uidStr = user ? user.uid : "GUEST" + Math.random().toString(36).substring(2,7);
                     const cleanUid = uidStr.substring(0,5).toUpperCase().replace(/[^A-Z0-9]/g, "");
-                    const cleanCourseId = c.id.substring(0,5).toUpperCase().replace(/[^A-Z0-9]/g, "");
+                    // FIX LỖI "TREO": Dùng biến courseId có sẵn thay vì nội suy từ c.id
+                    const cleanCourseId = courseId.substring(0,5).toUpperCase().replace(/[^A-Z0-9]/g, ""); 
                     
                     // Phân loại cú pháp cho App Script quét
                     const prefixCode = isDoc ? "TLIEU" : "TTOAN"; 
@@ -1071,7 +1084,10 @@
                     qrImg.onload = () => document.getElementById('qrLoading').classList.add('hidden');
                     qrImg.src = qrUrl;
                 }
-            } catch(e){ console.error(e); }
+            } catch(e){ 
+                console.error("Lỗi khi mở form thanh toán:", e); 
+                alert("Đã xảy ra lỗi tải mã thanh toán, vui lòng tải lại trang!");
+            }
         };
 
         window.closePaymentModal = () => {
@@ -1086,26 +1102,26 @@
         window.confirmPayment = async () => {
             if(!currentPayingCourse) return;
             
-            // Lấy thông tin vận chuyển
+            // Lấy thông tin vận chuyển an toàn (Dùng Optional Chaining ?.)
             let shippingInfo = {};
             const isDoc = currentPayingCourse.type === 'document_soft' || currentPayingCourse.type === 'document_hard';
             
             if (isDoc) {
-                const nameInp = document.getElementById('payUserName').value;
-                if(!nameInp) return alert("Vui lòng nhập Họ Tên người nhận!");
+                const nameInp = document.getElementById('payUserName')?.value;
+                if(!nameInp) return alert("Vui lòng nhập Họ Tên người mua!");
                 shippingInfo.name = nameInp;
 
                 if (currentPayingCourse.type === 'document_soft') {
-                    const emailInp = document.getElementById('payUserEmail').value;
+                    const emailInp = document.getElementById('payUserEmail')?.value;
                     if(!emailInp || !emailInp.includes('@')) return alert("Vui lòng nhập Email hợp lệ để nhận file PDF!");
                     shippingInfo.email = emailInp;
                 } else {
-                    const phoneInp = document.getElementById('payUserPhone').value;
-                    const addrInp = document.getElementById('payUserAddress').value;
+                    const phoneInp = document.getElementById('payUserPhone')?.value;
+                    const addrInp = document.getElementById('payUserAddress')?.value;
                     if(!phoneInp || !addrInp) return alert("Vui lòng nhập đủ SĐT và Địa chỉ giao hàng!");
                     shippingInfo.phone = phoneInp;
                     shippingInfo.address = addrInp;
-                    shippingInfo.nameAndPhone = `${nameInp} - ${phoneInp}`; // Format cũ cho dashboard
+                    shippingInfo.nameAndPhone = `${nameInp} - ${phoneInp}`; 
                 }
             }
 
@@ -1121,7 +1137,7 @@
                     userId: userIdToSave,
                     courseId: currentPayingCourse.id,
                     documentId: isDoc ? currentPayingCourse.id : null, 
-                    courseTitle: currentPayingCourse.title,
+                    courseTitle: currentPayingCourse.title || 'Sản phẩm',
                     amount: parseInt(String(currentPayingCourse.price).replace(/\D/g, '')) || 0,
                     status: 'pending',
                     content: document.getElementById('transferContentDisplay').innerText,
@@ -1132,24 +1148,23 @@
                 });
                 
                 window.closePaymentModal();
-                alert("Hệ thống đã ghi nhận đơn hàng! Đơn sẽ tự động kích hoạt sau khi giao dịch ngân hàng thành công (tầm 1-5 phút).");
+                alert("Hệ thống đã ghi nhận đơn hàng! Bạn sẽ nhận được sản phẩm sau khi giao dịch ngân hàng thành công (tầm 1-5 phút).");
             } catch(e) { 
-                alert("Lỗi: " + e.message); 
+                console.error(e);
+                alert("Lỗi: Không thể gửi yêu cầu, vui lòng thử lại."); 
             } finally { 
-                btn.innerHTML = originText; btn.disabled = false; 
+                if(btn) { btn.innerHTML = originText; btn.disabled = false; }
             }
         };
 
         // KÍCH HOẠT MỞ MODAL TỪ LINK CHIA SẺ
-        // Bắt sự kiện URL có biến ?product=ID_SAN_PHAM
         document.addEventListener('DOMContentLoaded', () => {
             const urlParams = new URLSearchParams(window.location.search);
             const productId = urlParams.get('product');
             if (productId) {
-                // Đợi Firebase load xong mới mở form
                 setTimeout(() => {
                     window.openPaymentModal(productId);
-                }, 1000);
+                }, 1000); // Trì hoãn 1 chút để Firebase và giao diện nạp xong
             }
         });
 
