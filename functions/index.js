@@ -11,7 +11,7 @@ const transporter = nodemailer.createTransport({
     service: "gmail",
     auth: {
         user: "phamngockhanh.942001@gmail.com", // Email gửi đi của hệ thống
-        pass: "ToThiTuyen2001" // VÍ DỤ: "abcd efgh ijkl mnop"
+        pass: "fpty frso luis rzqp" // VÍ DỤ: "abcd efgh ijkl mnop"
     }
 });
 
