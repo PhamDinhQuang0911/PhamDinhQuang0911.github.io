@@ -1126,24 +1126,39 @@
             window.showNotification("Đã sao chép!", "success"); 
         };
 
-        window.confirmPayment = async () => {
+                window.confirmPayment = async () => {
             if(!currentPayingCourse) return;
             
-            // Lấy thông tin vận chuyển an toàn (Dùng Optional Chaining ?.)
+            // --- BỘ LỌC KIỂM TRA ĐỊNH DẠNG (REGEX) ---
+            // Chỉ chấp nhận đuôi @gmail.com
+            const emailRegex = /^[a-zA-Z0-9._%+-]+@gmail\.com$/i; 
+            
+            // Danh sách đầu số hợp lệ từ ảnh (Viettel, Vina, Mobi, Vietnamobile, Gmobile, Itelecom, Wintel)
+            const validPhonePrefixes = ['086','096','097','098','032','033','034','035','036','037','038','039','088','091','094','083','084','085','081','082','089','090','093','070','079','077','076','078','092','056','058','099','059','087','055'];
+            // Phải bắt đầu bằng các đầu số trên và có chính xác 10 số
+            const phoneRegex = new RegExp(`^(${validPhonePrefixes.join('|')})\\d{7}$`);
+
+            // Lấy thông tin vận chuyển
             let shippingInfo = {};
             const isDoc = currentPayingCourse.type === 'document_soft' || currentPayingCourse.type === 'document_hard';
             
             if (isDoc) {
-                const nameInp = document.getElementById('payUserName')?.value;
+                const nameInp = document.getElementById('payUserName')?.value.trim();
                 if(!nameInp) return alert("Vui lòng nhập Họ Tên người mua!");
                 shippingInfo.name = nameInp;
 
                 if (currentPayingCourse.type === 'document_soft') {
-                    const emailInp = document.getElementById('payUserEmail')?.value;
-                    if(!emailInp || !emailInp.includes('@')) return alert("Vui lòng nhập Email hợp lệ để nhận file PDF!");
+                    const emailInp = document.getElementById('payUserEmail')?.value.trim();
+                    if(!emailInp) return alert("Vui lòng nhập Email!");
+                    
+                    // KIỂM TRA GMAIL
+                    if(!emailRegex.test(emailInp)) {
+                        return alert("Email không hợp lệ! Vui lòng sử dụng tài khoản @gmail.com để hệ thống gửi tài liệu.");
+                    }
                     shippingInfo.email = emailInp;
-                } else {
-                    const phoneInp = document.getElementById('payUserPhone')?.value.trim();
+
+                } else if (currentPayingCourse.type === 'document_hard') {
+                    const phoneInp = document.getElementById('payUserPhone')?.value.replace(/\s+/g, ''); // Bỏ dấu cách thừa
                     const provinceInp = document.getElementById('payUserProvince')?.value.trim();
                     const districtInp = document.getElementById('payUserDistrict')?.value.trim();
                     const wardInp = document.getElementById('payUserWard')?.value.trim();
@@ -1152,8 +1167,12 @@
                     if(!phoneInp || !provinceInp || !districtInp || !wardInp || !detailInp) {
                         return alert("Vui lòng nhập đầy đủ Số điện thoại và Địa chỉ giao nhận sách!");
                     }
+
+                    // KIỂM TRA SỐ ĐIỆN THOẠI
+                    if(!phoneRegex.test(phoneInp)) {
+                        return alert("Số điện thoại không hợp lệ!\nVui lòng nhập đúng 10 số và thuộc các nhà mạng tại Việt Nam.");
+                    }
                     
-                    // Tự động nối chuỗi hành chính thành địa chỉ chi tiết toàn diện
                     const composedAddress = `${detailInp}, ${wardInp}, ${districtInp}, ${provinceInp}`;
                     
                     shippingInfo.phone = phoneInp;
@@ -1161,7 +1180,7 @@
                     shippingInfo.district = districtInp;
                     shippingInfo.ward = wardInp;
                     shippingInfo.detailAddress = detailInp;
-                    shippingInfo.address = composedAddress; // Gộp chuỗi để đồng bộ hiển thị ra trang Dashboard cũ
+                    shippingInfo.address = composedAddress;
                     shippingInfo.nameAndPhone = `${nameInp} - ${phoneInp}`; 
                 }
             }
@@ -1192,11 +1211,12 @@
                 alert("Hệ thống đã ghi nhận đơn hàng! Bạn sẽ nhận được sản phẩm sau khi giao dịch ngân hàng thành công (tầm 1-5 phút).");
             } catch(e) { 
                 console.error(e);
-                alert("Lỗi: Không thể gửi yêu cầu, vui lòng thử lại."); 
+                alert("Lỗi: Không thể gửi yêu cầu. Chi tiết: " + e.message); 
             } finally { 
                 if(btn) { btn.innerHTML = originText; btn.disabled = false; }
             }
         };
+
 
         // KÍCH HOẠT MỞ MODAL TỪ LINK CHIA SẺ
         document.addEventListener('DOMContentLoaded', () => {
