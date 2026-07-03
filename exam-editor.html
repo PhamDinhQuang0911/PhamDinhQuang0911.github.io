@@ -125,6 +125,7 @@
                 <li><button onclick="switchView('settings'); window.toggleSidebar()" id="menu-settings" class="sidebar-item active w-full text-left px-6 py-3 text-gray-600 hover:bg-gray-50 transition-colors flex items-center gap-3 text-sm"><i class="fa-solid fa-sliders w-5"></i> Cài đặt & Cấu hình</button></li>
                 <li><button onclick="switchView('editor'); window.toggleSidebar()" id="menu-editor" class="sidebar-item w-full text-left px-6 py-3 text-gray-600 hover:bg-gray-50 transition-colors flex items-center gap-3 text-sm"><i class="fa-solid fa-list-check w-5"></i> Nội dung câu hỏi</button></li>
                 <li><button onclick="switchView('stats'); window.toggleSidebar()" id="menu-stats" class="sidebar-item w-full text-left px-6 py-3 text-gray-600 hover:bg-gray-50 transition-colors flex items-center gap-3 text-sm"><i class="fa-solid fa-chart-pie w-5"></i> Thống kê & Báo cáo</button></li>
+                <li><button onclick="switchView('grading'); window.toggleSidebar()" id="menu-grading" class="sidebar-item w-full text-left px-6 py-3 text-gray-600 hover:bg-gray-50 transition-colors flex items-center gap-3 text-sm"><i class="fa-solid fa-pen-nib w-5"></i> Chấm bài Tự luận</button></li>
             </ul>
         </nav>
         <div class="p-4 border-t border-gray-200 space-y-2">
@@ -170,6 +171,22 @@
                         <h3 class="font-bold text-gray-800 mb-4 pb-3 border-b border-gray-100"><i class="fa-solid fa-info-circle text-blue-600 mr-2"></i> Cấu hình chung</h3>
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div class="col-span-1 md:col-span-2"><label class="form-group-title">Tên đề thi <span class="text-red-500">*</span></label><input type="text" id="settingTitle" class="form-input font-bold" placeholder="VD: Kiểm tra 15 phút"></div>
+                            
+                            <div class="col-span-1 md:col-span-2">
+                                <label class="form-group-title">Phân loại Bài tập</label>
+                                <select id="settingType" class="form-input bg-white font-bold text-blue-700 border-blue-200" onchange="window.toggleHomeworkFields()">
+                                    <option value="exam">Trắc nghiệm / Tự luận ngắn (Auto chấm)</option>
+                                    <option value="homework">Bài tập Tự luận (Học sinh nộp ảnh)</option>
+                                </select>
+                            </div>
+                            <div id="homeworkConfigArea" class="col-span-1 md:col-span-2 hidden bg-blue-50 p-5 rounded-2xl border border-blue-200 mt-2">
+                                <h4 class="font-bold text-blue-800 mb-4"><i class="fa-solid fa-file-pdf"></i> Tệp đính kèm & Yêu cầu</h4>
+                                <div class="space-y-4">
+                                    <div><label class="block text-xs font-bold text-gray-600 mb-1">Link file đề bài (PDF Google Drive, ...)</label><input type="text" id="settingFileUrl" class="form-input" placeholder="Dán link file đề bài vào đây..."></div>
+                                    <div><label class="block text-xs font-bold text-gray-600 mb-1">Mô tả / Yêu cầu thêm</label><textarea id="settingHwDesc" class="form-input h-20" placeholder="Ví dụ: Các em làm ra giấy rồi chụp ảnh nộp nhé."></textarea></div>
+                                    <div><label class="block text-xs font-bold text-gray-600 mb-1">Link ảnh bìa (Banner)</label><input type="text" id="settingBannerUrl" class="form-input" placeholder="Link ảnh (Tùy chọn)"></div>
+                                </div>
+                            </div>
                             <div><label class="form-group-title">Khối lớp</label><select id="settingGrade" class="form-input bg-white"><option value="12">Khối 12</option><option value="11">Khối 11</option><option value="10">Khối 10</option><option value="9">Khối 9</option></select></div>
                             <div><label class="form-group-title">Môn học</label><select id="settingSubject" class="form-input bg-white"><option>Toán học</option><option>Vật lý</option><option>Hóa học</option><option>Tiếng Anh</option></select></div>
                             <div><label class="form-group-title">Thời gian (phút)</label><input type="number" id="settingDuration" value="90" class="form-input"></div>
@@ -360,6 +377,27 @@
                                 </tr>
                             </thead>
                             <tbody id="statsTableBody" class="divide-y divide-gray-100"></tbody>
+                        </table>
+                  </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="view-grading" class="hidden flex-1 overflow-y-auto p-4 md:p-8 bg-gray-50">
+            <div class="max-w-6xl mx-auto">
+                <h1 class="text-2xl font-bold text-gray-800 mb-6"><i class="fa-solid fa-pen-nib mr-2 text-orange-500"></i>Chấm bài học sinh</h1>
+                <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm text-left text-gray-600">
+                            <thead class="bg-gray-100 text-gray-700 uppercase text-xs font-bold">
+                                <tr>
+                                    <th class="px-6 py-3">Học sinh</th>
+                                    <th class="px-6 py-3 text-center">Trạng thái</th>
+                                    <th class="px-6 py-3 text-right">Ngày nộp</th>
+                                    <th class="px-6 py-3 text-center">Hành động</th>
+                                </tr>
+                            </thead>
+                            <tbody id="gradingTableBody" class="divide-y divide-gray-100"></tbody>
                         </table>
                     </div>
                 </div>
@@ -1088,6 +1126,11 @@
                 if (docSnap.exists()) {
                     const data = docSnap.data();
                     document.getElementById('settingTitle').value = data.title || '';
+                    document.getElementById('settingType').value = data.type || 'exam';
+                    document.getElementById('settingFileUrl').value = data.fileUrl || '';
+                    document.getElementById('settingHwDesc').value = data.description || '';
+                    document.getElementById('settingBannerUrl').value = data.bannerUrl || '';
+                    if(window.toggleHomeworkFields) window.toggleHomeworkFields();
                     document.getElementById('settingGrade').value = data.grade || '12';
                     document.getElementById('settingSubject').value = data.subject || 'Toán học';
                     document.getElementById('settingDuration').value = data.duration || 45;
@@ -1777,6 +1820,10 @@
 
                 const settings = {
                     title: title, 
+                    type: document.getElementById('settingType').value || 'exam',
+                    fileUrl: document.getElementById('settingFileUrl').value,
+                    description: document.getElementById('settingHwDesc').value,
+                    bannerUrl: document.getElementById('settingBannerUrl').value,
                     grade: document.getElementById('settingGrade').value, 
                     subject: document.getElementById('settingSubject').value,
                     duration: parseInt(document.getElementById('settingDuration').value) || 0, 
@@ -2020,6 +2067,7 @@
                 });
             }
             renderStatsTable(); // Gọi hàm vẽ bảng
+            if (window.renderGradingTable) window.renderGradingTable(); // Gọi hàm vẽ bảng chấm thi
         };
 
         window.filterStats = (classId) => {
@@ -2210,7 +2258,19 @@
         window.closeHistoryModal = () => { document.getElementById('historyModal').classList.add('opacity-0', 'pointer-events-none'); };
         window.exportToExcel = () => { if (Object.keys(statsMap).length === 0) return window.showToast("Chưa có dữ liệu để xuất!", "error"); const wb = XLSX.utils.book_new(); const dataSummary = Object.values(statsMap).map((r, i) => ({ "STT": i + 1, "Họ tên": r.studentName, "Điểm cao nhất": r.bestScore, "Số lần thi": r.attempts.length, "Ngày nộp cuối": new Date(r.submittedAt).toLocaleString('vi-VN') })); const wsSummary = XLSX.utils.json_to_sheet(dataSummary); XLSX.utils.book_append_sheet(wb, wsSummary, "Tong_Hop"); XLSX.writeFile(wb, `KetQua_${document.getElementById('settingTitle').value.replace(/\s/g, '_')}.xlsx`); };
 
-        window.switchView = (viewId) => { document.getElementById('view-settings').classList.add('hidden'); document.getElementById('view-editor').classList.add('hidden'); document.getElementById('view-editor').classList.remove('flex'); document.getElementById('view-stats').classList.add('hidden'); document.querySelectorAll('.sidebar-item').forEach(i => i.classList.remove('active')); if (viewId === 'settings') { document.getElementById('view-settings').classList.remove('hidden'); document.getElementById('menu-settings').classList.add('active'); } else if (viewId === 'editor') { document.getElementById('view-editor').classList.remove('hidden'); document.getElementById('view-editor').classList.add('flex'); document.getElementById('menu-editor').classList.add('active'); if(window.MathJax) MathJax.typesetPromise(); } else if (viewId === 'stats') { document.getElementById('view-stats').classList.remove('hidden'); document.getElementById('menu-stats').classList.add('active'); loadStats(); } };
+        window.switchView = (viewId) => { 
+            document.getElementById('view-settings').classList.add('hidden'); 
+            document.getElementById('view-editor').classList.add('hidden'); document.getElementById('view-editor').classList.remove('flex'); 
+            document.getElementById('view-stats').classList.add('hidden'); 
+            document.getElementById('view-grading').classList.add('hidden');
+            
+            document.querySelectorAll('.sidebar-item').forEach(i => i.classList.remove('active')); 
+            
+            if (viewId === 'settings') { document.getElementById('view-settings').classList.remove('hidden'); document.getElementById('menu-settings').classList.add('active'); } 
+            else if (viewId === 'editor') { document.getElementById('view-editor').classList.remove('hidden'); document.getElementById('view-editor').classList.add('flex'); document.getElementById('menu-editor').classList.add('active'); if(window.MathJax) MathJax.typesetPromise(); } 
+            else if (viewId === 'stats') { document.getElementById('view-stats').classList.remove('hidden'); document.getElementById('menu-stats').classList.add('active'); loadStats(); } 
+            else if (viewId === 'grading') { document.getElementById('view-grading').classList.remove('hidden'); document.getElementById('menu-grading').classList.add('active'); loadStats(); } 
+        };
         window.copyLink = () => { document.getElementById("shareLinkInput").select(); document.execCommand("copy"); window.showToast("Đã sao chép link!"); };
         window.copySettingLink = () => { document.getElementById("settingShareLink").select(); document.execCommand("copy"); window.showToast("Đã sao chép link!"); };
         window.closeShareModal = () => { document.getElementById('shareModal').classList.add('opacity-0', 'pointer-events-none'); };
@@ -3095,6 +3155,55 @@
             } finally {
                 if (btn) { btn.innerHTML = oldHtml; btn.disabled = false; }
             }
+        };
+    window.toggleHomeworkFields = () => {
+            const type = document.getElementById('settingType').value;
+            const hwArea = document.getElementById('homeworkConfigArea');
+            if (type === 'homework') hwArea.classList.remove('hidden');
+            else hwArea.classList.add('hidden');
+        };
+
+        window.renderGradingTable = () => {
+            const tbody = document.getElementById('gradingTableBody');
+            if (!tbody) return;
+            tbody.innerHTML = '';
+            
+            let combinedData = fullStudentList.map(st => {
+                const result = statsMap[st.studentId] || statsMap[st.studentName];
+                if (result) return { ...st, ...result, hasSubmitted: true };
+                return { ...st, hasSubmitted: false };
+            });
+
+            Object.values(statsMap).forEach(res => {
+                if (!combinedData.find(d => d.studentId === res.studentId)) {
+                    combinedData.push({ ...res, className: 'Khác', classId: 'other', hasSubmitted: true });
+                }
+            });
+
+            let filteredData = combinedData.filter(item => item.hasSubmitted);
+            filteredData.sort((a, b) => new Date(b.submittedAt || 0) - new Date(a.submittedAt || 0));
+
+            if (filteredData.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" class="text-center py-8 text-gray-400 text-sm">Chưa có bài nộp nào.</td></tr>';
+                return;
+            }
+
+            filteredData.forEach(r => {
+                const dateStr = new Date(r.submittedAt).toLocaleString('vi-VN');
+                const statusBadge = r.gradedAt ? '<span class="bg-green-100 text-green-700 px-2 py-1 rounded text-xs font-bold">Đã chấm</span>' : '<span class="bg-yellow-100 text-yellow-700 px-2 py-1 rounded text-xs font-bold animate-pulse">Cần chấm</span>';
+                const lastAttempt = r.attempts ? r.attempts[r.attempts.length - 1] : r;
+
+                tbody.innerHTML += `
+                    <tr class="bg-white border-b hover:bg-gray-50 transition-colors">
+                        <td class="px-6 py-3 font-bold text-blue-600">${r.studentName} <span class="text-xs text-gray-400 block">${r.className}</span></td>
+                        <td class="px-6 py-3 text-center">${statusBadge}</td>
+                        <td class="px-6 py-3 text-right text-xs text-gray-500">${dateStr}</td>
+                        <td class="px-6 py-3 text-center">
+                            <button onclick='window.openGrading(${JSON.stringify(lastAttempt).replace(/'/g, "&apos;")})' class="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 text-xs font-bold shadow-sm transition-all"><i class="fa-solid fa-pen-nib mr-1"></i> Chấm bài</button>
+                        </td>
+                    </tr>
+                `;
+            });
         };
     </script>
     <div id="missingImagesPanel" class="hidden fixed bottom-4 right-4 z-50 bg-white border-2 border-orange-500 shadow-2xl rounded-xl w-64 overflow-hidden flex flex-col max-h-[60vh]">
