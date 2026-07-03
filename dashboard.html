@@ -68,6 +68,7 @@
                 <div class="px-6 mt-4 mb-2 text-xs font-bold text-gray-400 uppercase tracking-wider">Cấu hình Hệ thống</div>
                 <button onclick="window.openHeroModal(); window.toggleSidebar()" class="nav-item w-full text-left px-6 py-3 text-gray-600 hover:bg-gray-50 transition-colors flex items-center gap-3"><i class="fa-solid fa-paintbrush"></i> Cài đặt Banner & Logo</button>
                 <button onclick="window.openPaymentConfigModal(); window.toggleSidebar()" class="nav-item w-full text-left px-6 py-3 text-gray-600 hover:bg-gray-50 transition-colors flex items-center gap-3"><i class="fa-solid fa-credit-card"></i> Cấu hình Thanh toán</button>
+                <button onclick="window.openAIConfigModal(); window.toggleSidebar()" class="nav-item w-full text-left px-6 py-3 text-gray-600 hover:bg-gray-50 transition-colors flex items-center gap-3"><i class="fa-solid fa-robot text-purple-600"></i> Quản lý API AI</button>
                 <button onclick="window.cleanUpSystem(); window.toggleSidebar()" class="nav-item w-full text-left px-6 py-3 text-red-600 hover:bg-red-50 transition-colors flex items-center gap-3">
                     <i class="fa-solid fa-broom"></i> Dọn dẹp hệ thống
                 </button>
@@ -370,6 +371,23 @@
         <div class="modal-container bg-white w-[90%] max-w-sm rounded-2xl shadow-2xl p-6 relative">
             <h3 id="actionModalTitle" class="text-xl font-bold text-gray-800 mb-4">Hành động</h3><div id="dynamicContent"></div> 
             <button onclick="window.toggleModal('actionModal', false)" class="absolute top-4 right-4 text-gray-400 hover:text-gray-600"><i class="fa-solid fa-times"></i></button>
+        </div>
+    </div>
+
+    <div id="aiConfigModal" class="modal opacity-0 pointer-events-none fixed inset-0 z-[95] flex items-center justify-center bg-gray-900 bg-opacity-60 px-4 transition-opacity duration-300">
+        <div class="modal-content bg-white w-full max-w-lg rounded-2xl shadow-2xl transform scale-95 transition-transform duration-300">
+            <div class="p-5 border-b border-gray-100 flex justify-between items-center bg-purple-50 rounded-t-2xl">
+                <h3 class="font-bold text-purple-800 text-lg"><i class="fa-solid fa-robot mr-2"></i>Cấu hình API AI</h3>
+                <button onclick="window.toggleModal('aiConfigModal', false)" class="text-gray-400 hover:text-red-500"><i class="fa-solid fa-times text-xl"></i></button>
+            </div>
+            <div class="p-6 space-y-4">
+                <p class="text-sm text-gray-600">Thêm API Key (OpenAI/Gemini) để hệ thống tự động xoay vòng khi chấm bài tự luận hoặc sinh đề AI.</p>
+                <div id="aiKeyList" class="space-y-2 max-h-40 overflow-y-auto custom-scrollbar"></div>
+                <div class="flex gap-2 mt-2 border-t pt-4">
+                    <input type="text" id="newAiKey" class="flex-1 px-4 py-2 border rounded-xl focus:ring-2 focus:ring-purple-200 outline-none text-sm font-mono" placeholder="Nhập API Key mới...">
+                    <button onclick="window.addAiKey()" class="px-4 py-2 bg-purple-600 text-white rounded-xl font-bold shadow hover:bg-purple-700 text-sm"><i class="fa-solid fa-plus"></i> Thêm</button>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -2249,7 +2267,54 @@ loadFileManager(true); }
         
         // Kích hoạt TikZ nếu có
         if (window.renderTikz) window.renderTikz();
-    };
+        };
+
+        // --- TÍNH NĂNG QUẢN LÝ API AI XOAY VÒNG ---
+        window.aiKeys = [];
+
+        window.openAIConfigModal = async () => {
+            window.toggleModal('aiConfigModal', true);
+            try {
+                const snap = await getDoc(doc(db, "configurations", "ai_keys"));
+                if (snap.exists()) window.aiKeys = snap.data().keys || [];
+                window.renderAiKeys();
+            } catch(e) { console.error("Lỗi lấy API Key:", e); }
+        };
+
+        window.renderAiKeys = () => {
+            const list = document.getElementById('aiKeyList');
+            list.innerHTML = '';
+            if (window.aiKeys.length === 0) {
+                list.innerHTML = '<p class="text-xs text-gray-400 italic text-center py-4">Chưa có API Key nào được thêm.</p>';
+            }
+            window.aiKeys.forEach((key, idx) => {
+                const obfuscated = key.substring(0, 8) + '...' + key.substring(key.length - 4);
+                list.innerHTML += `
+                    <div class="flex justify-between items-center bg-gray-50 p-3 rounded-lg border border-gray-200">
+                        <span class="text-sm font-mono text-gray-700">${obfuscated}</span>
+                        <button onclick="window.removeAiKey(${idx})" class="text-red-500 hover:text-red-700 bg-red-50 p-1.5 rounded-lg"><i class="fa-solid fa-trash"></i></button>
+                    </div>`;
+            });
+        };
+
+        window.addAiKey = async () => {
+            const val = document.getElementById('newAiKey').value.trim();
+            if (!val) return;
+            window.aiKeys.push(val);
+            document.getElementById('newAiKey').value = '';
+            
+            await setDoc(doc(db, "configurations", "ai_keys"), { keys: window.aiKeys }, { merge: true });
+            window.renderAiKeys();
+            window.showNotification("Thêm API Key thành công!", "success");
+        };
+
+        window.removeAiKey = async (idx) => {
+            window.aiKeys.splice(idx, 1);
+            await setDoc(doc(db, "configurations", "ai_keys"), { keys: window.aiKeys }, { merge: true });
+            window.renderAiKeys();
+            window.showNotification("Đã xóa API Key!", "success");
+        };
+
     </script>
     <div id="notificationPanel" class="hidden fixed z-[150] w-80 bg-white rounded-2xl shadow-2xl border border-gray-200 overflow-hidden animate-fade-in transform transition-all
     top-16 right-2 origin-top-right
