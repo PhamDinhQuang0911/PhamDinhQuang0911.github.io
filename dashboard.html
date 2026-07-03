@@ -1759,17 +1759,35 @@ loadFileManager(true); }
             btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang lưu bài...';
             btn.disabled = true;
 
+            window.saveHomework = async () => {
+            const title = document.getElementById('hwTitle').value.trim();
+            if (!title) return window.showNotification("Vui lòng nhập tiêu đề bài tập tự luận!", "error");
+
+            let finalDocUrl = "";
+            if (window.currentHwSource === 'file') {
+                finalDocUrl = window.currentHwFileUrl;
+            } else {
+                finalDocUrl = formatGoogleDriveLink(document.getElementById('hwLinkInput').value);
+            }
+
+            if (!finalDocUrl) return window.showNotification("Vui lòng tải tệp lên hoặc điền đường dẫn tài liệu đề bài!", "error");
+
+            const btn = document.getElementById('btnSaveHw');
+            const oldText = btn.innerHTML;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang lưu bài...';
+            btn.disabled = true;
+
             try {
                 const deadlineInput = document.getElementById('hwDeadline').value;
-                const durationInput = document.getElementById('hwDuration').value;
+                // Đã gỡ bỏ dòng lấy hwDuration vì phần HTML đã bị xóa
 
                 const hwData = {
                     title: title,
                     type: 'homework', // Nhãn nhận diện phân loại bài tập tự luận
                     fileUrl: finalDocUrl,
-                    bannerUrl: window.currentHwBannerUrl || "", // Lưu link banner do AI vẽ hoặc upload thường
+                    bannerUrl: window.currentHwBannerUrl || "", 
                     description: document.getElementById('hwDesc').value,
-                    duration: durationInput ? parseInt(durationInput) : 0,
+                    duration: 0, // Mặc định thời gian làm bài tự luận là 0 (Không giới hạn)
                     endTime: deadlineInput ? new Date(deadlineInput).toISOString() : null,
                     teacherId: currentUserUid,
                     accessType: 'class',
@@ -1782,6 +1800,12 @@ loadFileManager(true); }
                 await addDoc(collection(db, "exams"), hwData);
                 window.showNotification("Giao bài tập tự luận thành công!", "success");
                 window.toggleModal('homeworkModal', false);
+                
+                // Reset lại ảnh preview mặc định sau khi lưu thành công
+                const bannerPreview = document.getElementById('hwBannerPreview');
+                if(bannerPreview) bannerPreview.src = "https://placehold.co/600x250?text=Toán+Thầy+Choang";
+                window.currentHwBannerUrl = "";
+                
                 renderClassExercises(window.currentAssignClassId);
             } catch(e) {
                 console.error(e);
