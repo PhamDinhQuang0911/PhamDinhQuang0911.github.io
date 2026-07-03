@@ -265,6 +265,35 @@
         </div>
     </main>
 
+    <main id="homeworkMain" class="hidden flex-1 overflow-y-auto bg-gray-50 pb-24 w-full h-full relative">
+        <div id="hwBanner" class="w-full h-48 md:h-72 bg-gray-300 relative">
+            <img id="hwBannerImg" src="" class="w-full h-full object-cover">
+            <div class="absolute inset-0 bg-gradient-to-t from-gray-900/60 to-transparent"></div>
+        </div>
+        <div class="max-w-4xl mx-auto px-4 md:px-6 -mt-20 relative z-10">
+            <div class="bg-white p-6 md:p-8 rounded-3xl shadow-xl border border-gray-100 mb-8">
+                <span class="bg-red-100 text-red-600 text-[10px] font-black px-2.5 py-1 rounded-lg uppercase tracking-widest">Bài tập tự luận</span>
+                <h1 id="hwTitleDisplay" class="text-2xl md:text-3xl font-black text-gray-800 mt-3 mb-4">Tên bài tập</h1>
+                
+                <div class="flex flex-wrap gap-3 text-sm text-gray-600 mb-6 bg-gray-50 p-3 rounded-xl border border-gray-100">
+                    <div id="hwDeadlineDisplay" class="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-lg shadow-sm border border-gray-100"><i class="fa-solid fa-calendar-days text-red-500"></i> Hạn nộp: --</div>
+                    <div id="hwStatusDisplay" class="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-lg shadow-sm border border-gray-100"><i class="fa-solid fa-circle-info text-blue-500"></i> Trạng thái: Chưa nộp</div>
+                </div>
+                
+                <div id="hwDescDisplay" class="text-gray-700 bg-blue-50 p-4 md:p-5 rounded-2xl border border-blue-100 mb-6 whitespace-pre-wrap font-medium leading-relaxed"></div>
+                
+                <div class="w-full rounded-2xl overflow-hidden border-2 border-gray-200 shadow-inner bg-gray-100">
+                    <iframe id="hwIframe" src="" class="w-full h-[60vh]"></iframe>
+                </div>
+            </div>
+
+            <div class="bg-white p-6 md:p-8 rounded-3xl shadow-xl border border-gray-100 mb-8">
+                <h3 class="text-xl font-black text-gray-800 mb-6 border-b border-gray-100 pb-3"><i class="fa-solid fa-cloud-arrow-up text-blue-600 mr-2"></i>Khu vực Nộp bài (Ảnh)</h3>
+                <div id="hwUploadArea"></div>
+            </div>
+        </div>
+    </main>
+
     <div id="solutionView" class="hidden fixed inset-0 z-[90] bg-gray-50 flex h-full">
         <aside id="solutionSidebar" class="mobile-sidebar bg-white border-r border-gray-200 md:relative md:transform-none md:w-80 md:flex md:z-10">
             <div class="p-5 border-b border-gray-200 bg-white flex justify-between items-center shadow-sm">
@@ -467,6 +496,39 @@ async function loadLobbyData(id) {
                 snap.forEach(d => window.examHistory.push(d.data()));
                 window.examHistory.sort((a,b)=>new Date(b.submittedAt)-new Date(a.submittedAt));
                 const att = window.examHistory.length;
+
+                // --- [MỚI] XỬ LÝ RIÊNG NẾU LÀ BÀI TẬP TỰ LUẬN (HOMEWORK) ---
+                if (examData.type === 'homework') {
+                    // 1. Tạo 1 câu hỏi giả lập (loại essay) để tái sử dụng 100% logic chấm điểm, nộp ảnh, xem lại của trắc nghiệm
+                    examData.questions = [{
+                        type: 'essay',
+                        content: `<div class="bg-blue-50 p-4 rounded-xl border border-blue-200 mb-4"><div class="font-bold text-blue-800 mb-1"><i class="fa-solid fa-file-pdf"></i> Đề bài tự luận đính kèm:</div><div class="text-sm text-blue-600 mb-3">${examData.description || ''}</div><iframe src="${examData.fileUrl}" class="w-full h-[500px] border border-blue-300 rounded-lg bg-white"></iframe></div>`,
+                        point: 10
+                    }];
+                    currentQuestions = examData.questions; // Gán để chức năng xem lại bài hoạt động
+
+                    // 2. Nếu là chế độ Học sinh xem lại bài đã chấm -> Mở thẳng tính năng xem giải
+                    const urlParams = new URLSearchParams(window.location.search);
+                    if (urlParams.get('mode') === 'review' && att > 0) {
+                        const resultData = window.examHistory[0];
+                        userAnswers = resultData.answers || {};
+                        document.getElementById('lobbyScreen').classList.add('hidden'); 
+                        viewDetailSolutions(); 
+                        return;
+                    }
+
+                    // 3. Tải bài nháp đang làm dở (Ảnh đã chọn nhưng chưa nộp)
+                    const attemptRef = doc(db, "exam_attempts", `${currentUser.uid}_${examId}`);
+                    const attemptSnap = await getDoc(attemptRef);
+                    let cloudAnswers = {};
+                    if (attemptSnap.exists()) cloudAnswers = attemptSnap.data().answers || {};
+                    const localAnswers = JSON.parse(localStorage.getItem(`ans_${currentUser.uid}_${examId}`)) || {};
+                    userAnswers = { ...cloudAnswers, ...localAnswers };
+
+                    // 4. Mở giao diện riêng biệt cho Homework
+                    renderHomeworkView();
+                    return; // Chặn không cho chạy xuống logic của Trắc nghiệm nữa
+                }
 
                 // --- [MỚI] KIỂM TRA BÀI LÀM DỞ ---
                 const attemptRef = doc(db, "exam_attempts", `${currentUser.uid}_${examId}`);
@@ -1335,6 +1397,150 @@ async function loadLobbyData(id) {
         document.getElementById('prevBtnMob').onclick = () => { if(currentIndex > 0) renderQuestion(currentIndex - 1); };
         document.getElementById('nextBtnMob').onclick = () => { if(currentIndex < currentQuestions.length - 1) renderQuestion(currentIndex + 1); };
 
+        // =========================================================
+        // --- LOGIC HOẠT ĐỘNG RIÊNG CHO BÀI TẬP TỰ LUẬN (HOMEWORK) ---
+        // =========================================================
+        window.renderHomeworkView = () => {
+            // Ẩn toàn bộ UI thi trắc nghiệm cũ
+            dom.lobby.classList.add('hidden');
+            dom.header.classList.add('hidden');
+            dom.main.classList.add('hidden');
+            
+            // Hiện UI mới
+            document.getElementById('homeworkMain').classList.remove('hidden');
+
+            // Đổ dữ liệu vào UI
+            document.getElementById('hwBannerImg').src = examData.bannerUrl || "https://placehold.co/1200x400?text=Homework";
+            document.getElementById('hwTitleDisplay').textContent = examData.title;
+            
+            const deadline = examData.endTime ? new Date(examData.endTime) : null;
+            document.getElementById('hwDeadlineDisplay').innerHTML = `<i class="fa-solid fa-calendar-days text-red-500"></i> Hạn nộp: <b>${deadline ? deadline.toLocaleString('vi-VN') : 'Không giới hạn'}</b>`;
+            
+            if(userAnswers[0]) {
+                document.getElementById('hwStatusDisplay').innerHTML = `<i class="fa-solid fa-check-circle text-green-500"></i> Trạng thái: <b class="text-green-600">Đã lưu ảnh (Chưa nộp)</b>`;
+            } else {
+                document.getElementById('hwStatusDisplay').innerHTML = `<i class="fa-solid fa-circle-info text-blue-500"></i> Trạng thái: <b>Chưa có ảnh</b>`;
+            }
+
+            document.getElementById('hwDescDisplay').textContent = examData.description || 'Các em vui lòng xem đề bài trong tài liệu đính kèm bên dưới.';
+            document.getElementById('hwIframe').src = examData.fileUrl || '';
+
+            // --- TÁI SỬ DỤNG 100% CỤM CHỌN ẢNH, ĐÓNG DẤU TỪ CÂU ESSAY ---
+            const uploadArea = document.getElementById('hwUploadArea');
+            uploadArea.innerHTML = '';
+            
+            const wrapper = document.createElement('div');
+            wrapper.className = "space-y-4"; 
+            
+            // 1. Khu vực hiển thị ảnh đã tải lên
+            const submittedWrapper = document.createElement('div');
+            submittedWrapper.id = `submitted-area-wrapper-0`;
+            submittedWrapper.className = userAnswers[0] ? "bg-blue-50 p-5 rounded-2xl border border-blue-200 mb-4" : "hidden";
+            submittedWrapper.innerHTML = `
+                <div class="flex items-center justify-between mb-4 border-b border-blue-200 pb-3">
+                    <div class="flex items-center gap-2 text-blue-800 font-bold text-base">
+                        <i class="fa-solid fa-images"></i> Ảnh bài làm bạn đã tải lên hệ thống:
+                    </div>
+                    <button onclick="window.deleteAllImages(0)" class="text-xs bg-white text-red-600 border border-red-200 px-4 py-2 rounded-xl hover:bg-red-600 hover:text-white font-bold shadow-sm transition-colors flex items-center gap-1">
+                        <i class="fa-solid fa-trash-can"></i> Xóa tất cả ảnh
+                    </button>
+                </div>
+                <div id="submitted-area-0" class="submitted-content grid gap-6">
+                    ${userAnswers[0] || ''}
+                </div>
+            `;
+            wrapper.appendChild(submittedWrapper);
+
+            // 2. Hai nút lớn: Chọn ảnh & Chụp ảnh
+            const actionGrid = document.createElement('div');
+            actionGrid.className = "grid grid-cols-2 gap-4";
+            actionGrid.innerHTML = `
+                <label class="flex flex-col items-center justify-center p-6 md:p-8 border-2 border-dashed border-blue-300 rounded-2xl bg-blue-50/50 text-blue-600 font-bold cursor-pointer hover:bg-blue-50 hover:border-blue-400 hover:shadow-md transition-all active:scale-95">
+                    <div class="w-14 h-14 bg-white rounded-full flex items-center justify-center shadow-sm mb-3 text-2xl text-blue-500"><i class="fa-regular fa-image"></i></div>
+                    <span class="text-xs md:text-sm uppercase tracking-wide">Chọn ảnh từ máy</span>
+                    <input type="file" accept="image/*" multiple class="hidden" onclick="window.triggerUploadMode()" onchange="handleStudentUpload(this, 0)">
+                </label>
+                <label class="flex flex-col items-center justify-center p-6 md:p-8 border-2 border-dashed border-purple-300 rounded-2xl bg-purple-50/50 text-purple-600 font-bold cursor-pointer hover:bg-purple-50 hover:border-purple-400 hover:shadow-md transition-all active:scale-95">
+                    <div class="w-14 h-14 bg-white rounded-full flex items-center justify-center shadow-sm mb-3 text-2xl text-purple-500"><i class="fa-solid fa-camera"></i></div>
+                    <span class="text-xs md:text-sm uppercase tracking-wide">Chụp ảnh nộp</span>
+                    <input type="file" accept="image/*" capture="environment" class="hidden" onclick="window.triggerUploadMode()" onchange="handleStudentUpload(this, 0)">
+                </label>
+            `;
+            wrapper.appendChild(actionGrid);
+
+            // 3. Khu vực Preview trước khi ấn tải
+            const previewArea = document.createElement('div'); 
+            previewArea.id = `preview-area-0`; 
+            previewArea.className = "grid grid-cols-2 md:grid-cols-4 gap-4 mt-4 empty:hidden"; 
+            wrapper.appendChild(previewArea);
+
+            // 4. Nút Đóng dấu thứ tự trang
+            const saveBtnArea = document.createElement('div'); 
+            saveBtnArea.id = `upload-actions-0`; 
+            saveBtnArea.className = "hidden mt-6"; 
+            saveBtnArea.innerHTML = `<button onclick="autoNumberPages(0)" class="w-full py-4 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-xl font-bold text-lg shadow-lg hover:shadow-xl transition-all transform active:scale-95 flex items-center justify-center gap-2"><i class="fa-solid fa-cloud-arrow-up"></i> Đóng dấu thứ tự & Tải ảnh lên</button>`;
+            wrapper.appendChild(saveBtnArea);
+
+            // 5. NÚT CHỐT NỘP BÀI VỀ CHO GIÁO VIÊN
+            const finalSubmitArea = document.createElement('div');
+            finalSubmitArea.className = "mt-8 pt-8 border-t border-gray-200";
+            finalSubmitArea.innerHTML = `
+                <button onclick="submitHomework()" class="w-full py-4 bg-blue-600 text-white rounded-2xl font-black text-lg md:text-xl shadow-xl shadow-blue-200 hover:bg-blue-700 hover:shadow-2xl transition-all flex items-center justify-center gap-2 transform active:scale-95">
+                    <i class="fa-solid fa-paper-plane"></i> XÁC NHẬN NỘP BÀI
+                </button>
+                <p class="text-center text-xs text-gray-400 mt-4"><i class="fa-solid fa-shield-halved"></i> Bài nộp sẽ được lưu an toàn trên máy chủ để thầy cô chấm.</p>
+            `;
+            wrapper.appendChild(finalSubmitArea);
+
+            uploadArea.appendChild(wrapper);
+        };
+
+        // Hàm nộp bài (Push lên Results)
+        window.submitHomework = async () => {
+            if (!userAnswers[0] || userAnswers[0].trim() === '') {
+                window.customAlert("Em chưa tải bức ảnh bài làm nào lên hệ thống!", "error");
+                return;
+            }
+            if (!await window.customConfirm("Em chắc chắn muốn nộp bài tự luận này chứ? Bấm Đồng ý là không sửa được ảnh nữa đâu nhé!")) return;
+
+            const btn = document.querySelector('#hwUploadArea button[onclick="submitHomework()"]');
+            if(btn) { btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang nộp...'; btn.disabled = true; }
+            
+            try {
+                let detectedClassId = "vang_lai";
+                const urlParams = new URLSearchParams(window.location.search);
+                if (urlParams.get('classId')) detectedClassId = urlParams.get('classId');
+                
+                const resultData = { 
+                    examId, classId: detectedClassId, studentId: currentUser.uid, studentName: currentUser.displayName || currentUser.email, 
+                    score: 0, answers: { 0: userAnswers[0] }, // Cất nguyên cụm ảnh HTML vào index 0
+                    cheatCount: 0, correctCount: 0, totalQuestions: 1, 
+                    isPassed: false, passScoreSnapshot: 5, duration: 0, submittedAt: new Date().toISOString() 
+                };
+
+                // Đẩy vào kho chấm
+                await addDoc(collection(db, "results"), resultData);
+                // Dọn dẹp rác nháp
+                await deleteDoc(doc(db, "exam_attempts", `${currentUser.uid}_${examId}`));
+                localStorage.removeItem(`ans_${currentUser.uid}_${examId}`);
+
+                // Hiện Popup kết quả thành công (Tái sử dụng modal Trắc nghiệm)
+                document.getElementById('resultTitle').textContent = "Đã nộp bài!";
+                document.getElementById('resultTitle').className = "text-2xl font-extrabold text-blue-600 mb-2";
+                document.getElementById('resultMsg').textContent = "Bài làm tự luận của em đã được gửi cho giáo viên. Thầy cô sẽ chấm điểm và báo lại sau nhé.";
+                document.getElementById('scoreSection').classList.add('hidden'); // Bài chưa chấm thì không hiện điểm
+                document.getElementById('btnViewSolution').classList.add('hidden'); // Chưa chấm xong thì không cho xem lại
+                
+                document.getElementById('resultModal').classList.remove('hidden');
+                setTimeout(() => { document.getElementById('resultModal').classList.remove('opacity-0'); document.getElementById('resultModalContent').classList.add('scale-100'); }, 50);
+
+            } catch(e) {
+                window.customAlert("Lỗi nộp bài: " + e.message, "error");
+            } finally {
+                if(btn) { btn.innerHTML = '<i class="fa-solid fa-paper-plane"></i> XÁC NHẬN NỘP BÀI'; btn.disabled = false; }
+            }
+        };
+
         // --- CÁC HÀM XỬ LÝ UPLOAD ẢNH & PHÁO HOA ---
         window.tempStudentFiles = {}; 
         window.handleStudentUpload = (input, qIdx) => { const files = Array.from(input.files); if(files.length === 0) return; if(!window.tempStudentFiles[qIdx]) window.tempStudentFiles[qIdx] = []; window.tempStudentFiles[qIdx].push(...files); renderStudentPreview(qIdx); document.getElementById(`upload-actions-${qIdx}`).classList.remove('hidden'); };
@@ -1408,8 +1614,8 @@ async function loadLobbyData(id) {
                 document.getElementById(`preview-area-${qIdx}`).innerHTML = ''; 
                 document.getElementById(`upload-actions-${qIdx}`).classList.add('hidden'); 
                 
-                // Render lại câu hỏi để hiện ảnh mới
-                renderQuestion(qIdx); 
+                if (examData.type === 'homework') renderHomeworkView();
+                else renderQuestion(qIdx);
                 window.showToast("Đã nộp ảnh thành công!", "success");
 
             } catch (e) {
@@ -1492,8 +1698,12 @@ async function loadLobbyData(id) {
                 delete userAnswers[qIdx];
                 saveLocal();
                 
-                // 3. Cập nhật giao diện
-                document.getElementById(`submitted-area-wrapper-${qIdx}`).classList.add('hidden');
+                if (examData.type === 'homework') renderHomeworkView();
+                else {
+                    document.getElementById(`submitted-area-wrapper-${qIdx}`).classList.add('hidden');
+                    document.getElementById(`submitted-area-${qIdx}`).innerHTML = '';
+                    document.getElementById(`upload-actions-${qIdx}`).classList.add('hidden');
+                }
                 document.getElementById(`submitted-area-${qIdx}`).innerHTML = '';
                 
                 // Reset mảng file tạm nếu có
