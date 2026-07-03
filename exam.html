@@ -498,26 +498,51 @@ async function loadLobbyData(id) {
                 const att = window.examHistory.length;
 
                 // --- [MỚI] XỬ LÝ RIÊNG NẾU LÀ BÀI TẬP TỰ LUẬN (HOMEWORK) ---
+                                // --- [MỚI] XỬ LÝ RIÊNG NẾU LÀ BÀI TẬP TỰ LUẬN (HOMEWORK) ---
                 if (examData.type === 'homework') {
-                    // 1. Tạo 1 câu hỏi giả lập (loại essay) để tái sử dụng 100% logic chấm điểm, nộp ảnh, xem lại của trắc nghiệm
                     examData.questions = [{
                         type: 'essay',
                         content: `<div class="bg-blue-50 p-4 rounded-xl border border-blue-200 mb-4"><div class="font-bold text-blue-800 mb-1"><i class="fa-solid fa-file-pdf"></i> Đề bài tự luận đính kèm:</div><div class="text-sm text-blue-600 mb-3">${examData.description || ''}</div><iframe src="${examData.fileUrl}" class="w-full h-[500px] border border-blue-300 rounded-lg bg-white"></iframe></div>`,
                         point: 10
                     }];
-                    currentQuestions = examData.questions; // Gán để chức năng xem lại bài hoạt động
+                    currentQuestions = examData.questions;
 
-                    // 2. Nếu là chế độ Học sinh xem lại bài đã chấm -> Mở thẳng tính năng xem giải
                     const urlParams = new URLSearchParams(window.location.search);
-                    if (urlParams.get('mode') === 'review' && att > 0) {
+                    
+                    // NẾU ĐÃ CÓ LỊCH SỬ NỘP BÀI
+                    if (att > 0) {
                         const resultData = window.examHistory[0];
                         userAnswers = resultData.answers || {};
-                        document.getElementById('lobbyScreen').classList.add('hidden'); 
-                        viewDetailSolutions(); 
-                        return;
+                        window.currentResultId = resultData.id; // Lưu ID để cập nhật lại
+
+                        const deadline = examData.endTime ? new Date(examData.endTime) : null;
+                        const canEdit = !deadline || new Date() < deadline; // Kiểm tra xem còn hạn nộp không
+
+                        if (urlParams.get('mode') === 'review' || !canEdit) {
+                            // Hết hạn hoặc Chủ động xem lại -> Chế độ Đọc (Review)
+                            document.getElementById('lobbyScreen').classList.add('hidden'); 
+                            viewDetailSolutions(); 
+                            return;
+                        } else {
+                            // CÒN HẠN -> Cho phép sửa ảnh (Edit Mode)
+                            document.getElementById('lobbyScreen').classList.add('hidden');
+                            window.isEditMode = true;
+                            renderHomeworkView();
+                            
+                            // Đổi giao diện nút Nộp bài thành Cập nhật
+                            setTimeout(() => {
+                                const btn = document.querySelector('#hwUploadArea button[onclick="submitHomework()"]');
+                                if(btn) {
+                                    btn.innerHTML = '<i class="fa-solid fa-pen"></i> CẬP NHẬT LẠI BÀI LÀM';
+                                    btn.classList.remove('bg-blue-600', 'shadow-blue-200', 'hover:bg-blue-700');
+                                    btn.classList.add('bg-orange-500', 'shadow-orange-200', 'hover:bg-orange-600');
+                                }
+                            }, 100);
+                            return;
+                        }
                     }
 
-                    // 3. Tải bài nháp đang làm dở (Ảnh đã chọn nhưng chưa nộp)
+                    // Nếu chưa nộp thì load bài nháp dở (Ảnh đã chọn nhưng chưa bấm nộp)
                     const attemptRef = doc(db, "exam_attempts", `${currentUser.uid}_${examId}`);
                     const attemptSnap = await getDoc(attemptRef);
                     let cloudAnswers = {};
@@ -525,10 +550,10 @@ async function loadLobbyData(id) {
                     const localAnswers = JSON.parse(localStorage.getItem(`ans_${currentUser.uid}_${examId}`)) || {};
                     userAnswers = { ...cloudAnswers, ...localAnswers };
 
-                    // 4. Mở giao diện riêng biệt cho Homework
                     renderHomeworkView();
-                    return; // Chặn không cho chạy xuống logic của Trắc nghiệm nữa
+                    return;
                 }
+
 
                 // --- [MỚI] KIỂM TRA BÀI LÀM DỞ ---
                 const attemptRef = doc(db, "exam_attempts", `${currentUser.uid}_${examId}`);
@@ -1496,15 +1521,20 @@ async function loadLobbyData(id) {
         };
 
         // Hàm nộp bài (Push lên Results)
-        window.submitHomework = async () => {
+                window.submitHomework = async () => {
             if (!userAnswers[0] || userAnswers[0].trim() === '') {
                 window.customAlert("Em chưa tải bức ảnh bài làm nào lên hệ thống!", "error");
                 return;
             }
-            if (!await window.customConfirm("Em chắc chắn muốn nộp bài tự luận này chứ? Bấm Đồng ý là không sửa được ảnh nữa đâu nhé!")) return;
+            
+            // Thông báo khác nhau cho Lần đầu nộp và Cập nhật
+            const confirmMsg = window.isEditMode 
+                ? "Em muốn cập nhật lại ảnh bài làm này chứ?" 
+                : "Em chắc chắn muốn nộp bài tự luận này chứ?";
+            if (!await window.customConfirm(confirmMsg)) return;
 
             const btn = document.querySelector('#hwUploadArea button[onclick="submitHomework()"]');
-            if(btn) { btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang nộp...'; btn.disabled = true; }
+            if(btn) { btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang lưu...'; btn.disabled = true; }
             
             try {
                 let detectedClassId = "vang_lai";
@@ -1513,23 +1543,30 @@ async function loadLobbyData(id) {
                 
                 const resultData = { 
                     examId, classId: detectedClassId, studentId: currentUser.uid, studentName: currentUser.displayName || currentUser.email, 
-                    score: 0, answers: { 0: userAnswers[0] }, // Cất nguyên cụm ảnh HTML vào index 0
+                    score: 0, answers: { 0: userAnswers[0] }, 
                     cheatCount: 0, correctCount: 0, totalQuestions: 1, 
                     isPassed: false, passScoreSnapshot: 5, duration: 0, submittedAt: new Date().toISOString() 
                 };
 
-                // Đẩy vào kho chấm
-                await addDoc(collection(db, "results"), resultData);
-                // Dọn dẹp rác nháp
+                if (window.isEditMode && window.currentResultId) {
+                    // CẬP NHẬT LẠI KẾT QUẢ CŨ
+                    await updateDoc(doc(db, "results", window.currentResultId), {
+                        answers: { 0: userAnswers[0] },
+                        submittedAt: new Date().toISOString() // Cập nhật giờ nộp mới
+                    });
+                } else {
+                    // TẠO KẾT QUẢ MỚI
+                    await addDoc(collection(db, "results"), resultData);
+                }
+
                 await deleteDoc(doc(db, "exam_attempts", `${currentUser.uid}_${examId}`));
                 localStorage.removeItem(`ans_${currentUser.uid}_${examId}`);
 
-                // Hiện Popup kết quả thành công (Tái sử dụng modal Trắc nghiệm)
-                document.getElementById('resultTitle').textContent = "Đã nộp bài!";
+                document.getElementById('resultTitle').textContent = window.isEditMode ? "Đã cập nhật bài!" : "Đã nộp bài!";
                 document.getElementById('resultTitle').className = "text-2xl font-extrabold text-blue-600 mb-2";
                 document.getElementById('resultMsg').textContent = "Bài làm tự luận của em đã được gửi cho giáo viên. Thầy cô sẽ chấm điểm và báo lại sau nhé.";
-                document.getElementById('scoreSection').classList.add('hidden'); // Bài chưa chấm thì không hiện điểm
-                document.getElementById('btnViewSolution').classList.add('hidden'); // Chưa chấm xong thì không cho xem lại
+                document.getElementById('scoreSection').classList.add('hidden'); 
+                document.getElementById('btnViewSolution').classList.add('hidden'); 
                 
                 document.getElementById('resultModal').classList.remove('hidden');
                 setTimeout(() => { document.getElementById('resultModal').classList.remove('opacity-0'); document.getElementById('resultModalContent').classList.add('scale-100'); }, 50);
@@ -1537,9 +1574,10 @@ async function loadLobbyData(id) {
             } catch(e) {
                 window.customAlert("Lỗi nộp bài: " + e.message, "error");
             } finally {
-                if(btn) { btn.innerHTML = '<i class="fa-solid fa-paper-plane"></i> XÁC NHẬN NỘP BÀI'; btn.disabled = false; }
+                if(btn) { btn.innerHTML = window.isEditMode ? '<i class="fa-solid fa-pen"></i> CẬP NHẬT LẠI BÀI LÀM' : '<i class="fa-solid fa-paper-plane"></i> XÁC NHẬN NỘP BÀI'; btn.disabled = false; }
             }
         };
+
 
         // --- CÁC HÀM XỬ LÝ UPLOAD ẢNH & PHÁO HOA ---
         window.tempStudentFiles = {}; 
