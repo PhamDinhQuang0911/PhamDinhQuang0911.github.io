@@ -1604,45 +1604,189 @@ loadFileManager(true); }
         };
         // --- QUẢN LÝ BÀI TẬP TRONG LỚP (NÂNG CẤP) ---
         // --- LOGIC GIAO BÀI TẬP TỰ LUẬN ---
-window.currentHwFileUrl = "";
+// --- LOGIC CAO CẤP: GIAO BÀI TẬP TỰ LUẬN NÂNG CAO ---
+        window.currentHwFileUrl = "";
+        window.currentHwBannerUrl = "";
+        window.currentHwSource = "file";
 
-window.openHomeworkModal = (classId) => {
-    window.currentAssignClassId = classId;
-    window.toggleModal('homeworkModal', true);
-};
+        window.openHomeworkModal = (classId) => {
+            window.currentAssignClassId = classId;
+            document.getElementById('hwTitle').value = '';
+            document.getElementById('hwDesc').value = '';
+            document.getElementById('hwDuration').value = '';
+            document.getElementById('hwDeadline').value = '';
+            document.getElementById('hwLinkInput').value = '';
+            document.getElementById('hwFileText').innerHTML = '<i class="fa-solid fa-cloud-arrow-up text-2xl mb-1.5"></i> Bấm để tải file PDF hoặc Ảnh đề bài';
+            document.getElementById('hwBannerPreview').src = "https://placehold.co/600x250?text=Toán+Thầy+Choang";
+            window.currentHwFileUrl = "";
+            window.currentHwBannerUrl = "";
+            switchHwSource('file');
+            window.toggleModal('homeworkModal', true);
+        };
 
-window.handleHwFileUpload = async (input) => {
-    const file = input.files[0];
-    const textEl = document.getElementById('hwFileText');
-    textEl.innerHTML = 'Đang tải lên...';
-    
-    // Tận dụng hàm nén ảnh sẵn có nếu là ảnh
-    const fileToUpload = file.type.startsWith('image/') ? await window.compressImage(file, 0.8, 1500) : file;
-    const formData = new FormData(); 
-    formData.append('file', fileToUpload, `hw_${Date.now()}`);
-    
-    const res = await fetch("https://upload-helper.phamngockhanh-942001.workers.dev/", { method: 'PUT', body: formData });
-    const data = await res.json();
-    window.currentHwFileUrl = data.url;
-    textEl.innerHTML = `Đã chọn: ${file.name}`;
-};
+        // Hàm kiểm soát cơ chế tab chuyển đổi giữa File và Link
+        window.switchHwSource = (source) => {
+            window.currentHwSource = source;
+            document.getElementById('hwSourceFile').classList.toggle('hidden', source !== 'file');
+            document.getElementById('hwSourceLink').classList.toggle('hidden', source !== 'link');
+            
+            document.getElementById('btnSrcFile').className = source === 'file' 
+                ? 'flex-1 py-2 text-xs font-bold bg-red-600 text-white rounded-lg shadow-sm transition-all' 
+                : 'flex-1 py-2 text-xs font-bold bg-transparent text-gray-600 rounded-lg transition-all';
+                
+            document.getElementById('btnSrcLink').className = source === 'link' 
+                ? 'flex-1 py-2 text-xs font-bold bg-red-600 text-white rounded-lg shadow-sm transition-all' 
+                : 'flex-1 py-2 text-xs font-bold bg-transparent text-gray-600 rounded-lg transition-all';
+        };
 
-window.saveHomework = async () => {
-    const data = {
-        title: document.getElementById('hwTitle').value,
-        type: 'homework', // NHÃN ĐẶC BIỆT
-        fileUrl: window.currentHwFileUrl,
-        description: document.getElementById('hwDesc').value,
-        duration: parseInt(document.getElementById('hwDuration').value) || 0,
-        endTime: document.getElementById('hwDeadline').value,
-        teacherId: currentUserUid,
-        allowedClassIds: [window.currentAssignClassId],
-        status: 'published'
-    };
-    await addDoc(collection(db, "exams"), data);
-    window.toggleModal('homeworkModal', false);
-    renderClassExercises(window.currentAssignClassId);
-};
+        // Hàm chuyển đổi link chia sẻ Google Drive thành Link nhúng Iframe Preview trực tiếp giống phần khóa học
+        function formatGoogleDriveLink(url) {
+            if (!url) return "";
+            let link = url.trim();
+            if (link.includes("drive.google.com")) {
+                if (link.includes("/view")) {
+                    link = link.split("/view")[0] + "/preview";
+                } else if (link.includes("/edit")) {
+                    link = link.split("/edit")[0] + "/preview";
+                } else if (link.includes("id=")) {
+                    const match = link.match(/id=([^&]+)/);
+                    if (match) link = `https://drive.google.com/file/d/${match[1]}/preview`;
+                }
+            }
+            return link;
+        }
+
+        window.handleHwFileUpload = async (input) => {
+            const file = input.files[0];
+            if(!file) return;
+            const textEl = document.getElementById('hwFileText');
+            textEl.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin text-xl mb-1"></i> Đang tải tài liệu lên hệ thống...';
+            
+            try {
+                let fileToUpload = file;
+                if (file.type.startsWith('image/')) {
+                    fileToUpload = await window.compressImage(file, 0.8, 1500);
+                }
+                const formData = new FormData(); 
+                formData.append('file', fileToUpload, `homework_${Date.now()}_${file.name.replace(/[^a-zA-Z0-9.]/g, '')}`);
+                
+                const res = await fetch("https://upload-helper.phamngockhanh-942001.workers.dev/", { method: 'PUT', body: formData });
+                const data = await res.json();
+                
+                window.currentHwFileUrl = data.url;
+                textEl.innerHTML = `<i class="fa-solid fa-circle-check text-green-500 text-xl mb-1"></i> Đã tải tài liệu thành công:<br><span class="text-xs text-gray-500">${file.name}</span>`;
+                window.showNotification("Tải file đề bài lên thành công!", "success");
+            } catch(e) {
+                textEl.innerHTML = '<i class="fa-solid fa-circle-exclamation text-red-500 text-xl mb-1"></i> Tải lên thất bại, bấm để thử lại';
+                window.showNotification("Lỗi kết nối bộ lưu trữ: " + e.message, "error");
+            }
+            input.value = '';
+        };
+
+        window.handleHwBannerUpload = async (input) => {
+            const file = input.files[0];
+            if (!file) return;
+            window.showNotification("Đang tải ảnh banner bìa lên...", "info");
+            try {
+                const blob = await window.compressImage(file, 0.8, 1200);
+                const formData = new FormData();
+                formData.append('file', blob, `hw_banner_${Date.now()}.jpg`);
+                
+                const res = await fetch("https://upload-helper.phamngockhanh-942001.workers.dev/", { method: 'PUT', body: formData });
+                const data = await res.json();
+                
+                window.currentHwBannerUrl = data.url;
+                document.getElementById('hwBannerPreview').src = data.url;
+                window.showNotification("Đã áp dụng ảnh bìa mới!", "success");
+            } catch(e) {
+                window.showNotification("Không tải được ảnh bìa: " + e.message, "error");
+            }
+        };
+
+        // HÀM AI ĐỌC HIỂU NỘI DUNG VÀ TỰ ĐỘNG THIẾT KẾ BANNER ĐỘC QUYỀN
+        window.generateHwBannerAI = async () => {
+            const title = document.getElementById('hwTitle').value.trim();
+            const desc = document.getElementById('hwDesc').value.trim();
+            if (!title) return window.showNotification("Vui lòng điền tên bài tập để AI lấy ý tưởng thiết kế!", "error");
+
+            const aiBtn = document.getElementById('btnHwBannerAI');
+            const originalText = aiBtn.innerHTML;
+            aiBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> AI đang thiết kế...';
+            aiBtn.disabled = true;
+
+            try {
+                const response = await fetch("https://upload-helper.phamngockhanh-942001.workers.dev/generate-banner", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ title: title, description: desc || "Bài kiểm tra toán học tự luận" })
+                });
+                const data = await response.json();
+                if (data.url) {
+                    window.currentHwBannerUrl = data.url;
+                    document.getElementById('hwBannerPreview').src = data.url;
+                    window.showNotification("AI đã thiết kế ảnh bìa thành công!", "success");
+                } else {
+                    throw new Error(data.error || "Mô hình vẽ tranh AI bận.");
+                }
+            } catch (e) {
+                console.error(e);
+                window.showNotification("Lỗi AI: " + e.message, "error");
+            } finally {
+                aiBtn.innerHTML = originalText;
+                aiBtn.disabled = false;
+            }
+        };
+
+        window.saveHomework = async () => {
+            const title = document.getElementById('hwTitle').value.trim();
+            if (!title) return window.showNotification("Vui lòng nhập tiêu đề bài tập tự luận!", "error");
+
+            let finalDocUrl = "";
+            if (window.currentHwSource === 'file') {
+                finalDocUrl = window.currentHwFileUrl;
+            } else {
+                finalDocUrl = formatGoogleDriveLink(document.getElementById('hwLinkInput').value);
+            }
+
+            if (!finalDocUrl) return window.showNotification("Vui lòng tải tệp lên hoặc điền đường dẫn tài liệu đề bài!", "error");
+
+            const btn = document.getElementById('btnSaveHw');
+            const oldText = btn.innerHTML;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang lưu bài...';
+            btn.disabled = true;
+
+            try {
+                const deadlineInput = document.getElementById('hwDeadline').value;
+                const durationInput = document.getElementById('hwDuration').value;
+
+                const hwData = {
+                    title: title,
+                    type: 'homework', // Nhãn nhận diện phân loại bài tập tự luận
+                    fileUrl: finalDocUrl,
+                    bannerUrl: window.currentHwBannerUrl || "", // Lưu link banner do AI vẽ hoặc upload thường
+                    description: document.getElementById('hwDesc').value,
+                    duration: durationInput ? parseInt(durationInput) : 0,
+                    endTime: deadlineInput ? new Date(deadlineInput).toISOString() : null,
+                    teacherId: currentUserUid,
+                    accessType: 'class',
+                    allowedClassIds: [window.currentAssignClassId],
+                    status: 'published',
+                    createdAt: new Date().toISOString(),
+                    questionCount: 1
+                };
+
+                await addDoc(collection(db, "exams"), hwData);
+                window.showNotification("Giao bài tập tự luận thành công!", "success");
+                window.toggleModal('homeworkModal', false);
+                renderClassExercises(window.currentAssignClassId);
+            } catch(e) {
+                console.error(e);
+                window.showNotification("Lỗi lưu cơ sở dữ liệu: " + e.message, "error");
+            } finally {
+                btn.innerHTML = oldText;
+                btn.disabled = false;
+            }
+        };
         
         // 1. Hiển thị danh sách + Nút Thêm bài tập
         // 1. Hiển thị danh sách + Nút Thêm bài tập (Đã fix lỗi hover menu)
