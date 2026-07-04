@@ -405,6 +405,27 @@
         </div>
     </main>
 
+    <!-- [MÃ MỚI BỔ SUNG] MODAL CHẤM BÀI TỰ LUẬN -->
+    <div id="essayGradingModal" class="modal opacity-0 pointer-events-none fixed inset-0 z-[100] flex items-center justify-center bg-gray-900 bg-opacity-75 px-4 transition-opacity duration-300">
+        <div class="modal-content bg-white w-full max-w-4xl h-[90vh] rounded-2xl shadow-2xl flex flex-col transform scale-95 transition-transform duration-300">
+            <div class="p-4 border-b flex justify-between items-center bg-orange-50 rounded-t-2xl">
+                <h3 class="font-bold text-orange-800 text-lg" id="gradingStudentName"><i class="fa-solid fa-pen-nib mr-2"></i>Chấm bài: </h3>
+                <button onclick="window.toggleModal('essayGradingModal', false)" class="text-gray-500 hover:text-red-500"><i class="fa-solid fa-times text-xl"></i></button>
+            </div>
+            <div class="flex-1 overflow-y-auto p-4 bg-gray-200 flex justify-center items-start custom-scrollbar" id="gradingImageContainer">
+                <!-- Ảnh bài làm sẽ chèn vào đây bằng JS -->
+            </div>
+            <div class="p-4 border-t bg-white flex flex-col sm:flex-row items-center gap-4 rounded-b-2xl">
+                <div class="flex items-center gap-2">
+                    <label class="font-bold text-gray-700 whitespace-nowrap">Điểm số:</label>
+                    <input type="number" id="gradingScore" class="form-input w-24 text-center text-lg font-bold text-blue-600" placeholder="0-10" min="0" max="10">
+                </div>
+                <input type="text" id="gradingFeedback" class="form-input flex-1" placeholder="Nhận xét của giáo viên (tùy chọn)...">
+                <button id="btnSaveGrade" class="px-6 py-2 bg-orange-500 text-white rounded-lg font-bold shadow hover:bg-orange-600 w-full sm:w-auto">Lưu Điểm</button>
+            </div>
+        </div>
+    </div>
+
     <div id="historyModal" class="modal opacity-0 pointer-events-none fixed inset-0 z-[110] flex items-center justify-center bg-gray-900 bg-opacity-60 px-4">
         <div class="bg-white rounded-xl shadow-2xl w-full max-w-md transform scale-95 transition-transform duration-300 flex flex-col max-h-[80vh]">
             <div class="p-4 border-b border-gray-100 flex justify-between items-center bg-blue-50 rounded-t-xl">
@@ -2585,14 +2606,91 @@
             currentGradingAttempt = attempt;
             document.getElementById('historyModal').classList.add('opacity-0', 'pointer-events-none'); // Ẩn modal lịch sử
             
-            const modal = document.getElementById('gradingModal');
-            document.getElementById('gradingStudentName').textContent = attempt.studentName;
-            document.getElementById('gradingTotalScore').textContent = attempt.score;
-            
-            renderGradingView();
-            
-            modal.classList.remove('hidden');
-            setTimeout(() => modal.classList.remove('opacity-0'), 50);
+            // Lấy loại đề thi (nếu là bài tập tự luận thì type = 'homework')
+            const examType = document.getElementById('settingType').value; 
+
+            if (examType === 'homework') {
+                // 1. MỞ MODAL CHẤM BÀI TỰ LUẬN (MODAL MỚI VỪA THÊM Ở BƯỚC 1A)
+                document.getElementById('gradingStudentName').textContent = 'Chấm bài: ' + (attempt.studentName || 'Học sinh ẩn danh');
+                
+                // Trích xuất cụm HTML chứa ảnh mà học sinh đã nộp
+                const ans = attempt.answers && attempt.answers[0] ? attempt.answers[0] : '';
+                const container = document.getElementById('gradingImageContainer');
+                
+                if (ans.includes('<img')) {
+                    container.innerHTML = ans; 
+                    // Tinh chỉnh lại CSS để ảnh không bị tràn khung
+                    const imgs = container.querySelectorAll('img');
+                    imgs.forEach(img => img.className = "max-w-full h-auto shadow-md rounded border border-gray-300 mb-4 mx-auto");
+                } else if (ans) {
+                    container.innerHTML = `<img src="${ans}" class="max-w-full h-auto shadow-md rounded border border-gray-300 mx-auto">`;
+                } else {
+                    container.innerHTML = '<p class="text-red-500 font-bold mt-10"><i class="fa-solid fa-triangle-exclamation"></i> Học sinh này chưa tải lên ảnh bài làm hợp lệ.</p>';
+                }
+
+                // Gán dữ liệu cũ nếu đã từng chấm
+                document.getElementById('gradingScore').value = attempt.score || '';
+                
+                // Gán hàm lưu điểm
+                document.getElementById('btnSaveGrade').onclick = () => window.saveGrade(attempt.id);
+                
+                // Hiển thị modal
+                window.toggleModal('essayGradingModal', true);
+                setTimeout(() => {
+                    document.getElementById('essayGradingModal').classList.remove('opacity-0');
+                    document.querySelector('#essayGradingModal .modal-content').classList.remove('scale-95');
+                }, 10);
+
+            } else {
+                // 2. MỞ MODAL CHẤM BÀI CŨ (TRẮC NGHIỆM / ĐIỀN TỪ)
+                const modal = document.getElementById('gradingModal');
+                document.getElementById('gradingStudentName').textContent = attempt.studentName;
+                document.getElementById('gradingTotalScore').textContent = attempt.score;
+                
+                renderGradingView();
+                
+                modal.classList.remove('hidden');
+                setTimeout(() => modal.classList.remove('opacity-0'), 50);
+            }
+        };
+
+        // Hàm lưu điểm chuyên dụng cho Bài tự luận
+        window.saveGrade = async (resultId) => {
+            const score = parseFloat(document.getElementById('gradingScore').value) || 0;
+            const feedback = document.getElementById('gradingFeedback') ? document.getElementById('gradingFeedback').value.trim() : '';
+            const btn = document.getElementById('btnSaveGrade');
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang lưu...'; 
+            btn.disabled = true;
+
+            try {
+                // Lưu lên Firebase
+                await updateDoc(doc(db, "results", resultId), {
+                    score: score,
+                    teacherFeedback: feedback,
+                    gradedAt: new Date().toISOString(),
+                    graderId: currentUser.uid
+                });
+                
+                // Tắt modal
+                document.getElementById('essayGradingModal').classList.add('opacity-0');
+                document.querySelector('#essayGradingModal .modal-content').classList.add('scale-95');
+                setTimeout(() => window.toggleModal('essayGradingModal', false), 300);
+                
+                // Cập nhật lại dữ liệu cục bộ để vẽ lại bảng ngay lập tức
+                if(statsMap[resultId]) {
+                    statsMap[resultId].score = score;
+                    statsMap[resultId].gradedAt = new Date().toISOString();
+                }
+                
+                if(window.loadStats) window.loadStats(); 
+                window.showToast("Đã lưu điểm thành công!", "success");
+            } catch (e) {
+                console.error(e);
+                window.customAlert("Lỗi lưu điểm: " + e.message, "error");
+            } finally {
+                btn.innerHTML = 'Lưu Điểm'; 
+                btn.disabled = false;
+            }
         };
 
         window.closeGradingModal = () => {
