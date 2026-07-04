@@ -1891,11 +1891,19 @@ loadFileManager(true); }
                                     </div>
                                 </div>
                             </div>
-                            <div class="flex flex-col items-end gap-2">
+                            <div class="flex flex-col items-end gap-2 mt-2">
                                 ${statusBadge}
-                                <button onclick="window.location.href='exam-editor.html?id=${d.id}&view=stats'" class="text-xs text-blue-600 font-bold hover:underline flex items-center gap-1 bg-blue-50 px-2 py-1 rounded hover:bg-blue-100 transition-colors">
-                                    <i class="fa-solid fa-chart-pie"></i> Thống kê
-                                </button>
+                                <div class="flex gap-2">
+                                    <button onclick="window.location.href='exam-editor.html?id=${d.id}&view=settings'" class="text-xs text-orange-600 font-bold hover:underline flex items-center gap-1 bg-orange-50 px-2 py-1 rounded hover:bg-orange-100 transition-colors" title="Sửa bài">
+                                        <i class="fa-solid fa-pen"></i> Sửa
+                                    </button>
+                                    <button onclick="window.location.href='exam-editor.html?id=${d.id}&view=${ex.type === 'homework' ? 'grading' : 'stats'}'" class="text-xs text-blue-600 font-bold hover:underline flex items-center gap-1 bg-blue-50 px-2 py-1 rounded hover:bg-blue-100 transition-colors">
+                                        ${ex.type === 'homework' ? '<i class="fa-solid fa-pen-nib"></i> Chấm' : '<i class="fa-solid fa-chart-pie"></i> Thống kê'}
+                                    </button>
+                                    <button onclick="window.deleteExam('${d.id}', '${ex.title.replace(/'/g, "\\'")}')" class="text-xs text-red-600 font-bold hover:underline flex items-center gap-1 bg-red-50 px-2 py-1 rounded hover:bg-red-100 transition-colors" title="Xóa bài">
+                                        <i class="fa-solid fa-trash"></i> Xóa
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     `;
@@ -1979,12 +1987,31 @@ loadFileManager(true); }
                 document.getElementById('assignExamModal').classList.add('hidden');
                 
                 // Reload lại danh sách bài tập
+                // Reload lại danh sách bài tập
                 renderClassExercises(window.currentAssignClassId); 
             } catch(e) {
                 console.error(e);
                 window.showNotification("Lỗi: " + e.message, "error");
             }
         };
+
+        window.deleteExam = async (examId, examTitle) => {
+            if (!await window.customConfirm(`Thầy/Cô có chắc chắn muốn xóa bài tập "${examTitle}" không? Mọi dữ liệu làm bài của học sinh sẽ bị mất vĩnh viễn!`)) return;
+            try {
+                // Xóa document trên Firestore
+                await deleteDoc(doc(db, "exams", examId));
+                window.showNotification("Đã xóa bài tập thành công!", "success");
+                
+                // Tải lại danh sách bài tập của lớp hiện tại
+                if (window.currentAssignClassId) {
+                    renderClassExercises(window.currentAssignClassId);
+                }
+            } catch(e) {
+                console.error(e);
+                window.customAlert("Lỗi khi xóa: " + e.message, "error");
+            }
+        };
+        // ============================================================
         // ============================================================
     // ============================================================
     // LOGIC KHO CÂU HỎI & BỘ LỌC MAPID (CẬP NHẬT)
