@@ -397,18 +397,22 @@
                         </div>
                     </div>
                     <div class="overflow-x-auto">
-                        <table class="w-full text-sm text-left text-gray-600">
+                        <!-- Bảng desktop -->
+                        <table class="hidden md:table w-full text-sm text-left text-gray-600 min-w-[600px]">
                             <thead class="bg-gray-100 text-gray-700 uppercase text-xs font-bold">
                                 <tr>
-                                    <th class="px-6 py-3">Học sinh</th>
-                                    <th class="px-6 py-3 text-center">Điểm (Cao nhất)</th>
-                                    <th class="px-6 py-3 text-center text-red-600">Vi phạm</th> <th class="px-6 py-3 text-center">Số lượt</th>
-                                    <th class="px-6 py-3 text-right">Ngày nộp</th>
+                                    <th class="px-4 py-3">Học sinh</th>
+                                    <th class="px-4 py-3 text-center">Điểm cao nhất</th>
+                                    <th class="px-4 py-3 text-center text-red-600">Vi phạm</th>
+                                    <th class="px-4 py-3 text-center">Số lượt</th>
+                                    <th class="px-4 py-3 text-right">Ngày nộp & Hành động</th>
                                 </tr>
                             </thead>
                             <tbody id="statsTableBody" class="divide-y divide-gray-100"></tbody>
                         </table>
-                  </div>
+                        <!-- Danh sách card cho mobile -->
+                        <div id="statsCardList" class="md:hidden divide-y divide-gray-100"></div>
+                   </div>
                 </div>
             </div>
         </div>
@@ -2298,8 +2302,10 @@
 
         window.renderStatsTable = () => {
             const tbody = document.getElementById('statsTableBody'); 
+            const cardList = document.getElementById('statsCardList');
             if (!tbody) return;
             tbody.innerHTML = '';
+            if (cardList) cardList.innerHTML = '';
 
             let combinedData = fullStudentList.map(st => {
                 const result = statsMap[st.studentId] || statsMap[st.studentName];
@@ -2323,8 +2329,6 @@
                 }
             });
 
-            // (Giữ nguyên phần lọc và sắp xếp cũ...)
-            // ... [CODE LỌC GIỮ NGUYÊN] ...
             let filteredData = combinedData.filter(item => {
                 if (currentClassFilter !== 'all' && item.classId !== currentClassFilter) return false;
                 if (currentStatusFilter === 'done' && !item.hasSubmitted) return false;
@@ -2345,17 +2349,20 @@
             // Render HTML
             if (filteredData.length === 0) {
                 tbody.innerHTML = '<tr><td colspan="5" class="text-center py-8 text-gray-400 text-sm">Không tìm thấy học sinh nào.</td></tr>';
+                if (cardList) cardList.innerHTML = '<div class="text-center py-8 text-gray-400 text-sm">Không tìm thấy học sinh nào.</div>';
                 return;
             }
 
+
             filteredData.forEach(r => { 
                 const dateStr = r.submittedAt ? new Date(r.submittedAt).toLocaleString('vi-VN') : '<span class="text-gray-400 italic">Chưa nộp</span>'; 
+                const dateStrShort = r.submittedAt ? new Date(r.submittedAt).toLocaleTimeString('vi-VN', {hour:'2-digit', minute:'2-digit'}) + '<br>' + new Date(r.submittedAt).toLocaleDateString('vi-VN') : '<span class="text-gray-400 italic text-xs">Chưa nộp</span>';
                 const scoreClass = !r.hasSubmitted ? 'text-gray-300' : (r.bestScore >= 8 ? 'text-green-600' : (r.bestScore >= 5 ? 'text-blue-600' : 'text-red-500')); 
                 const attemptCount = r.attempts ? r.attempts.length : 0; 
                 
                 const nameHtml = r.hasSubmitted 
-                    ? `<button onclick="showStudentHistory('${r.studentName}')" class="font-bold text-blue-600 hover:underline flex items-center gap-2"><i class="fa-solid fa-user-graduate"></i> ${r.studentName}</button>` 
-                    : `<span class="text-gray-500 flex items-center gap-2"><i class="fa-regular fa-user"></i> ${r.studentName}</span>`;
+                    ? `<button onclick="showStudentHistory('${r.studentName}')" class="font-bold text-blue-600 hover:underline flex items-center gap-1 text-left"><i class="fa-solid fa-user-graduate text-xs"></i> ${r.studentName}</button>` 
+                    : `<span class="text-gray-500 flex items-center gap-1"><i class="fa-regular fa-user text-xs"></i> ${r.studentName}</span>`;
                 
                 let statusBadge = '';
                 if (r.hasSubmitted) {
@@ -2364,48 +2371,68 @@
                 }
 
                 const cheatBadge = (r.hasSubmitted && r.cheatCount > 0) 
-                    ? `<span class="ml-1 bg-red-100 text-red-600 px-2 py-0.5 rounded text-xs font-bold"><i class="fa-solid fa-triangle-exclamation"></i> ${r.cheatCount}</span>` : '';
+                    ? `<span class="ml-1 bg-red-100 text-red-600 px-1.5 py-0.5 rounded text-[10px] font-bold"><i class="fa-solid fa-triangle-exclamation"></i> ${r.cheatCount}</span>` : '';
 
-                // --- NÚT CẤP QUYỀN (MỚI) ---
-                // --- NÚT XỬ LÝ YÊU CẦU ---
                 let actionBtn = '';
                 if (r.requestId) {
-                    // CÓ YÊU CẦU: Hiện 2 nút Duyệt (Xanh) và Từ chối (Xám)
-                    // Lưu lý do xin phép vào data attribute để hiển thị tooltip nếu cần
                     actionBtn = `
-                        <div class="flex flex-col gap-1 items-end">
-                            <button onclick="approveReattempt('${r.studentId}', '${r.requestId}', '${r.studentName}')" class="px-3 py-1 bg-green-600 text-white rounded hover:bg-green-700 text-xs font-bold shadow-sm whitespace-nowrap flex items-center gap-1">
+                        <div class="flex flex-wrap gap-1 items-end justify-end">
+                            <button onclick="approveReattempt('${r.studentId}', '${r.requestId}', '${r.studentName}')" class="px-2 py-1 bg-green-600 text-white rounded hover:bg-green-700 text-xs font-bold shadow-sm whitespace-nowrap flex items-center gap-1">
                                 <i class="fa-solid fa-check"></i> Duyệt
                             </button>
-                            <button onclick="denyReattempt('${r.requestId}', '${r.studentName}')" class="px-3 py-1 bg-gray-200 text-gray-600 rounded hover:bg-gray-300 text-xs font-bold shadow-sm whitespace-nowrap flex items-center gap-1">
+                            <button onclick="denyReattempt('${r.requestId}', '${r.studentName}')" class="px-2 py-1 bg-gray-200 text-gray-600 rounded hover:bg-gray-300 text-xs font-bold shadow-sm whitespace-nowrap flex items-center gap-1">
                                 <i class="fa-solid fa-xmark"></i> Từ chối
                             </button>
                         </div>`;
                 } else if (r.hasSubmitted) {
-                    // CHƯA CÓ YÊU CẦU (Đã nộp): Nút cấp lại thủ công
-                    actionBtn = `<button onclick="approveReattempt('${r.studentId}', null, '${r.studentName}')" class="w-8 h-8 rounded-full bg-blue-50 text-blue-600 hover:bg-blue-100 flex items-center justify-center transition-colors" title="Cấp quyền làm lại thủ công"><i class="fa-solid fa-rotate-right"></i></button>`;
+                    actionBtn = `<button onclick="approveReattempt('${r.studentId}', null, '${r.studentName}')" class="w-7 h-7 rounded-full bg-blue-50 text-blue-600 hover:bg-blue-100 flex items-center justify-center transition-colors text-xs" title="Cấp quyền làm lại thủ công"><i class="fa-solid fa-rotate-right"></i></button>`;
                 }
 
+                // --- DESKTOP TABLE ROW ---
                 tbody.innerHTML += `
                     <tr class="bg-white border-b hover:bg-gray-50 transition-colors ${!r.hasSubmitted ? 'bg-gray-50/50' : ''}">
-                        <td class="px-6 py-3">
+                        <td class="px-4 py-3">
                             <div class="font-medium text-gray-900">${nameHtml}</div>
                             <div class="text-[10px] text-gray-500 flex items-center gap-1 mt-1">
                                 <span class="bg-gray-100 px-1.5 rounded border border-gray-200 text-gray-600">${r.className || 'Tự do'}</span>
                                 ${statusBadge} ${cheatBadge}
                             </div>
                         </td>
-                        <td class="px-6 py-3 text-center font-bold ${scoreClass} text-lg">${r.hasSubmitted ? r.bestScore : '--'}</td>
-                        <td class="px-6 py-3 text-center text-xs text-gray-500 font-bold">${attemptCount}</td>
-                        <td class="px-6 py-3 text-right text-xs text-gray-500 font-mono">
+                        <td class="px-4 py-3 text-center font-bold ${scoreClass} text-lg">${r.hasSubmitted ? r.bestScore : '--'}</td>
+                        <td class="px-4 py-3 text-center text-red-500 text-xs font-bold">${r.hasSubmitted && r.cheatCount > 0 ? r.cheatCount : (r.hasSubmitted ? '0' : '--')}</td>
+                        <td class="px-4 py-3 text-center text-xs text-gray-500 font-bold">${attemptCount}</td>
+                        <td class="px-4 py-3 text-right text-xs text-gray-500 font-mono">
                             <div class="flex flex-col items-end gap-1">
                                 <span>${dateStr}</span>
                                 ${actionBtn}
                             </div>
                         </td>
                     </tr>`; 
+
+                // --- MOBILE CARD ---
+                cardList.innerHTML += `
+                    <div class="p-3 bg-white ${!r.hasSubmitted ? 'bg-gray-50/80' : ''}">
+                        <div class="flex items-start justify-between gap-2">
+                            <div class="flex-1 min-w-0">
+                                <div class="font-medium text-gray-900">${nameHtml}</div>
+                                <div class="flex flex-wrap items-center gap-1 mt-1">
+                                    <span class="text-[10px] bg-gray-100 px-1.5 rounded border border-gray-200 text-gray-600">${r.className || 'Tự do'}</span>
+                                    ${statusBadge}${cheatBadge}
+                                </div>
+                            </div>
+                            <div class="text-right shrink-0">
+                                <div class="font-bold ${scoreClass} text-xl">${r.hasSubmitted ? r.bestScore : '--'}</div>
+                                <div class="text-[10px] text-gray-400 mt-0.5">${attemptCount} lượt</div>
+                            </div>
+                        </div>
+                        <div class="flex items-center justify-between mt-2 pt-2 border-t border-gray-100">
+                            <div class="text-[10px] text-gray-400">${r.submittedAt ? new Date(r.submittedAt).toLocaleString('vi-VN') : '<i>Chưa nộp</i>'}</div>
+                            ${actionBtn ? `<div class="shrink-0">${actionBtn}</div>` : ''}
+                        </div>
+                    </div>`;
             });
         };
+
         
         window.showStudentHistory = (studentName) => {
             const studentData = Object.values(statsMap).find(s => s.studentName === studentName);
