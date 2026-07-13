@@ -409,6 +409,7 @@
         let currentIndex = 0, timerInterval, timeLeft = 0, cheatCount = 0, isExamActive = false;
         let syncInterval = null; // Biến quản lý lưu Cloud 10p/lần
         window.examHistory = [];
+        window.briefNotes = {}; // Lưu trữ ghi chú vắn tắt: { [idx]: { text: '', images: [] } }
 
         // --- HÀM LƯU TRỮ (MỚI) ---
         function saveLocal() {
@@ -1070,6 +1071,11 @@ async function loadLobbyData(id) {
                 dom.options.appendChild(wrapper);
             }
 
+            // Thêm ô Trình bày vắn tắt nếu tính năng được bật và câu không phải tự luận
+            if (examData.briefNote && q.type !== 'essay') {
+                renderBriefNoteBox(idx);
+            }
+
             if(window.MathJax) { MathJax.typesetPromise([dom.content, dom.options]).then(() => { if(window.renderTikz) window.renderTikz(); if(window.autoScaleTables) window.autoScaleTables(); }).catch(()=>{}); }
             updatePalette();
             closeAllSidebars();
@@ -1225,6 +1231,7 @@ async function loadLobbyData(id) {
                 isPassed: isPassed, 
                 passScoreSnapshot: passScore, 
                 duration: durationSeconds,
+                briefNotes: window.briefNotes || {},
                 submittedAt: new Date().toISOString() 
             };
 
@@ -1946,7 +1953,153 @@ async function loadLobbyData(id) {
                 if(uploadBtn) { uploadBtn.disabled = false; uploadBtn.innerHTML = '<i class="fa-solid fa-cloud-arrow-up"></i> Đóng dấu số trang & Nộp bài'; }
             }
         };
+
+        // =========================================================
+        // --- TÍNH NĂNG: TRÌNH BÀY VẮN TẮT ---
+        // =========================================================
+        function renderBriefNoteBox(idx) {
+            const note = window.briefNotes[idx] || { text: '', images: [] };
+
+            const box = document.createElement('div');
+            box.id = `brief-note-box-${idx}`;
+            box.className = 'mt-3 rounded-xl border border-purple-200 bg-purple-50/60 overflow-hidden';
+            
+            // Header thu gọn/mở rộng
+            const isExpanded = note.text || note.images.length > 0;
+            box.innerHTML = `
+                <button onclick="window.toggleBriefNote(${idx})" 
+                    class="w-full flex items-center justify-between px-3 py-2 text-purple-700 hover:bg-purple-100 transition-colors">
+                    <span class="flex items-center gap-1.5 text-xs font-bold">
+                        <i class="fa-solid fa-pen-nib"></i>
+                        Trình bày vắn tắt
+                        ${note.images.length > 0 ? `<span class="bg-purple-600 text-white text-[9px] font-black px-1.5 py-0.5 rounded-full ml-1">${note.images.length} ảnh</span>` : ''}
+                        ${note.text ? '<span class="bg-purple-200 text-purple-800 text-[9px] font-bold px-1.5 py-0.5 rounded-full ml-1">có ghi chú</span>' : ''}
+                    </span>
+                    <i id="brief-chevron-${idx}" class="fa-solid ${isExpanded ? 'fa-chevron-up' : 'fa-chevron-down'} text-xs text-purple-400"></i>
+                </button>
+                <div id="brief-body-${idx}" class="${isExpanded ? '' : 'hidden'} px-3 pb-3 space-y-2">
+                    <textarea id="brief-text-${idx}" 
+                        class="w-full text-xs border border-purple-200 rounded-lg p-2 focus:outline-none focus:border-purple-400 bg-white resize-none transition-all" 
+                        rows="2" 
+                        placeholder="Ghi tóm tắt cách giải, lý do chọn đáp án..."
+                        oninput="window.saveBriefText(${idx}, this.value)"
+                    >${note.text}</textarea>
+                    
+                    <!-- Ảnh đã đính kèm -->
+                    <div id="brief-images-${idx}" class="flex flex-wrap gap-1.5 ${note.images.length === 0 ? 'hidden' : ''}">
+                        ${note.images.map((url, i) => `
+                            <div class="relative group" style="width:64px;height:64px">
+                                <img src="${url}" class="w-16 h-16 object-cover rounded-lg border border-purple-200 cursor-pointer" onclick="window.open('${url}','_blank')">
+                                <button onclick="window.deleteBriefImage(${idx}, ${i})" 
+                                    class="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 text-white rounded-full text-[9px] flex items-center justify-center hover:bg-red-600 transition-colors shadow-sm opacity-0 group-hover:opacity-100">
+                                    <i class="fa-solid fa-times"></i>
+                                </button>
+                            </div>
+                        `).join('')}
+                    </div>
+
+                    <!-- Nút thêm ảnh / chụp -->
+                    <div class="flex items-center gap-2 ${note.images.length >= 3 ? 'hidden' : ''}" id="brief-add-btns-${idx}">
+                        <label class="flex items-center gap-1 text-xs font-bold text-purple-600 bg-white border border-purple-200 px-2.5 py-1.5 rounded-lg cursor-pointer hover:bg-purple-50 transition-colors">
+                            <i class="fa-regular fa-image"></i> <span>Đính kèm</span>
+                            <input type="file" accept="image/*" multiple class="hidden" onchange="window.uploadBriefImages(this, ${idx})">
+                        </label>
+                        <label class="flex items-center gap-1 text-xs font-bold text-purple-600 bg-white border border-purple-200 px-2.5 py-1.5 rounded-lg cursor-pointer hover:bg-purple-50 transition-colors">
+                            <i class="fa-solid fa-camera"></i> <span>Chụp</span>
+                            <input type="file" accept="image/*" capture="environment" class="hidden" onchange="window.uploadBriefImages(this, ${idx})">
+                        </label>
+                        <span id="brief-upload-status-${idx}" class="text-xs text-purple-400 hidden">
+                            <i class="fa-solid fa-spinner fa-spin"></i>
+                        </span>
+                    </div>
+                </div>
+            `;
+            dom.options.appendChild(box);
+        }
+
+        window.toggleBriefNote = (idx) => {
+            const body = document.getElementById(`brief-body-${idx}`);
+            const chevron = document.getElementById(`brief-chevron-${idx}`);
+            if (!body) return;
+            body.classList.toggle('hidden');
+            chevron.className = body.classList.contains('hidden')
+                ? 'fa-solid fa-chevron-down text-xs text-purple-400'
+                : 'fa-solid fa-chevron-up text-xs text-purple-400';
+        };
+
+        window.saveBriefText = (idx, text) => {
+            if (!window.briefNotes[idx]) window.briefNotes[idx] = { text: '', images: [] };
+            window.briefNotes[idx].text = text;
+            saveLocal();
+        };
+
+        window.deleteBriefImage = (idx, imgIdx) => {
+            if (!window.briefNotes[idx]) return;
+            window.briefNotes[idx].images.splice(imgIdx, 1);
+            saveLocal();
+            renderBriefNoteBox(idx);
+            // Re-render lại box (đã append vào dom.options nên cần replace)
+            const oldBox = document.getElementById(`brief-note-box-${idx}`);
+            if (oldBox) oldBox.remove();
+            renderBriefNoteBox(idx);
+        };
+
+        window.uploadBriefImages = async (input, idx) => {
+            const files = Array.from(input.files);
+            if (!files.length) return;
+            if (!window.briefNotes[idx]) window.briefNotes[idx] = { text: '', images: [] };
+            
+            const currentCount = window.briefNotes[idx].images.length;
+            const allowed = 3 - currentCount;
+            if (allowed <= 0) { window.showToast('Tối đa 3 ảnh/câu', 'error'); return; }
+            const toUpload = files.slice(0, allowed);
+
+            const statusEl = document.getElementById(`brief-upload-status-${idx}`);
+            if (statusEl) statusEl.classList.remove('hidden');
+            window.isUploading = true;
+
+            try {
+                for (let i = 0; i < toUpload.length; i++) {
+                    const file = toUpload[i];
+                    // Nén ảnh nhẹ (không watermark)
+                    const compressed = await compressImage(file, 0.75, 1200);
+                    const formData = new FormData();
+                    const fileName = `brief-notes/${examId}/${currentUser.uid}_q${idx}_${Date.now()}_${i}.jpg`;
+                    formData.append('file', compressed, fileName);
+
+                    const res = await fetch('https://upload-helper.phamngockhanh-942001.workers.dev/', {
+                        method: 'PUT',
+                        body: formData
+                    });
+                    if (!res.ok) throw new Error('Lỗi upload ảnh trình bày');
+                    const data = await res.json();
+                    window.briefNotes[idx].images.push(data.url);
+                }
+                saveLocal();
+                // Refresh box
+                const oldBox = document.getElementById(`brief-note-box-${idx}`);
+                if (oldBox) oldBox.remove();
+                renderBriefNoteBox(idx);
+                // Đảm bảo box được mở
+                setTimeout(() => {
+                    const body = document.getElementById(`brief-body-${idx}`);
+                    const chevron = document.getElementById(`brief-chevron-${idx}`);
+                    if (body) body.classList.remove('hidden');
+                    if (chevron) chevron.className = 'fa-solid fa-chevron-up text-xs text-purple-400';
+                }, 50);
+                window.showToast(`Đã tải ${toUpload.length} ảnh thành công!`, 'success');
+            } catch(e) {
+                console.error(e);
+                window.showToast('Lỗi tải ảnh: ' + e.message, 'error');
+            } finally {
+                window.isUploading = false;
+                if (statusEl) statusEl.classList.add('hidden');
+                input.value = '';
+            }
+        };
+
         // --- HÀM HIỂN THỊ THÔNG BÁO GÓC MÀN HÌNH (TOAST) ---
+
         window.showToast = (message, type = 'success') => {
             // Tạo phần tử thông báo nếu chưa có
             let toast = document.getElementById('toast-notification');

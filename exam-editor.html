@@ -225,6 +225,16 @@
                                 <div><label class="form-group-title">Số lượt làm</label><input type="number" id="settingAttempts" value="1" class="form-input"></div>
                                 <div class="flex justify-between items-center"><span class="text-sm font-bold text-gray-700">Giám sát tự động</span><label class="relative inline-flex items-center cursor-pointer"><input type="checkbox" id="settingProctoring" class="toggle-checkbox sr-only peer"><div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:bg-blue-600 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all"></div></label></div>
                                 <div class="flex justify-between items-center"><span class="text-sm font-bold text-gray-700">Đảo câu hỏi</span><label class="relative inline-flex items-center cursor-pointer"><input type="checkbox" id="settingShuffle" checked class="toggle-checkbox sr-only peer"><div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:bg-blue-600 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all"></div></label></div>
+                                <div class="flex justify-between items-center pt-2 border-t border-dashed border-gray-100">
+                                    <div>
+                                        <span class="text-sm font-bold text-gray-700">✏️ Trình bày vắn tắt</span>
+                                        <p class="text-xs text-gray-400 mt-0.5">Học sinh ghi chú ngắn + ảnh cho từng câu trắc nghiệm</p>
+                                    </div>
+                                    <label class="relative inline-flex items-center cursor-pointer ml-4 shrink-0">
+                                        <input type="checkbox" id="settingBriefNote" class="toggle-checkbox sr-only peer">
+                                        <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:bg-purple-600 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all"></div>
+                                    </label>
+                                </div>
                             </div>
                         </div>
                         <div class="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-gray-200 mt-6">
@@ -1326,6 +1336,7 @@
                     document.getElementById('settingShuffle').checked = (data.shuffle !== false);
                     document.getElementById('settingRemindDays').value = data.remindDays !== undefined ? data.remindDays : 1;
                     document.getElementById('settingAutoSendResult').checked = (data.autoSendResult === true);
+                    document.getElementById('settingBriefNote').checked = (data.briefNote === true);
                     
                     if(data.showScore) { const r = document.querySelector(`input[name="settingShowScore"][value="${data.showScore}"]`); if(r) r.checked = true; }
                     if(data.showResult) { const r = document.querySelector(`input[name="settingShowResult"][value="${data.showResult}"]`); if(r) r.checked = true; }
@@ -2022,6 +2033,7 @@
                     shuffle: document.getElementById('settingShuffle').checked,
                     remindDays: parseInt(document.getElementById('settingRemindDays').value) || 0,
                     autoSendResult: document.getElementById('settingAutoSendResult').checked,
+                    briefNote: document.getElementById('settingBriefNote').checked,
                     showScore: document.querySelector('input[name="settingShowScore"]:checked').value, 
                     showResult: document.querySelector('input[name="settingShowResult"]:checked').value,
                     passScore: parseFloat(document.getElementById('settingPassScoreInput').value) || 5,
@@ -3419,9 +3431,28 @@
                         ${q.solution ? `<div class="text-sm text-gray-500 border-l-4 border-blue-200 pl-3 py-1 bg-blue-50/50 italic">${window.formatContent(q.solution)}</div>` : ''}
                     </div>
                     ${answerHtml}
+                    ${(() => {
+                        const briefNotes = currentGradingAttempt.briefNotes || {};
+                        const note = briefNotes[idx];
+                        if (!note || (!note.text && (!note.images || note.images.length === 0))) return '';
+                        return `<div class="px-4 pb-4 pt-2 border-t border-purple-100 bg-purple-50/40">
+                            <div class="text-[10px] font-black text-purple-500 uppercase tracking-wider mb-2 flex items-center gap-1">
+                                <i class="fa-solid fa-pen-nib"></i> Trình bày vắn tắt của học sinh
+                            </div>
+                            ${note.text ? `<p class="text-sm text-gray-700 bg-white rounded-lg border border-purple-100 px-3 py-2 mb-2 whitespace-pre-wrap">${note.text}</p>` : ''}
+                            ${note.images && note.images.length > 0 ? `
+                                <div class="flex flex-wrap gap-2">
+                                    ${note.images.map(url => `
+                                        <a href="${url}" target="_blank" class="block hover:scale-105 transition-transform">
+                                            <img src="${url}" class="w-20 h-20 object-cover rounded-lg border-2 border-purple-200 shadow-sm" loading="lazy">
+                                        </a>`).join('')}
+                                </div>` : ''}
+                        </div>`;
+                    })()}
                 `;
                 container.appendChild(card);
             });
+            
             
             if(window.MathJax) MathJax.typesetPromise([container]).catch(()=>{});
         };
