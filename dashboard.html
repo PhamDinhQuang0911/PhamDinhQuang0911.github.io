@@ -62,6 +62,7 @@
             <div id="teacherMenu">
                 <div class="px-6 mt-4 mb-2 text-xs font-bold text-gray-400 uppercase tracking-wider">Quản lý</div>
                 <button onclick="switchView('classes'); window.toggleSidebar()" id="nav-classes" class="nav-item w-full text-left px-6 py-3 text-gray-600 hover:bg-gray-50 transition-colors flex items-center gap-3"><i class="fa-solid fa-chalkboard-user"></i> Danh sách lớp học</button>
+                <button onclick="switchView('students'); window.toggleSidebar()" id="nav-students" class="nav-item w-full text-left px-6 py-3 text-gray-600 hover:bg-gray-50 transition-colors flex items-center gap-3"><i class="fa-solid fa-users"></i> Quản lý Học sinh</button>
                 <button onclick="switchView('exambank'); window.toggleSidebar()" id="nav-exambank" class="nav-item w-full text-left px-6 py-3 text-gray-600 hover:bg-gray-50 transition-colors flex items-center gap-3"><i class="fa-solid fa-folder-tree"></i> Ngân hàng đề thi</button>
                 <button onclick="switchView('questionbank'); window.toggleSidebar()" id="nav-questionbank" class="nav-item w-full text-left px-6 py-3 text-gray-600 hover:bg-gray-50 transition-colors flex items-center gap-3"><i class="fa-solid fa-vault"></i> Kho câu hỏi (R2)</button>
                 <button onclick="window.location.href='course-manager.html'" id="nav-course-manager" class="nav-item w-full text-left px-6 py-3 text-gray-600 hover:bg-gray-50 transition-colors flex items-center gap-3"><i class="fa-solid fa-shapes"></i> Quản lý Khóa học</button>
@@ -183,6 +184,55 @@
 
                 </div>
                 <div id="tabContentExams" class="hidden space-y-6 w-full max-w-7xl mx-auto"><div id="teacherExamList" class="space-y-3"></div></div>
+            </div>
+        </div>
+
+        <!-- ====== QUẢN LÝ HỌC SINH TỔNG QUÁT ====== -->
+        <div id="view-students" class="view-section hidden flex-1 flex flex-col h-full overflow-y-auto p-4 md:p-8 pb-24 md:pb-8">
+            <div class="bg-white border-b border-gray-200 p-4 md:p-6 flex flex-col md:flex-row justify-between items-start md:items-center shadow-sm z-10 rounded-t-2xl gap-4">
+                <h2 class="text-xl md:text-2xl font-bold text-gray-800 flex items-center"><i class="fa-solid fa-users mr-2 text-blue-500"></i> Quản lý Học sinh</h2>
+                <div class="w-full md:w-80 relative">
+                    <input type="text" id="searchGlobalStudent" oninput="window.filterGlobalStudents()" placeholder="Tìm tên, tài khoản, email..." class="w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none text-sm pr-10 transition-all">
+                    <i class="fa-solid fa-search absolute right-3 top-3 text-gray-400"></i>
+                </div>
+            </div>
+            
+            <div class="flex-1 bg-white rounded-b-2xl shadow-sm border border-t-0 border-gray-200 overflow-hidden flex flex-col">
+                <div class="p-4 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
+                    <h3 class="font-bold text-gray-700">Tất cả học sinh (<span id="globalStudentCount">0</span>)</h3>
+                    <button onclick="window.loadAllGlobalStudents()" class="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-lg text-sm font-bold transition-colors"><i class="fa-solid fa-rotate-right mr-1"></i> Tải lại</button>
+                </div>
+                
+                <div class="flex-1 overflow-auto">
+                    <!-- Desktop Table -->
+                    <div class="hidden md:block min-w-[700px]">
+                        <table class="w-full text-sm text-left text-gray-500">
+                            <thead class="text-xs text-gray-500 uppercase bg-gray-50 sticky top-0 z-10">
+                                <tr>
+                                    <th class="px-4 py-3 font-bold w-12 text-center">STT</th>
+                                    <th class="px-4 py-3 font-bold">Họ tên</th>
+                                    <th class="px-4 py-3 font-bold">Tài khoản/Email</th>
+                                    <th class="px-4 py-3 font-bold">Loại TK</th>
+                                    <th class="px-4 py-3 font-bold">Lớp đang học</th>
+                                    <th class="px-4 py-3 font-bold text-center">Hành động</th>
+                                </tr>
+                            </thead>
+                            <tbody id="globalStudentTable" class="divide-y divide-gray-100">
+                                <!-- JS Render -->
+                            </tbody>
+                        </table>
+                    </div>
+                    
+                    <!-- Mobile List -->
+                    <div id="globalStudentListMobile" class="md:hidden divide-y divide-gray-100">
+                        <!-- JS Render -->
+                    </div>
+                    
+                    <div id="emptyGlobalStudentMsg" class="flex flex-col items-center justify-center py-12 text-gray-400 hidden">
+                        <i class="fa-solid fa-users-slash text-4xl mb-2 text-gray-300"></i>
+                        <p>Không tìm thấy học sinh nào.</p>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -545,6 +595,12 @@
             // [TỐI ƯU] Tải Kho câu hỏi
             if (viewName === 'questionbank') {
                 loadQuestionBank();
+            }
+
+            if (viewName === 'students') {
+                if (!window.allGlobalStudents || window.allGlobalStudents.length === 0) {
+                    window.loadAllGlobalStudents();
+                }
             }
         }
 
@@ -1030,32 +1086,68 @@
             }
         };
         
-        function renderStudentList(list) { 
-            const table = document.getElementById('studentListTable'); 
+        function renderStudentList(list) {
+            const table = document.getElementById('studentListTable');
             const cardList = document.getElementById('studentCardList');
-            if(!table) return; 
-            table.innerHTML = ''; 
-            if (cardList) cardList.innerHTML = '';
+            if(table) table.innerHTML = '';
+            if(cardList) cardList.innerHTML = '';
+            
             document.getElementById('studentCountBadge').textContent = `${list.length} học sinh`; 
             if (list.length === 0) {
                 document.getElementById('emptyStudentMsg').classList.remove('hidden');
             } else { 
                 document.getElementById('emptyStudentMsg').classList.add('hidden'); 
                 list.forEach((st, index) => { 
+                    const isTeacherCreated = st.password && st.password !== "";
+                    const passDisplay = isTeacherCreated ? (st.password) : '<span class="px-2 py-1 bg-green-50 text-green-600 rounded text-xs font-bold">Bảo mật</span>';
+                    
                     // Desktop table row
-                    table.innerHTML += `<tr class="bg-white hover:bg-gray-50 border-b"><td class="px-4 py-3 font-medium text-gray-500">${index + 1}</td><td class="px-4 py-3 font-medium text-gray-900">${st.name}</td><td class="px-4 py-3 text-blue-600 font-medium">${st.username}</td><td class="px-4 py-3 font-mono text-gray-400">******</td><td class="px-4 py-3 text-center"><button onclick="window.openEditStudent(${index})" class="text-blue-500 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 p-2 rounded-lg transition-colors mr-1"><i class="fa-solid fa-pen-to-square"></i></button><button onclick="window.deleteStudent(${index})" class="text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 p-2 rounded-lg transition-colors"><i class="fa-solid fa-trash"></i></button></td></tr>`;
+                    table.innerHTML += `<tr class="bg-white hover:bg-gray-50 border-b"><td class="px-4 py-3 font-medium text-gray-500">${index + 1}</td><td class="px-4 py-3 font-medium text-gray-900">${st.name}</td><td class="px-4 py-3 text-blue-600 font-medium">${st.username}</td><td class="px-4 py-3 font-mono text-gray-600 text-sm">${passDisplay}</td><td class="px-4 py-3 text-center"><button onclick="window.openEditStudent(${index})" class="text-blue-500 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 p-2 rounded-lg transition-colors mr-1" title="Sửa/Đổi mật khẩu"><i class="fa-solid fa-pen-to-square"></i></button><button onclick="window.deleteStudent(${index})" class="text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 p-2 rounded-lg transition-colors" title="Loại khỏi lớp"><i class="fa-solid fa-trash"></i></button></td></tr>`;
                     // Mobile card
-                    if (cardList) cardList.innerHTML += `<div class="flex items-center justify-between p-3 bg-white"><div class="flex items-center gap-3"><div class="w-9 h-9 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold text-sm shrink-0">${index + 1}</div><div><div class="font-semibold text-gray-900 text-sm">${st.name}</div><div class="text-xs text-blue-500 font-medium">${st.username}</div></div></div><div class="flex items-center gap-1 shrink-0"><button onclick="window.openEditStudent(${index})" class="text-blue-500 hover:text-blue-700 bg-blue-50 p-2 rounded-lg transition-colors"><i class="fa-solid fa-pen-to-square"></i></button><button onclick="window.deleteStudent(${index})" class="text-red-500 hover:text-red-700 bg-red-50 p-2 rounded-lg transition-colors"><i class="fa-solid fa-trash"></i></button></div></div>`;
+                    if (cardList) cardList.innerHTML += `<div class="flex items-center justify-between p-3 bg-white border-b"><div class="flex items-center gap-3"><div class="w-9 h-9 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold text-sm shrink-0">${index + 1}</div><div><div class="font-semibold text-gray-900 text-sm">${st.name}</div><div class="text-xs text-blue-500 font-medium">${st.username}</div><div class="text-xs text-gray-500 mt-0.5">MK: ${passDisplay}</div></div></div><div class="flex items-center gap-1 shrink-0"><button onclick="window.openEditStudent(${index})" class="text-blue-500 hover:text-blue-700 bg-blue-50 p-2 rounded-lg transition-colors"><i class="fa-solid fa-pen-to-square"></i></button><button onclick="window.deleteStudent(${index})" class="text-red-500 hover:text-red-700 bg-red-50 p-2 rounded-lg transition-colors"><i class="fa-solid fa-trash"></i></button></div></div>`;
                 }); 
             } 
         }
 
-        window.openEditStudent = function(index) { editingStudentIndex = index; const st = currentClassStudents[index]; document.getElementById('editStuName').value = st.name || ''; document.getElementById('editStuSBD').value = st.sbd || ''; document.getElementById('editStuGender').value = st.gender || 'Nam'; document.getElementById('editStuPhone').value = st.phoneStudent || ''; document.getElementById('editStuParentPhone').value = st.phoneParent || ''; document.getElementById('editStuEmail').value = st.email || ''; document.getElementById('editStuUsername').value = st.username || ''; document.getElementById('editStuPassword').value = st.password || ''; document.getElementById('editStuPassword').type = "password"; window.toggleModal('editStudentModal', true); }
+        window.openEditStudent = function(index) {
+            editingStudentIndex = index; 
+            const st = currentClassStudents[index]; 
+            const isTeacherCreated = st.password && st.password !== "";
+            
+            document.getElementById('editStuName').value = st.name || ''; 
+            document.getElementById('editStuSBD').value = st.sbd || ''; 
+            document.getElementById('editStuGender').value = st.gender || 'Nam'; 
+            document.getElementById('editStuPhone').value = st.phoneStudent || ''; 
+            document.getElementById('editStuParentPhone').value = st.phoneParent || ''; 
+            document.getElementById('editStuEmail').value = st.email || ''; 
+            document.getElementById('editStuUsername').value = st.username || ''; 
+            
+            const passEl = document.getElementById('editStuPassword');
+            if (isTeacherCreated) {
+                passEl.value = st.password || ''; 
+                passEl.type = "password"; 
+                passEl.disabled = false;
+                passEl.placeholder = "Nhập mật khẩu mới (nếu muốn đổi)";
+            } else {
+                passEl.value = "";
+                passEl.type = "text";
+                passEl.disabled = true;
+                passEl.placeholder = "Tài khoản tự do (không thể đổi MK)";
+            }
+            
+            window.toggleModal('editStudentModal', true); 
+        }
         
         window.deleteStudent = async function(index) {
-            if(!await window.customConfirm("CẢNH BÁO: Hành động này sẽ xóa vĩnh viễn tài khoản đăng nhập của học sinh và loại khỏi lớp học. Bạn có chắc chắn không?")) return;
-            
             const student = currentClassStudents[index];
+            const isTeacherCreated = student.password && student.password !== "";
+            
+            if (isTeacherCreated) {
+                if(!await window.customConfirm("CẢNH BÁO: Hành động này sẽ xóa vĩnh viễn tài khoản đăng nhập của học sinh, loại khỏi lớp học và XÓA TOÀN BỘ dữ liệu học tập (bài tập, kết quả). Bạn có chắc chắn không?")) return;
+            } else {
+                if(!await window.customConfirm("Bạn có chắc chắn muốn loại học sinh này khỏi lớp học? (Tài khoản và dữ liệu học tập của học sinh sẽ không bị xóa khỏi hệ thống).")) return;
+            }
+            
             const btnDelete = document.querySelectorAll('#studentListTable button')[index * 2 + 1]; // Nút xóa tương ứng
             if(btnDelete) btnDelete.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; // Hiệu ứng loading
 
@@ -1074,30 +1166,47 @@
                 currentClassStudents = updatedStudents;
                 renderStudentList(currentClassStudents);
 
-                // BƯỚC 2: Gọi Cloud Function xóa Auth (Chạy ngầm, lỗi thì bỏ qua)
-                let targetUid = student.uid;
-                
-                // Nếu không có UID, thử tìm bằng email (dự phòng)
-                if (!targetUid && student.email) {
-                    try {
-                        const qUser = query(collection(db, "users"), where("email", "==", student.email));
-                        const snapUser = await getDocs(qUser);
-                        if (!snapUser.empty) targetUid = snapUser.docs[0].id;
-                    } catch(e) { console.log("Không tìm thấy user firestore:", e); }
+                if (isTeacherCreated) {
+                    // BƯỚC 2: Xóa Auth và Dữ liệu nếu là TK giáo viên tạo
+                    let targetUid = student.uid;
+                    
+                    if (!targetUid && student.email) {
+                        try {
+                            const qUser = query(collection(db, "users"), where("email", "==", student.email));
+                            const snapUser = await getDocs(qUser);
+                            if (!snapUser.empty) targetUid = snapUser.docs[0].id;
+                        } catch(e) { console.log("Không tìm thấy user firestore:", e); }
+                    }
+
+                    if (targetUid) {
+                        // Gọi hàm xóa Auth
+                        const deleteFunc = httpsCallable(functions, 'deleteStudentAccount');
+                        deleteFunc({ studentUid: targetUid }).then(() => {
+                            console.log("Đã xóa Auth thành công.");
+                        }).catch((err) => {
+                            console.warn("Lỗi xóa Auth:", err.message);
+                        });
+                        
+                        // Xóa dữ liệu học tập (chạy bất đồng bộ để không chặn giao diện)
+                        try {
+                            const qResults = query(collection(db, "results"), where("studentId", "==", targetUid));
+                            getDocs(qResults).then(snap => snap.forEach(d => deleteDoc(d.ref)));
+                            
+                            const qAttempts = query(collection(db, "exam_attempts"), where("studentId", "==", targetUid));
+                            getDocs(qAttempts).then(snap => snap.forEach(d => deleteDoc(d.ref)));
+                            
+                            const qPractice = query(collection(db, "practice_results"), where("uid", "==", targetUid));
+                            getDocs(qPractice).then(snap => snap.forEach(d => deleteDoc(d.ref)));
+                            
+                            // Xóa user doc
+                            deleteDoc(doc(db, "users", targetUid)).catch(()=>{});
+                        } catch(e) {
+                            console.log("Lỗi xóa dữ liệu:", e);
+                        }
+                    }
                 }
 
-                if (targetUid) {
-                    // Gọi hàm xóa Auth
-                    const deleteFunc = httpsCallable(functions, 'deleteStudentAccount');
-                    deleteFunc({ studentUid: targetUid }).then(() => {
-                        console.log("Đã xóa Auth thành công.");
-                    }).catch((err) => {
-                        console.warn("Lỗi xóa Auth (có thể user đã bị xóa từ trước):", err.message);
-                        // Không cần báo lỗi ra giao diện vì người dùng đã bị loại khỏi lớp rồi
-                    });
-                }
-
-                window.showNotification("Đã xóa học sinh khỏi lớp thành công!", "success");
+                window.showNotification("Đã loại học sinh khỏi lớp thành công!", "success");
 
             } catch(e) { 
                 console.error(e); 
@@ -2669,6 +2778,228 @@ loadFileManager(true); }
             window.showNotification("Đã xóa API Key!", "success");
         };
 
+        // ====== LOGIC QUẢN LÝ HỌC SINH TỔNG QUÁT ======
+        window.allGlobalStudents = [];
+        window.currentStudentInfoUid = null;
+
+        window.loadAllGlobalStudents = () => {
+            const tbody = document.getElementById('globalStudentTable');
+            const mbList = document.getElementById('globalStudentListMobile');
+            if(tbody) tbody.innerHTML = '<tr><td colspan="6" class="text-center py-8"><i class="fa-solid fa-spinner fa-spin text-2xl text-gray-400"></i></td></tr>';
+            if(mbList) mbList.innerHTML = '<div class="text-center py-8"><i class="fa-solid fa-spinner fa-spin text-2xl text-gray-400"></i></div>';
+            
+            // Collect unique students from allClassesData
+            const studentMap = new Map();
+            window.allClassesData.forEach(cl => {
+                if (cl.students && cl.students.length > 0) {
+                    cl.students.forEach(st => {
+                        const uid = st.uid || st.email || st.username;
+                        if (!studentMap.has(uid)) {
+                            studentMap.set(uid, { ...st, classes: [cl.name] });
+                        } else {
+                            studentMap.get(uid).classes.push(cl.name);
+                        }
+                    });
+                }
+            });
+            
+            window.allGlobalStudents = Array.from(studentMap.values());
+            window.filterGlobalStudents();
+        };
+
+        window.filterGlobalStudents = () => {
+            const query = (document.getElementById('searchGlobalStudent').value || "").toLowerCase();
+            const filtered = window.allGlobalStudents.filter(st => {
+                const searchStr = `${st.name || ''} ${st.username || ''} ${st.email || ''}`.toLowerCase();
+                return searchStr.includes(query);
+            });
+            
+            document.getElementById('globalStudentCount').textContent = filtered.length;
+            
+            const tbody = document.getElementById('globalStudentTable');
+            const mbList = document.getElementById('globalStudentListMobile');
+            
+            if(tbody) tbody.innerHTML = '';
+            if(mbList) mbList.innerHTML = '';
+            
+            if (filtered.length === 0) {
+                document.getElementById('emptyGlobalStudentMsg').classList.remove('hidden');
+            } else {
+                document.getElementById('emptyGlobalStudentMsg').classList.add('hidden');
+                filtered.forEach((st, index) => {
+                    const isTeacherCreated = st.password && st.password !== "";
+                    const typeBadge = isTeacherCreated 
+                        ? `<span class="px-2 py-1 bg-blue-50 text-blue-600 rounded text-xs font-bold whitespace-nowrap">GV tạo</span>` 
+                        : `<span class="px-2 py-1 bg-green-50 text-green-600 rounded text-xs font-bold whitespace-nowrap">Tự đăng ký</span>`;
+                    const uidSafe = (st.uid || st.email || '').replace(/'/g, "\\'");
+                    
+                    if(tbody) {
+                        tbody.innerHTML += `
+                            <tr class="bg-white hover:bg-gray-50 border-b cursor-pointer transition-colors" onclick="window.openStudentInfo('${uidSafe}')">
+                                <td class="px-4 py-3 font-medium text-gray-500 text-center">${index + 1}</td>
+                                <td class="px-4 py-3 font-bold text-gray-900">${st.name}</td>
+                                <td class="px-4 py-3 text-blue-600 font-medium">${st.username || st.email}</td>
+                                <td class="px-4 py-3">${typeBadge}</td>
+                                <td class="px-4 py-3 text-sm text-gray-600 truncate max-w-[200px]" title="${st.classes.join(', ')}">${st.classes.join(', ')}</td>
+                                <td class="px-4 py-3 text-center">
+                                    <button class="text-blue-500 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg transition-colors text-xs font-bold">Chi tiết</button>
+                                </td>
+                            </tr>
+                        `;
+                    }
+                    if(mbList) {
+                        mbList.innerHTML += `
+                            <div class="p-4 bg-white border-b cursor-pointer hover:bg-gray-50" onclick="window.openStudentInfo('${uidSafe}')">
+                                <div class="flex justify-between items-start mb-2">
+                                    <div class="font-bold text-gray-900">${st.name}</div>
+                                    ${typeBadge}
+                                </div>
+                                <div class="text-sm text-blue-600 font-medium mb-1">${st.username || st.email}</div>
+                                <div class="text-xs text-gray-500 truncate">Lớp: ${st.classes.join(', ')}</div>
+                            </div>
+                        `;
+                    }
+                });
+            }
+        };
+
+        window.openStudentInfo = async (uidOrEmail) => {
+            const st = window.allGlobalStudents.find(s => (s.uid === uidOrEmail || s.email === uidOrEmail));
+            if (!st) return;
+            
+            window.currentStudentInfoUid = st.uid || null;
+            
+            document.getElementById('siName').textContent = st.name;
+            document.getElementById('siUsername').textContent = st.username || st.email;
+            document.getElementById('siClasses').textContent = `Lớp: ${st.classes.join(', ')}`;
+            
+            const isTeacherCreated = st.password && st.password !== "";
+            if (isTeacherCreated && st.uid) {
+                document.getElementById('siResetPassBtn').classList.remove('hidden');
+                document.getElementById('siResetPassBtn').onclick = () => window.resetStudentPasswordGlobal(st.uid, st.email);
+            } else {
+                document.getElementById('siResetPassBtn').classList.add('hidden');
+            }
+            
+            window.toggleModal('studentInfoModal', true);
+            window.switchStudentInfoTab('results');
+            
+            if (!st.uid) {
+                document.getElementById('siContent-results').innerHTML = '<div class="text-center py-8 text-gray-500">Chưa có dữ liệu học tập.</div>';
+                document.getElementById('siContent-courses').innerHTML = '<div class="text-center py-8 text-gray-500">Chưa mua khóa học nào.</div>';
+                return;
+            }
+            
+            // Load Results
+            try {
+                const qRes = query(collection(db, "results"), where("studentId", "==", st.uid), orderBy("submittedAt", "desc"), limit(20));
+                const snapRes = await getDocs(qRes);
+                let resHtml = '';
+                if (snapRes.empty) {
+                    resHtml = '<div class="text-center py-8 text-gray-500">Chưa có lịch sử làm bài.</div>';
+                } else {
+                    snapRes.forEach(d => {
+                        const r = d.data();
+                        const date = r.submittedAt ? new Date(r.submittedAt).toLocaleDateString('vi-VN') : '';
+                        resHtml += `
+                            <div class="p-3 bg-white border border-gray-100 rounded-xl shadow-sm flex justify-between items-center">
+                                <div>
+                                    <div class="font-bold text-gray-800 text-sm mb-1">${r.examTitle}</div>
+                                    <div class="text-xs text-gray-500">${date}</div>
+                                </div>
+                                <div class="text-lg font-bold text-green-600">${r.score || 0}đ</div>
+                            </div>
+                        `;
+                    });
+                }
+                document.getElementById('siContent-results').innerHTML = resHtml;
+            } catch(e) {
+                document.getElementById('siContent-results').innerHTML = '<div class="text-center py-8 text-red-500">Lỗi tải dữ liệu.</div>';
+            }
+            
+            // Load Courses
+            try {
+                const qOrder = query(collection(db, "orders"), where("userId", "==", st.uid));
+                const snapOrder = await getDocs(qOrder);
+                let courHtml = '';
+                if (snapOrder.empty) {
+                    courHtml = '<div class="text-center py-8 text-gray-500">Chưa mua khóa học nào.</div>';
+                } else {
+                    snapOrder.forEach(d => {
+                        const o = d.data();
+                        const date = o.createdAt ? new Date(o.createdAt).toLocaleDateString('vi-VN') : '';
+                        courHtml += `
+                            <div class="p-3 bg-white border border-gray-100 rounded-xl shadow-sm flex items-center gap-3">
+                                <div class="w-10 h-10 bg-purple-100 text-purple-600 rounded-lg flex items-center justify-center font-bold shrink-0"><i class="fa-solid fa-play"></i></div>
+                                <div>
+                                    <div class="font-bold text-gray-800 text-sm mb-1">${o.courseTitle || 'Khóa học'}</div>
+                                    <div class="text-xs text-gray-500">Mua ngày: ${date}</div>
+                                </div>
+                            </div>
+                        `;
+                    });
+                }
+                document.getElementById('siContent-courses').innerHTML = courHtml;
+            } catch(e) {
+                document.getElementById('siContent-courses').innerHTML = '<div class="text-center py-8 text-red-500">Lỗi tải dữ liệu.</div>';
+            }
+        };
+
+        window.switchStudentInfoTab = (tab) => {
+            document.getElementById('siTab-results').className = tab === 'results' ? 'px-4 py-3 text-sm font-bold border-b-2 border-blue-600 text-blue-600' : 'px-4 py-3 text-sm font-bold border-b-2 border-transparent text-gray-500 hover:text-blue-600';
+            document.getElementById('siTab-courses').className = tab === 'courses' ? 'px-4 py-3 text-sm font-bold border-b-2 border-blue-600 text-blue-600' : 'px-4 py-3 text-sm font-bold border-b-2 border-transparent text-gray-500 hover:text-blue-600';
+            
+            if(tab === 'results') {
+                document.getElementById('siContent-results').classList.remove('hidden');
+                document.getElementById('siContent-courses').classList.add('hidden');
+            } else {
+                document.getElementById('siContent-results').classList.add('hidden');
+                document.getElementById('siContent-courses').classList.remove('hidden');
+            }
+        };
+
+        window.resetStudentPasswordGlobal = async (uid, email) => {
+            const newPass = await window.customPrompt("Nhập mật khẩu mới cho học sinh này:", "Mật khẩu tối thiểu 6 ký tự");
+            if (!newPass) return;
+            if (newPass.length < 6) return window.showNotification("Mật khẩu phải từ 6 ký tự trở lên!", "error");
+            
+            const btn = document.getElementById('siResetPassBtn');
+            const originalHtml = btn.innerHTML;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang đổi...';
+            btn.disabled = true;
+            
+            try {
+                const updateFunc = httpsCallable(functions, 'updateStudentPassword');
+                await updateFunc({ studentUid: uid, newPassword: newPass });
+                
+                // Cập nhật lại password trong tất cả classes chứa học sinh này
+                const qClass = query(collection(db, "classes"), where("teacherId", "==", currentUserUid));
+                const snapClass = await getDocs(qClass);
+                snapClass.forEach(async d => {
+                    const cl = d.data();
+                    let updated = false;
+                    const newStudents = cl.students.map(s => {
+                        if (s.uid === uid || s.email === email) {
+                            updated = true;
+                            return { ...s, password: newPass };
+                        }
+                        return s;
+                    });
+                    if (updated) {
+                        await updateDoc(doc(db, "classes", d.id), { students: newStudents });
+                    }
+                });
+                
+                window.showNotification("Đổi mật khẩu thành công!", "success");
+            } catch(e) {
+                console.error(e);
+                window.showNotification("Lỗi đổi mật khẩu: " + e.message, "error");
+            } finally {
+                btn.innerHTML = originalHtml;
+                btn.disabled = false;
+            }
+        };
+
     </script>
     <script>
         // --- N8N WEBHOOK LOGIC ---
@@ -2720,6 +3051,49 @@ loadFileManager(true); }
             <div id="assignExamList" class="flex-1 overflow-y-auto p-4 space-y-2 custom-scrollbar bg-gray-50/50"></div>
             <div class="p-4 border-t border-gray-100 bg-white rounded-b-2xl flex justify-end">
                 <button onclick="document.getElementById('assignExamModal').classList.add('hidden')" class="px-6 py-2.5 bg-gray-100 text-gray-600 font-bold rounded-xl hover:bg-gray-200 mr-3">Hủy</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="studentInfoModal" class="hidden fixed inset-0 z-[160] bg-gray-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col border border-gray-200 overflow-hidden">
+            <div class="p-5 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+                <h3 class="text-lg font-bold text-gray-800"><i class="fa-solid fa-user-graduate mr-2 text-blue-600"></i> Hồ sơ Học sinh</h3>
+                <button onclick="window.toggleModal('studentInfoModal', false)" class="w-8 h-8 rounded-full bg-white text-gray-400 hover:text-red-500 hover:bg-red-50 flex items-center justify-center shadow-sm transition-all"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="flex-1 overflow-y-auto p-0 md:p-6 bg-gray-50/50 flex flex-col gap-6">
+                <!-- Info Section -->
+                <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm flex flex-col md:flex-row gap-6 items-start md:items-center m-4 md:m-0">
+                    <div class="w-20 h-20 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-3xl font-bold shrink-0 mx-auto md:mx-0">
+                        <i class="fa-solid fa-user"></i>
+                    </div>
+                    <div class="flex-1 text-center md:text-left">
+                        <h4 id="siName" class="text-xl font-bold text-gray-800 mb-1">Đang tải...</h4>
+                        <p id="siUsername" class="text-sm text-blue-600 font-medium mb-1">@dangtai</p>
+                        <p id="siClasses" class="text-xs text-gray-500">Lớp: ...</p>
+                    </div>
+                    <div class="shrink-0 flex flex-col gap-2 w-full md:w-auto mt-4 md:mt-0">
+                        <button id="siResetPassBtn" class="hidden w-full px-4 py-2 bg-orange-100 text-orange-600 hover:bg-orange-200 rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition-colors">
+                            <i class="fa-solid fa-key"></i> Đổi mật khẩu
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Tabs -->
+                <div class="flex border-b border-gray-200 mx-4 md:mx-0">
+                    <button onclick="window.switchStudentInfoTab('results')" id="siTab-results" class="px-4 py-3 text-sm font-bold border-b-2 border-blue-600 text-blue-600">Kết quả Học tập</button>
+                    <button onclick="window.switchStudentInfoTab('courses')" id="siTab-courses" class="px-4 py-3 text-sm font-bold border-b-2 border-transparent text-gray-500 hover:text-blue-600">Khóa học đã mua</button>
+                </div>
+                
+                <!-- Tab Contents -->
+                <div class="px-4 md:px-0 pb-6">
+                    <div id="siContent-results" class="space-y-3">
+                        <div class="text-center py-8 text-gray-400"><i class="fa-solid fa-spinner fa-spin text-2xl"></i></div>
+                    </div>
+                    <div id="siContent-courses" class="hidden space-y-3">
+                        <div class="text-center py-8 text-gray-400"><i class="fa-solid fa-spinner fa-spin text-2xl"></i></div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
