@@ -1159,15 +1159,55 @@
                 container.innerHTML = `<div class="border-2 border-dashed border-gray-200 rounded-xl p-8 text-center bg-gray-50"><div class="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4 text-gray-400 text-2xl"><i class="fa-regular fa-folder-open"></i></div><h3 class="text-gray-500 font-bold">Chưa có đề thi nào</h3><p class="text-sm text-gray-400 mt-1">Thầy hãy vào "Ngân hàng đề thi" để tạo và giao đề nhé.</p></div>`;
                 return;
             }
-            let html = '<div class="grid grid-cols-1 gap-4">';
+            let html = '<div class="grid grid-cols-1 gap-3">';
             examsList.forEach(exam => {
                 const examId = exam.id;
-                const statusBadge = exam.status === 'published' ? '<span class="bg-green-100 text-green-700 px-2 py-1 rounded text-xs font-bold whitespace-nowrap">Đang mở</span>' : '<span class="bg-orange-100 text-orange-700 px-2 py-1 rounded text-xs font-bold whitespace-nowrap">Bản nháp</span>';
-                html += `<div class="bg-white p-5 rounded-xl border border-gray-200 hover:border-blue-300 transition-all flex flex-col sm:flex-row sm:justify-between items-start sm:items-center gap-4 group cursor-pointer" onclick="window.location.href='exam-editor.html?id=${examId}'"><div class="flex items-center gap-4"><div class="w-12 h-12 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center text-xl shrink-0"><i class="fa-solid fa-file-pen"></i></div><div class="overflow-hidden"><h4 class="font-bold text-gray-800 text-lg group-hover:text-blue-600 transition-colors truncate">${exam.title}</h4><div class="text-xs text-gray-500 flex flex-wrap gap-2 mt-1"><span><i class="fa-regular fa-clock"></i> ${exam.duration} phút</span><span><i class="fa-solid fa-list-ol"></i> ${exam.questionCount || 0} câu</span><span><i class="fa-solid fa-calendar-days"></i> Hạn: ${exam.endTime ? new Date(exam.endTime).toLocaleDateString('vi-VN') : 'Không giới hạn'}</span></div></div></div><div class="text-left sm:text-right w-full sm:w-auto flex flex-row sm:flex-col justify-between items-center sm:items-end mt-2 sm:mt-0">${statusBadge}<div class="text-xs text-gray-400"><i class="fa-solid fa-gear mr-1"></i> Cài đặt</div></div></div>`;
+                const isPublished = exam.status === 'published';
+                const statusBadge = isPublished 
+                    ? '<span class="bg-green-100 text-green-700 px-2 py-0.5 rounded-full text-xs font-bold">Đang mở</span>' 
+                    : '<span class="bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full text-xs font-bold">Bản nháp</span>';
+                const isHomework = exam.isHomework || exam.type === 'homework';
+                const iconClass = isHomework ? 'fa-solid fa-pen-to-square text-orange-500' : 'fa-solid fa-file-pen text-blue-500';
+                const deadline = exam.endTime ? new Date(exam.endTime).toLocaleDateString('vi-VN') : 'Không giới hạn';
+                
+                // Nút thao tác (thầy xem thống kê & sửa)
+                const hasGrading = isHomework;
+                const actionBtns = hasGrading
+                    ? `<button onclick="event.stopPropagation(); window.location.href='exam-editor.html?id=${examId}'" class="px-3 py-1.5 bg-orange-50 text-orange-600 hover:bg-orange-100 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors"><i class="fa-solid fa-pen"></i> Sửa</button>
+                       <button onclick="event.stopPropagation(); window.location.href='exam-editor.html?id=${examId}&view=grading'" class="px-3 py-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors"><i class="fa-solid fa-chart-pie"></i> Chấm</button>
+                       <button onclick="event.stopPropagation(); window.removeExamFromClass('${examId}')" class="px-3 py-1.5 bg-red-50 text-red-500 hover:bg-red-100 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors"><i class="fa-solid fa-trash"></i> Xóa</button>`
+                    : `<button onclick="event.stopPropagation(); window.location.href='exam-editor.html?id=${examId}'" class="px-3 py-1.5 bg-orange-50 text-orange-600 hover:bg-orange-100 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors"><i class="fa-solid fa-pen"></i> Sửa</button>
+                       <button onclick="event.stopPropagation(); window.location.href='exam-editor.html?id=${examId}&view=stats'" class="px-3 py-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors"><i class="fa-solid fa-chart-pie"></i> Thống kê</button>
+                       <button onclick="event.stopPropagation(); window.removeExamFromClass('${examId}')" class="px-3 py-1.5 bg-red-50 text-red-500 hover:bg-red-100 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors"><i class="fa-solid fa-trash"></i> Xóa</button>`;
+
+                html += `<div class="bg-white rounded-xl border border-gray-200 hover:border-blue-300 transition-all shadow-sm overflow-hidden" onclick="window.location.href='exam-editor.html?id=${examId}'" style="cursor:pointer">
+                    <!-- Dòng 1: Icon + Tên + Status -->
+                    <div class="flex items-start gap-3 p-4 pb-2">
+                        <div class="w-9 h-9 rounded-lg bg-blue-50 flex items-center justify-center shrink-0 mt-0.5">
+                            <i class="${iconClass}"></i>
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <div class="flex items-start justify-between gap-2">
+                                <h4 class="font-bold text-gray-800 text-sm leading-snug">${exam.title}</h4>
+                                ${statusBadge}
+                            </div>
+                            <div class="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5 text-xs text-gray-500">
+                                <span><i class="fa-regular fa-clock mr-0.5"></i>${exam.duration} phút</span>
+                                <span><i class="fa-solid fa-list-ol mr-0.5"></i>${exam.questionCount || 0} câu</span>
+                                <span><i class="fa-solid fa-calendar-days mr-0.5"></i>Hạn: ${deadline}</span>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Dòng 2: Nút thao tác -->
+                    <div class="px-4 py-2.5 border-t border-gray-100 bg-gray-50/50 flex items-center gap-2 flex-wrap" onclick="event.stopPropagation()">
+                        ${actionBtns}
+                    </div>
+                </div>`;
             });
             html += '</div>';
             container.innerHTML = html;
         }
+
 
         // CÁC HÀM NÉN ẢNH VÀ UPLOAD (CHO BANNER)
         window.compressImage = async (file, quality = 0.8, maxWidth = 1500) => {

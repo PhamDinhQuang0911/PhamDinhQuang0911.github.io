@@ -101,7 +101,7 @@
             <div onclick="openProfileModal()" class="w-9 h-9 rounded-full bg-gray-200 border border-white shadow-sm overflow-hidden active:scale-95 transition-transform"><img id="mobileHeaderAvatar" src="https://placehold.co/100" class="w-full h-full object-cover"></div>
         </header>
 
-        <div class="flex-1 overflow-y-auto p-4 md:p-8 relative scroll-smooth" id="mainScrollArea">
+        <div class="flex-1 overflow-y-auto p-4 md:p-8 pb-24 md:pb-8 relative scroll-smooth" id="mainScrollArea">
             <div id="tab-dashboard" class="tab-content space-y-8 animate-fade-in">
                 <div class="bg-gradient-to-br from-teal-600 to-blue-600 rounded-3xl p-8 md:p-12 text-white shadow-xl relative overflow-hidden">
                     <div class="relative z-10">
@@ -177,7 +177,7 @@
                         </div>
                     </div>
 
-                   <div class="lg:col-span-2 flex flex-col h-[600px]">
+                   <div class="lg:col-span-2 flex flex-col" style="min-height: 400px; max-height: 70vh">
                         <div class="bg-white rounded-3xl shadow-sm border border-gray-200 flex-1 overflow-hidden flex flex-col">
                             <div class="p-5 border-b border-gray-100 flex flex-col md:flex-row md:items-center justify-between gap-4 bg-gray-50/50">
                                 <h3 class="font-bold text-gray-800 flex items-center gap-2 text-lg">
@@ -228,11 +228,12 @@
             </div>
             
             <div id="tab-history" class="tab-content hidden animate-fade-in">
-                <div class="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div class="mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
                     <div>
-                        <h2 class="text-3xl font-black text-gray-800 mb-2">Lịch sử luyện thi</h2>
-                        <p class="text-gray-500">Quản lý kết quả học tập của bạn</p>
+                        <h2 class="text-2xl md:text-3xl font-black text-gray-800 mb-1">Lịch sử luyện thi</h2>
+                        <p class="text-gray-500 text-sm">Quản lý kết quả học tập của bạn</p>
                     </div>
+                    <!-- Bộ lọc loại -->
                     <div class="bg-white p-1.5 rounded-xl border border-gray-200 shadow-sm inline-flex flex-wrap gap-1">
                         <button onclick="filterHistory('all')" class="px-3 py-2 rounded-lg text-xs md:text-sm font-bold bg-teal-50 text-teal-700 history-filter active" data-type="all">Tất cả</button>
                         <button onclick="filterHistory('class')" class="px-3 py-2 rounded-lg text-xs md:text-sm font-bold text-gray-500 hover:bg-gray-50 history-filter" data-type="class">Lớp học</button>
@@ -241,26 +242,27 @@
                     </div>
                 </div>
 
-                <div class="bg-white rounded-2xl shadow-sm border border-teal-50 overflow-hidden">
-                    <div class="overflow-x-auto">
-                        <table class="w-full text-left border-collapse">
-                            <thead class="bg-gray-50 text-gray-500 text-xs uppercase font-bold sticky top-0">
-                                <tr>
-                                    <th class="p-4 whitespace-nowrap">Tên đề thi</th>
-                                    <th class="p-4 whitespace-nowrap">Phân loại</th> <th class="p-4 whitespace-nowrap">Điểm số</th>
-                                    <th class="p-4 whitespace-nowrap hidden md:table-cell">Thời gian nộp</th>
-                                    <th class="p-4 whitespace-nowrap hidden md:table-cell">Kết quả</th>
-                                    <th class="p-4 whitespace-nowrap text-right">Hành động</th>
-                                </tr>
-                            </thead>
-                            <tbody id="historyListBody" class="divide-y divide-gray-100 text-sm text-gray-700">
-                                </tbody>
-                        </table>
-                    </div>
-                    <div id="emptyHistoryMsg" class="hidden p-12 text-center text-gray-400">
-                        <i class="fa-solid fa-clipboard-list text-4xl mb-3 text-gray-200"></i>
-                        <p>Chưa có lịch sử làm bài nào.</p>
-                    </div>
+                <!-- Tab phân loại: Đề thi / Bài tập Tự luận -->
+                <div class="flex gap-2 mb-4 border-b border-gray-200">
+                    <button id="historyTabExam" onclick="switchHistoryTypeTab('exam')" class="px-4 py-2.5 text-sm font-bold text-blue-600 border-b-2 border-blue-600 -mb-px transition-colors">
+                        <i class="fa-solid fa-file-pen mr-1"></i>Đề thi trắc nghiệm
+                    </button>
+                    <button id="historyTabHomework" onclick="switchHistoryTypeTab('homework')" class="px-4 py-2.5 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-blue-600 -mb-px transition-colors">
+                        <i class="fa-solid fa-pen-to-square mr-1"></i>Bài tập Tự luận
+                    </button>
+                </div>
+
+                <!-- Danh sách dạng card (cuộn được) -->
+                <div class="space-y-3" id="historyCardList"></div>
+
+                <!-- Ẩn bảng cũ (giữ lại để ko bị lỗi JS) -->
+                <div class="hidden">
+                    <table><tbody id="historyListBody"></tbody></table>
+                </div>
+
+                <div id="emptyHistoryMsg" class="hidden p-12 text-center text-gray-400">
+                    <i class="fa-solid fa-clipboard-list text-4xl mb-3 text-gray-200"></i>
+                    <p>Chưa có lịch sử làm bài nào.</p>
                 </div>
             </div>
 
@@ -1820,42 +1822,100 @@
             renderHistoryRows(filtered);
         }
 
+        // Quản lý tab Đề thi / Bài tập Tự luận
+        let currentHistoryTypeTab = 'exam'; // 'exam' hoặc 'homework'
+        window.switchHistoryTypeTab = (type) => {
+            currentHistoryTypeTab = type;
+            // Cập nhật giao diện tab
+            ['exam', 'homework'].forEach(t => {
+                const btn = document.getElementById('historyTab' + (t === 'exam' ? 'Exam' : 'Homework'));
+                if (!btn) return;
+                if (t === type) {
+                    btn.className = 'px-4 py-2.5 text-sm font-bold text-blue-600 border-b-2 border-blue-600 -mb-px transition-colors';
+                } else {
+                    btn.className = 'px-4 py-2.5 text-sm font-bold text-gray-500 border-b-2 border-transparent hover:text-blue-600 -mb-px transition-colors';
+                }
+            });
+            // Render lại với filter hiện tại
+            if (window.allHistoryData) renderHistoryCards(window.allHistoryData);
+        };
+
         function renderHistoryRows(data) {
-            const tbody = document.getElementById('historyListBody');
-            if (data.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="6" class="p-8 text-center text-gray-400">Không tìm thấy kết quả nào.</td></tr>';
+            // Hàm cũ - giờ gọi sang renderHistoryCards
+            renderHistoryCards(data);
+        }
+
+        function renderHistoryCards(data) {
+            const cardList = document.getElementById('historyCardList');
+            const emptyMsg = document.getElementById('emptyHistoryMsg');
+            if (!cardList) return;
+
+            // Lọc theo tab loại (Đề thi trắc nghiệm / Bài tập tự luận)
+            const filtered = data.filter(r => {
+                const isHomework = r.isHomework || r.type === 'homework';
+                return currentHistoryTypeTab === 'homework' ? isHomework : !isHomework;
+            });
+
+            if (filtered.length === 0) {
+                cardList.innerHTML = '';
+                if (emptyMsg) emptyMsg.classList.remove('hidden');
                 return;
             }
+            if (emptyMsg) emptyMsg.classList.add('hidden');
+
             let html = '';
-            data.forEach(r => {
+            filtered.forEach(r => {
                 let dateStr = '---';
-                if(r.submittedAt) { try { dateStr = new Date(r.submittedAt).toLocaleString('vi-VN'); } catch(e){} }
+                if (r.submittedAt) { try { dateStr = new Date(r.submittedAt).toLocaleString('vi-VN'); } catch(e){} }
                 const score = r.score !== undefined ? r.score : 0;
-                const scoreColor = score >= 8 ? 'text-green-600' : (score >= 5 ? 'text-orange-500' : 'text-red-500');
-                
-                let correct = r.correctAnswers; 
-                if (correct === undefined) correct = r.correctCount; 
+                const scoreColor = score >= 8 ? 'text-green-500' : (score >= 5 ? 'text-orange-500' : 'text-red-500');
+
+                let correct = r.correctAnswers;
+                if (correct === undefined) correct = r.correctCount;
                 if (correct === undefined) correct = '?';
                 let total = r.totalQuestions;
                 if (total === undefined || total === 0) total = '?';
                 const detail = `${correct}/${total} câu`;
 
-                const deleteBtn = r.type === 'free' 
-                    ? `<button onclick="deleteHistoryItem('${r.id}')" class="w-8 h-8 rounded-lg bg-red-50 text-red-500 hover:bg-red-100 flex items-center justify-center transition-colors" title="Xóa lịch sử"><i class="fa-solid fa-trash"></i></button>` 
-                    : `<span class="w-8 h-8 block"></span>`; 
+                const deleteBtn = r.type === 'free'
+                    ? `<button onclick="deleteHistoryItem('${r.id}')" class="w-8 h-8 rounded-lg bg-red-50 text-red-400 hover:bg-red-100 flex items-center justify-center transition-colors" title="Xóa lịch sử"><i class="fa-solid fa-trash text-xs"></i></button>`
+                    : '';
 
-                html += `
-                <tr class="hover:bg-gray-50 transition-colors group border-b border-gray-50 last:border-0">
-                    <td class="p-4"><div class="font-bold text-gray-800 line-clamp-1" title="${r.examTitle}">${r.examTitle || 'Bài thi không tên'}</div><div class="text-[10px] text-gray-400 font-mono mt-0.5">ID: ${r.examId ? r.examId.substring(0,6) : '---'}</div></td>
-                    <td class="p-4"><span class="${r.typeClass || 'bg-gray-100'} px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider border border-white shadow-sm">${r.typeLabel || 'Khác'}</span></td>
-                    <td class="p-4 font-black ${scoreColor} text-lg">${score}</td>
-                    <td class="p-4 hidden md:table-cell text-gray-500 text-xs">${dateStr}</td>
-                    <td class="p-4 hidden md:table-cell"><span class="bg-gray-100 text-gray-600 px-2 py-1 rounded text-xs font-bold">${detail}</span></td>
-                    <td class="p-4 text-right"><div class="flex items-center justify-end gap-2"><button onclick="window.location.href='exam.html?id=${r.examId}&mode=review'" class="px-3 py-1.5 bg-white border border-teal-200 text-teal-700 rounded-lg text-xs font-bold hover:bg-teal-50 transition-all shadow-sm">Xem lại</button>${deleteBtn}</div></td>
-                </tr>`;
+                // Badge loại
+                const typeBadge = `<span class="${r.typeClass || 'bg-gray-100 text-gray-600'} px-2 py-0.5 rounded text-[10px] font-bold uppercase">${r.typeLabel || 'Khác'}</span>`;
+
+                html += `<div class="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden hover:border-teal-200 transition-all">
+                    <div class="flex items-start gap-3 p-3">
+                        <div class="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center shrink-0 mt-0.5">
+                            <i class="fa-solid fa-file-pen text-blue-500"></i>
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <div class="font-bold text-gray-800 text-sm line-clamp-2 leading-snug" title="${r.examTitle}">${r.examTitle || 'Bài thi không tên'}</div>
+                            <div class="flex flex-wrap items-center gap-1.5 mt-1.5">
+                                ${typeBadge}
+                                <span class="text-[10px] text-gray-400 font-mono">ID: ${r.examId ? r.examId.substring(0,6) : '---'}</span>
+                                <span class="text-[10px] text-gray-400">${detail}</span>
+                            </div>
+                            <div class="text-[10px] text-gray-400 mt-1">${dateStr}</div>
+                        </div>
+                        <div class="shrink-0 text-right">
+                            <div class="font-black ${scoreColor} text-2xl">${score}</div>
+                            <div class="text-[10px] text-gray-400">điểm</div>
+                        </div>
+                    </div>
+                    <div class="px-3 py-2 border-t border-gray-50 bg-gray-50/50 flex items-center justify-between gap-2">
+                        <div class="text-[10px] text-gray-400">Nộp: ${dateStr}</div>
+                        <div class="flex items-center gap-1">
+                            <button onclick="window.location.href='exam.html?id=${r.examId}&mode=review'" class="px-3 py-1.5 bg-teal-50 border border-teal-200 text-teal-700 rounded-lg text-xs font-bold hover:bg-teal-100 transition-all">Xem lại</button>
+                            ${deleteBtn}
+                        </div>
+                    </div>
+                </div>`;
             });
-            tbody.innerHTML = html;
+            cardList.innerHTML = html;
         }
+
+
 
         window.deleteHistoryItem = async (resultId) => {
             const modal = document.getElementById('confirmDeleteModal');
