@@ -443,7 +443,7 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getAuth, onAuthStateChanged, signOut, updateProfile, updatePassword, EmailAuthProvider, reauthenticateWithCredential } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
         // Thêm enableIndexedDbPersistence vào dòng import này
-        import { getFirestore, doc, getDoc, updateDoc, collection, getDocs, query, where, addDoc, limit, orderBy, deleteDoc, onSnapshot, enableIndexedDbPersistence } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { getFirestore, doc, getDoc, updateDoc, collection, getDocs, query, where, addDoc, limit, orderBy, deleteDoc, setDoc, onSnapshot, enableIndexedDbPersistence } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
         // CẤU HÌNH FIREBASE
         const firebaseConfig = {
@@ -1797,7 +1797,8 @@
                     else { type = 'free'; typeLabel = 'Tự do'; typeClass = 'bg-purple-100 text-purple-700'; }
                     
                     const isHomework = exam.isHomework || exam.type === 'homework';
-                    return { ...r, type, typeLabel, typeClass, examTitle: exam.title || r.examTitle || 'Đề không tên', isHomework };
+                    const allowDeleteHistory = exam.allowDeleteHistory === true;
+                    return { ...r, type, typeLabel, typeClass, examTitle: exam.title || r.examTitle || 'Đề không tên', isHomework, allowDeleteHistory };
                 });
                 window.allHistoryData.sort((a, b) => new Date(b.submittedAt) - new Date(a.submittedAt));
                 renderHistoryRows(window.allHistoryData);
@@ -1884,26 +1885,19 @@
                 if (total === undefined || total === 0) total = '?';
                 const detail = `${correct}/${total} câu`;
 
-                const deleteBtn = r.type === 'free'
+                const deleteBtn = r.allowDeleteHistory
                     ? `<button onclick="deleteHistoryItem('${r.id}')" class="w-8 h-8 rounded-lg bg-red-50 text-red-400 hover:bg-red-100 flex items-center justify-center transition-colors" title="Xóa lịch sử"><i class="fa-solid fa-trash text-xs"></i></button>`
                     : '';
 
                 // Badge loại
                 const typeBadge = `<span class="${r.typeClass || 'bg-gray-100 text-gray-600'} px-2 py-0.5 rounded text-[10px] font-bold uppercase">${r.typeLabel || 'Khác'}</span>`;
 
-                html += `<div class="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden hover:border-teal-200 transition-all">
-                    <div class="flex items-start gap-3 p-3">
-                        <div class="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center shrink-0 mt-0.5">
-                            <i class="fa-solid fa-file-pen text-blue-500"></i>
-                        </div>
-                        <div class="flex-1 min-w-0">
-                            <div class="font-bold text-gray-800 text-sm line-clamp-2 leading-snug" title="${r.examTitle}">${r.examTitle || 'Bài thi không tên'}</div>
-                            <div class="flex flex-wrap items-center gap-1.5 mt-1.5">
-                                ${typeBadge}
-                                <span class="text-[10px] text-gray-400 font-mono">ID: ${r.examId ? r.examId.substring(0,6) : '---'}</span>
-                                <span class="text-[10px] text-gray-400">${detail}</span>
-                            </div>
-                            <div class="text-[10px] text-gray-400 mt-1">${dateStr}</div>
+                html += `<div class="bg-white rounded-xl border border-gray-100 p-4 shadow-sm">
+                    <div class="flex justify-between items-start mb-3">
+                        <div>
+                            ${typeBadge}
+                            <h3 class="font-bold text-gray-800 mt-1">${r.examTitle}</h3>
+                            <p class="text-xs text-gray-400">${detail}</p>
                         </div>
                         <div class="shrink-0 text-right">
                             <div class="font-black ${scoreColor} text-2xl">${score}</div>
@@ -1934,7 +1928,31 @@
                     btnConfirm.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Đang xóa...';
                     btnConfirm.disabled = true;
                     try {
+                        // Lấy thông tin bài thi trước khi xóa
+                        const deletedRecord = window.allHistoryData 
+                            ? window.allHistoryData.find(r => r.id === resultId) 
+                            : null;
+
+                        // Xóa kết quả khỏi Firestore
                         await deleteDoc(doc(db, "results", resultId));
+
+                        // GHI MARKER NGĂN LÀM LẠI: Giữ lại bản ghi exam_attempts
+                        // để hệ thống vẫn biết học sinh đã từng làm bài này
+                        if (deletedRecord && deletedRecord.examId && currentUser) {
+                            try {
+                                const attemptKey = `${currentUser.uid}_${deletedRecord.examId}`;
+                                await setDoc(doc(db, "exam_attempts", attemptKey), {
+                                    uid: currentUser.uid,
+                                    examId: deletedRecord.examId,
+                                    status: 'deleted',
+                                    deletedAt: new Date().toISOString(),
+                                    originalScore: deletedRecord.score
+                                }, { merge: true });
+                            } catch(markerErr) {
+                                console.warn("Lỗi ghi marker ngăn làm lại:", markerErr);
+                            }
+                        }
+
                         modal.classList.add('hidden');
                         window.showNotification("Đã xóa lịch sử làm bài thành công!", "success");
                         if(window.allHistoryData) {
@@ -1945,7 +1963,7 @@
                         }
                     } catch(e) {
                         modal.classList.add('hidden');
-                        if(e.code === 'permission-denied') window.showNotification("Lỗi: Bạn không có quyền xóa bài này (Chỉ xóa được bài của chính mình)!", "error");
+                        if(e.code === 'permission-denied') window.showNotification("Lỗi: Bạn không có quyền xóa bài này!", "error");
                         else window.showNotification("Lỗi xóa: " + e.message, "error");
                     } finally { btnConfirm.innerHTML = originalText; btnConfirm.disabled = false; }
                 };
