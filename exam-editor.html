@@ -42,6 +42,7 @@
     <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
     <link rel="stylesheet" type="text/css" href="https://tikzjax.com/v1/fonts.css">
     <script src="https://tikzjax.com/v1/tikzjax.js"></script>
+    <script src="ai-grader.js"></script>
     <style>
         body { font-family: 'Nunito', sans-serif; background-color: #F8F9FA; }
         .font-handwriting { font-family: 'Pacifico', cursive; }
@@ -103,6 +104,19 @@
             box-shadow: 0 4px 6px -1px rgba(59, 130, 246, 0.5);
         }
     </style>
+    
+    <!-- MathJax -->
+    <script>
+      MathJax = {
+        tex: {
+          inlineMath: [['$', '$'], ['\\(', '\\)']]
+        },
+        svg: {
+          fontCache: 'global'
+        }
+      };
+    </script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
 </head>
 <body class="h-screen flex overflow-hidden text-gray-800">
 
@@ -187,7 +201,13 @@
                                     <div><label class="block text-xs font-bold text-blue-600 mb-1"><i class="fa-solid fa-robot"></i> Link file Lời giải / Đáp án (AI lấy làm chuẩn)</label><input type="text" id="settingSolutionUrl" class="form-input bg-blue-50/50 border-blue-300" placeholder="Nhập link ảnh/PDF lời giải..."></div>
                                     
                                     <div><label class="block text-xs font-bold text-gray-600 mb-1">Mô tả / Yêu cầu thêm</label><textarea id="settingHwDesc" class="form-input h-20" placeholder="Ví dụ: Các em làm ra giấy rồi chụp ảnh nộp nhé."></textarea></div>
-                                    <div><label class="block text-xs font-bold text-gray-600 mb-1">Link ảnh bìa (Banner)</label><input type="text" id="settingBannerUrl" class="form-input" placeholder="Link ảnh (Tùy chọn)"></div>
+                                    <div class="flex flex-col gap-1">
+                                        <label class="block text-xs font-bold text-gray-600 mb-1">Link ảnh bìa (Banner)</label>
+                                        <div class="flex gap-2">
+                                            <input type="text" id="settingBannerUrl" class="form-input flex-1" placeholder="Link ảnh (Tùy chọn)">
+                                            <button onclick="window.generateAIBanner()" class="px-3 py-2 bg-gradient-to-r from-pink-500 to-rose-500 text-white rounded font-bold shadow hover:shadow-md transition-all text-xs whitespace-nowrap">🪄 Tạo Banner AI</button>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                             <div><label class="form-group-title">Khối lớp</label><select id="settingGrade" class="form-input bg-white"><option value="12">Khối 12</option><option value="11">Khối 11</option><option value="10">Khối 10</option><option value="9">Khối 9</option></select></div>
@@ -205,6 +225,13 @@
                                 <div><label class="form-group-title">Số lượt làm</label><input type="number" id="settingAttempts" value="1" class="form-input"></div>
                                 <div class="flex justify-between items-center"><span class="text-sm font-bold text-gray-700">Giám sát tự động</span><label class="relative inline-flex items-center cursor-pointer"><input type="checkbox" id="settingProctoring" class="toggle-checkbox sr-only peer"><div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:bg-blue-600 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all"></div></label></div>
                                 <div class="flex justify-between items-center"><span class="text-sm font-bold text-gray-700">Đảo câu hỏi</span><label class="relative inline-flex items-center cursor-pointer"><input type="checkbox" id="settingShuffle" checked class="toggle-checkbox sr-only peer"><div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:bg-blue-600 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all"></div></label></div>
+                            </div>
+                        </div>
+                        <div class="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-gray-200 mt-6">
+                            <h3 class="font-bold text-gray-800 mb-4 pb-3 border-b border-gray-100"><i class="fa-solid fa-bell text-green-600 mr-2"></i> Thông báo Zalo (Qua n8n)</h3>
+                            <div class="space-y-4">
+                                <div><label class="form-group-title">Gửi nhắc nhở nộp bài trước hạn (ngày)</label><input type="number" id="settingRemindDays" value="1" min="0" class="form-input"></div>
+                                <div class="flex justify-between items-center"><span class="text-sm font-bold text-gray-700">Tự động gửi kết quả Zalo khi nộp bài</span><label class="relative inline-flex items-center cursor-pointer"><input type="checkbox" id="settingAutoSendResult" class="toggle-checkbox sr-only peer"><div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:bg-green-600 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all"></div></label></div>
                             </div>
                         </div>
                         <div class="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-gray-200">
@@ -388,12 +415,19 @@
 
         <div id="view-grading" class="hidden flex-1 overflow-y-auto p-4 md:p-8 bg-gray-50">
             <div class="max-w-6xl mx-auto">
-                <h1 class="text-2xl font-bold text-gray-800 mb-6"><i class="fa-solid fa-pen-nib mr-2 text-orange-500"></i>Chấm bài học sinh</h1>
+                <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-3">
+                    <h1 class="text-2xl font-bold text-gray-800"><i class="fa-solid fa-pen-nib mr-2 text-orange-500"></i>Chấm bài học sinh</h1>
+                    <div class="flex gap-2">
+                        <button onclick="window.scanAndRemindZalo()" class="px-4 py-2 bg-yellow-500 text-white rounded-lg font-bold shadow hover:bg-yellow-600 text-sm flex items-center gap-2"><i class="fa-solid fa-bell"></i> Quét nhắc nhở Zalo</button>
+                        <button onclick="window.sendSelectedResultsZalo()" class="px-4 py-2 bg-green-600 text-white rounded-lg font-bold shadow hover:bg-green-700 text-sm flex items-center gap-2"><i class="fa-solid fa-paper-plane"></i> Gửi kết quả (Zalo)</button>
+                    </div>
+                </div>
                 <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                     <div class="overflow-x-auto">
                         <table class="w-full text-sm text-left text-gray-600">
                             <thead class="bg-gray-100 text-gray-700 uppercase text-xs font-bold">
                                 <tr>
+                                    <th class="px-4 py-3 w-10 text-center"><input type="checkbox" id="selectAllGrading" onclick="window.toggleSelectAllGrading(this)" class="w-4 h-4 rounded border-gray-300"></th>
                                     <th class="px-6 py-3">Học sinh</th>
                                     <th class="px-6 py-3 text-center">Trạng thái</th>
                                     <th class="px-6 py-3 text-right">Ngày nộp</th>
@@ -410,59 +444,122 @@
 
     <!-- [MÃ MỚI BỔ SUNG] MODAL CHẤM BÀI TỰ LUẬN -->
     <div id="essayGradingModal" class="modal opacity-0 pointer-events-none fixed inset-0 z-[100] flex items-center justify-center bg-gray-900 bg-opacity-80 transition-opacity duration-300">
-        <div class="modal-content bg-white w-full h-full md:w-[95vw] md:h-[95vh] md:rounded-2xl shadow-2xl flex flex-col transform scale-95 transition-transform duration-300 overflow-hidden">
-            <div class="p-3 border-b flex justify-between items-center bg-orange-50 shrink-0">
-                <h3 class="font-bold text-orange-800" id="gradingStudentName"><i class="fa-solid fa-pen-nib mr-2"></i>Chấm bài</h3>
-                <button onclick="window.toggleModal('essayGradingModal', false)" class="text-gray-500 hover:text-red-500"><i class="fa-solid fa-times text-xl"></i></button>
+        <div class="modal-content bg-white w-full h-full md:w-[98vw] md:h-[98vh] md:rounded-2xl shadow-2xl flex flex-col transform scale-95 transition-transform duration-300 overflow-hidden">
+            <div class="p-3 border-b flex justify-between items-center bg-blue-50 shrink-0">
+                <h3 class="font-bold text-blue-800 text-lg flex items-center gap-2" id="gradingStudentName">
+                    <i class="fa-solid fa-user-graduate"></i> Chấm bài
+                </h3>
+                
+                <div id="resubmitActionArea" class="hidden flex items-center gap-2 mr-4">
+                    <span class="text-xs font-bold text-red-500 bg-red-100 px-2 py-1 rounded">Học sinh xin nộp lại</span>
+                    <button onclick="window.handleResubmitRequest(true)" class="px-3 py-1.5 bg-green-500 text-white rounded-lg text-sm font-bold hover:bg-green-600 shadow-sm"><i class="fa-solid fa-check"></i> Cho phép</button>
+                    <button onclick="window.handleResubmitRequest(false)" class="px-3 py-1.5 bg-gray-500 text-white rounded-lg text-sm font-bold hover:bg-gray-600 shadow-sm"><i class="fa-solid fa-xmark"></i> Từ chối</button>
+                </div>
+
+                <button onclick="window.toggleModal('essayGradingModal', false)" class="text-gray-500 hover:text-red-500 w-8 h-8 flex items-center justify-center rounded-full hover:bg-red-50 transition-colors"><i class="fa-solid fa-times text-xl"></i></button>
             </div>
             
-            <div class="flex-1 flex flex-col md:flex-row overflow-hidden bg-gray-200">
-                <div class="flex-1 overflow-auto relative flex justify-center items-start p-4" id="gradingCanvasContainer">
-                    <div class="relative shadow-xl border border-gray-300 bg-white inline-block" id="canvasWrapper">
-                        <img id="gradingBgImage" class="block max-w-full h-auto pointer-events-none select-none" crossorigin="anonymous" src="">
-                        <canvas id="gradingCanvas" class="absolute top-0 left-0 w-full h-full cursor-crosshair touch-none"></canvas>
-                    </div>
+            <div id="gradingSidebarOverlay" class="md:hidden fixed inset-0 bg-black/50 z-[95] hidden opacity-0 transition-opacity duration-300"></div>
+            <button id="btnToggleSidebarMobile" class="md:hidden fixed bottom-6 right-6 z-[90] w-14 h-14 bg-blue-600 text-white rounded-full shadow-xl shadow-blue-300 flex items-center justify-center text-2xl hover:bg-blue-700 transition-transform active:scale-95" type="button">
+                <i class="fa-solid fa-toolbox"></i>
+            </button>
+            <div class="flex-1 flex flex-col md:flex-row overflow-hidden bg-gray-100 relative">
+                <!-- Left: Image Viewer (Scrollable) -->
+                <div class="flex-1 overflow-auto relative p-6 custom-scrollbar flex flex-col items-center gap-8" id="gradingImagesContainer">
+                    <!-- Canvases will be injected here dynamically -->
                 </div>
                 
-                <div class="w-full md:w-80 bg-white border-l border-gray-200 flex flex-col shrink-0 overflow-y-auto custom-scrollbar">
-                    <div class="p-4 border-b border-gray-100 space-y-3">
-                        <h4 class="font-bold text-gray-700 text-sm uppercase"><i class="fa-solid fa-toolbox text-blue-500"></i> Công cụ Bút vẽ</h4>
-                        <div class="flex gap-2">
-                            <button onclick="window.setTool('pen')" id="toolPen" class="flex-1 p-2 bg-blue-100 text-blue-700 rounded-lg ring-2 ring-blue-400 font-bold text-xs"><i class="fa-solid fa-pen"></i> Bút</button>
-                            <button onclick="window.setTool('eraser')" id="toolEraser" class="flex-1 p-2 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200 font-bold text-xs"><i class="fa-solid fa-eraser"></i> Tẩy</button>
+                <!-- Right: Tools & Score (Fixed width) -->
+                <div id="gradingSidebar" class="fixed inset-y-0 right-0 z-[100] transform translate-x-full md:relative md:translate-x-0 w-[85vw] md:w-96 bg-white border-l border-gray-200 flex flex-col shrink-0 shadow-[-4px_0_15px_rgba(0,0,0,0.05)] transition-transform duration-300 overflow-y-auto custom-scrollbar h-full">
+                    <!-- Tool Palette -->
+                    <div class="p-5 border-b border-gray-100 space-y-4">
+                        <h4 class="font-bold text-gray-700 text-sm uppercase flex items-center gap-2"><i class="fa-solid fa-toolbox text-blue-500"></i> Công cụ chấm</h4>
+                        
+                        <div class="grid grid-cols-4 gap-2">
+                            <button onclick="window.setTool('pen')" id="toolPen" class="flex flex-col items-center justify-center p-2 bg-blue-50 text-blue-700 rounded-xl ring-2 ring-blue-400 font-bold text-xs hover:bg-blue-100 transition-colors gap-1"><i class="fa-solid fa-pen text-lg"></i> Vẽ</button>
+                            <button onclick="window.setTool('eraser')" id="toolEraser" class="flex flex-col items-center justify-center p-2 bg-gray-50 text-gray-600 rounded-xl hover:bg-gray-200 font-bold text-xs transition-colors gap-1"><i class="fa-solid fa-eraser text-lg"></i> Tẩy</button>
+                            <button onclick="window.setTool('check')" id="toolCheck" class="flex flex-col items-center justify-center p-2 bg-green-50 text-green-600 border border-green-200 hover:bg-green-100 rounded-xl font-bold text-xs transition-colors gap-1"><i class="fa-solid fa-check text-lg"></i> Đúng</button>
+                            <button onclick="window.setTool('cross')" id="toolCross" class="flex flex-col items-center justify-center p-2 bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 rounded-xl font-bold text-xs transition-colors gap-1"><i class="fa-solid fa-xmark text-lg"></i> Sai</button>
                         </div>
-                        <div class="flex gap-2">
-                            <button onclick="window.setTool('check')" id="toolCheck" class="flex-1 p-2 bg-green-50 text-green-600 border border-green-200 hover:bg-green-100 rounded-lg font-bold text-xs"><i class="fa-solid fa-check text-lg"></i> Đúng (+)</button>
-                            <button onclick="window.setTool('cross')" id="toolCross" class="flex-1 p-2 bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 rounded-lg font-bold text-xs"><i class="fa-solid fa-xmark text-lg"></i> Sai (-)</button>
+                        
+                        <div class="flex items-center gap-3 bg-gray-50 p-2 rounded-lg">
+                            <input type="color" id="penColor" value="#ef4444" class="w-8 h-8 rounded cursor-pointer border-none p-0 outline-none">
+                            <div class="flex-1 flex flex-col">
+                                <span class="text-[10px] text-gray-500 font-bold mb-1 uppercase">Độ dày nét vẽ</span>
+                                <input type="range" id="penSize" min="1" max="15" value="3" class="w-full accent-blue-600 cursor-pointer">
+                            </div>
                         </div>
-                        <div class="flex items-center gap-3 pt-2">
-                            <input type="color" id="penColor" value="#ff0000" class="w-8 h-8 rounded cursor-pointer border-none p-0 outline-none">
-                            <input type="range" id="penSize" min="1" max="15" value="3" class="flex-1 accent-blue-600 cursor-pointer">
-                        </div>
-                        <button onclick="window.clearCanvas()" class="w-full py-1.5 text-xs text-gray-500 hover:text-red-500 hover:bg-red-50 rounded border border-gray-200 mt-2"><i class="fa-solid fa-trash-can"></i> Xóa toàn bộ nét vẽ</button>
+                        
+                        <button onclick="window.clearAllCanvases()" class="w-full py-2 text-sm font-bold text-red-500 hover:text-white hover:bg-red-500 rounded-lg border border-red-200 transition-all flex items-center justify-center gap-2"><i class="fa-solid fa-trash-can"></i> Xóa toàn bộ nét vẽ</button>
                     </div>
 
-                    <div class="p-4 border-b border-gray-100 bg-purple-50/50">
-                        <button onclick="window.gradeWithAI()" id="btnAIGrade" class="w-full py-3 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-xl font-bold shadow-md hover:opacity-90 flex items-center justify-center gap-2 transition-all">
-                            <img src="https://upload.wikimedia.org/wikipedia/commons/8/8a/Google_Gemini_logo.svg" class="w-5 h-5 invert" alt="Gemini"> Gemini Chấm Bài
+                    <!-- AI Gemini -->
+                    <div class="p-4 border-b border-gray-100 bg-gradient-to-br from-indigo-50 to-purple-50 space-y-2">
+                        <div class="flex flex-col gap-2">
+                            <button onclick="window.gradeWithAI('gradeOnly')" id="btnAIGradeOnly" class="w-full py-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg font-bold shadow-md hover:shadow-lg flex items-center justify-center gap-2 text-sm transition-all">
+                                <img src="https://upload.wikimedia.org/wikipedia/commons/8/8a/Google_Gemini_logo.svg" class="w-4 h-4 invert" alt="Gemini"> Chấm & Nhận Xét
+                            </button>
+                            <button onclick="window.gradeWithAI('gradeAndDraw')" id="btnAIGradeDraw" class="w-full py-2 bg-gradient-to-r from-purple-600 to-pink-500 text-white rounded-lg font-bold shadow-md hover:shadow-lg flex items-center justify-center gap-2 text-sm transition-all">
+                                <i class="fa-solid fa-pen-ruler"></i> Chấm, Nhận xét & Tạo ảnh lỗi
+                            </button>
+                        </div>
+                        <button onclick="window.gradeWithAI('drawOnly')" id="btnAIDrawOnly" class="w-full py-2 bg-gray-800 text-white rounded-lg font-bold shadow-md hover:bg-gray-900 flex items-center justify-center gap-2 text-sm transition-all hidden">
+                            <i class="fa-solid fa-highlighter text-yellow-400"></i> Tạo ảnh chỉ lỗi sai
                         </button>
-                        <p class="text-[10px] text-gray-500 text-center mt-2 italic">Trí tuệ nhân tạo sẽ soi lỗi và nhận xét.</p>
+                        <p class="text-[10px] text-indigo-500 text-center mt-1 font-medium"><i class="fa-solid fa-wand-magic-sparkles"></i> Phân tích tự động toàn bộ ảnh bằng AI</p>
                     </div>
 
-                    <div class="p-4 space-y-4 flex-1">
-                        <div>
-                            <label class="block font-bold text-gray-700 text-sm mb-1">Lời phê của Giáo viên</label>
-                            <textarea id="gradingFeedback" class="w-full p-3 border border-gray-300 rounded-xl text-sm h-28 outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-100" placeholder="Viết nhận xét chi tiết cho học sinh..."></textarea>
+                    <!-- Feedback & Score -->
+                    <div class="p-5 flex-1 flex flex-col gap-4">
+                        <div class="flex-1 flex flex-col min-h-[150px]">
+                            <label class="block font-bold text-gray-700 text-sm mb-2 flex justify-between items-center">
+                                <span><i class="fa-solid fa-comment-dots text-orange-500"></i> Lời phê của Giáo viên</span>
+                                <button id="btnToggleMathPreview" class="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200 transition-colors" type="button">
+                                    <i class="fa-solid fa-eye"></i> Xem biên dịch Toán
+                                </button>
+                            </label>
+                            <textarea id="gradingFeedback" class="flex-1 w-full p-4 border border-gray-200 rounded-xl text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 resize-none bg-gray-50 focus:bg-white transition-all shadow-inner" placeholder="Nhập nhận xét chi tiết..."></textarea>
+                            <div id="gradingFeedbackPreview" class="hidden flex-1 w-full p-4 border border-blue-200 rounded-xl text-sm bg-blue-50 overflow-y-auto" style="min-height: 150px; max-height: 400px;"></div>
+                            <script>
+                                document.getElementById('btnToggleMathPreview').addEventListener('click', function() {
+                                    const ta = document.getElementById('gradingFeedback');
+                                    const pv = document.getElementById('gradingFeedbackPreview');
+                                    if (pv.classList.contains('hidden')) {
+                                        pv.classList.remove('hidden');
+                                        ta.classList.add('hidden');
+                                        this.innerHTML = '<i class="fa-solid fa-pen"></i> Chỉnh sửa';
+                                        
+                                        // Xử lý Markdown nhẹ (bold, list, xuống dòng)
+                                        let text = ta.value.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                                        text = text.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
+                                        text = text.replace(/\n/g, '<br>');
+                                        pv.innerHTML = text;
+                                        
+                                        if (window.MathJax) {
+                                            MathJax.typesetPromise([pv]).catch(function (err) {
+                                                console.error(err.message);
+                                            });
+                                        }
+                                    } else {
+                                        pv.classList.add('hidden');
+                                        ta.classList.remove('hidden');
+                                        this.innerHTML = '<i class="fa-solid fa-eye"></i> Xem biên dịch Toán';
+                                    }
+                                });
+                            </script>
                         </div>
-                        <div>
-                            <label class="block font-bold text-gray-700 text-sm mb-1 text-center">ĐIỂM SỐ</label>
-                            <input type="number" id="gradingScore" class="w-full p-4 border-2 border-orange-300 bg-orange-50 rounded-2xl text-center text-4xl font-black text-orange-600 focus:outline-none focus:border-orange-600" placeholder="0">
+                        <div class="bg-blue-50 p-4 rounded-xl border border-blue-100 mt-auto">
+                            <label class="block font-bold text-blue-800 text-sm mb-2 text-center uppercase tracking-wider">ĐIỂM SỐ</label>
+                            <div class="flex items-center justify-center">
+                                <input type="number" id="gradingScore" class="w-32 p-3 bg-white border-2 border-blue-300 rounded-xl text-center text-4xl font-black text-blue-600 focus:outline-none focus:border-blue-600 shadow-inner" placeholder="0">
+                            </div>
                         </div>
                     </div>
 
-                    <div class="p-4 border-t border-gray-100 bg-gray-50">
-                        <button id="btnSaveGrade" class="w-full py-3.5 bg-orange-500 text-white rounded-xl font-bold shadow-lg hover:bg-orange-600 transition-all text-lg flex items-center justify-center gap-2">
-                            <i class="fa-solid fa-floppy-disk"></i> LƯU KẾT QUẢ
+                    <!-- Footer / Save -->
+                    <div class="p-4 bg-white border-t border-gray-100 shrink-0">
+                        <button id="btnSaveGrade" class="w-full py-4 bg-green-500 text-white rounded-xl font-black text-lg shadow-lg shadow-green-200 hover:bg-green-600 hover:-translate-y-0.5 transition-all flex items-center justify-center gap-2">
+                            <i class="fa-solid fa-floppy-disk"></i> LƯU KẾT QUẢ CHẤM
                         </button>
                     </div>
                 </div>
@@ -714,7 +811,7 @@
                 
                 // 1. Tải song song: Lớp học + Cây MapID từ Firestore
                 const p1 = loadTeacherClasses();
-                const p2 = getDoc(doc(db, "configurations", "map_id_tree")).then(snap => {
+                window.n8nWebhook = ''; getDoc(doc(db, "configurations", "n8n_webhook")).then(snap => { if (snap.exists()) window.n8nWebhook = snap.data().url || ''; }); const p2 = getDoc(doc(db, "configurations", "map_id_tree")).then(snap => {
                     if(snap.exists()) {
                         window.globalIdTree = snap.data().tree || [];
                         console.log("Đã tải MapID Tree:", window.globalIdTree);
@@ -725,7 +822,23 @@
 
                 const urlParams = new URLSearchParams(window.location.search);
                 const examId = urlParams.get('id');
-                if (examId) { currentExamId = examId; loadExamData(examId); }
+                const viewParam = urlParams.get('view');
+                const typeParam = urlParams.get('type');
+                
+                if (examId) { 
+                    currentExamId = examId; 
+                    loadExamData(examId); 
+                } else if (typeParam === 'homework') {
+                    document.getElementById('settingType').value = 'homework';
+                    if (window.toggleHomeworkFields) window.toggleHomeworkFields();
+                    if (window.switchView) window.switchView('settings');
+                } else {
+                    if (window.switchView) window.switchView('settings'); // Default to settings for new exams
+                }
+                
+                if (viewParam && window.switchView) {
+                    window.switchView(viewParam);
+                }
             } else { window.location.href = 'index.html'; }
         });
 
@@ -1207,6 +1320,8 @@
                     document.getElementById('settingAttempts').value = (data.attempts !== undefined) ? data.attempts : 1;
                     document.getElementById('settingProctoring').checked = (data.proctoring === true);
                     document.getElementById('settingShuffle').checked = (data.shuffle !== false);
+                    document.getElementById('settingRemindDays').value = data.remindDays !== undefined ? data.remindDays : 1;
+                    document.getElementById('settingAutoSendResult').checked = (data.autoSendResult === true);
                     
                     if(data.showScore) { const r = document.querySelector(`input[name="settingShowScore"][value="${data.showScore}"]`); if(r) r.checked = true; }
                     if(data.showResult) { const r = document.querySelector(`input[name="settingShowResult"][value="${data.showResult}"]`); if(r) r.checked = true; }
@@ -1901,6 +2016,8 @@
                     attempts: parseInt(document.getElementById('settingAttempts').value) || 0,
                     proctoring: document.getElementById('settingProctoring').checked, 
                     shuffle: document.getElementById('settingShuffle').checked,
+                    remindDays: parseInt(document.getElementById('settingRemindDays').value) || 0,
+                    autoSendResult: document.getElementById('settingAutoSendResult').checked,
                     showScore: document.querySelector('input[name="settingShowScore"]:checked').value, 
                     showResult: document.querySelector('input[name="settingShowResult"]:checked').value,
                     passScore: parseFloat(document.getElementById('settingPassScoreInput').value) || 5,
@@ -2647,6 +2764,7 @@
         });
     // --- LOGIC CHẤM THI (GRADING) ---
         let currentGradingAttempt = null;
+        window.currentGradingCanvases = [];
 
         // Bổ sung hàm toggleModal cho trang exam-editor
         window.toggleModal = (id, show) => {
@@ -2671,41 +2789,83 @@
             const examType = document.getElementById('settingType').value; 
 
             if (examType === 'homework') {
-                document.getElementById('gradingStudentName').textContent = 'Chấm bài: ' + (attempt.studentName || 'Học sinh ẩn danh');
+                document.getElementById('gradingStudentName').innerHTML = `<i class="fa-solid fa-user-graduate"></i> Chấm bài: ${attempt.studentName || 'Học sinh ẩn danh'}`;
                 window.currentResultIdForAI = attempt.id;
 
-                let imgUrl = "";
-                const ans = attempt.answers && attempt.answers[0] ? attempt.answers[0] : '';
-                if (ans.includes('src="')) {
-                    imgUrl = ans.split('src="')[1].split('"')[0];
-                } else if (ans.startsWith('http') || ans.startsWith('data:image')) {
-                    imgUrl = ans;
+                // Xử lý Resubmit Request
+                const resubmitArea = document.getElementById('resubmitActionArea');
+                if (attempt.resubmitStatus === 'requested') {
+                    resubmitArea.classList.remove('hidden');
+                    // Reset nội dung lại ban đầu nếu trước đó đã bấm duyệt/từ chối
+                    resubmitArea.innerHTML = `
+                        <span class="text-xs font-bold text-red-500 bg-red-100 px-2 py-1 rounded shadow-inner animate-pulse">Học sinh xin nộp lại</span>
+                        <button onclick="window.handleResubmitRequest(true)" class="px-3 py-1.5 bg-green-500 text-white rounded-lg text-sm font-bold hover:bg-green-600 shadow-sm transition-transform active:scale-95"><i class="fa-solid fa-check"></i> Cho phép</button>
+                        <button onclick="window.handleResubmitRequest(false)" class="px-3 py-1.5 bg-gray-500 text-white rounded-lg text-sm font-bold hover:bg-gray-600 shadow-sm transition-transform active:scale-95"><i class="fa-solid fa-xmark"></i> Từ chối</button>
+                    `;
+                } else {
+                    resubmitArea.classList.add('hidden');
                 }
 
-                const imgEl = document.getElementById('gradingBgImage');
-                const canvas = document.getElementById('gradingCanvas');
-                const ctx = canvas.getContext('2d');
-                
-                if (imgUrl) {
-                    // Nếu là link Cloudflare hoặc Firebase, thử bypass Cache để tránh lỗi Canvas Tainted
-                    imgEl.crossOrigin = "anonymous";
-                    imgEl.src = imgUrl + (imgUrl.includes('?') ? '&' : '?') + 'bypassCache=' + Date.now();
-                    
-                    imgEl.onload = () => {
-                        canvas.width = imgEl.clientWidth;
-                        canvas.height = imgEl.clientHeight;
-                        ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-                        window.setupCanvasEvents(canvas, ctx);
-                    };
+                // Trích xuất TẤT CẢ url ảnh
+                let imageUrls = [];
+                if (attempt.gradedImageUrls && attempt.gradedImageUrls.length > 0) {
+                    imageUrls = attempt.gradedImageUrls;
                 } else {
-                    imgEl.src = "https://placehold.co/600x400?text=Khong+co+anh+bai+lam";
+                    const ans = attempt.answers && attempt.answers[0] ? attempt.answers[0] : '';
+                    if (ans.includes('<img')) {
+                        const parser = new DOMParser();
+                        const doc = parser.parseFromString(ans, 'text/html');
+                        const imgs = doc.querySelectorAll('img');
+                        imgs.forEach(img => imageUrls.push(img.src));
+                    } else if (ans.startsWith('http') || ans.startsWith('data:image')) {
+                        imageUrls.push(ans);
+                    }
+                }
+
+                const container = document.getElementById('gradingImagesContainer');
+                container.innerHTML = '';
+                window.currentGradingCanvases = [];
+
+                if (imageUrls.length === 0) {
+                    container.innerHTML = `<div class="text-gray-500 mt-32 text-center flex flex-col items-center"><i class="fa-regular fa-image text-5xl mb-4 text-gray-300 block"></i><p>Học sinh chưa nộp ảnh nào.</p></div>`;
+                } else {
+                    imageUrls.forEach((url, idx) => {
+                        const wrapper = document.createElement('div');
+                        wrapper.className = "relative shadow-2xl border-4 border-white bg-white inline-block mb-10 shrink-0 transform transition-transform hover:scale-[1.01]";
+                        
+                        const imgEl = document.createElement('img');
+                        imgEl.className = "block max-w-[900px] w-full h-auto pointer-events-none select-none rounded";
+                        imgEl.crossOrigin = "anonymous";
+                        imgEl.src = url + (url.includes('?') ? '&' : '?') + 'bypassCache=' + Date.now();
+                        
+                        const canvas = document.createElement('canvas');
+                        canvas.className = "absolute top-0 left-0 w-full h-full cursor-crosshair touch-none rounded";
+                        
+                        const pageLabel = document.createElement('div');
+                        pageLabel.className = "absolute -left-5 -top-5 w-10 h-10 bg-blue-600 border-4 border-white text-white font-black text-lg flex items-center justify-center rounded-full shadow-lg z-10 ring-4 ring-blue-100";
+                        pageLabel.innerText = idx + 1;
+
+                        wrapper.appendChild(pageLabel);
+                        wrapper.appendChild(imgEl);
+                        wrapper.appendChild(canvas);
+                        container.appendChild(wrapper);
+
+                        imgEl.onload = () => {
+                            canvas.width = imgEl.clientWidth;
+                            canvas.height = imgEl.clientHeight;
+                            const ctx = canvas.getContext('2d');
+                            ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+                            window.setupCanvasEvents(canvas, ctx);
+                            window.currentGradingCanvases.push({ imgEl, canvas, ctx });
+                        };
+                    });
                 }
 
                 document.getElementById('gradingScore').value = attempt.score || '';
                 document.getElementById('gradingFeedback').value = attempt.teacherFeedback || '';
                 
                 const saveBtn = document.getElementById('btnSaveGrade');
-                if(saveBtn) saveBtn.onclick = () => window.saveAdvancedGrade(attempt.id, imgEl, canvas);
+                if(saveBtn) saveBtn.onclick = () => window.saveAdvancedGrade(attempt.id);
                 
                 window.toggleModal('essayGradingModal', true);
             } else {
@@ -2729,19 +2889,22 @@
                 const b = document.getElementById(id);
                 if(b) {
                     b.classList.remove('ring-2', 'ring-blue-400', 'bg-blue-100');
-                    if(b.id !== 'toolCheck' && b.id !== 'toolCross') b.classList.add('bg-gray-100');
+                    if(b.id !== 'toolCheck' && b.id !== 'toolCross') b.classList.add('bg-gray-50');
                 }
             });
             const activeBtn = document.getElementById(tool === 'pen' ? 'toolPen' : tool === 'eraser' ? 'toolEraser' : tool === 'check' ? 'toolCheck' : 'toolCross');
             if(activeBtn) {
                 activeBtn.classList.add('ring-2', 'ring-blue-400', 'bg-blue-100');
-                activeBtn.classList.remove('bg-gray-100');
+                activeBtn.classList.remove('bg-gray-50');
             }
         };
 
-        window.clearCanvas = () => {
-            const canvas = document.getElementById('gradingCanvas');
-            canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+        window.clearAllCanvases = () => {
+            if (confirm('Thầy/cô chắc chắn muốn xóa toàn bộ nét vẽ trên tất cả các trang?')) {
+                window.currentGradingCanvases.forEach(obj => {
+                    obj.ctx.clearRect(0, 0, obj.canvas.width, obj.canvas.height);
+                });
+            }
         };
 
         window.setupCanvasEvents = (canvas, ctx) => {
@@ -2753,14 +2916,13 @@
             };
 
             const startDraw = (e) => {
-                // Chỉ preventDefault trên cảm ứng để tránh vướng cuộn chuột trên PC
                 if(e.touches) e.preventDefault(); 
                 const pos = getPos(e);
                 
                 if (window.currentTool === 'check' || window.currentTool === 'cross') {
-                    ctx.font = "bold 40px Arial";
+                    ctx.font = "bold 50px Arial";
                     ctx.fillStyle = window.currentTool === 'check' ? "#16a34a" : "#dc2626";
-                    ctx.fillText(window.currentTool === 'check' ? "✔" : "✘", pos.x - 20, pos.y + 15);
+                    ctx.fillText(window.currentTool === 'check' ? "✔" : "✘", pos.x - 25, pos.y + 20);
                     
                     let scoreInput = document.getElementById('gradingScore');
                     let s = parseFloat(scoreInput.value) || 0;
@@ -2798,35 +2960,50 @@
         };
 
         // --- HÀM LƯU ĐIỂM VÀ GHÉP ẢNH CANVAS ---
-        window.saveAdvancedGrade = async (resultId, imgEl, canvas) => {
+        window.saveAdvancedGrade = async (resultId) => {
             const btn = document.getElementById('btnSaveGrade');
             btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang lưu...'; 
             btn.disabled = true;
 
             try {
-                // Ghép Ảnh Gốc + Nét vẽ
-                const finalCanvas = document.createElement('canvas');
-                finalCanvas.width = imgEl.naturalWidth;
-                finalCanvas.height = imgEl.naturalHeight;
-                const fctx = finalCanvas.getContext('2d');
-                fctx.drawImage(imgEl, 0, 0);
-                fctx.drawImage(canvas, 0, 0, finalCanvas.width, finalCanvas.height);
-                
-                const mergedBase64 = finalCanvas.toDataURL('image/jpeg', 0.8);
-                const blob = await (await fetch(mergedBase64)).blob();
-                const formData = new FormData();
-                formData.append('file', blob, `graded_${Date.now()}.jpg`);
-                
-                const uploadRes = await fetch("https://upload-helper.phamngockhanh-942001.workers.dev/", { method: 'PUT', body: formData });
-                const finalImgUrl = (await uploadRes.json()).url;
+                let finalUrls = [];
+                // Lặp qua tất cả canvas để upload
+                for (let i = 0; i < window.currentGradingCanvases.length; i++) {
+                    const obj = window.currentGradingCanvases[i];
+                    const finalCanvas = document.createElement('canvas');
+                    finalCanvas.width = obj.imgEl.naturalWidth;
+                    finalCanvas.height = obj.imgEl.naturalHeight;
+                    const fctx = finalCanvas.getContext('2d');
+                    fctx.drawImage(obj.imgEl, 0, 0);
+                    fctx.drawImage(obj.canvas, 0, 0, finalCanvas.width, finalCanvas.height);
+                    
+                    const mergedBase64 = finalCanvas.toDataURL('image/jpeg', 0.8);
+                    const blob = await (await fetch(mergedBase64)).blob();
+                    const formData = new FormData();
+                    formData.append('file', blob, `graded_${Date.now()}_${i}.jpg`);
+                    
+                    const uploadRes = await fetch("https://upload-helper.phamngockhanh-942001.workers.dev/", { method: 'PUT', body: formData });
+                    const uploadData = await uploadRes.json();
+                    if (uploadData.url) {
+                        finalUrls.push(uploadData.url);
+                    }
+                }
 
-                await updateDoc(doc(db, "results", resultId), {
+                const updateData = {
                     score: parseFloat(document.getElementById('gradingScore').value) || 0,
                     teacherFeedback: document.getElementById('gradingFeedback').value.trim(),
-                    gradedImageUrl: finalImgUrl, 
                     gradedAt: new Date().toISOString(),
-                    graderId: currentUser.uid
-                });
+                    graderId: currentUser.uid,
+                    resubmitStatus: 'graded' // Đánh dấu đã chấm xong (để học sinh có thể xin nộp lại)
+                };
+
+                // Nếu có ảnh đã vẽ, lưu mảng ảnh
+                if (finalUrls.length > 0) {
+                    updateData.gradedImageUrls = finalUrls;
+                    updateData.gradedImageUrl = finalUrls[0]; // Giữ lại ảnh 1 cho tương thích cũ
+                }
+
+                await updateDoc(doc(db, "results", resultId), updateData);
                 
                 if(window.showToast) window.showToast("Đã lưu bài chấm thành công!", "success");
                 else alert("Đã lưu bài chấm thành công!");
@@ -2835,28 +3012,69 @@
                 if(window.loadStats) window.loadStats(); 
             } catch (e) {
                 console.error("Lỗi ghép ảnh/upload:", e);
-                // Nếu bị lỗi Cors (Tainted Canvas), vẫn lưu điểm chữ bình thường
+                // Fallback nếu lỗi Tainted Canvas
                 await updateDoc(doc(db, "results", resultId), {
                     score: parseFloat(document.getElementById('gradingScore').value) || 0,
                     teacherFeedback: document.getElementById('gradingFeedback').value.trim(),
                     gradedAt: new Date().toISOString(),
-                    graderId: currentUser.uid
+                    graderId: currentUser.uid,
+                    resubmitStatus: 'graded'
                 });
-                if(window.showToast) window.showToast("Lưu điểm (không lưu ảnh) thành công!", "success");
+                if(window.showToast) window.showToast("Lưu điểm (không lưu được nét vẽ) thành công!", "success");
                 window.toggleModal('essayGradingModal', false);
                 if(window.loadStats) window.loadStats(); 
             } finally {
-                btn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> LƯU KẾT QUẢ'; btn.disabled = false;
+                btn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> LƯU KẾT QUẢ CHẤM'; btn.disabled = false;
             }
         };
 
         // --- HÀM AI (GEMINI) CHẤM ĐIỂM TỰ ĐỘNG ---
-        window.gradeWithAI = async () => {
-            const btnAI = document.getElementById('btnAIGrade');
-            const studentImg = document.getElementById('gradingBgImage').src;
-            if (!studentImg || studentImg.includes("placehold")) return alert("Không có ảnh bài làm để chấm!");
+        window.gradeWithAI = async (mode = 'gradeOnly') => {
+            const btnAIGradeOnly = document.getElementById('btnAIGradeOnly');
+            const btnAIGradeDraw = document.getElementById('btnAIGradeDraw');
+            const btnAIDrawOnly = document.getElementById('btnAIDrawOnly');
+            
+            if (window.currentGradingCanvases.length === 0) return alert("Không có ảnh bài làm để chấm!");
 
-            // Lấy AI Key (Gemini)
+            if (mode === 'gradeAndDraw') {
+                const ans = currentGradingAttempt.answers && currentGradingAttempt.answers[0] ? currentGradingAttempt.answers[0] : '';
+                let originalUrls = [];
+                if (ans.includes('<img')) {
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(ans, 'text/html');
+                    const imgs = doc.querySelectorAll('img');
+                    imgs.forEach(img => originalUrls.push(img.src));
+                } else if (ans.startsWith('http') || ans.startsWith('data:image')) {
+                    originalUrls.push(ans);
+                }
+                
+                const loadPromises = originalUrls.map((url, idx) => {
+                    return new Promise((resolve) => {
+                        if (window.currentGradingCanvases[idx]) {
+                            const img = window.currentGradingCanvases[idx].imgEl;
+                            if (img.src !== url) {
+                                img.onload = () => {
+                                    window.currentGradingCanvases[idx].ctx.clearRect(0, 0, window.currentGradingCanvases[idx].canvas.width, window.currentGradingCanvases[idx].canvas.height);
+                                    resolve();
+                                };
+                                img.onerror = resolve; // Tránh treo nếu lỗi
+                                img.src = url;
+                            } else {
+                                window.currentGradingCanvases[idx].ctx.clearRect(0, 0, window.currentGradingCanvases[idx].canvas.width, window.currentGradingCanvases[idx].canvas.height);
+                                resolve();
+                            }
+                        } else {
+                            resolve();
+                        }
+                    });
+                });
+                
+                if (btnAIGradeDraw) btnAIGradeDraw.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang tải ảnh...';
+                await Promise.all(loadPromises);
+                if (btnAIGradeDraw) btnAIGradeDraw.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang chấm & tạo ảnh...';
+            }
+
+            // Lấy AI Key
             let apiKey = window.aiKeys && window.aiKeys.length > 0 ? window.aiKeys[0] : null;
             if (!apiKey) {
                 const snap = await getDoc(doc(db, "configurations", "ai_keys"));
@@ -2866,76 +3084,194 @@
             }
             if (!apiKey) return alert("Vui lòng vào Dashboard -> Quản lý API AI để nhập mã API Key Gemini.");
 
-            btnAI.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> AI đang phân tích...';
-            btnAI.disabled = true;
+            // Cập nhật trạng thái nút UI
+            const oldHtmlOnly = btnAIGradeOnly ? btnAIGradeOnly.innerHTML : '';
+            const oldHtmlDraw = btnAIGradeDraw ? btnAIGradeDraw.innerHTML : '';
+            const oldHtmlDrawOnly = btnAIDrawOnly ? btnAIDrawOnly.innerHTML : '';
+            
+            if (btnAIGradeOnly) { btnAIGradeOnly.disabled = true; }
+            if (btnAIGradeDraw) { btnAIGradeDraw.disabled = true; }
+            if (btnAIDrawOnly) { btnAIDrawOnly.disabled = true; }
+            
+            if (mode === 'gradeOnly' && btnAIGradeOnly) {
+                if (btnAIDrawOnly) { btnAIDrawOnly.classList.add('hidden'); }
+                btnAIGradeOnly.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang chấm...';
+            } else if (mode === 'gradeAndDraw' && btnAIGradeDraw) {
+                if (btnAIDrawOnly) { btnAIDrawOnly.classList.add('hidden'); }
+                btnAIGradeDraw.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang chấm & tạo ảnh...';
+            } else if (mode === 'drawOnly' && btnAIDrawOnly) {
+                btnAIDrawOnly.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang phân tích vị trí lỗi...';
+                btnAIDrawOnly.classList.remove('hidden');
+            }
 
             try {
-                // 1. Chuyển ảnh thành Base64
-                let base64Data = "";
-                let mimeType = "image/jpeg";
-                
-                if (studentImg.startsWith('data:image')) {
-                    const parts = studentImg.split(';');
-                    mimeType = parts[0].split(':')[1];
-                    base64Data = parts[1].split(',')[1];
-                } else {
-                    const res = await fetch(studentImg);
-                    const blob = await res.blob();
-                    mimeType = blob.type;
-                    base64Data = await new Promise((resolve) => {
-                        const reader = new FileReader();
-                        reader.onloadend = () => resolve(reader.result.split(',')[1]);
-                        reader.readAsDataURL(blob);
-                    });
+                // 1. Chuyển TẤT CẢ ảnh thành Base64 (Có nén để tăng tốc cực lớn)
+                let studentImages = [];
+                for (let i = 0; i < window.currentGradingCanvases.length; i++) {
+                    const imgEl = window.currentGradingCanvases[i].imgEl;
+                    
+                    const tempCanvas = document.createElement('canvas');
+                    let w = imgEl.naturalWidth || imgEl.width || 800;
+                    let h = imgEl.naturalHeight || imgEl.height || 1000;
+                    
+                    const MAX_DIM = 1200;
+                    if (w > MAX_DIM || h > MAX_DIM) {
+                        if (w > h) {
+                            h = Math.floor(h * (MAX_DIM / w));
+                            w = MAX_DIM;
+                        } else {
+                            w = Math.floor(w * (MAX_DIM / h));
+                            h = MAX_DIM;
+                        }
+                    }
+                    tempCanvas.width = w;
+                    tempCanvas.height = h;
+                    const ctx = tempCanvas.getContext('2d');
+                    ctx.drawImage(imgEl, 0, 0, w, h);
+                    
+                    const base64Data = tempCanvas.toDataURL('image/jpeg', 0.6).split(',')[1];
+                    studentImages.push({ mimeType: "image/jpeg", data: base64Data });
                 }
 
-                // 2. Tạo Prompt
+                const examFileUrl = document.getElementById('settingFileUrl') ? document.getElementById('settingFileUrl').value : "";
                 const solutionUrl = document.getElementById('settingSolutionUrl') ? document.getElementById('settingSolutionUrl').value : "";
-                const solutionContext = solutionUrl ? `\nLink đáp án/lời giải chuẩn: ${solutionUrl}` : "";
-                
-                const promptMsg = `Bạn là một Giáo viên Toán chấm bài. Hãy phân tích bức ảnh bài làm tự luận của học sinh. ${solutionContext}
-Nhiệm vụ:
-1. Phát hiện lỗi sai.
-2. Chấm điểm theo thang điểm 10.
-3. CHỈ trả về JSON như sau (Tuyệt đối không chứa Markdown):
-{
-  "score": 8.5,
-  "feedback": "Nhận xét chi tiết..."
-}`;
+                // Lấy thêm metadata đề bài để AI phán đoán thiếu bài chính xác hơn
+                const examTitle = document.getElementById('settingTitle') ? document.getElementById('settingTitle').value.trim() : "";
+                const examDescription = document.getElementById('settingHwDesc') ? document.getElementById('settingHwDesc').value.trim() : "";
 
-                // 3. Gọi Gemini 1.5 Pro
-                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${apiKey}`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        contents: [{
-                            parts: [
-                                { text: promptMsg },
-                                { inline_data: { mime_type: mimeType, data: base64Data } }
-                            ]
-                        }],
-                        generationConfig: { responseMimeType: "application/json" }
-                    })
+                // 2. Gọi hàm chấm bài từ ai-grader.js
+                if (typeof window.AIGrader === 'undefined') {
+                    throw new Error("Không tìm thấy thư viện AI Grader. Vui lòng tải lại trang.");
+                }
+
+                const aiResult = await window.AIGrader.gradeEssay({
+                    apiKey: apiKey,
+                    apiKeys: window.aiKeys || [],
+                    studentImages: studentImages,
+                    examFileUrl: examFileUrl,
+                    solutionUrl: solutionUrl,
+                    examTitle: examTitle,
+                    examDescription: examDescription,
+                    totalStudentPages: studentImages.length,
+                    mode: mode,
+                    existingFeedback: document.getElementById('gradingFeedback').value.trim()
                 });
 
-                const resData = await response.json();
-                if (resData.error) throw new Error(resData.error.message);
+                // 3. Hiển thị kết quả
+                if (mode !== 'drawOnly') {
+                    if (aiResult.score !== null && aiResult.score !== undefined) {
+                        document.getElementById('gradingScore').value = aiResult.score;
+                    }
+                    
+                    let feedbackText = aiResult.feedback ? aiResult.feedback : "";
+                    feedbackText = feedbackText.replace(/<br\s*\/?>/gi, '\n');
+                    document.getElementById('gradingFeedback').value = feedbackText.trim();
+                }
                 
-                // 4. Bóc tách JSON
-                let aiText = resData.candidates[0].content.parts[0].text;
-                const aiResult = JSON.parse(aiText);
-
-                document.getElementById('gradingScore').value = aiResult.score || 0;
-                document.getElementById('gradingFeedback').value = "🤖 [GEMINI NHẬN XÉT]:\n" + (aiResult.feedback || aiText);
+                // Lưu lại kết quả lỗi để có thể vẽ sau
+                if (mode !== 'gradeOnly') {
+                    window.lastAiMistakes = aiResult.mistakes || [];
+                }
                 
-                if(window.showToast) window.showToast("Gemini đã chấm xong!", "success");
+                // 4. Xử lý tùy chọn vẽ ảnh
+                if (mode === 'gradeAndDraw' || mode === 'drawOnly') {
+                    window.drawLastAiMistakes();
+                } else if (mode === 'gradeOnly') {
+                    // Hiện nút phụ "Chỉ lỗi"
+                    if (btnAIDrawOnly) {
+                        btnAIDrawOnly.classList.remove('hidden');
+                        btnAIDrawOnly.innerHTML = oldHtmlDrawOnly || '<i class="fa-solid fa-highlighter text-yellow-400"></i> Tạo ảnh chỉ lỗi sai';
+                    }
+                    if (window.showToast) window.showToast("AI đã chấm xong! Có thể bấm 'Tạo ảnh chỉ lỗi sai' để xem vị trí lỗi trên ảnh.", "success");
+                }
 
             } catch (error) {
                 console.error(error);
                 alert("Lỗi gọi Gemini AI: " + error.message);
             } finally {
-                btnAI.innerHTML = '<img src="https://upload.wikimedia.org/wikipedia/commons/8/8a/Google_Gemini_logo.svg" class="w-5 h-5 invert"> Gemini Chấm Bài';
-                btnAI.disabled = false;
+                if (btnAIGradeOnly) {
+                    btnAIGradeOnly.innerHTML = oldHtmlOnly;
+                    btnAIGradeOnly.disabled = false;
+                }
+                if (btnAIGradeDraw) {
+                    btnAIGradeDraw.innerHTML = oldHtmlDraw;
+                    btnAIGradeDraw.disabled = false;
+                }
+                if (btnAIDrawOnly) {
+                    btnAIDrawOnly.innerHTML = oldHtmlDrawOnly || '<i class="fa-solid fa-highlighter text-yellow-400"></i> Tạo ảnh chỉ lỗi sai';
+                    btnAIDrawOnly.disabled = false;
+                }
+            }
+        };
+
+        // Hàm hỗ trợ vẽ lỗi sai lưu trong bộ nhớ tạm lên Canvas
+        window.drawLastAiMistakes = () => {
+            if (!window.lastAiMistakes || window.lastAiMistakes.length === 0) {
+                return alert("Không tìm thấy lỗi sai nào do AI phát hiện, hoặc bạn cần bấm 'Chấm bài' trước.");
+            }
+            
+            let drawCount = 0;
+            window.lastAiMistakes.forEach(mistake => {
+                const pageIdx = mistake.pageIndex;
+                if (pageIdx >= 0 && pageIdx < window.currentGradingCanvases.length) {
+                    const canvasObj = window.currentGradingCanvases[pageIdx];
+                    const ctx = canvasObj.ctx;
+                    const cw = canvasObj.canvas.width;
+                    const ch = canvasObj.canvas.height;
+                    
+                    // Chuyển tọa độ chuẩn hóa (0-1000) sang pixel thực tế của canvas
+                    const xmin = (mistake.xmin * cw) / 1000;
+                    const ymin = (mistake.ymin * ch) / 1000;
+                    const xmax = (mistake.xmax * cw) / 1000;
+                    const ymax = (mistake.ymax * ch) / 1000;
+                    
+                    // Vẽ đường gạch chân màu đỏ dưới lỗi sai
+                    ctx.beginPath();
+                    ctx.strokeStyle = '#ef4444'; // Tailwind red-500
+                    ctx.lineWidth = 4;
+                    ctx.moveTo(xmin, ymax + 5);
+                    ctx.lineTo(xmax, ymax + 5);
+                    ctx.stroke();
+
+                    // Vẽ mũi tên và chú thích lỗi
+                    if (mistake.note) {
+                        ctx.fillStyle = '#ef4444';
+                        ctx.font = 'bold 12px "Nunito", sans-serif'; 
+                        const noteText = "→ Sai";
+                        ctx.fillText(noteText, xmax + 5, ymax + 5);
+                        
+                        // Vẽ cách sửa màu xanh lá (nếu có)
+                        if (mistake.correction) {
+                            const noteWidth = ctx.measureText(noteText).width;
+                            ctx.fillStyle = '#16a34a'; // Tailwind green-600
+                            ctx.fillText(` (Sửa: ${mistake.correction})`, xmax + 5 + noteWidth, ymax + 5);
+                        }
+                    }
+                    drawCount++;
+                }
+            });
+            
+            const btnAIDrawOnly = document.getElementById('btnAIDrawOnly');
+            if (btnAIDrawOnly) btnAIDrawOnly.classList.add('hidden'); // Ẩn nút sau khi vẽ
+            
+            if (window.showToast) {
+                if (drawCount > 0) window.showToast(`Đã vẽ ${drawCount} lỗi lên bài làm. Đừng quên bấm Lưu kết quả chấm để lưu cả ảnh!`, "success");
+                else window.showToast("Không có lỗi sai nào trên hình.", "info");
+            }
+        };
+
+        window.handleResubmitRequest = async (isApprove) => {
+            if (!currentGradingAttempt || !currentGradingAttempt.id) return;
+            if (!confirm(`Bạn có chắc muốn ${isApprove ? 'CHO PHÉP' : 'TỪ CHỐI'} học sinh nộp lại bài này?`)) return;
+            
+            try {
+                await updateDoc(doc(db, "results", currentGradingAttempt.id), {
+                    resubmitStatus: isApprove ? 'approved' : 'rejected'
+                });
+                document.getElementById('resubmitActionArea').innerHTML = `<span class="text-xs font-bold ${isApprove ? 'text-green-600 bg-green-100' : 'text-red-600 bg-red-100'} px-3 py-2 rounded-lg shadow-inner">Đã ${isApprove ? 'Cho phép' : 'Từ chối'} nộp lại</span>`;
+                if(window.showToast) window.showToast("Đã xử lý yêu cầu xin nộp lại", "success");
+            } catch(e) {
+                if(window.showToast) window.showToast("Lỗi: " + e.message, "error");
             }
         };
 
@@ -3507,6 +3843,159 @@ Nhiệm vụ:
             else hwArea.classList.add('hidden');
         };
 
+        window.generateAIBanner = async () => {
+            const subject = document.getElementById('settingSubject') ? document.getElementById('settingSubject').value : 'Toán học';
+            const title = document.getElementById('settingTitle') ? document.getElementById('settingTitle').value.trim() : 'Bài Tập';
+            
+            // Đổi nút thành Đang xử lý
+            const bannerBtn = document.querySelector('button[onclick="window.generateAIBanner()"]');
+            const oldText = bannerBtn ? bannerBtn.innerHTML : '';
+            if(bannerBtn) {
+                bannerBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang vẽ...';
+                bannerBtn.disabled = true;
+            }
+
+            try {
+                // Lấy Logo từ Firebase
+                let logoUrl = null;
+                try {
+                    const snap = await getDoc(doc(db, "configurations", "general"));
+                    if (snap.exists() && snap.data().logoUrl) {
+                        logoUrl = snap.data().logoUrl;
+                    }
+                } catch(e) {}
+
+                // Tạo Canvas và vẽ banner bằng gradient (không cần API ngoài)
+                const canvas = document.createElement('canvas');
+                canvas.width = 800;
+                canvas.height = 400;
+                const ctx = canvas.getContext('2d');
+
+                // Chọn bảng màu theo môn học
+                const colorMap = {
+                    'Toán học':   ['#0f0c29', '#302b63', '#24243e'],
+                    'Vật lý':     ['#0f2027', '#203a43', '#2c5364'],
+                    'Hóa học':    ['#134e5e', '#71b280', '#134e5e'],
+                    'Tiếng Anh':  ['#1a1a2e', '#16213e', '#0f3460'],
+                    'Ngữ văn':    ['#360033', '#0b8793', '#360033'],
+                    'Lịch sử':    ['#4b1248', '#f10711', '#c21500'],
+                    'Địa lý':     ['#134e5e', '#71b280', '#0a3d62'],
+                    'Sinh học':   ['#1d976c', '#93f9b9', '#1d976c'],
+                };
+                const colors = colorMap[subject] || ['#141e30', '#243b55', '#141e30'];
+
+                // Vẽ gradient nền
+                const bgGrad = ctx.createLinearGradient(0, 0, 800, 400);
+                bgGrad.addColorStop(0, colors[0]);
+                bgGrad.addColorStop(0.5, colors[1]);
+                bgGrad.addColorStop(1, colors[2]);
+                ctx.fillStyle = bgGrad;
+                ctx.fillRect(0, 0, 800, 400);
+
+                // Vẽ các hình trang trí hình học
+                ctx.globalAlpha = 0.07;
+                for (let i = 0; i < 8; i++) {
+                    ctx.beginPath();
+                    ctx.arc(Math.random()*800, Math.random()*400, 30 + Math.random()*120, 0, Math.PI*2);
+                    ctx.strokeStyle = '#ffffff';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                }
+                // Vẽ lưới trang trí
+                ctx.globalAlpha = 0.05;
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 1;
+                for (let x = 0; x < 800; x += 50) {
+                    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, 400); ctx.stroke();
+                }
+                for (let y = 0; y < 400; y += 50) {
+                    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(800, y); ctx.stroke();
+                }
+                ctx.globalAlpha = 1.0;
+
+                // Dải màu vàng nổi bật trên cùng
+                const accentGrad = ctx.createLinearGradient(0, 0, 800, 0);
+                accentGrad.addColorStop(0, 'rgba(250, 204, 21, 0)');
+                accentGrad.addColorStop(0.3, 'rgba(250, 204, 21, 0.9)');
+                accentGrad.addColorStop(0.7, 'rgba(250, 204, 21, 0.9)');
+                accentGrad.addColorStop(1, 'rgba(250, 204, 21, 0)');
+                ctx.fillStyle = accentGrad;
+                ctx.fillRect(0, 0, 800, 6);
+
+                // Tải và vẽ logo (nếu có)
+                if (logoUrl) {
+                    try {
+                        const logoImg = await new Promise((res, rej) => {
+                            const img = new Image(); img.crossOrigin = 'anonymous';
+                            img.onload = () => res(img);
+                            img.onerror = () => rej(new Error('logo load fail'));
+                            img.src = logoUrl;
+                        });
+                        ctx.drawImage(logoImg, 30, 30, 55, 55);
+                    } catch(e) { console.warn('Không tải được logo', e); }
+                }
+
+                // Nhãn môn học
+                ctx.fillStyle = 'rgba(250, 204, 21, 0.9)';
+                ctx.font = 'bold 16px Arial, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.letterSpacing = '4px';
+                ctx.fillText(subject.toUpperCase(), 400, 155);
+
+                // Tên bài tập (chính)
+                ctx.fillStyle = '#ffffff';
+                ctx.font = 'bold 46px Arial, sans-serif';
+                ctx.textAlign = 'center';
+                // Tự xuống dòng nếu tiêu đề dài
+                const maxWidth = 700;
+                const words = title.split(' ');
+                let line = '', lines = [];
+                words.forEach(word => {
+                    const test = line + (line ? ' ' : '') + word;
+                    if (ctx.measureText(test).width > maxWidth && line) {
+                        lines.push(line); line = word;
+                    } else { line = test; }
+                });
+                if (line) lines.push(line);
+                const lineH = 52;
+                const startY = 210 - ((lines.length - 1) * lineH) / 2;
+                lines.forEach((l, i) => ctx.fillText(l, 400, startY + i * lineH));
+
+                // Chữ phụ dưới cùng
+                ctx.fillStyle = 'rgba(255,255,255,0.5)';
+                ctx.font = '14px Arial, sans-serif';
+                ctx.fillText('Thầy Phạm Đình Quang · Hệ thống quản lý học tập', 400, 370);
+
+                // Upload ảnh lên Helper
+                const base64 = canvas.toDataURL('image/jpeg', 0.92);
+                const blob = await (await fetch(base64)).blob();
+                const formData = new FormData();
+                formData.append('file', blob, `banner_${Date.now()}.jpg`);
+                
+                const uploadRes = await fetch("https://upload-helper.phamngockhanh-942001.workers.dev/", { method: 'PUT', body: formData });
+                const uploadData = await uploadRes.json();
+                
+                if (uploadData.url) {
+                    const bannerInput = document.getElementById('settingBannerUrl');
+                    if (bannerInput) {
+                        bannerInput.value = uploadData.url;
+                        if(window.showToast) window.showToast("Đã tạo Banner thành công!", "success");
+                    }
+                } else {
+                    throw new Error("Lỗi upload URL");
+                }
+
+            } catch (err) {
+                console.error(err);
+                if(window.showToast) window.showToast("Có lỗi xảy ra khi tạo Banner: " + err.message, "error");
+            } finally {
+                if(bannerBtn) {
+                    bannerBtn.innerHTML = oldText;
+                    bannerBtn.disabled = false;
+                }
+            }
+        };
+
         window.renderGradingTable = () => {
             const tbody = document.getElementById('gradingTableBody');
             if (!tbody) return;
@@ -3539,15 +4028,106 @@ Nhiệm vụ:
 
                 tbody.innerHTML += `
                     <tr class="bg-white border-b hover:bg-gray-50 transition-colors">
+                        <td class="px-4 py-3 text-center"><input type="checkbox" value='${JSON.stringify(lastAttempt).replace(/'/g, "&apos;")}' class="grading-student-checkbox w-4 h-4 rounded border-gray-300"></td>
                         <td class="px-6 py-3 font-bold text-blue-600">${r.studentName} <span class="text-xs text-gray-400 block">${r.className}</span></td>
                         <td class="px-6 py-3 text-center">${statusBadge}</td>
                         <td class="px-6 py-3 text-right text-xs text-gray-500">${dateStr}</td>
                         <td class="px-6 py-3 text-center">
-                            <button onclick='window.openGrading(${JSON.stringify(lastAttempt).replace(/'/g, "&apos;")})' class="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 text-xs font-bold shadow-sm transition-all"><i class="fa-solid fa-pen-nib mr-1"></i> Chấm bài</button>
+                            <button onclick='window.openGrading(${JSON.stringify(lastAttempt).replace(/'/g, "&apos;")})' class="px-4 py-2 ${r.gradedAt ? 'bg-indigo-500 hover:bg-indigo-600' : 'bg-orange-500 hover:bg-orange-600'} text-white rounded-lg text-xs font-bold shadow-sm transition-all"><i class="fa-solid ${r.gradedAt ? 'fa-rotate-right' : 'fa-pen-nib'} mr-1"></i> ${r.gradedAt ? 'Chấm lại' : 'Chấm bài'}</button>
                         </td>
                     </tr>
                 `;
             });
+        };
+
+        // --- ZALO LOGIC ---
+        window.toggleSelectAllGrading = (el) => {
+            document.querySelectorAll('.grading-student-checkbox').forEach(cb => cb.checked = el.checked);
+        };
+
+        window.scanAndRemindZalo = async () => {
+            if (!window.n8nWebhook) {
+                window.showNotification("Vui lòng cấu hình Webhook n8n trong bảng điều khiển trước!", "error");
+                return;
+            }
+            
+            const missingStudents = window.fullStudentList.filter(st => {
+                return !(window.statsMap[st.studentId] || window.statsMap[st.studentName]);
+            });
+            
+            if (missingStudents.length === 0) {
+                window.showNotification("Tất cả học sinh đã nộp bài!", "success");
+                return;
+            }
+
+            const btn = event.currentTarget;
+            const originalHTML = btn.innerHTML;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang quét...';
+            btn.disabled = true;
+
+            try {
+                const payload = {
+                    action: "remind_missing",
+                    examTitle: document.getElementById('settingTitle').value,
+                    examId: window.currentExamId,
+                    endTime: document.getElementById('settingEndTime').value,
+                    students: missingStudents
+                };
+                
+                await fetch(window.n8nWebhook, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                window.showNotification(`Đã gửi danh sách ${missingStudents.length} học sinh chưa nộp lên n8n!`, "success");
+            } catch(e) {
+                console.error(e);
+                window.showNotification("Lỗi kết nối n8n: " + e.message, "error");
+            } finally {
+                btn.innerHTML = originalHTML;
+                btn.disabled = false;
+            }
+        };
+
+        window.sendSelectedResultsZalo = async () => {
+            if (!window.n8nWebhook) {
+                window.showNotification("Vui lòng cấu hình Webhook n8n trong bảng điều khiển trước!", "error");
+                return;
+            }
+            const selected = Array.from(document.querySelectorAll('.grading-student-checkbox:checked')).map(cb => JSON.parse(cb.value));
+            if (selected.length === 0) {
+                window.showNotification("Vui lòng chọn ít nhất một học sinh!", "error");
+                return;
+            }
+            
+            const btn = event.currentTarget;
+            const originalHTML = btn.innerHTML;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang gửi...';
+            btn.disabled = true;
+
+            try {
+                const payload = {
+                    action: "send_results",
+                    examTitle: document.getElementById('settingTitle').value,
+                    examId: window.currentExamId,
+                    students: selected
+                };
+                
+                await fetch(window.n8nWebhook, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                window.showNotification(`Đã gửi yêu cầu n8n cho ${selected.length} học sinh thành công!`, "success");
+            } catch(e) {
+                console.error(e);
+                window.showNotification("Lỗi kết nối n8n: " + e.message, "error");
+            } finally {
+                btn.innerHTML = originalHTML;
+                btn.disabled = false;
+            }
         };
     </script>
     <div id="missingImagesPanel" class="hidden fixed bottom-4 right-4 z-50 bg-white border-2 border-orange-500 shadow-2xl rounded-xl w-64 overflow-hidden flex flex-col max-h-[60vh]">
@@ -3653,5 +4233,32 @@ Nhiệm vụ:
             </div>
         </div>
     </div>
+    
+    <script>
+        // Toggle Sidebar on Mobile
+        const sidebar = document.getElementById('gradingSidebar');
+        const overlay = document.getElementById('gradingSidebarOverlay');
+        const btnToggleSidebar = document.getElementById('btnToggleSidebarMobile');
+        let isSidebarOpen = false;
+
+        function toggleSidebar() {
+            if (!sidebar || !overlay || !btnToggleSidebar) return;
+            isSidebarOpen = !isSidebarOpen;
+            if (isSidebarOpen) {
+                sidebar.classList.remove('translate-x-full');
+                overlay.classList.remove('hidden');
+                setTimeout(() => overlay.classList.remove('opacity-0'), 10);
+                btnToggleSidebar.innerHTML = '<i class="fa-solid fa-xmark"></i>';
+            } else {
+                sidebar.classList.add('translate-x-full');
+                overlay.classList.add('opacity-0');
+                setTimeout(() => overlay.classList.add('hidden'), 300);
+                btnToggleSidebar.innerHTML = '<i class="fa-solid fa-toolbox"></i>';
+            }
+        }
+
+        if(btnToggleSidebar) btnToggleSidebar.addEventListener('click', toggleSidebar);
+        if(overlay) overlay.addEventListener('click', toggleSidebar);
+    </script>
 </body>
 </html>

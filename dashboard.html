@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
@@ -390,6 +390,15 @@
                     <button onclick="window.addAiKey()" class="px-4 py-2 bg-purple-600 text-white rounded-xl font-bold shadow hover:bg-purple-700 text-sm"><i class="fa-solid fa-plus"></i> Thêm</button>
                 </div>
             </div>
+            
+            <div class="p-6 border-t border-gray-100 bg-gray-50 rounded-b-2xl">
+                <h4 class="font-bold text-gray-700 text-sm mb-2"><i class="fa-solid fa-bell text-green-500 mr-2"></i>Cấu hình n8n Webhook Zalo</h4>
+                <p class="text-[11px] text-gray-500 mb-2">Nhập đường dẫn Webhook của n8n để hệ thống có thể gửi thông báo, kết quả tự động qua Zalo cho Phụ huynh.</p>
+                <div class="flex gap-2">
+                    <input type="url" id="n8nWebhookUrl" class="flex-1 px-4 py-2 border rounded-xl focus:ring-2 focus:ring-green-200 outline-none text-sm" placeholder="https://n8n.yourdomain.com/webhook/zalo...">
+                    <button onclick="window.saveN8nWebhook()" class="px-4 py-2 bg-green-600 text-white rounded-xl font-bold shadow hover:bg-green-700 text-sm"><i class="fa-solid fa-save"></i> Lưu</button>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -473,7 +482,7 @@
             } else {
                 btnHw.className = "px-3 md:px-4 py-1.5 text-xs md:text-sm font-bold rounded-md transition-all text-blue-700 bg-white shadow-sm";
                 btnExam.className = "px-3 md:px-4 py-1.5 text-xs md:text-sm font-bold rounded-md transition-all text-gray-500 hover:text-gray-700";
-                btnCreate.onclick = () => window.openHomeworkModal(null); // Gọi Modal tự luận nhưng không gán cho lớp nào
+                btnCreate.onclick = () => window.location.href = 'exam-editor.html?type=homework';
                 btnCreate.className = "px-2 md:px-3 py-2 bg-red-100 text-red-700 hover:bg-red-200 rounded-lg text-xs md:text-sm font-bold transition-colors";
                 btnCreate.innerHTML = '<i class="fa-solid fa-file-pdf mr-1"></i> Tạo bài Tự luận';
             }
@@ -700,17 +709,28 @@
                 try {
                     await addDoc(collection(db, "classes"), { name: name, teacherId: currentUserUid, studentCount: 0, createdAt: new Date().toISOString() });
                     window.showNotification("Tạo lớp thành công!", "success");
-                    loadClasses(); 
+                    loadClasses(true); 
                 } catch(e) { window.showNotification("Lỗi tạo lớp: " + e.message, "error"); }
             }
         }
 
-        // --- HÀM TẢI LỚP (CÓ GHI NHỚ VIEW) ---
+        // --- HÀM TẢI LỚP (CÓ GHI NHỚ VIEW VÀ CACHE) ---
         window.allClassesData = []; // Biến tạm lưu dữ liệu
 
-        async function loadClasses() {
+        async function loadClasses(forceReload = false) {
             const container = document.getElementById('classList'); 
             if(!container) return;
+
+            // TỐI ƯU: Lấy từ Cache (Session Storage) nếu có để render tức thì khi back trang
+            if (!forceReload) {
+                const cached = sessionStorage.getItem('lms_cached_classes');
+                if (cached) {
+                    window.allClassesData = JSON.parse(cached);
+                    const savedView = localStorage.getItem('classViewMode') || 'grid';
+                    renderClasses(savedView);
+                    return; // Render ngay lập tức từ Cache
+                }
+            }
 
             // Skeleton Loading
             container.innerHTML = `<div class="col-span-full grid grid-cols-1 md:grid-cols-3 gap-6 animate-pulse">${'<div class="h-40 bg-gray-200 rounded-2xl"></div>'.repeat(3)}</div>`;
@@ -720,6 +740,9 @@
                 const snap = await getDocs(q);
                 window.allClassesData = [];
                 snap.forEach(d => window.allClassesData.push({ id: d.id, ...d.data() }));
+
+                // Lưu vào Session Storage
+                sessionStorage.setItem('lms_cached_classes', JSON.stringify(window.allClassesData));
 
                 // Khôi phục chế độ xem đã lưu (Mặc định là grid)
                 const savedView = localStorage.getItem('classViewMode') || 'grid';
@@ -797,7 +820,7 @@
                 try {
                     await deleteDoc(doc(db, "classes", id));
                     window.showNotification("Đã xóa lớp học", "success");
-                    loadClasses(); 
+                    loadClasses(true); 
                 } catch(e) { window.showNotification("Lỗi: " + e.message, "error"); }
             }
         }
@@ -832,6 +855,14 @@
                 try {
                     await updateDoc(doc(db, "classes", currentViewingClassId), { name: newName });
                     titleEl.textContent = newName;
+                    
+                    // Cập nhật Cache cục bộ
+                    const idx = window.allClassesData.findIndex(c => c.id === currentViewingClassId);
+                    if(idx !== -1) {
+                        window.allClassesData[idx].name = newName;
+                        sessionStorage.setItem('lms_cached_classes', JSON.stringify(window.allClassesData));
+                    }
+                    
                     window.showNotification("Đổi tên lớp thành công!");
                 } catch(e) { window.showNotification("Lỗi: " + e.message, "error"); }
             }
@@ -1876,11 +1907,6 @@ loadFileManager(true); }
 
                 await addDoc(collection(db, "exams"), hwData);
                 window.showNotification(window.currentAssignClassId ? "Giao bài tập vào lớp thành công!" : "Tạo bài tự luận vào Ngân hàng thành công!", "success");
-                window.toggleModal('homeworkModal', false);
-                
-                const bannerPreview = document.getElementById('hwBannerPreview');
-                if(bannerPreview) bannerPreview.src = "https://placehold.co/600x250?text=Toán+Thầy+Choang";
-                window.currentHwBannerUrl = "";
                 
                 if (window.currentAssignClassId) {
                     renderClassExercises(window.currentAssignClassId);
@@ -1899,6 +1925,7 @@ loadFileManager(true); }
         // 1. Hiển thị danh sách + Nút Thêm bài tập
         // 1. Hiển thị danh sách + Nút Thêm bài tập (Đã fix lỗi hover menu)
         window.renderClassExercises = async (classId) => {
+            window.currentAssignClassId = classId; // Fix: Lưu lại classId hiện tại để xóa chính xác
             const container = document.getElementById('tabContentExams');
             if(!container) return;
             
@@ -1923,7 +1950,7 @@ loadFileManager(true); }
                                 <button onclick="window.location.href='exam-editor.html?assignTo=${classId}'" class="w-full text-left px-4 py-3 hover:bg-green-50 flex items-center gap-3 text-sm font-bold text-gray-700 last:rounded-b-xl transition-colors">
                                     <span class="w-8 h-8 rounded-lg bg-green-100 text-green-600 flex items-center justify-center"><i class="fa-solid fa-pen-to-square"></i></span> Soạn đề mới
                                 </button>
-                                <button onclick="window.openHomeworkModal('${classId}')" class="w-full text-left px-4 py-3 hover:bg-red-50 flex items-center gap-3 text-sm font-bold text-gray-700">
+                                <button onclick="window.location.href='exam-editor.html?assignTo=${classId}&type=homework'" class="w-full text-left px-4 py-3 hover:bg-red-50 flex items-center gap-3 text-sm font-bold text-gray-700">
                                 <span class="w-8 h-8 rounded-lg bg-red-100 text-red-600 flex items-center justify-center"><i class="fa-solid fa-file-pdf"></i></span> Giao bài Tự luận
                                 </button>
                             </div>
@@ -2396,7 +2423,13 @@ loadFileManager(true); }
                 const snap = await getDoc(doc(db, "configurations", "ai_keys"));
                 if (snap.exists()) window.aiKeys = snap.data().keys || [];
                 window.renderAiKeys();
-            } catch(e) { console.error("Lỗi lấy API Key:", e); }
+
+                const n8nSnap = await getDoc(doc(db, "configurations", "n8n_webhook"));
+                if (n8nSnap.exists()) {
+                    window.n8nWebhook = n8nSnap.data().url || '';
+                    document.getElementById('n8nWebhookUrl').value = window.n8nWebhook;
+                }
+            } catch(e) { console.error("Lỗi lấy API/Webhook Config:", e); }
         };
 
         window.renderAiKeys = () => {
@@ -2434,6 +2467,27 @@ loadFileManager(true); }
         };
 
     </script>
+    <script>
+        // --- N8N WEBHOOK LOGIC ---
+        window.n8nWebhook = '';
+        
+        // Load webhook on auth state changed
+        document.addEventListener('DOMContentLoaded', () => {
+            // we will fetch this inside the onAuthStateChanged in dashboard main script
+        });
+
+        window.saveN8nWebhook = async () => {
+            const url = document.getElementById('n8nWebhookUrl').value.trim();
+            try {
+                await setDoc(doc(db, "configurations", "n8n_webhook"), { url: url }, { merge: true });
+                window.n8nWebhook = url;
+                window.showNotification("Lưu n8n Webhook thành công!", "success");
+            } catch(e) {
+                console.log(e);
+                window.showNotification("Lỗi lưu n8n Webhook", "error");
+            }
+        };
+    </script>
     <div id="notificationPanel" class="hidden fixed z-[150] w-80 bg-white rounded-2xl shadow-2xl border border-gray-200 overflow-hidden animate-fade-in transform transition-all
     top-16 right-2 origin-top-right
     md:top-20 md:left-64 md:ml-4 md:right-auto md:origin-top-left">
@@ -2466,81 +2520,6 @@ loadFileManager(true); }
             </div>
         </div>
     </div>
-    <div id="homeworkModal" class="modal opacity-0 pointer-events-none fixed inset-0 z-[160] bg-gray-900/60 backdrop-blur-sm flex items-center justify-center p-4 transition-opacity duration-300">
-        <div class="modal-content bg-white rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col border border-gray-200 transform scale-95 transition-transform duration-300 max-h-[90vh]">
-            <div class="p-5 border-b border-gray-100 flex justify-between items-center bg-red-50 rounded-t-2xl shrink-0">
-                <h3 class="text-lg font-bold text-red-800"><i class="fa-solid fa-file-pdf mr-2"></i> Cấu hình bài tập tự luận nâng cao</h3>
-                <button onclick="window.toggleModal('homeworkModal', false)" class="text-gray-400 hover:text-red-500"><i class="fa-solid fa-xmark text-xl"></i></button>
-            </div>
-            <div class="p-6 overflow-y-auto custom-scrollbar space-y-5 flex-1 text-left">
-                <div>
-                    <label class="block text-sm font-bold text-gray-700 mb-1">Tên bài tập *</label>
-                    <input type="text" id="hwTitle" class="w-full px-4 py-2.5 border border-gray-300 focus:border-red-500 focus:ring-2 focus:ring-red-100 rounded-xl outline-none text-sm transition-all font-bold" placeholder="VD: Bài tập tự luận Hàm số bậc nhất (Tuần 1)">
-                </div>
 
-                <div>
-                    <label class="block text-sm font-bold text-gray-700 mb-1.5">Nguồn tài liệu đề bài *</label>
-                    <div class="flex bg-gray-100 p-1 rounded-xl gap-1 mb-3">
-                        <button type="button" onclick="switchHwSource('file')" id="btnSrcFile" class="flex-1 py-2 text-xs font-bold bg-red-600 text-white rounded-lg shadow-sm transition-all">Tải File lên mạng</button>
-                        <button type="button" onclick="switchHwSource('link')" id="btnSrcLink" class="flex-1 py-2 text-xs font-bold bg-transparent text-gray-600 rounded-lg transition-all">Nhúng Link PDF / Drive</button>
-                    </div>
-
-                    <div id="hwSourceFile">
-                        <input type="file" id="hwFileInput" class="hidden" accept=".pdf, image/*" onchange="window.handleHwFileUpload(this)">
-                        <button type="button" onclick="document.getElementById('hwFileInput').click()" class="w-full py-5 border-2 border-dashed border-red-200 bg-red-50/30 rounded-xl text-red-600 font-bold text-sm hover:bg-red-50 transition-colors flex flex-col items-center justify-center" id="hwFileText">
-                            <i class="fa-solid fa-cloud-arrow-up text-2xl mb-1.5"></i> Bấm để tải file PDF hoặc Ảnh đề bài
-                        </button>
-                    </div>
-
-                    <div id="hwSourceLink" class="hidden">
-                        <input type="url" id="hwLinkInput" class="w-full px-4 py-2.5 border border-gray-300 focus:border-red-500 rounded-xl outline-none text-sm" placeholder="Dán link PDF hoặc link chia sẻ Google Drive tại đây...">
-                        <p class="text-[11px] text-gray-500 italic mt-1.5 flex items-center gap-1"><i class="fa-solid fa-circle-info text-blue-500"></i> Hỗ trợ link Drive công khai. Hệ thống tự động chuyển đổi sang giao diện nhúng xem trực tiếp & cho tải về.</p>
-                    </div>
-                </div>
-                
-                <div>
-                    <label class="block text-sm font-bold text-blue-700 mb-1"><i class="fa-solid fa-robot"></i> Link file Đáp án / Lời giải chi tiết</label>
-                    <input type="url" id="hwSolutionLink" class="w-full px-4 py-2.5 border border-blue-200 focus:border-blue-500 rounded-xl outline-none text-sm bg-blue-50/30" placeholder="Dán link ảnh/PDF lời giải (Để AI dùng làm chuẩn chấm bài)...">
-                </div>
-
-                <div>
-                    <label class="block text-sm font-bold text-gray-700 mb-1">Yêu cầu / Ghi chú cho học sinh</label>
-                    <textarea id="hwDesc" class="w-full px-4 py-2 border border-gray-300 focus:border-red-500 rounded-xl outline-none h-20 text-sm" placeholder="VD: Các em trình bày lời giải chi tiết ra giấy kiểm tra, sau đó chụp hình rõ nét tải lên hệ thống trước hạn chót nhé..."></textarea>
-                </div>
-
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                        <label class="block text-sm font-bold text-gray-700 mb-1">Ngày giao bài</label>
-                        <input type="text" id="hwAssignDate" class="w-full px-4 py-2.5 border border-gray-200 bg-gray-100 rounded-xl outline-none text-sm font-bold text-gray-500 cursor-not-allowed" readonly>
-                    </div>
-                    <div>
-                        <label class="block text-sm font-bold text-gray-700 mb-1">Hạn chót nộp bài (Deadline)</label>
-                        <input type="datetime-local" id="hwDeadline" class="w-full px-4 py-2.5 border border-gray-300 focus:border-red-500 focus:ring-2 focus:ring-red-100 rounded-xl outline-none text-sm transition-all">
-                    </div>
-                </div>
-
-                <div class="border-t border-gray-100 pt-4">
-                    <label class="block text-sm font-bold text-gray-700 mb-2 flex items-center gap-1.5"><i class="fa-solid fa-images text-purple-600"></i> Cấu hình Banner Ảnh bìa bài kiểm tra</label>
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
-                        <div class="md:col-span-1 h-24 bg-gray-50 rounded-xl border border-gray-200 flex items-center justify-center overflow-hidden relative shadow-inner">
-                            <img id="hwBannerPreview" src="https://placehold.co/600x250?text=Toán+Thầy+Choang" class="w-full h-full object-cover">
-                        </div>
-                        <div class="md:col-span-2 space-y-2.5">
-                            <div class="flex gap-2">
-                                <input type="file" id="hwBannerInput" class="hidden" accept="image/*" onchange="window.handleHwBannerUpload(this)">
-                                <button type="button" onclick="document.getElementById('hwBannerInput').click()" class="flex-1 py-2 px-3 bg-white border border-gray-300 rounded-xl text-xs font-bold text-gray-700 hover:bg-gray-50 flex items-center justify-center gap-1 transition-all"><i class="fa-solid fa-image text-gray-500"></i> Tải ảnh lên</button>
-                                <button type="button" onclick="window.generateHwBannerAI()" id="btnHwBannerAI" class="flex-1 py-2 px-3 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-xl text-xs font-bold shadow-md hover:opacity-95 flex items-center justify-center gap-1 transition-all"><i class="fa-solid fa-wand-magic-sparkles"></i> AI Tự Vẽ Banner</button>
-                            </div>
-                            <p class="text-[10px] text-gray-400 italic">Trí tuệ nhân tạo AI sẽ tự động đọc hiểu Tên bài kiểm tra & Mô tả để phối màu vẽ một bức tranh Banner toán học độc quyền.</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <div class="p-4 border-t border-gray-100 bg-gray-50 rounded-b-2xl flex justify-end gap-3 shrink-0">
-                <button type="button" onclick="window.toggleModal('homeworkModal', false)" class="px-5 py-2 bg-white border border-gray-300 text-gray-600 font-bold rounded-xl hover:bg-gray-100 text-sm transition-colors">Hủy bỏ</button>
-                <button id="btnSaveHw" onclick="window.saveHomework()" class="px-6 py-2 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 shadow-md flex items-center gap-2 text-sm transition-colors"><i class="fa-solid fa-paper-plane"></i> Giao Bài Tập</button>
-            </div>
-        </div>
-    </div>
 </body>
 </html>
