@@ -2,7 +2,7 @@
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Góc Học Tập - Thầy Choang</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet">
@@ -48,6 +48,16 @@
         .notification-toast { animation: slideIn 0.5s ease forwards; }
         .dashed-loader { border: 3px dashed #CBD5E1; border-top-color: #0F766E; border-radius: 50%; width: 24px; height: 24px; animation: spin 1s linear infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Mobile bottom safe area spacing */
+        @media (max-width: 767px) {
+            #mainScrollArea {
+                padding-bottom: calc(14rem + env(safe-area-inset-bottom, 0px)) !important;
+            }
+            .tab-content {
+                padding-bottom: 6rem;
+            }
+        }
     </style>
 </head>
 <body class="h-screen flex overflow-hidden font-sans">
@@ -609,7 +619,12 @@
                 const name = data.displayName || user.displayName || "Bạn";
                 document.getElementById('userName').innerText = name;
                 document.getElementById('welcomeName').innerText = name;
-                document.getElementById('userAvatar').src = user.photoURL || `https://ui-avatars.com/api/?name=${name}&background=0F766E&color=fff`;
+                
+                const avatarUrl = user.photoURL || `https://ui-avatars.com/api/?name=${name}&background=0F766E&color=fff`;
+                document.getElementById('userAvatar').src = avatarUrl;
+                if(document.getElementById('profAvatar')) document.getElementById('profAvatar').src = avatarUrl;
+                if(document.getElementById('mobileHeaderAvatar')) document.getElementById('mobileHeaderAvatar').src = avatarUrl;
+
                 document.getElementById('profName').value = name;
                 document.getElementById('profUsername').value = data.username || user.email;
             } catch(e) { console.error(e); }
@@ -1269,38 +1284,13 @@
                     } catch(e) { return null; }
                 }));
 
-                // 3. Render danh sách ĐÃ MUA (chỉ những cái valid)
-                let htmlPaid = '';
-                validPaidItems.forEach(o => {
-                    if(!o) return; // Bỏ qua null (khóa đã xóa)
-                    
-                    purchasedCourseIds.add(o.courseId);
-                    // Lấy tiến độ thật từ order (nếu có), mặc định 0
-                    const percent = o.progress || 0; 
-                    
-                    // Giao diện Grid
-                    htmlPaid += `
-                        <div class="bg-white p-5 rounded-2xl border border-teal-50 shadow-sm hover:border-teal-300 hover:shadow-md transition-all cursor-pointer group flex flex-col h-full relative overflow-hidden" onclick="window.location.href='course-player.html?id=${o.courseId}'">
-                            <div class="absolute top-0 right-0 bg-teal-500 w-16 h-16 rounded-bl-full opacity-10"></div>
-                            <div class="flex gap-3 mb-4 relative z-10">
-                                <div class="w-12 h-12 bg-teal-100 text-teal-600 rounded-xl flex items-center justify-center font-bold shrink-0 shadow-inner"><i class="fa-solid fa-graduation-cap text-xl"></i></div>
-                                <div class="flex-1 min-w-0">
-                                    <h4 class="font-bold text-gray-800 text-sm line-clamp-2 mb-1 group-hover:text-brand transition-colors">${o.courseTitle}</h4>
-                                    <p class="text-[10px] text-gray-400 flex items-center gap-1"><i class="fa-solid fa-calendar-check"></i> Đã kích hoạt</p>
-                                </div>
-                            </div>
-                            <div class="mt-auto pt-3 border-t border-dashed border-gray-100 relative z-10">
-                                <div class="flex justify-between items-center mb-1.5"><span class="text-[10px] font-extrabold text-gray-400 uppercase tracking-wider">Tiến độ</span><span class="text-[10px] font-bold text-brand bg-teal-50 px-2 py-0.5 rounded-full">${percent}%</span></div>
-                                <div class="w-full bg-gray-100 rounded-full h-2 overflow-hidden shadow-inner"><div class="bg-gradient-to-r from-teal-400 to-brand h-full rounded-full transition-all duration-1000" style="width: ${percent}%"></div></div>
-                            </div>
-                            <button class="w-full mt-4 py-2.5 bg-white border-2 border-teal-50 text-teal-700 text-xs font-bold rounded-xl group-hover:bg-brand group-hover:text-white group-hover:border-brand transition-all flex items-center justify-center gap-2 shadow-sm"><i class="fa-solid fa-play"></i> Tiếp tục học</button>
-                        </div>`;
-                });
-                
-                if(listPaid) {
-                    if (!htmlPaid) listPaid.innerHTML = '<div class="col-span-full text-center py-12 bg-white rounded-2xl border border-dashed border-gray-300"><i class="fa-solid fa-basket-shopping text-4xl text-gray-200 mb-3"></i><p class="text-gray-500 font-bold">Bạn chưa đăng ký khóa học nào.</p></div>';
-                    else listPaid.innerHTML = htmlPaid;
-                }
+                // 3. Lưu vào dataCache để hỗ trợ chuyển đổi Grid/List
+                const validList = validPaidItems.filter(o => o !== null);
+                window.dataCache.purchased = validList;
+                validList.forEach(o => purchasedCourseIds.add(o.courseId));
+
+                // Render thông qua hàm renderPurchasedUI (hỗ trợ cả grid & list)
+                renderPurchasedUI();
 
                 // 4. Render danh sách CHỜ THANH TOÁN (Pending)
                 let htmlPending = '';
