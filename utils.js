@@ -5,12 +5,24 @@
 /**
  * utils.js - Phiên bản "Strict Timeout"
  */
-const TIKZ_API_URL = "https://compile.qmath.io.vn/compile"; 
+const getTikzApiUrl = () => {
+    const mode = localStorage.getItem('tikzVpsMode') || 'free';
+    const customUrl = localStorage.getItem('tikzVpsUrl');
+    
+    if (mode === 'personal' && customUrl) {
+        // Xóa dấu / ở cuối nếu có để chuẩn hóa URL
+        const baseUrl = customUrl.replace(/\/+$/, '');
+        // Nếu người dùng đã gõ sẵn /compile thì không nối thêm
+        if (baseUrl.endsWith('/compile')) return baseUrl;
+        return `${baseUrl}/compile`;
+    }
+    return "https://compile.qmath.io.vn/compile"; // Free tier
+};
 
 export const compileTikZToImage = async (tikzCode) => {
-    // THỜI GIAN TỐI ĐA CHO PHÉP: 30 Giây
-    // Nếu VPS làm xong mà Cloudflare không trả về trong 30s -> CẮT
-    const TIMEOUT_MS = 30000;
+    // THỜI GIAN TỐI ĐA CHO PHÉP: 60 Giây
+    // Nếu VPS làm xong mà Cloudflare không trả về trong 60s -> CẮT
+    const TIMEOUT_MS = 60000;
 
     const controller = new AbortController();
     
@@ -25,7 +37,8 @@ export const compileTikZToImage = async (tikzCode) => {
     // 2. Lệnh gửi đi thực tế
     const requestPromise = async () => {
         try {
-            const response = await fetch(TIKZ_API_URL, {
+            const apiUrl = getTikzApiUrl();
+            const response = await fetch(apiUrl, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ code: tikzCode }),
