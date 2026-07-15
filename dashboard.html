@@ -2952,6 +2952,57 @@ loadFileManager(true); }
         window.updateBulkDeleteButton();
     };
 
+    window.deleteSelectedQuestions = async () => {
+        const checkboxes = document.querySelectorAll('.bank-item-checkbox:checked');
+        const idsToDelete = Array.from(checkboxes).map(cb => cb.value);
+        
+        if (idsToDelete.length === 0) {
+            window.showNotification("Vui lòng chọn ít nhất một câu hỏi để xóa", "error");
+            return;
+        }
+        
+        if(!confirm(`Bạn có chắc chắn muốn xóa vĩnh viễn ${idsToDelete.length} câu hỏi này khỏi hệ thống Cloudflare?`)) return;
+        
+        const btnDelete = document.getElementById('btnBulkDelete');
+        const oldText = btnDelete.innerHTML;
+        btnDelete.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang xóa...';
+        btnDelete.disabled = true;
+
+        try {
+            let successCount = 0;
+            let failCount = 0;
+            for (const id of idsToDelete) {
+                const res = await fetch(`https://upload-helper.phamngockhanh-942001.workers.dev/bank?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+                if (res.ok) {
+                    successCount++;
+                    const item = document.getElementById(`bank-item-${id}`);
+                    if (item) item.remove();
+                    window.globalBankQuestions = window.globalBankQuestions.filter(q => q.id !== id);
+                    window.selectedBankQuestions.delete(id);
+                } else {
+                    failCount++;
+                }
+            }
+            
+            window.showNotification(`Đã xóa thành công ${successCount} câu hỏi.` + (failCount > 0 ? ` (Lỗi ${failCount} câu)` : ""), successCount > 0 ? "success" : "error");
+            
+            const allCount = window.globalBankQuestions.length;
+            window.applyBankFilters();
+            const countEl = document.getElementById('bankCount'); if (countEl) countEl.innerText = `${allCount} câu`;
+            const selectAllCb = document.getElementById('selectAllCheckbox');
+            if (selectAllCb) selectAllCb.checked = false;
+            
+            window.updateBulkDeleteButton();
+            
+        } catch (e) {
+            console.error(e);
+            window.showNotification("Lỗi hệ thống khi xóa nhiều câu hỏi", "error");
+        } finally {
+            btnDelete.innerHTML = oldText;
+            btnDelete.disabled = false;
+        }
+    };
+
     window.updateBulkDeleteButton = () => {
         const btn = document.getElementById('btnBulkDelete');
         if (window.selectedBankQuestions.size > 0) {
