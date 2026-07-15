@@ -6,8 +6,8 @@
  * utils.js - Phiên bản "Strict Timeout"
  */
 const getTikzApiUrl = () => {
-    const mode = localStorage.getItem('tikzVpsMode') || 'free';
-    const customUrl = localStorage.getItem('tikzVpsUrl');
+    const mode = localStorage.getItem('tikzVpsMode') || 'personal';
+    const customUrl = localStorage.getItem('tikzVpsUrl') || 'http://42.96.4.216:3000';
     
     if (mode === 'personal' && customUrl) {
         // Xóa dấu / ở cuối nếu có để chuẩn hóa URL
@@ -60,6 +60,168 @@ export const compileTikZToImage = async (tikzCode) => {
     return Promise.race([requestPromise(), timeoutPromise]);
 };
 
+// --- HÀM MỚI: BIÊN DỊCH BATCH (Nhiều hình 1 lúc) ---
+export const compileTikZBatch = async (codesArray) => {
+    const TIMEOUT_MS = 60000;
+    const controller = new AbortController();
+    
+    const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => {
+            controller.abort();
+            reject(new Error("TIMEOUT_FORCE"));
+        }, TIMEOUT_MS);
+    });
+
+    const requestPromise = async () => {
+        try {
+            const baseUrl = getTikzApiUrl().replace(/\/compile$/, '');
+            const apiUrl = `${baseUrl}/compile-batch`;
+            
+            const response = await fetch(apiUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ codes: codesArray }),
+                signal: controller.signal
+            });
+
+            if (!response.ok) throw new Error(`HTTP Error ${response.status}`);
+            
+            const text = await response.text();
+            if (!text || text.trim() === "") throw new Error("Empty Response");
+
+            return JSON.parse(text).urls;
+        } catch (err) {
+            throw err;
+        }
+    };
+
+    return Promise.race([requestPromise(), timeoutPromise]);
+};
+
+// --- HÀM BIÊN DỊCH BẰNG TIKZJAX (SỬ DỤNG IFRAME CÁCH LY ĐỂ TRÁNH XUNG ĐỘT MATHJAX) ---
+let _tikzIframe = null;
+let _tikzQueue = [];
+let _tikzReady = false;
+let _tikzIframeInitStarted = false;
+
+const initTikzIframe = () => {
+    if (_tikzIframeInitStarted) return;
+    _tikzIframeInitStarted = true;
+
+    _tikzIframe = document.createElement('iframe');
+    _tikzIframe.style.display = 'none';
+    document.body.appendChild(_tikzIframe);
+
+    const doc = _tikzIframe.contentWindow.document;
+    doc.open();
+    doc.write(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <script>
+                window.addEventListener('message', function(event) {
+                    if (event.data && event.data.type === 'render-tikz') {
+                        const id = event.data.id;
+                        const code = event.data.code;
+                        
+                        const container = document.createElement('div');
+                        container.id = 'container-' + id;
+                        document.body.appendChild(container);
+                        
+                        const script = document.createElement('script');
+                        script.type = 'text/tikz';
+                        script.textContent = code;
+                        
+                        const observer = new MutationObserver(function(mutations) {
+                            for (let i = 0; i < mutations.length; i++) {
+                                if (mutations[i].addedNodes.length > 0) {
+                                    const svg = container.querySelector('svg');
+                                    if (svg) {
+                                        observer.disconnect();
+                                        const serializer = new XMLSerializer();
+                                        let svgString = serializer.serializeToString(svg);
+                                        if (!svgString.match(/^<svg[^>]+xmlns="http:\\/\\/www\\.w3\\.org\\/2000\\/svg"/)) {
+                                            svgString = svgString.replace(/^<svg/, '<svg xmlns="http://www.w3.org/2000/svg"');
+                                        }
+                                        window.parent.postMessage({ type: 'tikz-result', id: id, svg: svgString }, '*');
+                                        container.remove();
+                                        return;
+                                    }
+                                }
+                            }
+                        });
+                        
+                        observer.observe(container, { childList: true, subtree: true });
+                        container.appendChild(script);
+                        
+                        if (window.tikzjax && typeof window.tikzjax.process === 'function') {
+                            window.tikzjax.process();
+                        }
+                    }
+                });
+                window.addEventListener('load', function() {
+                    window.parent.postMessage({ type: 'tikz-iframe-ready' }, '*');
+                });
+            <\/script>
+            <script src="https://tikzjax.com/v1/tikzjax.js"><\/script>
+        </head>
+        <body></body>
+        </html>
+    `);
+    doc.close();
+
+    window.addEventListener('message', (event) => {
+        if (event.data && event.data.type === 'tikz-iframe-ready') {
+            _tikzReady = true;
+        } else if (event.data && event.data.type === 'tikz-result') {
+            const id = event.data.id;
+            const item = _tikzQueue.find(i => i.id === id);
+            if (item) {
+                clearTimeout(item.timeoutHandle);
+                item.resolve(event.data.svg);
+                _tikzQueue = _tikzQueue.filter(i => i.id !== id);
+            }
+        }
+    });
+};
+
+export const compileTikzLocalViaTikzJax = async (code) => {
+    initTikzIframe();
+    
+    let tries = 0;
+    while (!_tikzReady && tries < 60) {
+        await new Promise(r => setTimeout(r, 500));
+        tries++;
+    }
+
+    return new Promise((resolve, reject) => {
+        if (!_tikzReady) return reject(new Error("TikzJax iframe timeout"));
+
+        const id = Date.now().toString() + Math.random().toString().slice(2);
+        
+        const timeoutHandle = setTimeout(() => {
+            _tikzQueue = _tikzQueue.filter(i => i.id !== id);
+            reject(new Error("TikzJax timeout sau 20s"));
+        }, 20000);
+
+        _tikzQueue.push({
+            id,
+            resolve: (svgString) => {
+                try {
+                    const svgBase64 = btoa(unescape(encodeURIComponent(svgString)));
+                    resolve(`data:image/svg+xml;base64,${svgBase64}`);
+                } catch(e) {
+                    const blob = new Blob([svgString], { type: 'image/svg+xml' });
+                    resolve(URL.createObjectURL(blob));
+                }
+            },
+            timeoutHandle
+        });
+
+        _tikzIframe.contentWindow.postMessage({ type: 'render-tikz', id: id, code: code }, '*');
+    });
+};
+
 // --- CÁC HÀM EXPORT HỖ TRỢ ---
 
 export function cleanTikzCode(code) {
@@ -83,9 +245,46 @@ export function extractNextBrace(text) {
 
 // --- CÁC HÀM XỬ LÝ NỘI BỘ ---
 
+/**
+ * Thay thế lệnh custom VN như \heva{} và \hoac{} bằng LaTeX chuẩn
+ * Xử lý đúng cả khi có ngoặc {} lồng nhau
+ */
+function replaceCustomMathCmd(text, cmd, leftDelim, rightDelim) {
+    let result = '';
+    let remaining = String(text || '');
+    const search = '\\' + cmd;
+    while (true) {
+        const idx = remaining.indexOf(search);
+        if (idx === -1) { result += remaining; break; }
+        result += remaining.substring(0, idx);
+        remaining = remaining.substring(idx + search.length).replace(/^\s*/, '');
+        if (!remaining.startsWith('{')) { result += search; continue; }
+        let depth = 1, i = 1;
+        while (i < remaining.length && depth > 0) {
+            if (remaining[i] === '{') depth++;
+            else if (remaining[i] === '}') depth--;
+            i++;
+        }
+        const content = remaining.substring(1, i - 1);
+        remaining = remaining.substring(i);
+        result += `${leftDelim}\\begin{aligned}${content}\\end{aligned}${rightDelim}`;
+    }
+    return result;
+}
+
 function processNestedTikz(text) {
     if (!text) return "";
-    let result = "", remaining = String(text);
+
+    // 1. Bảo vệ các <script type="text/tikz"> đã nhúng sẵn (tránh double-wrap)
+    const protectedBlocks = [];
+    let textToProcess = text.replace(/<script\s+type="text\/tikz"[^>]*>[\s\S]*?<\/script>/gi, (match) => {
+        const idx = protectedBlocks.length;
+        protectedBlocks.push(match);
+        return `%%TIKZ_PROTECTED_${idx}%%`;
+    });
+
+    // 2. Xử lý \begin{tikzpicture}...\end{tikzpicture} còn lại (chưa được nhúng)
+    let result = "", remaining = String(textToProcess);
     while (true) {
         const startIdx = remaining.indexOf("\\begin{tikzpicture}");
         if (startIdx === -1) { result += remaining; break; }
@@ -107,16 +306,34 @@ function processNestedTikz(text) {
         
         let rawTikz = remaining.substring(0, endIdx);
         let finalTikz = cleanTikzCode(rawTikz);
-        if (!finalTikz.includes("\\usetikzlibrary")) finalTikz = "\\usetikzlibrary{calc,intersections,arrows.meta}\n" + finalTikz;
+        if (!finalTikz.includes("\\usetikzlibrary")) finalTikz = "\\usetikzlibrary{calc,arrows.meta}\n" + finalTikz;
         result += `<div class="flex justify-center my-4 overflow-x-auto"><script type="text/tikz">${finalTikz}<\/script></div>`;
         remaining = remaining.substring(endIdx);
     }
+
+    // 3. Khôi phục các block đã bảo vệ
+    protectedBlocks.forEach((block, idx) => {
+        result = result.replace(`%%TIKZ_PROTECTED_${idx}%%`, block);
+    });
+
     return result;
 }
 
+
 function processTabular(text) {
     if (!text) return "";
-    let processed = text.replace(/\\begin\{table\}(\[.*?\])?/g, '').replace(/\\end\{table\}/g, '');
+    let processed = text.replace(/\\begin\{table\}(?:\[.*?\])?[\s\S]*?\\end\{table\}/g, (match) => {
+        // Giữ nội dung tabular, bỏ caption, renewcommand, centering
+        return match
+            .replace(/\\begin\{table\}(?:\[.*?\])?/g, '')
+            .replace(/\\end\{table\}/g, '')
+            .replace(/\\caption\s*\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/g, '')
+            .replace(/\\renewcommand\s*\{?\s*\\arraystretch\s*\}?\s*\{[^}]+\}/g, '')
+            .replace(/\\centering/g, '');
+    });
+    // Cũng cleanup ngoài table environment
+    processed = processed.replace(/\\caption\s*\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/g, '');
+    processed = processed.replace(/\\renewcommand\s*\{?\s*\\arraystretch\s*\}?\s*\{[^}]+\}/g, '');
     const regex = /\\begin\{tabular\}(\{|\[).*?(\}|\])([\s\S]*?)\\end\{tabular\}/g;
     return processed.replace(regex, (match, open, close, body) => {
         const rows = body.split('\\\\').filter(r => r.trim().length > 0);
@@ -219,6 +436,21 @@ export const formatContent = (text) => {
     if (text === null || text === undefined) return "";
     let processed = text;
 
+    // 0. Pre-process lệnh toán học custom của VN (phải làm TRƯỚC khi split)
+    processed = replaceCustomMathCmd(processed, 'heva', '\\left\\{', '\\right.');
+    processed = replaceCustomMathCmd(processed, 'hoac', '\\left[', '\\right.');
+    processed = replaceCustomMathCmd(processed, 'heva*', '\\left\\{', '\\right.');
+    processed = replaceCustomMathCmd(processed, 'hoac*', '\\left[', '\\right.');
+    // Cleanup metadata LaTeX bảng (caption, arraystretch)
+    processed = processed.replace(/\\caption\s*\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/g, '');
+    processed = processed.replace(/\\renewcommand\s*\{?\s*\\arraystretch\s*\}?\s*\{[^}]+\}/g, '');
+    processed = processed.replace(/\\renewcommand\\arraystretch\s*\{[^}]+\}/g, '');
+
+    // 0.5 Strip question environments
+    processed = processed.replace(/\\begin\{(?:ex|bt|vd|cau|question)\}(?:\[.*?\])?/g, '');
+    processed = processed.replace(/\\end\{(?:ex|bt|vd|cau|question)\}/g, '');
+    processed = processed.replace(/\\immini(?:\[.*?\])?\s*\{/g, '{'); // Strip \immini but keep the group
+
     // 1. Clean Text
     processed = processed.replace(/\\centering/g, "");
     processed = processed.replace(/\\%/g, "%");
@@ -272,14 +504,31 @@ export const formatContent = (text) => {
 export const renderTikz = () => {
     const scripts = document.querySelectorAll('script[type="text/tikz"]');
     if (scripts.length === 0) return;
-    const oldScript = document.querySelector('script[src*="tikzjax.js"]');
-    if (oldScript) oldScript.remove();
-    const newScript = document.createElement('script');
-    newScript.src = "https://tikzjax.com/v1/tikzjax.js?v=" + Date.now();
-    document.head.appendChild(newScript);
+    
+    scripts.forEach(script => {
+        const code = script.textContent;
+        const container = script.parentElement;
+        
+        // Tạo placeholder
+        const placeholder = document.createElement('div');
+        placeholder.className = 'flex justify-center my-4';
+        placeholder.innerHTML = '<span class="text-blue-500 italic"><i class="fa-solid fa-spinner fa-spin mr-2"></i>Đang vẽ hình TikZ...</span>';
+        
+        // Thay thế script bằng placeholder
+        script.parentNode.replaceChild(placeholder, script);
+        
+        // Biên dịch ngầm bằng iframe
+        compileTikzLocalViaTikzJax(code)
+            .then(url => {
+                placeholder.innerHTML = `<img src="${url}" class="rounded-lg shadow-sm max-h-[250px] object-contain mx-auto w-full md:w-auto" loading="lazy">`;
+            })
+            .catch(err => {
+                placeholder.innerHTML = `<span class="text-red-500 italic">Lỗi vẽ hình: ${err.message}</span>`;
+            });
+    });
 };
 
-export const compressImage = (file, quality = 0.7, maxWidth = 1000) => {
+export const compressImage = (file, quality = 0.6, maxWidth = 600) => {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.readAsDataURL(file);

@@ -9,28 +9,29 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     
     <script>
-    window.MathJax = {
-      loader: { load: ['[tex]/noerrors', '[tex]/noundefined'] },
-      tex: {
-        inlineMath: [['$', '$'], ['\\(', '\\)']],
-        displayMath: [['$$', '$$'], ['\\[', '\\]']],
-        processEscapes: true,
-        packages: {'[+]': ['noerrors', 'noundefined']},
-        macros: {
-          heva: ["\\left\\{\\begin{aligned}#1\\end{aligned}\\right.", 1],
-          hoac: ["\\left[\\begin{aligned}#1\\end{aligned}\\right.", 1],
-          tich: "\\cdot",
-          deg: "^\\circ",
-          R: "\\mathbb{R}",
-          N: "\\mathbb{N}",
-          Z: "\\mathbb{Z}",
-          vectors: ["\\overrightarrow{#1}", 1],
-          mtx: ["\\left[\\begin{matrix}#1\\end{matrix}\\right]", 1]
-        }
-      },
-      options: { ignoreHtmlClass: 'tex2jax_ignore', processHtmlClass: 'tex2jax_process' },
-      startup: { typeset: false }
+            window.MathJax = {
+        loader: { load: ['[tex]/noerrors', '[tex]/noundefined'] },
+        tex: {
+          inlineMath: [['$', '$'], ['\\(', '\\)']],
+          displayMath: [['$$', '$$'], ['\\[', '\\]']],
+          processEscapes: true,
+          packages: {'[+]': ['noerrors', 'noundefined']},
+          macros: {
+            heva: ["\left\{\begin{aligned}#1\end{aligned}\right.", 1],
+            hoac: ["\left[\begin{aligned}#1\end{aligned}\right.", 1],
+            tich: "\cdot",
+            deg: "^\circ",
+            R: "\mathbb{R}",
+            N: "\mathbb{N}",
+            Z: "\mathbb{Z}",
+            vectors: ["\overrightarrow{#1}", 1],
+            mtx: ["\left[\begin{matrix}#1\end{matrix}\right]", 1]
+          }
+        },
+        options: { ignoreHtmlClass: 'tex2jax_ignore', processHtmlClass: 'tex2jax_process' },
+        startup: { typeset: false }
     };
+
     </script>
     <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
     <link rel="stylesheet" type="text/css" href="https://tikzjax.com/v1/fonts.css">
@@ -133,6 +134,20 @@
         }
         
     </style>
+    <script>
+        // Các hàm giao diện cơ bản (được định nghĩa sớm để tránh lỗi "not defined")
+        window.selectMode = function(mode) {
+            document.getElementById('landingStep').classList.add('hidden');
+            document.getElementById('configStep').classList.remove('hidden');
+            if(window.renderTopicList) window.renderTopicList(); 
+        };
+
+        window.backToLanding = function() {
+            document.getElementById('configStep').classList.add('hidden');
+            document.getElementById('landingStep').classList.remove('hidden');
+        };
+
+    </script>
 </head>
 <body class="min-h-screen flex flex-col text-gray-800">
 
@@ -281,6 +296,12 @@
                                 <label class="block text-xs font-bold text-gray-400 uppercase mb-2">Thời gian (p)</label>
                                 <input type="number" id="inputTime" value="0" min="0" placeholder="Auto" class="w-full px-3 py-2 border border-gray-200 rounded-xl font-bold text-center text-gray-700 outline-none focus:ring-2 focus:ring-blue-100">
                             </div>
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-bold text-gray-400 uppercase mb-2">Luyện tập theo ID (Tùy chọn)</label>
+                            <input type="text" id="inputPracticeId" placeholder="Nhập mã CCCD (VD: 9D1H1-6_abcde)" class="w-full px-3 py-2 border border-gray-200 rounded-xl font-bold text-gray-700 outline-none focus:ring-2 focus:ring-blue-100 text-sm font-mono">
+                            <p class="text-[10px] text-gray-400 mt-1 italic">Nếu nhập ID, hệ thống sẽ bỏ qua bộ lọc và chỉ hiển thị câu hỏi này.</p>
                         </div>
                          
                          <div class="flex items-center justify-between bg-gray-50 p-2 rounded-lg border border-gray-100">
@@ -611,16 +632,7 @@
         };
 
         // --- LOGIC LUYỆN TẬP ---
-        window.selectMode = (mode) => {
-            document.getElementById('landingStep').classList.add('hidden');
-            document.getElementById('configStep').classList.remove('hidden');
-            renderTopicList(); // Đảm bảo render khi chuyển tab
-        };
 
-        window.backToLanding = () => {
-            document.getElementById('configStep').classList.add('hidden');
-            document.getElementById('landingStep').classList.remove('hidden');
-        };
 
         const getDifficultyLevel = (id) => {
             if (id.includes('NB') || id.includes('N')) return 1;
@@ -657,9 +669,10 @@
 
             try {
                 // 1. CỘT TRÁI: Lấy thông số chung
+                const practiceId = document.getElementById('inputPracticeId')?.value.trim();
                 const grade = document.querySelector('input[name="grade"]:checked').value;
                 const subject = document.querySelector('input[name="subject"]:checked').value;
-                const qCount = parseInt(document.getElementById('inputQCount').value) || 10;
+                const qCount = practiceId ? 1 : (parseInt(document.getElementById('inputQCount').value) || 10);
                 const customTime = parseInt(document.getElementById('inputTime').value) || 0;
                 const sortDiff = document.getElementById('toggleSortDifficulty').checked;
                 
@@ -696,6 +709,8 @@
 
                 // 4. KIỂM DUYỆT CÂU HỎI
                 let pool = globalBankMetadata.filter(q => {
+                    if (practiceId) return q.id === practiceId;
+
                     const actualMapId = String(q.mapId || q.id || "").trim(); 
                     const actualLevel = String(q.level || "").trim().toUpperCase();
                     if (!actualMapId) return false;
@@ -711,20 +726,11 @@
 
                     // TRẠM 2: Mức độ
                     if (checkedLevels.length > 0) {
-                        let idLevelChar = "";
-                        const levelMatch = actualMapId.split('-')[0].match(/[NHVC]$/i);
-                        if (levelMatch) idLevelChar = levelMatch[0].toUpperCase();
-
                         let isLevelMatch = checkedLevels.some(code => {
-                            const hasN = actualMapId.includes('NB') || actualMapId.includes('N');
-                            const hasH = actualMapId.includes('TH') || actualMapId.includes('H');
-                            const hasV = actualMapId.includes('VD') && !actualMapId.includes('VDC');
-                            const hasC = actualMapId.includes('VDC') || actualMapId.includes('C');
-
-                            if (code === 'NB' && (actualLevel.includes('NHẬN BIẾT') || actualLevel === 'NB' || idLevelChar === 'N' || hasN)) return true;
-                            if (code === 'TH' && (actualLevel.includes('THÔNG HIỂU') || actualLevel === 'TH' || idLevelChar === 'H' || hasH)) return true;
-                            if (code === 'VD' && (actualLevel === 'VẬN DỤNG' || actualLevel === 'VD' || idLevelChar === 'V' || hasV)) return true;
-                            if (code === 'VDC' && (actualLevel.includes('CAO') || actualLevel === 'VDC' || idLevelChar === 'C' || hasC)) return true;
+                            if (code === 'NB' && (actualLevel.includes('NHẬN BIẾT') || actualLevel === 'NB')) return true;
+                            if (code === 'TH' && (actualLevel.includes('THÔNG HIỂU') || actualLevel === 'TH')) return true;
+                            if (code === 'VD' && (actualLevel === 'VẬN DỤNG' || actualLevel === 'VD')) return true;
+                            if (code === 'VDC' && (actualLevel.includes('CAO') || actualLevel === 'VDC')) return true;
                             return false;
                         });
                         if (!isLevelMatch) return false;
@@ -854,7 +860,15 @@
                     inputHtml = `<div class="mt-4"><label class="block text-xs font-bold text-gray-500 uppercase mb-2 ml-1">Nhập đáp án:</label><input type="text" class="w-full md:w-1/2 p-3 border border-gray-300 rounded-xl outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 font-bold text-gray-700 placeholder-gray-300" placeholder="Ví dụ: 5.2" onchange="window.saveAnswer(${idx}, this.value, 'short')"></div>`;
                 }
 
-                qDiv.innerHTML = `<div class="flex items-start gap-3"><span class="bg-blue-100 text-blue-700 font-bold px-2.5 py-1 rounded-lg text-xs shrink-0 mt-1">Câu ${idx + 1}</span><div class="text-gray-800 text-base leading-relaxed flex-1 math-content font-medium overflow-x-auto">${window.formatContent(q.content)}</div></div>${inputHtml}`;
+                qDiv.innerHTML = `
+                    <div class="flex justify-between items-center mb-3">
+                        <span class="bg-blue-100 text-blue-700 font-bold px-2.5 py-1 rounded-lg text-xs shrink-0">Câu ${idx + 1}</span>
+                        ${q.id ? `<span class="text-[10px] text-gray-400 font-mono bg-gray-50 px-2 py-0.5 rounded border border-gray-100" title="CCCD (ID Duy nhất)"><i class="fa-solid fa-hashtag mr-1"></i>${q.id}</span>` : ''}
+                        <button onclick="window.openReportModal('${q.id || ''}')" class="ml-2 text-red-400 hover:text-red-600 text-xs flex items-center gap-1 transition-colors bg-red-50 px-2 py-1 rounded-lg border border-red-100"><i class="fa-solid fa-triangle-exclamation"></i> Báo lỗi</button>
+                    </div>
+                    <div class="flex items-start gap-3">
+                        <div class="text-gray-800 text-base leading-relaxed flex-1 math-content font-medium overflow-x-auto">${window.formatContent(q.content)}</div>
+                    </div>${inputHtml}`;
                 container.appendChild(qDiv);
 
                 const btn = document.createElement('button');
@@ -1108,6 +1122,90 @@
                 tbody.innerHTML = `<tr><td colspan="4" class="text-center p-4 text-red-400">Lỗi tải dữ liệu. Có thể cần tạo Index (Xem Console).</td></tr>`;
             }
         };
+
+    
+        // --- REPORT QUESTION ---
+        let currentReportId = null;
+
+        window.openReportModal = (id) => {
+            currentReportId = id;
+            const el = document.getElementById('reportQuestionId');
+            if (el) el.innerText = 'ID: ' + id;
+            const descEl = document.getElementById('reportDescription');
+            if (descEl) descEl.value = '';
+            
+            const modal = document.getElementById('reportModal');
+            if (modal) {
+                modal.classList.remove('opacity-0', 'pointer-events-none');
+                const content = modal.querySelector('.modal-content');
+                if(content) content.classList.remove('scale-95');
+            }
+        };
+
+        window.closeReportModal = () => {
+            const modal = document.getElementById('reportModal');
+            if (modal) {
+                modal.classList.add('opacity-0', 'pointer-events-none');
+                const content = modal.querySelector('.modal-content');
+                if(content) content.classList.add('scale-95');
+            }
+        };
+
+        window.submitReport = async () => {
+            const desc = document.getElementById('reportDescription').value.trim();
+            if (!desc) {
+                if (window.showNotification) window.showNotification("Vui lòng nhập mô tả lỗi", "error");
+                else alert("Vui lòng nhập mô tả lỗi");
+                return;
+            }
+            
+            const btn = document.getElementById('btnSubmitReport');
+            const ogHtml = btn ? btn.innerHTML : '';
+            if (btn) {
+                btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang gửi...';
+                btn.disabled = true;
+            }
+            
+            try {
+                // Determine current student uid if logged in
+                let stuUid = null;
+                let stuName = "Khách (Luyện tập)";
+                if (typeof window.firebase !== 'undefined') {
+                    // Try to get auth from window.auth or global
+                    if(typeof auth !== 'undefined' && auth.currentUser) {
+                        stuUid = auth.currentUser.uid;
+                        stuName = auth.currentUser.displayName || auth.currentUser.email || "Học sinh";
+                    }
+                }
+                
+                const reportData = {
+                    type: 'error_report',
+                    questionId: currentReportId,
+                    description: desc,
+                    examId: typeof currentExamId !== 'undefined' ? currentExamId : null,
+                    studentId: stuUid,
+                    studentName: stuName,
+                    createdAt: new Date().toISOString(),
+                    status: 'pending'
+                };
+                
+                await addDoc(collection(db, "access_requests"), reportData);
+                
+                if (window.showNotification) window.showNotification("Cảm ơn bạn đã báo cáo. Chúng tôi sẽ kiểm tra lại câu hỏi này.", "success");
+                else alert("Đã gửi báo cáo thành công!");
+                window.closeReportModal();
+                        } catch (err) {
+                console.error("Lỗi gửi báo cáo:", err);
+                if (window.showNotification) window.showNotification("Có lỗi xảy ra: " + err.message, "error");
+                else alert("Có lỗi xảy ra: " + err.message);
+            } finally {
+                if (btn) {
+                    btn.innerHTML = ogHtml;
+                    btn.disabled = false;
+                }
+            }
+        };
+
     </script>
     <div id="confirmSaveModal" class="hidden fixed inset-0 tutorial-overlay flex items-center justify-center p-4 z-[10001]">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 text-center transform transition-all scale-100">
@@ -1151,5 +1249,29 @@
             </div>
         </div>
     </div>
+
+    <!-- Báo cáo lỗi Modal -->
+    <div id="reportModal" class="fixed inset-0 z-50 flex items-center justify-center opacity-0 pointer-events-none transition-opacity duration-300">
+        <div class="absolute inset-0 bg-gray-900/60 backdrop-blur-sm" onclick="window.closeReportModal()"></div>
+        <div class="modal-content relative bg-white w-[90%] md:w-[500px] rounded-3xl shadow-2xl scale-95 transition-transform duration-300 overflow-hidden flex flex-col">
+            <div class="bg-red-50 p-4 border-b border-red-100 flex justify-between items-center">
+                <h3 class="font-bold text-red-600 text-lg flex items-center gap-2"><i class="fa-solid fa-triangle-exclamation"></i> Báo cáo lỗi câu hỏi</h3>
+                <button onclick="window.closeReportModal()" class="w-8 h-8 flex items-center justify-center rounded-full bg-red-100 text-red-600 hover:bg-red-200 transition-colors"><i class="fa-solid fa-times"></i></button>
+            </div>
+            <div class="p-6">
+                <input type="hidden" id="reportQId">
+                <p class="text-sm text-gray-600 mb-4">Bạn đang báo cáo lỗi cho câu hỏi ID: <strong id="reportQIdDisplay" class="text-gray-800"></strong></p>
+                <div class="mb-4">
+                    <label class="block text-sm font-bold text-gray-700 mb-2">Mô tả lỗi gặp phải:</label>
+                    <textarea id="reportDescription" rows="4" class="w-full border border-gray-300 rounded-xl p-3 outline-none focus:ring-2 focus:ring-red-100 focus:border-red-500 text-gray-700" placeholder="Ví dụ: Đề bài bị sai số liệu, đáp án không đúng, lỗi hiển thị hình ảnh..."></textarea>
+                </div>
+                <div class="flex justify-end gap-3 mt-6">
+                    <button onclick="window.closeReportModal()" class="px-5 py-2.5 rounded-xl font-bold text-gray-600 hover:bg-gray-100 transition-colors">Hủy</button>
+                    <button onclick="window.submitReport()" id="btnSubmitReport" class="px-5 py-2.5 rounded-xl font-bold bg-red-500 text-white hover:bg-red-600 transition-colors shadow-md">Gửi báo cáo</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
 </body>
 </html>

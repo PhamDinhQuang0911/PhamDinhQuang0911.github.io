@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
@@ -302,7 +302,7 @@
                         </select>
                     </div>
                 </div>
-                <div id="classExamList" class="pb-40 md:pb-24"></div>
+                <div id="classExamList" class="pb-[500px] md:pb-24"></div>
             </div>
 
             <div id="tab-my-courses" class="tab-content hidden animate-fade-in">
@@ -658,8 +658,28 @@
                 if (selectedAvatarFile) {
                     btn.innerHTML = '<i class="fa-solid fa-cloud-arrow-up fa-bounce"></i> Đang tải ảnh...';
                     
+                    // Hàm nén ảnh
+                    const compressImage = (file) => {
+                        return new Promise((resolve) => {
+                            const maxWidth = 500;
+                            const reader = new FileReader(); reader.readAsDataURL(file);
+                            reader.onload = (e) => {
+                                const img = new Image(); img.src = e.target.result;
+                                img.onload = () => {
+                                    const cvs = document.createElement('canvas');
+                                    let w = img.width, h = img.height;
+                                    if (w > maxWidth) { h *= maxWidth/w; w = maxWidth; }
+                                    cvs.width = w; cvs.height = h;
+                                    cvs.getContext('2d').drawImage(img, 0, 0, w, h);
+                                    cvs.toBlob(blob => resolve(blob), 'image/jpeg', 0.6);
+                                };
+                            };
+                        });
+                    };
+
+                    const compressedFile = await compressImage(selectedAvatarFile);
                     const formData = new FormData();
-                    formData.append('file', selectedAvatarFile);
+                    formData.append('file', compressedFile, `avatar_${Date.now()}.jpg`);
 
                     // Gọi Worker
                     const res = await fetch(CLOUDFLARE_UPLOAD_API, { method: 'POST', body: formData });

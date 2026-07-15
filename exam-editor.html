@@ -692,6 +692,7 @@
         </div>
     </div>
     
+    
     <div id="toastContainer" class="fixed top-5 right-5 z-[110] flex flex-col gap-3 pointer-events-none"></div>
     
     <input type="file" id="batchFileInput" accept="image/*" class="hidden">
@@ -704,7 +705,7 @@
         import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js";
         
         // --- IMPORT TỪ UTILS.JS ---
-        import { compileTikZToImage, formatContent, convertArrayToMatrix, autoScaleTables, cleanTikzCode, extractNextBrace } from "./utils.js";
+        import { compileTikZToImage, compileTikZBatch, compileTikzLocalViaTikzJax, formatContent, convertArrayToMatrix, autoScaleTables, cleanTikzCode, extractNextBrace, renderTikz } from "./utils.js";
 
         // Gán vào window
         window.formatContent = formatContent;
@@ -868,7 +869,7 @@
 
         function compressImage(file) {
             return new Promise((resolve, reject) => {
-                const maxWidth = 800; 
+                const maxWidth = 600; 
                 const reader = new FileReader();
                 reader.readAsDataURL(file);
                 reader.onload = (event) => {
@@ -880,7 +881,7 @@
                         if (width > maxWidth) { height *= maxWidth / width; width = maxWidth; }
                         canvas.width = width; canvas.height = height;
                         const ctx = canvas.getContext('2d'); ctx.drawImage(img, 0, 0, width, height);
-                        canvas.toBlob((blob) => { resolve(blob); }, 'image/jpeg', 0.7);
+                        canvas.toBlob((blob) => { resolve(blob); }, 'image/jpeg', 0.6);
                     };
                     img.onerror = (err) => reject(err);
                 };
@@ -1116,7 +1117,7 @@
             const url = data.url;
 
             // 3. Mã HTML ảnh đơn giản
-            const simpleImgTag = `<div class="flex justify-center my-1"><img src="${url}" class="rounded-lg shadow-sm" style="max-height:350px;" loading="lazy"></div>`;
+            const simpleImgTag = `<div class="flex justify-center my-1"><img src="${url}" class="rounded-lg shadow-sm max-h-[250px] object-contain mx-auto w-full md:w-auto" loading="lazy"></div>`;
 
             // 4. Thay thế & Xóa chữ thừa (Dùng DOM + Marker như cũ)
             let replacedCount = 0;
@@ -1261,7 +1262,7 @@
                             const data = await uploadSingleImage(matchFile);
                             
                             // --> THÀNH CÔNG: THAY THẾ VÀO BÀI
-                            const imgTag = `<div class="flex justify-center my-1"><img src="${data.url}" class="rounded-lg shadow-sm" style="max-height:350px;" loading="lazy"></div>`;
+                            const imgTag = `<div class="flex justify-center my-1"><img src="${data.url}" class="rounded-lg shadow-sm max-h-[250px] object-contain mx-auto w-full md:w-auto" loading="lazy"></div>`;
                             
                             // Cập nhật nội dung câu hỏi
                             window.questions.forEach(q => {
@@ -1390,15 +1391,7 @@
             window.questions.sort((a, b) => (order[a.type] || 99) - (order[b.type] || 99));
         }
 
-        window.renderTikz = () => {
-            const scripts = document.querySelectorAll('script[type="text/tikz"]');
-            if (scripts.length === 0) return;
-            const oldScript = document.querySelector('script[src*="tikzjax.js"]');
-            if (oldScript) oldScript.remove();
-            const newScript = document.createElement('script');
-            newScript.src = "https://tikzjax.com/v1/tikzjax.js?v=" + Date.now();
-            document.head.appendChild(newScript);
-        };
+        window.renderTikz = renderTikz;
 
         // ============================================================
         // --- [FIX HOÀN CHỈNH] PREVIEW BÊN TRÁI KHÔNG BỊ CẮT HÌNH/CHỮ ---
@@ -1696,6 +1689,7 @@
             setTimeout(() => { 
                 if(window.renderTikz) window.renderTikz(); 
                 window.autoScaleTables(); 
+                if(window.cleanWhitespace) window.cleanWhitespace();
             }, 500);
             
             if (pendingImageUploads.some(i => i.type === 'normal')) renderBatchImageModal();
@@ -1707,122 +1701,182 @@
             window.finishImportProcess(); 
         };
 
-        // --- HÀM CẬP NHẬT: XÓA KHOẢNG TRẮNG CHO TIKZ/VPS ---
-        // --- HÀM FIX: XÓA CHỮ THỪA CHO TIKZ ---
-        // --- HÀM MỚI: BIÊN DỊCH SONG SONG 2 LUỒNG (BATCH PROCESSING) ---
-        // --- HÀM MỚI: WORKER POOL (CHẠY ĐUA 2 LUỒNG) ---
-        // --- HÀM XỬ LÝ BIÊN DỊCH: WORKER POOL + REAL-TIME UI UPDATE ---
         window.handleAutoCompileAll = async () => {
-            // 1. Chuẩn bị giao diện: Ẩn modal chọn, hiện thanh tiến độ
             document.getElementById('importModeModal').classList.add('opacity-0', 'pointer-events-none');
             const pm = document.getElementById('progressModal');
             pm.classList.remove('opacity-0', 'pointer-events-none');
 
-            // 2. Lấy danh sách ảnh cần làm
-            // Lưu ý: Map sang object mới để quản lý retry, nhưng vẫn giữ tham chiếu ID để update lại mảng gốc
-            let queue = pendingImageUploads
-                .filter(i => i.type === 'tikz' && !i._done)
-                .map(item => ({ ...item, retries: 0 }));
-
-            const total = queue.length;
+            let rawQueue = pendingImageUploads.filter(i => i.type === 'tikz' && !i._done).map(item => ({ ...item, retries: 0 }));
+            const total = rawQueue.length;
             let finishedCount = 0;
 
-            // Hàm cập nhật thanh tiến độ và bảng trạng thái
             const updateUI = () => {
                 const pct = total > 0 ? Math.round((finishedCount / total) * 100) : 100;
                 document.getElementById('compileProgressBar').style.width = `${pct}%`;
                 document.getElementById('compileProgressText').innerText = `${finishedCount}/${total}`;
                 document.getElementById('compilePercent').innerText = `${pct}%`;
-                
-                // QUAN TRỌNG: Gọi hàm vẽ lại bảng để ô đổi màu Xanh/Đỏ ngay lập tức
                 if (window.renderMissingImagesPanel) window.renderMissingImagesPanel(); 
             };
-            
-            // Gọi lần đầu để reset bảng về trạng thái chờ
             if (window.renderMissingImagesPanel) window.renderMissingImagesPanel();
 
-            // --- ĐỊNH NGHĨA CÔNG NHÂN (WORKER) ---
-            const runWorker = async (workerId) => {
-                // Chạy liên tục khi hàng đợi còn việc
-                while (queue.length > 0) {
-                    // Lấy 1 nhiệm vụ ra khỏi hàng đợi
-                    const item = queue.shift();
-                    
+            const useTikzJax = document.getElementById('useTikzJaxCheckbox')?.checked || false;
+            const vpsMode = localStorage.getItem('tikzVpsMode') || 'personal';
+
+            let localQueue = [];
+            let vpsQueue = [];
+
+            // Hàm phát hiện mã TikZ phức tạp cần VPS (tkz-euclide, pgfplots, etc.)
+            const needsVPS = (code) => {
+                const vpsPackages = ['tkz-euclide', 'tkz-tab', 'tkz-base', 'tkz-', 'pgfplots', 
+                                     'pgf-', 'tkzTabSetup', 'tkzDefPoint', 'tkzDrawCircle',
+                                     'tkzTabLine', 'axis', 'addplot'];
+                return vpsPackages.some(pkg => code.includes(pkg));
+            };
+
+            if (useTikzJax) {
+                rawQueue.forEach(item => {
+                    if (!needsVPS(item.contentCode)) {
+                        localQueue.push(item); // TikzJax: render trực tiếp, không upload
+                    } else {
+                        vpsQueue.push(item); // VPS: biên dịch → Cloudflare URL
+                    }
+                });
+            } else {
+                vpsQueue = [...rawQueue];
+            }
+
+            const processSuccessItem = (item, url, customHtml = null) => {
+                const imgTag = customHtml || `<div class="flex justify-center my-1"><img src="${url}" class="rounded-lg shadow-sm max-h-[250px] object-contain mx-auto w-full md:w-auto" loading="lazy"></div>`;
+                window.questions.forEach(q => {
+                    ['content', 'solution'].forEach(key => {
+                        if (q[key] && q[key].includes(item.id)) {
+                            const tempDiv = document.createElement('div');
+                            tempDiv.innerHTML = q[key];
+                            const ph = tempDiv.querySelector(`div[data-id="${item.id}"]`);
+                            if(ph) {
+                                ph.outerHTML = "___IMG_MARKER___";
+                                q[key] = tempDiv.innerHTML.replace(/___IMG_MARKER___/g, '\n' + imgTag + '\n');
+                            }
+                        }
+                    });
+                });
+                const original = pendingImageUploads.find(i => i.id === item.id);
+                if(original) original._done = true;
+                finishedCount++;
+                updateUI();
+            };
+
+            const processFailItem = (item, errMessage) => {
+                const original = pendingImageUploads.find(i => i.id === item.id);
+                if(original) {
+                    original.retries = (original.retries || 0) + 1;
+                }
+                finishedCount++;
+                updateUI();
+            };
+
+            const runLocalWorker = async () => {
+                while(localQueue.length > 0) {
+                    const item = localQueue.shift();
                     try {
-                        console.log(`[Worker ${workerId}] Đang xử lý ảnh ${item.questionIdx + 1}...`);
+                        console.log(`[TikzJax] Đang xử lý ảnh ${item.questionIdx + 1}...`);
+                        const url = await compileTikzLocalViaTikzJax(item.contentCode);
+                        processSuccessItem(item, url);
+                    } catch(e) {
+                        console.warn(`[TikzJax] Lỗi ảnh ${item.questionIdx+1}, đẩy sang VPS: ${e.message}`);
+                        vpsQueue.push(item); 
+                    }
+                }
+            };
 
-                        // Gọi API (Hàm utils đã được cập nhật timeout 40s)
+            const runVpsSingleWorker = async (workerId, queueToProcess) => {
+                while (queueToProcess.length > 0) {
+                    const item = queueToProcess.shift();
+                    try {
+                        console.log(`[VPS Tuần tự ${workerId}] Đang xử lý ảnh ${item.questionIdx + 1}...`);
                         const url = await compileTikZToImage(item.contentCode);
-
-                        // --> THÀNH CÔNG (Không bị treo, có link ảnh)
-                        const imgTag = `<div class="flex justify-center my-1"><img src="${url}" class="rounded-lg shadow-sm" style="max-height:350px;" loading="lazy"></div>`;
-                        
-                        // Thay thế Marker trong nội dung câu hỏi bằng thẻ ảnh thật
-                        window.questions.forEach(q => {
-                            ['content', 'solution'].forEach(key => {
-                                if (q[key] && q[key].includes(item.id)) {
-                                    const tempDiv = document.createElement('div');
-                                    tempDiv.innerHTML = q[key];
-                                    const ph = tempDiv.querySelector(`div[data-id="${item.id}"]`);
-                                    if(ph) {
-                                        ph.outerHTML = "___IMG_MARKER___";
-                                        q[key] = tempDiv.innerHTML.replace(/___IMG_MARKER___/g, '\n' + imgTag + '\n');
-                                    }
-                                }
-                            });
-                        });
-
-                        // Cập nhật trạng thái "Đã xong" vào danh sách gốc (pendingImageUploads)
-                        const original = pendingImageUploads.find(i => i.id === item.id);
-                        if(original) original._done = true;
-
-                        // Tăng biến đếm và cập nhật giao diện (Ô sẽ chuyển XANH)
-                        finishedCount++;
-                        updateUI();
-                        console.log(`[Worker ${workerId}] -> Ảnh ${item.questionIdx + 1} XONG.`);
-
+                        processSuccessItem(item, url);
                     } catch (err) {
-                        // --> NẾU CÓ LỖI (Mạng, Timeout, v.v...)
-                        console.warn(`[Worker ${workerId}] Lỗi ảnh ${item.questionIdx + 1}: ${err.message}`);
-                        
                         item.retries++;
-                        
-                        // Cập nhật số lần retry vào danh sách gốc để bảng hiển thị màu ĐỎ nếu fail
                         const original = pendingImageUploads.find(i => i.id === item.id);
                         if(original) original.retries = item.retries;
 
                         if (item.retries < 3) {
-                            // Nếu chưa quá 3 lần: Đẩy ngược lại vào đầu hàng đợi để thử lại ngay
-                            console.log(`[Worker ${workerId}] -> Đẩy lại vào hàng đợi (Lần thử ${item.retries + 1})`);
-                            queue.unshift(item);
-                            
-                            // QUAN TRỌNG: Nghỉ 3 giây để "xả" kết nối lỗi trước khi làm tiếp
+                            queueToProcess.unshift(item);
                             await new Promise(r => setTimeout(r, 3000));
                         } else {
-                            // Nếu đã lỗi 3 lần: Bỏ qua, coi như xong lượt này (nhưng trạng thái là lỗi)
-                            console.error(`[Worker ${workerId}] -> BỎ QUA ảnh ${item.questionIdx + 1} sau 3 lần lỗi.`);
-                            finishedCount++; 
-                            updateUI(); // Ô sẽ chuyển ĐỎ
+                            processFailItem(item, err.message);
                         }
                     }
-                    
-                    // Nghỉ nhẹ 500ms giữa các ảnh để trình duyệt đóng socket cũ, tránh tắc nghẽn
                     await new Promise(r => setTimeout(r, 500));
                 }
             };
 
-            // 3. KHỞI ĐỘNG 2 CÔNG NHÂN CHẠY SONG SONG
-            const workers = [runWorker(1), runWorker(2)];
+            const workers = [];
+
+            if (localQueue.length > 0) {
+                workers.push(runLocalWorker());
+                workers.push(runLocalWorker());
+            }
+
+            if (vpsMode === 'free') {
+                workers.push(runVpsSingleWorker(1, vpsQueue));
+                workers.push(runVpsSingleWorker(2, vpsQueue));
+            } else {
+                const runBatchWorkers = async () => {
+                    const CHUNK_SIZE = 25;
+                    const chunks = [];
+                    for (let i = 0; i < vpsQueue.length; i += CHUNK_SIZE) {
+                        chunks.push(vpsQueue.slice(i, i + CHUNK_SIZE));
+                    }
+                    
+                    let fallbackQueue = [];
+                    let chunkIndex = 0;
+
+                    const processChunk = async (chunk, workerId) => {
+                        try {
+                            console.log(`[VPS Batch ${workerId}] Đang gom khối ${chunk.length} ảnh...`);
+                            const codes = chunk.map(c => c.contentCode);
+                            const urls = await compileTikZBatch(codes);
+                            for(let i = 0; i < chunk.length; i++) {
+                                processSuccessItem(chunk[i], urls[i]);
+                            }
+                        } catch(e) {
+                            console.warn(`[VPS Batch ${workerId}] Khối lỗi, xé lẻ để cô lập: ${e.message}`);
+                            fallbackQueue.push(...chunk);
+                        }
+                    };
+
+                    const batchWorkerPromises = [];
+                    for (let w = 1; w <= 4; w++) { // 4 Cores
+                        batchWorkerPromises.push((async () => {
+                            while (chunkIndex < chunks.length) {
+                                const idx = chunkIndex++;
+                                if (chunks[idx]) await processChunk(chunks[idx], w);
+                            }
+                        })());
+                    }
+                    await Promise.all(batchWorkerPromises);
+
+                    if (fallbackQueue.length > 0) {
+                        console.log(`[Fallback] Cứu hộ ${fallbackQueue.length} ảnh bị rớt khỏi Batch...`);
+                        const fallbackPromises = [
+                            runVpsSingleWorker('F1', fallbackQueue),
+                            runVpsSingleWorker('F2', fallbackQueue),
+                            runVpsSingleWorker('F3', fallbackQueue),
+                            runVpsSingleWorker('F4', fallbackQueue)
+                        ];
+                        await Promise.all(fallbackPromises);
+                    }
+                };
+                workers.push(runBatchWorkers());
+            }
             
-            // Đợi tất cả công nhân hoàn thành hết việc
             await Promise.all(workers);
 
-            // 4. KẾT THÚC
             setTimeout(() => {
                 pm.classList.add('opacity-0', 'pointer-events-none');
                 window.finishImportProcess();
-                
-                // Vẽ lại lần cuối để đảm bảo màu sắc đúng
                 if (window.renderMissingImagesPanel) window.renderMissingImagesPanel();
                 
                 const failed = pendingImageUploads.filter(i => i.type === 'tikz' && !i._done);
@@ -1985,8 +2039,8 @@
                     const m = document.getElementById('importModeModal');
                     
                     // Load VPS config
-                    const vpsMode = localStorage.getItem('tikzVpsMode') || 'free';
-                    const vpsUrl = localStorage.getItem('tikzVpsUrl') || '';
+                    const vpsMode = localStorage.getItem('tikzVpsMode') || 'personal';
+                    const vpsUrl = localStorage.getItem('tikzVpsUrl') || 'http://42.96.4.216:3000';
                     document.getElementById('vpsModeSelector').value = vpsMode;
                     document.getElementById('vpsCustomUrl').value = vpsUrl;
                     document.getElementById('vpsUrlContainer').classList.toggle('hidden', vpsMode === 'free');
@@ -4281,6 +4335,13 @@
                     </select>
                     <div id="vpsUrlContainer" class="hidden mt-2">
                         <label class="block text-xs text-gray-500 mb-1">Địa chỉ API VPS Cá nhân:</label>
+                        <input type="text" id="vpsCustomUrl" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm mb-3" placeholder="http://103.14.x.x:3000">
+                    </div>
+                    <label class="flex items-center gap-2 mt-3 cursor-pointer">
+                        <input type="checkbox" id="useTikzJaxCheckbox" class="w-4 h-4 text-brand rounded border-gray-300 focus:ring-brand">
+                        <span class="text-sm font-semibold text-gray-700">Dùng TikzJax cho mã TikZ thuần (Thử nghiệm)</span>
+                    </label>
+                </div>
                         <input type="text" id="vpsCustomUrl" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono" placeholder="VD: http://42.96.4.216:3000">
                     </div>
                 </div>
