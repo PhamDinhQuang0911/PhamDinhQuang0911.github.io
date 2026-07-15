@@ -153,58 +153,89 @@
           };
 
           window.use5050 = function(idx) {
-              const q = practiceQuestions[idx];
+              const q = window.practiceQuestions ? window.practiceQuestions[idx] : null; if(!q) return;
               const btn = document.getElementById(`fiftyBtn-${idx}`);
               if(!btn) return;
-              btn.disabled = true;
-              btn.classList.add('opacity-50', 'cursor-not-allowed');
-              btn.innerHTML = `<i class="fa-solid fa-check"></i> Đã dùng 50/50`;
               
-              if (q.type !== 'multiple_choice') return;
-              
-              const correctKeys = [];
-              if (q.correctAnswer) {
-                  ['A', 'B', 'C', 'D'].forEach(k => {
-                      if (q.correctAnswer.includes(k)) correctKeys.push(k);
+              if (q.type === 'mc' && q.shuffleMap) {
+                  let correctRealIdx = q.correct;
+                  if (correctRealIdx === undefined && q.correctAnswer) {
+                      correctRealIdx = ['A','B','C','D'].indexOf(q.correctAnswer);
+                  }
+                  let wrongIdxs = [];
+                  q.shuffleMap.forEach(realIdx => {
+                      if(realIdx != correctRealIdx) wrongIdxs.push(realIdx);
+                  });
+                  // pick 2 to hide
+                  wrongIdxs = wrongIdxs.sort(() => 0.5 - Math.random()).slice(0, 2);
+                  wrongIdxs.forEach(realIdx => {
+                      const optLabel = document.getElementById(`opt-${idx}-${realIdx}`);
+                      if(optLabel) {
+                          optLabel.style.opacity = '0.2';
+                          optLabel.style.pointerEvents = 'none';
+                      }
                   });
               }
               
-              const allKeys = ['A', 'B', 'C', 'D'];
-              const wrongKeys = allKeys.filter(k => !correctKeys.includes(k));
-              
-              const shuffled = wrongKeys.sort(() => 0.5 - Math.random());
-              const toRemove = shuffled.slice(0, 2);
-              
-              toRemove.forEach(k => {
-                  const lbl = document.getElementById(`lbl-${idx}-${k}`);
-                  if (lbl) {
-                      lbl.style.opacity = '0.2';
-                      lbl.style.pointerEvents = 'none';
-                  }
-              });
+              btn.disabled = true;
+              btn.classList.add('opacity-50', 'cursor-not-allowed');
+              btn.innerHTML = `<i class="fa-solid fa-check"></i> Đã dùng 50/50`;
           };
 
-          window.useHint = function(idx) {
-              const q = practiceQuestions[idx];
+          window.useHint = async function(idx) {
+              const q = window.practiceQuestions ? window.practiceQuestions[idx] : (typeof practiceQuestions !== 'undefined' ? practiceQuestions[idx] : null);
+              if (!q) return;
               const btn = document.getElementById(`hintBtn-${idx}`);
               if(!btn) return;
               btn.disabled = true;
               btn.classList.add('opacity-50', 'cursor-not-allowed');
-              btn.innerHTML = `<i class="fa-solid fa-check"></i> Đã xem Gợi ý`;
+              btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Đang hỏi AI...`;
               
               const container = document.getElementById(`q-${idx}`);
               const hintDiv = document.createElement('div');
               hintDiv.className = 'mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-xl text-yellow-800 text-sm animate-fade-in tex2jax_process shadow-sm';
               
-              let solText = q.solution || "";
-              let shortSol = solText.substring(0, Math.min(solText.length, 120)) + "... (Hãy tự suy nghĩ tiếp nhé!)";
-              
-              hintDiv.innerHTML = `<strong>💡 Gợi ý AI:</strong> <div class="mt-2">${shortSol}</div>`;
-              container.appendChild(hintDiv);
-              
-              if (window.MathJax) {
-                  MathJax.typesetPromise([hintDiv]).catch(()=>{});
+              try {
+                  let apiKey = window.aiKeys && window.aiKeys.length > 0 ? window.aiKeys[0] : null;
+                  if (!apiKey) {
+                      throw new Error("Hệ thống chưa cấu hình API Key cho tính năng này. Vui lòng báo Giáo viên kiểm tra lại.");
+                  }
+                  
+                  let prompt = `Bạn là một gia sư Toán học xuất sắc mang tên AI Antigravity. Học sinh đang giải câu hỏi sau:\n${q.content}\n\n`;
+                  if (q.options) {
+                      prompt += `Các đáp án: ${q.options.map(o => o.key + ". " + o.text).join(" | ")}\n\n`;
+                  }
+                  if (q.solution) {
+                      prompt += `Đây là lời giải chuẩn của bài toán (CHỈ DÀNH CHO BẠN BIẾT ĐỂ ĐỊNH HƯỚNG, KHÔNG ĐƯỢC CHÉP NGUYÊN VĂN): ${q.solution}\n\n`;
+                  }
+                  prompt += `Học sinh đang xin gợi ý (Hint). Nhiệm vụ: HÃY ĐƯA RA 1 GỢI Ý CỰC KỲ VẮN TẮT (1-2 câu). Chỉ nêu hướng làm hoặc công thức cần dùng. TUYỆT ĐỐI KHÔNG giải chi tiết, KHÔNG đưa ra kết quả. Xưng "thầy/cô" gọi "em".`;
+
+                  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                          contents: [{ parts: [{ text: prompt }] }],
+                          generationConfig: { temperature: 0.7, maxOutputTokens: 300 }
+                      })
+                  });
+
+                  const data = await response.json();
+                  if (data.error) throw new Error(data.error.message);
+                  
+                  const aiText = data.candidates[0].content.parts[0].text;
+                  hintDiv.innerHTML = `<strong><i class="fa-solid fa-robot text-yellow-600"></i> AI Gia Sư:</strong> <div class="mt-2 text-gray-700 font-medium">${window.formatContent ? window.formatContent(aiText) : aiText}</div>`;
+                  
+                  btn.innerHTML = `<i class="fa-solid fa-check"></i> Đã nhận Gợi ý AI`;
+              } catch (e) {
+                  console.error(e);
+                  hintDiv.innerHTML = `<strong><i class="fa-solid fa-triangle-exclamation text-red-500"></i> Lỗi:</strong> ${e.message}`;
+                  btn.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i> Lỗi AI`;
+                  btn.disabled = false;
+                  btn.classList.remove('opacity-50', 'cursor-not-allowed');
               }
+              
+              container.appendChild(hintDiv);
+              if (window.MathJax) MathJax.typesetPromise([hintDiv]).catch(()=>{});
           };
 
           // Các hàm giao diện cơ bản (được định nghĩa sớm để tránh lỗi "not defined")
@@ -331,16 +362,16 @@
                     <div class="absolute top-0 right-0 bg-blue-100 w-32 h-32 rounded-bl-full -mr-10 -mt-10 transition-transform group-hover:scale-110"></div>
                     <div class="relative z-10">
                         <div class="w-16 h-16 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center text-3xl mb-6 shadow-sm group-hover:bg-blue-600 group-hover:text-white transition-colors"><i class="fa-solid fa-layer-group"></i></div>
-                        <h3 class="text-xl font-bold text-gray-800 mb-2">Ôn tập theo Chuyên đề</h3>
-                        <p class="text-gray-500 text-sm">Chọn cụ thể Chương, Bài học hoặc Dạng toán.</p>
+                        <h3 class="text-xl font-bold text-gray-800 mb-2">Học Theo Lộ Trình</h3>
+                        <p class="text-gray-500 text-sm">Luyện tập các chuyên đề theo khối lớp, chương, bài, dạng do giáo viên xây dựng.</p>
                     </div>
                 </div>
                 <div onclick="selectMode('random')" class="mode-card bg-white p-8 rounded-3xl border-2 border-gray-100 cursor-pointer transition-all duration-300 relative group overflow-hidden">
                     <div class="absolute top-0 right-0 bg-purple-100 w-32 h-32 rounded-bl-full -mr-10 -mt-10 transition-transform group-hover:scale-110"></div>
                     <div class="relative z-10">
                         <div class="w-16 h-16 bg-purple-50 text-purple-600 rounded-2xl flex items-center justify-center text-3xl mb-6 shadow-sm group-hover:bg-purple-600 group-hover:text-white transition-colors"><i class="fa-solid fa-shuffle"></i></div>
-                        <h3 class="text-xl font-bold text-gray-800 mb-2">Luyện ngẫu nhiên</h3>
-                        <p class="text-gray-500 text-sm">Hệ thống tự động trích xuất câu hỏi ngẫu nhiên.</p>
+                        <h3 class="text-xl font-bold text-gray-800 mb-2">Tạo Đề Tự Chọn</h3>
+                        <p class="text-gray-500 text-sm">Học sinh tự chọn cấu hình môn, cấp độ để hệ thống tạo đề.</p>
                     </div>
                 </div>
             </div>
@@ -440,7 +471,7 @@
             </div>
         </div>
         <div id="practiceStep" class="hidden max-w-5xl mx-auto h-[calc(100vh-100px)] flex flex-col">
-            <div class="mb-4 flex items-center justify-between bg-white p-3 rounded-xl shadow-sm border border-gray-100 shrink-0">
+            <div class="mb-4 flex flex-col md:flex-row gap-3 items-center justify-between bg-white p-3 rounded-xl shadow-sm border border-gray-100 shrink-0">
                 <div class="flex items-center gap-4">
                     <div onclick="window.history.back()" class="w-10 h-10 rounded-xl bg-gray-50 hover:bg-gray-100 flex items-center justify-center text-gray-500 cursor-pointer transition-colors"><i class="fa-solid fa-arrow-left"></i></div>
                     <div>
@@ -513,7 +544,13 @@
         onAuthStateChanged(auth, async (user) => {
             if (user) {
                 
-                checkTutorial(); // Kiểm tra hiển thị hướng dẫn
+                                checkTutorial(); // Kiểm tra hiển thị hướng dẫn
+                
+                // Nạp API Key Gemini
+                getDoc(doc(db, "configurations", "ai_keys")).then(snap => {
+                    if (snap.exists() && snap.data().keys) window.aiKeys = snap.data().keys;
+                }).catch(e => console.log("Không thể nạp API Key:", e));
+
                 await Promise.all([loadMapTree(), loadBankMetadata()]);
                 loadUserPracticeStats(user.uid); // Nạp thống kê
 
@@ -961,6 +998,7 @@
                 
                 const results = await Promise.all(fetchPromises);
                 practiceQuestions = results.filter(q => q !== null);
+                  window.practiceQuestions = practiceQuestions;
                 if (practiceQuestions.length === 0) {
                     alert("Lỗi tải nội dung câu hỏi.");
                     return;
@@ -1010,7 +1048,7 @@
                         const opt = q.options[realIdx];
                         const label = String.fromCharCode(65 + displayIdx);
                         if(opt) {
-                            inputHtml += `<label class="flex items-center gap-3 p-3 border border-gray-200 rounded-xl cursor-pointer hover:bg-indigo-50 hover:border-indigo-200 transition-all group"><div class="flex items-center justify-center w-8 h-8 rounded-full bg-gray-100 text-gray-500 font-bold text-xs group-hover:bg-indigo-600 group-hover:text-white transition-colors shrink-0">${label}</div><input type="radio" name="ans-${idx}" value="${realIdx}" class="hidden" onchange="window.saveAnswer(${idx}, ${realIdx}, 'mc')"><span class="text-gray-700 text-sm font-medium math-content">${window.formatContent(opt)}</span></label>`;
+                            inputHtml += `<label id="opt-${idx}-${realIdx}" class="flex items-center gap-3 p-3 border border-gray-200 rounded-xl cursor-pointer hover:bg-indigo-50 hover:border-indigo-200 transition-all group"><div class="flex items-center justify-center w-8 h-8 rounded-full bg-gray-100 text-gray-500 font-bold text-xs group-hover:bg-indigo-600 group-hover:text-white transition-colors shrink-0">${label}</div><input type="radio" name="ans-${idx}" value="${realIdx}" class="hidden" onchange="window.saveAnswer(${idx}, ${realIdx}, 'mc')"><span class="text-gray-700 text-sm font-medium math-content">${window.formatContent(opt)}</span></label>`;
                         }
                     });
                     inputHtml += `</div>`;
@@ -1034,7 +1072,20 @@
                     <div class="flex items-start gap-3">
                         <div class="text-gray-800 text-base leading-relaxed flex-1 math-content font-medium overflow-x-auto">${window.formatContent(q.content)}</div>
                     </div>${inputHtml}`;
-                container.appendChild(qDiv);
+                  let lifelineHtml = '';
+                  let hintHtml = '';
+                  if (q.solution) {
+                      hintHtml = `<button onclick="useHint(${idx})" id="hintBtn-${idx}" class="text-xs text-yellow-500 font-bold hover:text-yellow-600 transition-colors flex items-center gap-1 px-3 py-1.5 bg-yellow-50 rounded-lg"><i class="fa-solid fa-lightbulb"></i> Gợi ý</button>`;
+                  }
+                  let fiftyHtml = '';
+                  if (q.type === 'mc') {
+                      fiftyHtml = `<button onclick="use5050(${idx})" id="fiftyBtn-${idx}" class="text-xs text-indigo-500 font-bold hover:text-indigo-600 transition-colors flex items-center gap-1 px-3 py-1.5 bg-indigo-50 rounded-lg"><i class="fa-solid fa-wand-magic-sparkles"></i> 50/50</button>`;
+                  }
+                  if (hintHtml || fiftyHtml) {
+                      lifelineHtml = `<div class="flex justify-end gap-2 mt-4 pt-3 border-t border-gray-50/10 w-full">${hintHtml}${fiftyHtml}</div>`;
+                  }
+                  qDiv.innerHTML += lifelineHtml;
+                  container.appendChild(qDiv);
                 const btn = document.createElement('button');
                 btn.id = `p-btn-${idx}`;
                 btn.className = "h-8 w-full rounded-lg border border-gray-200 flex items-center justify-center font-bold text-xs text-gray-400 hover:bg-gray-50 transition-colors";
