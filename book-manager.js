@@ -47,6 +47,10 @@ function extractBracesAfterCommand(text, command, numBraces, startIndex = 0) {
         let contentEnd = -1;
         
         for (let i = currentIdx; i < text.length; i++) {
+            if (text[i] === '\\' && (text[i+1] === '{' || text[i+1] === '}')) {
+                i++;
+                continue;
+            }
             if (text[i] === '{') {
                 braceCount++;
                 inBrace = true;
@@ -86,6 +90,10 @@ function extractLoigiai(exContent) {
             let start = post.indexOf('{', solMatch.index);
             let end = -1;
             for(let i=start; i<post.length; i++){
+                if (post[i] === '\\' && (post[i+1] === '{' || post[i+1] === '}')) {
+                    i++;
+                    continue;
+                }
                 if (post[i] === '{') depth++;
                 else if (post[i] === '}') {
                     depth--;
@@ -107,8 +115,9 @@ function postProcess(text) {
 
     processed = processed.replace(/(?<!\\)%.*/g, '');
 
-    // Dọn dẹp \displaystyle
+    // Dọn dẹp \displaystyle và \allowdisplaybreaks
     processed = processed.replace(/\\displaystyle\s*/g, '');
+    processed = processed.replace(/\\allowdisplaybreaks\s*/g, '');
 
     // Thay thế \ldots và \hfill
     processed = processed.replace(/\\ldots/g, '...');
@@ -118,11 +127,30 @@ function postProcess(text) {
     processed = processed.replace(/\\parbox(?:\[.*?\])?\{[^}]*\}\s*\{\s*(<div\s+id="placeholder-[^>]+>[\s\S]*?<\/div>)\s*\}/g, '$1');
     processed = processed.replace(/\{\s*(<div\s+id="placeholder-[^>]+>[\s\S]*?<\/div>)\s*\}/g, '$1');
     
-    // Dọn dẹp tabular
-    processed = processed.replace(/\\begin\{tabular\}\{[^}]*\}/g, '<div class="flex flex-wrap items-center justify-center gap-4 my-4 w-full">');
-    processed = processed.replace(/\\end\{tabular\s*\}/g, '</div>');
-    processed = processed.replace(/\s*&\s*(?=\\includegraphics|\\begin\{tikzpicture\})/g, '');
+    // Chuyển đổi tabular thành HTML Table
+    processed = processed.replace(/\\begin\{tabular\}\{([^}]*)\}([\s\S]*?)\\end\{tabular\s*\}/g, (match, align, content) => {
+        let html = '<div class="overflow-x-auto my-4"><table class="mx-auto border-collapse border border-slate-600 bg-white shadow-sm">';
+        let rows = content.split(/\\\\/);
+        for (let row of rows) {
+            row = row.replace(/\\hline/g, '').trim();
+            if (!row) continue;
+            
+            html += '<tr>';
+            let cells = row.split('&');
+            for (let cell of cells) {
+                html += `<td class="border border-slate-300 px-4 py-2 text-center align-middle latex-container">${cell.trim()}</td>`;
+            }
+            html += '</tr>';
+        }
+        html += '</table></div>';
+        return html;
+    });
 
+    let tcData;
+    while ((tcData = extractBracesAfterCommand(processed, '\\textcolor', 2)).found && tcData.contents.length === 2) {
+        processed = processed.substring(0, tcData.startIndex) + tcData.contents[1] + processed.substring(tcData.endIndex);
+    }
+    
     let imminiData;
     // Dọn "\\immini": văn bản bên trái, ảnh bên phải
     while ((imminiData = extractBracesAfterCommand(processed, '\\immini', 2)).found && imminiData.contents.length === 2) {
@@ -171,15 +199,42 @@ function postProcess(text) {
         </div>`;
     });
 
+    function getListStyle(opt) {
+        if (!opt) return "list-decimal";
+        if (opt.includes("a") || opt.includes("a)") || opt.includes("a.")) return "list-[lower-alpha]";
+        if (opt.includes("A") || opt.includes("A)") || opt.includes("A.")) return "list-[upper-alpha]";
+        if (opt.includes("i") || opt.includes("i)") || opt.includes("i.")) return "list-[lower-roman]";
+        if (opt.includes("I") || opt.includes("I)") || opt.includes("I.")) return "list-[upper-roman]";
+        return "list-decimal";
+    }
+
+    function getCols(cols) {
+        if (!cols || cols === "1") return "";
+        if (cols === "2") return "columns-1 sm:columns-2 gap-8";
+        if (cols === "3") return "columns-1 sm:columns-3 gap-8";
+        if (cols === "4") return "columns-2 sm:columns-4 gap-8";
+        return `columns-1 sm:columns-${cols} gap-8`;
+    }
+
     processed = processed.replace(/\\begin\{itemize\}/g, '<ul class="list-disc pl-8 my-3 space-y-2">');
     processed = processed.replace(/\\end\{itemize\s*\}/g, '</ul>');
-    processed = processed.replace(/\\begin\{enumerate\}(\[[^\]]*\])?/g, '<ol class="list-decimal pl-8 my-3 space-y-2">');
+    
+    processed = processed.replace(/\\begin\{enumerate\}(?:\[([^\]]*)\])?/g, (match, opt) => {
+        return `<ol class="${getListStyle(opt)} pl-8 my-3 space-y-2">`;
+    });
     processed = processed.replace(/\\end\{enumerate\s*\}/g, '</ol>');
-    processed = processed.replace(/\\begin\{enumEX\}(\[[^\]]*\])?\{[^}]*\}/g, '<ul class="list-[circle] pl-8 my-3 space-y-2">');
-    processed = processed.replace(/\\end\{enumEX\s*\}/g, '</ul>');
-    processed = processed.replace(/\\begin\{listEX\}(\[[^\]]*\])?/g, '<ul class="list-[circle] pl-8 my-3 space-y-2">');
-    processed = processed.replace(/\\end\{listEX\s*\}/g, '</ul>');
-    processed = processed.replace(/\\begin\{itemchoice\}/g, '<ul class="list-[circle] pl-8 my-3 space-y-2">');
+
+    processed = processed.replace(/\\begin\{enumEX\}(?:\[([^\]]*)\])?(?:\{([^}]*)\})?/g, (match, opt, cols) => {
+        return `<ol class="${getListStyle(opt)} pl-8 my-3 space-y-2 ${getCols(cols)}">`;
+    });
+    processed = processed.replace(/\\end\{enumEX\s*\}/g, '</ol>');
+
+    processed = processed.replace(/\\begin\{listEX\}(?:\[([^\]]*)\])?/g, (match, opt) => {
+        return `<ol class="${getListStyle(opt)} pl-8 my-3 space-y-2">`;
+    });
+    processed = processed.replace(/\\end\{listEX\s*\}/g, '</ol>');
+
+    processed = processed.replace(/\\begin\{itemchoice\}/g, '<ul class="list-[lower-alpha] pl-8 my-3 space-y-2">');
     processed = processed.replace(/\\end\{itemchoice\s*\}/g, '</ul>');
     
     // Nhận xét (nx) environment
@@ -187,6 +242,41 @@ function postProcess(text) {
     processed = processed.replace(/\\end\{nx\s*\}/g, '</div>');
     processed = processed.replace(/\\itemch/g, '<li class="mb-1">');
     processed = processed.replace(/\\item/g, '<li class="mb-1">');
+
+    function replaceBfIt(text) {
+        let res = text;
+        let regex = /\{\\(bf|it)(?:\s+|(?=\{))/;
+        let match;
+        while ((match = regex.exec(res)) !== null) {
+            let start = match.index;
+            let contentStart = start + match[0].length;
+            let depth = 1;
+            let end = -1;
+            for (let i = contentStart; i < res.length; i++) {
+                if (res[i] === '\\' && (res[i+1] === '{' || res[i+1] === '}')) {
+                    i++;
+                    continue;
+                }
+                if (res[i] === '{') depth++;
+                else if (res[i] === '}') {
+                    depth--;
+                    if (depth === 0) {
+                        end = i;
+                        break;
+                    }
+                }
+            }
+            if (end !== -1) {
+                let tag = match[1] === 'bf' ? 'strong' : 'em';
+                let innerContent = res.substring(contentStart, end);
+                res = res.substring(0, start) + `<${tag}>${innerContent}</${tag}>` + res.substring(end + 1);
+            } else {
+                res = res.substring(0, start) + res.substring(contentStart); // broken, just strip
+            }
+        }
+        return res;
+    }
+    processed = replaceBfIt(processed);
 
     let textbfData;
     while ((textbfData = extractBracesAfterCommand(processed, '\\textbf', 1)).found && textbfData.contents.length === 1) {
@@ -296,7 +386,7 @@ function postProcess(text) {
         return `<div class="note-env flex items-start gap-2 my-4 p-4 bg-red-50 rounded-lg border border-red-200"><i class="fa-solid fa-circle-exclamation text-red-600 mt-1 text-lg"></i><div class="italic text-gray-800 flex-1 latex-container note-content"><b>Lưu ý: </b>${content}</div></div>`;
     });
 
-    processedText = processedText.replace(/\\subsubsection\{([\s\S]*?)\}/g, '<div class="mt-6 mb-4 subsubsection-header text-xl font-bold text-slate-800"><span class="mr-2 subsubsection-number"></span>$1</div>');
+    processedText = processedText.replace(/\\subsubsection\{([\s\S]*?)\}/g, '<div class="mt-4 mb-2 subsubsection-header text-lg font-bold text-slate-800"><span class="mr-1 subsubsection-number"></span>$1</div>');
 
     return processedText.trim();
 }
@@ -348,6 +438,10 @@ function parseMCQ(text) {
                 let depth = 0;
                 let endTitleIdx = -1;
                 for(let j=0; j<trimmedPart.length; j++){
+                    if (trimmedPart[j] === '\\' && (trimmedPart[j+1] === '{' || trimmedPart[j+1] === '}')) {
+                        j++;
+                        continue;
+                    }
                     if (trimmedPart[j] === '{') depth++;
                     else if (trimmedPart[j] === '}') {
                         depth--;
@@ -436,6 +530,7 @@ function parseMCQ(text) {
 }
 
 function parseTreeStructure(text) {
+    text = text.replace(/(?<!\\)%.*/g, '');
     const sections = [];
     const sectionSplits = text.split(/\\section\{([\s\S]*?)\}/);
     
@@ -557,6 +652,18 @@ window.renameChapter = function(cIdx) {
     }
 };
 
+window.renameLesson = function(cIdx, lIdx) {
+    if(!window.currentBookData) return;
+    const newName = prompt("Nhập tên mới cho Bài:", window.currentBookData.chapters[cIdx].lessons[lIdx].title);
+    if(newName !== null && newName.trim() !== "") {
+        window.currentBookData.chapters[cIdx].lessons[lIdx].title = newName.trim();
+        renderTreeSidebar();
+        if(window.currentNodeIndex && window.currentNodeIndex.cIdx === cIdx && window.currentNodeIndex.lIdx === lIdx) {
+            document.getElementById('previewNodeTitle').textContent = newName.trim();
+        }
+    }
+};
+
 window.addLesson = function(cIdx) {
     if(!window.currentBookData) return;
     const lessonNum = window.currentBookData.chapters[cIdx].lessons.length + 1;
@@ -566,6 +673,45 @@ window.addLesson = function(cIdx) {
     });
     // Select it automatically
     window.selectNode(cIdx, window.currentBookData.chapters[cIdx].lessons.length - 1);
+};
+
+window.appendLessonUpload = async function(input) {
+    if (!input.files || input.files.length === 0 || !window.currentNodeIndex) return;
+    
+    const { cIdx, lIdx } = window.currentNodeIndex;
+    
+    const filesArray = Array.from(input.files).sort((a, b) => {
+        let aName = a.name.toLowerCase();
+        let bName = b.name.toLowerCase();
+        const score = (name) => {
+            if (name.includes('lt') || name.includes('lythuyet')) return 1;
+            if (name.includes('tl') || name.includes('tuluan')) return 2;
+            if (name.includes('tn') || name.includes('tracnghiem')) return 3;
+            return 4;
+        };
+        return score(aName) - score(bName);
+    });
+
+    let combinedText = "";
+    for (let f of filesArray) {
+        combinedText += await f.text() + "\n\n";
+    }
+    
+    const parsedSections = parseTreeStructure(combinedText);
+    
+    if (parsedSections.length > 0) {
+        const firstSection = parsedSections[0];
+        let targetLesson = window.currentBookData.chapters[cIdx].lessons[lIdx];
+        if(!targetLesson.subsections) targetLesson.subsections = [];
+        targetLesson.subsections.push(...firstSection.subsections);
+        
+        showToast("Nạp thêm nội dung thành công!", "success");
+        renderTreeSidebar();
+        showEditorPane();
+    } else {
+        showToast("Không tìm thấy nội dung hợp lệ", "error");
+    }
+    input.value = "";
 };
 
 window.handleLessonUpload = async function(input) {
@@ -695,9 +841,14 @@ function renderTreeSidebar() {
                             <span class="lesson-handle cursor-move px-1 mr-1 text-gray-300 hover:text-teal-600 transition" onclick="event.stopPropagation()"><i class="fa-solid fa-grip-vertical"></i></span>
                             <i class="fa-solid fa-file-lines mr-2 flex-shrink-0 ${isActive ? 'text-teal-500' : 'text-gray-400'}"></i> <span class="truncate block cursor-pointer">${lesson.title}</span>
                         </div>
-                        <button onclick="event.stopPropagation(); window.deleteLesson(${cIdx}, ${lIdx})" class="text-red-400 hover:text-red-600 p-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 ml-2" title="Xóa bài này">
-                            <i class="fa-solid fa-trash text-[11px]"></i>
-                        </button>
+                        <div class="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 ml-2 flex items-center">
+                            <button onclick="event.stopPropagation(); window.renameLesson(${cIdx}, ${lIdx})" class="text-blue-400 hover:text-blue-600 p-1" title="Đổi tên Bài">
+                                <i class="fa-solid fa-pencil text-[11px]"></i>
+                            </button>
+                            <button onclick="event.stopPropagation(); window.deleteLesson(${cIdx}, ${lIdx})" class="text-red-400 hover:text-red-600 p-1" title="Xóa bài này">
+                                <i class="fa-solid fa-trash text-[11px]"></i>
+                            </button>
+                        </div>
                     </div>
             `;
             if (isActive) {
@@ -842,6 +993,10 @@ window.replaceSection = async function(sectionType, subIdx) {
         if (!targetLesson.pendingImages) targetLesson.pendingImages = [];
         if (newLesson.pendingImages) {
             targetLesson.pendingImages.push(...newLesson.pendingImages);
+        }
+        if(window.currentPendingImages && window.currentPendingImages.length > 0) {
+            targetLesson.pendingImages = targetLesson.pendingImages.concat(window.currentPendingImages);
+            window.currentPendingImages = [];
         }
         
         showToast("Đã thay thế mục " + (sectionType === 'theory' ? 'Lý thuyết' : (sectionType === 'TL' ? 'Tự luận' : 'Trắc nghiệm')), "success");
@@ -993,7 +1148,7 @@ function showEditorPane() {
                         html += `
                             <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
                                 <div class="flex items-start gap-3 mb-4">
-                                    <div class="bg-green-100 text-green-700 font-bold px-3 py-1 rounded-md text-sm whitespace-nowrap">Bài ${index + 1}</div>
+                                    <div class="font-bold text-slate-800 text-lg whitespace-nowrap">Bài ${index + 1}.</div>
                                     <div class="latex-container flex-1 text-slate-800">${item.content}</div>
                                 </div>
                                 <div class="mt-4 pt-4 border-t border-dashed border-slate-200">
@@ -1012,7 +1167,7 @@ function showEditorPane() {
                 
                 // Trắc Nghiệm
                 if (sub.exercises_TN_Modules && sub.exercises_TN_Modules.length > 0) {
-                    html += `<div class="mb-10"><h4 class="text-xl font-bold text-slate-700 mb-4 flex items-center gap-2"><i class="fa-solid fa-list-check text-purple-500"></i> Trắc Nghiệm</h4><div class="space-y-6">`;
+                    html += `<div class="mb-10"><h4 class="text-xl font-bold text-slate-700 mb-4 flex items-center justify-between gap-2"><span><i class="fa-solid fa-list-check text-purple-500"></i> Trắc Nghiệm</span> <button onclick="window.replaceSection('TN', ${subIdx})" class="text-sm font-normal text-purple-600 bg-purple-50 px-2 py-1 rounded hover:bg-purple-100 transition-colors"><i class="fa-solid fa-upload"></i> Thay thế</button></h4><div class="space-y-6">`;
                     
                     let subsubCounter = 1;
                     let dangCounter = 1;
