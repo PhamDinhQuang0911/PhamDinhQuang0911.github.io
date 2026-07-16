@@ -918,8 +918,22 @@ async function loadLobbyData(id) {
         function renderQuestion(idx) {
             currentIndex = idx;
             const q = currentQuestions[idx];
-            document.getElementById('currentQNum').textContent = idx + 1;
-            dom.badge.textContent = q.type==='mc'?'TRẮC NGHIỆM':(q.type==='tf'?'ĐÚNG/SAI':(q.type==='short'?'TRẢ LỜI NGẮN':'TỰ LUẬN'));
+            
+            const qNumHeader = document.querySelector('.text-lg.font-bold.text-gray-400');
+            if (q.isTheory) {
+                qNumHeader.innerHTML = `<span class="text-blue-600 uppercase"><i class="fa-solid fa-book mr-1"></i> Phần Lý Thuyết</span>`;
+                dom.badge.textContent = 'LÝ THUYẾT';
+                dom.badge.className = "inline-block px-3 py-1 bg-blue-50 text-blue-600 rounded-lg text-xs font-bold uppercase tracking-wider mb-1";
+            } else {
+                let subtitle = '';
+                if (q.dangTitle) {
+                    subtitle = `<div class="text-[11px] font-normal text-purple-600 bg-purple-50 border border-purple-200 px-2 py-0.5 rounded mt-1.5 shadow-sm inline-block"><i class="fa-solid fa-layer-group mr-1.5 text-purple-500"></i>Dạng ${q.dangIndex}: ${q.dangTitle}</div>`;
+                }
+                qNumHeader.innerHTML = `Câu số <span id="currentQNum">${idx + 1}</span> <br> ${subtitle}`;
+                dom.badge.textContent = q.type==='mc'?'TRẮC NGHIỆM':(q.type==='tf'?'ĐÚNG/SAI':(q.type==='short'?'TRẢ LỜI NGẮN':'TỰ LUẬN'));
+                dom.badge.className = "inline-block px-3 py-1 bg-blue-50 text-blue-600 rounded-lg text-xs font-bold uppercase tracking-wider mb-1";
+            }
+
             dom.content.innerHTML = window.formatContent(q.content);
             dom.options.innerHTML = '';
 
@@ -1083,15 +1097,73 @@ async function loadLobbyData(id) {
 
         function updatePalette() {
             dom.palette.innerHTML = '';
+            dom.palette.className = 'flex flex-col gap-2'; // Đổi từ grid thành flex col để chứa các Accordion
+            
+            let currentGroup = null;
+            let btnContainer = dom.palette;
+
             currentQuestions.forEach((q, i) => {
-                const btn = document.createElement('button'); btn.className = "q-btn"; btn.textContent = i+1;
-                if(i===currentIndex) btn.classList.add('active'); else if(flaggedQuestions[i]) btn.classList.add('flagged');
-                else {
+                let groupLabel = '';
+                if (q.isTheory) groupLabel = 'LÝ THUYẾT';
+                else if (q.dangTitle) groupLabel = `Dạng ${q.dangIndex}: ${q.dangTitle}`;
+
+                if (groupLabel !== currentGroup) {
+                    currentGroup = groupLabel;
+                    if (groupLabel !== '') {
+                        const details = document.createElement('details');
+                        details.className = "bg-white rounded border border-gray-200 shadow-sm";
+                        details.open = true; // Mở sẵn cho dễ nhìn
+                        details.innerHTML = `
+                            <summary class="bg-gray-50 p-2 text-[11px] font-bold text-gray-700 cursor-pointer list-none flex justify-between items-center hover:bg-gray-100 [&::-webkit-details-marker]:hidden border-b border-transparent group-open:border-gray-200">
+                                <span class="uppercase flex-1 pr-2 truncate" title="${groupLabel}">${groupLabel}</span>
+                                <i class="fa-solid fa-chevron-down text-gray-400 group-open:rotate-180 transition-transform"></i>
+                            </summary>
+                            <div class="p-2 grid grid-cols-5 gap-2 group-btn-container"></div>
+                        `;
+                        dom.palette.appendChild(details);
+                        btnContainer = details.querySelector('.group-btn-container');
+                    } else {
+                        const div = document.createElement('div');
+                        div.className = "grid grid-cols-5 gap-2 group-btn-container";
+                        dom.palette.appendChild(div);
+                        btnContainer = div;
+                    }
+                }
+
+                const btn = document.createElement('button'); 
+                btn.className = "q-btn flex items-center justify-center font-bold text-sm w-full aspect-square rounded-lg border-2 transition-all"; 
+                
+                // Set text cho nút
+                if (q.isTheory) {
+                    btn.textContent = "LT";
+                    btn.title = "Lý thuyết";
+                    btn.classList.add('text-xs');
+                } else {
+                    btn.textContent = q.dangTitle ? q.dangQIndex : i+1;
+                    if(q.dangTitle) btn.title = `Câu ${i+1} (Dạng ${q.dangIndex} - Câu ${q.dangQIndex})`;
+                }
+
+                if(i===currentIndex) {
+                    btn.classList.add('active', 'border-blue-500', 'bg-blue-50', 'text-blue-700');
+                    // Tự động cuộn/mở group nếu câu hiện tại đang ở trong group đó
+                    if (btnContainer !== dom.palette && btnContainer.parentElement) {
+                        btnContainer.parentElement.open = true;
+                    }
+                } else if(flaggedQuestions[i]) {
+                    btn.classList.add('flagged', 'border-red-400', 'bg-red-50', 'text-red-600');
+                } else {
                     const a = userAnswers[i]; let done = (a!==undefined && a!==null && a!=="");
                     if(q.type==='tf' && typeof a==='object') done = Object.keys(a).length>0;
-                    if(done) btn.classList.add('answered');
+                    
+                    if(done) {
+                        btn.classList.add('answered', 'border-green-400', 'bg-green-50', 'text-green-700');
+                    } else {
+                        btn.classList.add('border-gray-200', 'bg-white', 'text-gray-500', 'hover:bg-gray-50', 'hover:border-gray-300');
+                    }
                 }
-                btn.onclick = () => renderQuestion(i); dom.palette.appendChild(btn);
+                
+                btn.onclick = () => renderQuestion(i); 
+                btnContainer.appendChild(btn);
             });
             // Update Progress Bar
             const answeredCount = Object.keys(userAnswers).length;
@@ -1410,6 +1482,7 @@ async function loadLobbyData(id) {
             const pal = document.getElementById('solutionPalette'); 
             list.innerHTML = ''; 
             pal.innerHTML = '';
+            pal.className = 'flex flex-col gap-2'; // Reset palette container
 
             let durationStr = "--:--";
             if (h.duration) {
@@ -1446,6 +1519,9 @@ async function loadLobbyData(id) {
             
             // [TỰ ĐỘNG DÁN LẠI LOGIC RENDER ĐỂ BẠN ĐỠ PHẢI TÌM]
             const normalize = (str) => String(str).replace(/\$| /g, '').toLowerCase().trim();
+            let currentGroup = null;
+            let btnContainer = pal;
+
             currentQuestions.forEach((q, idx) => {
                 const u = userAnswers[idx]; let isCorrect = false; let ansHtml = '';
                 
@@ -1467,16 +1543,65 @@ async function loadLobbyData(id) {
                 else if (q.type==='tf') { 
                     let matches=0; ansHtml='<ul class="text-sm mt-2">'; 
                     let displayIndices = q.statements.map((_,k)=>k); 
-                    // Nếu muốn hiển thị lại đúng thứ tự đã đảo (nâng cao), cần lưu shuffleMapTF vào db. 
-                    // Hiện tại hiển thị theo thứ tự gốc để dễ tra cứu.
                     
                     q.statements.forEach((s,i)=>{ const uc = (u&&u[i]!==undefined)?(u[i]?'Đ':'S'):'_'; const tc = s.isTrue?'Đ':'S'; const m = (u&&u[i]===s.isTrue); if(m) matches++; ansHtml+=`<li>- ${window.formatContent(s.text)}: <b class="${m?'text-green-600':'text-red-500'}">${uc}</b> (Đúng: ${tc})</li>`; }); ansHtml+='</ul>'; isCorrect = (matches === q.statements.length); 
                 }
                 else { ansHtml = `<div class="text-gray-500 italic">Câu hỏi tự luận (Cần giáo viên chấm)</div>${u ? `<div class="mt-2 text-xs bg-gray-50 p-2 border">Đã nộp bài</div>` : ''}`; }
 
-                const btn = document.createElement('button'); btn.className = `q-btn ${isCorrect?'correct':(isCorrect===false?'wrong':'partial')}`; btn.textContent = idx+1; btn.onclick = () => { document.getElementById(`sol-q-${idx}`).scrollIntoView({behavior:'smooth', block:'center'}); closeAllSidebars(); }; pal.appendChild(btn);
+                // Group logic for Solution Palette
+                let groupLabel = '';
+                if (q.isTheory) groupLabel = 'LÝ THUYẾT';
+                else if (q.dangTitle) groupLabel = `Dạng ${q.dangIndex}: ${q.dangTitle}`;
+
+                if (groupLabel !== currentGroup) {
+                    currentGroup = groupLabel;
+                    if (groupLabel !== '') {
+                        const details = document.createElement('details');
+                        details.className = "bg-white rounded border border-gray-200 shadow-sm";
+                        details.open = true;
+                        details.innerHTML = `
+                            <summary class="bg-gray-50 p-2 text-[11px] font-bold text-gray-700 cursor-pointer list-none flex justify-between items-center hover:bg-gray-100 [&::-webkit-details-marker]:hidden border-b border-transparent group-open:border-gray-200">
+                                <span class="uppercase flex-1 pr-2 truncate" title="${groupLabel}">${groupLabel}</span>
+                                <i class="fa-solid fa-chevron-down text-gray-400 group-open:rotate-180 transition-transform"></i>
+                            </summary>
+                            <div class="p-2 grid grid-cols-5 gap-2 group-btn-container"></div>
+                        `;
+                        pal.appendChild(details);
+                        btnContainer = details.querySelector('.group-btn-container');
+                    } else {
+                        const div = document.createElement('div');
+                        div.className = "grid grid-cols-5 gap-2 group-btn-container";
+                        pal.appendChild(div);
+                        btnContainer = div;
+                    }
+                }
+
+                const btn = document.createElement('button'); 
+                btn.className = `q-btn flex items-center justify-center font-bold text-sm w-full aspect-square rounded-lg border-2 transition-all ${isCorrect?'correct':(isCorrect===false?'wrong':'partial')}`; 
+                
+                if (q.isTheory) {
+                    btn.textContent = "LT";
+                    btn.title = "Lý thuyết";
+                    btn.classList.add('text-xs');
+                } else {
+                    btn.textContent = q.dangTitle ? q.dangQIndex : idx+1;
+                    if(q.dangTitle) btn.title = `Câu ${idx+1} (Dạng ${q.dangIndex} - Câu ${q.dangQIndex})`;
+                }
+
+                btn.onclick = () => { document.getElementById(`sol-q-${idx}`).scrollIntoView({behavior:'smooth', block:'center'}); closeAllSidebars(); }; 
+                btnContainer.appendChild(btn);
+                
+                // Solution Item in Main View
+                let headerHtml = `Câu ${idx+1} (${q.type ? q.type.toUpperCase() : 'Question'})`;
+                if (q.isTheory) {
+                    headerHtml = `<span class="text-blue-700 uppercase"><i class="fa-solid fa-book mr-1"></i> PHẦN LÝ THUYẾT</span>`;
+                    ansHtml = ''; // Ẩn phần chấm điểm với Lý thuyết
+                } else if (q.dangTitle) {
+                    headerHtml = `Câu ${idx+1} <span class="text-[11px] font-normal text-purple-600 bg-purple-50 border border-purple-200 px-2 py-1 rounded-lg ml-2 inline-block"><i class="fa-solid fa-layer-group mr-1.5 text-purple-500"></i>Dạng ${q.dangIndex}: ${q.dangTitle}</span>`;
+                }
+
                 const item = document.createElement('div'); item.id = `sol-q-${idx}`; item.className = "bg-white p-6 rounded-2xl shadow-sm border border-gray-200 mb-6";
-                item.innerHTML = `<div class="font-bold text-gray-500 text-sm mb-2">Câu ${idx+1} (${q.type ? q.type.toUpperCase() : 'Question'})</div><div class="mb-4 text-gray-800 text-lg">${window.formatContent(q.content)}</div><div class="bg-gray-50 p-3 rounded-lg border border-gray-200 mb-3">${ansHtml}</div>${q.solution ? `<div class="solution-box"><div class="font-bold text-green-700 mb-1">Lời giải:</div><div class="text-gray-700">${window.formatContent(q.solution)}</div></div>` : ''}`;
+                item.innerHTML = `<div class="font-bold text-gray-500 text-sm mb-3 flex items-center">${headerHtml}</div><div class="mb-4 text-gray-800 text-lg">${window.formatContent(q.content)}</div>${ansHtml ? `<div class="bg-gray-50 p-3 rounded-lg border border-gray-200 mb-3">${ansHtml}</div>` : ''}${q.solution ? `<div class="solution-box"><div class="font-bold text-green-700 mb-1">Lời giải:</div><div class="text-gray-700">${window.formatContent(q.solution)}</div></div>` : ''}`;
                 list.appendChild(item);
             });
 
