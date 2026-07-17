@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Công cụ dọn dẹp Firebase Storage</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body class="bg-gray-100 min-h-screen p-8">
+
+    <div class="max-w-3xl mx-auto bg-white rounded-2xl shadow-xl overflow-hidden">
+        <div class="bg-red-600 p-6 text-white">
+            <h1 class="text-2xl font-bold"><i class="fa-solid fa-trash-can mr-2"></i> Công cụ dọn dẹp hình ảnh thừa</h1>
+            <p class="text-red-100 text-sm mt-1">Cảnh báo: Hành động xóa không thể khôi phục. Hãy kiểm tra kỹ.</p>
+        </div>
+
+        <div class="p-6">
+            <div id="statusArea" class="mb-6 space-y-2">
+                <div class="flex justify-between items-center bg-blue-50 p-3 rounded border border-blue-200">
+                    <span>1. Tổng số đề thi đã quét:</span>
+                    <span id="countExams" class="font-bold text-blue-700">0</span>
+                </div>
+                <div class="flex justify-between items-center bg-green-50 p-3 rounded border border-green-200">
+                    <span>2. Tổng số ảnh ĐANG SỬ DỤNG (trong DB):</span>
+                    <span id="countUsed" class="font-bold text-green-700">0</span>
+                </div>
+                <div class="flex justify-between items-center bg-gray-50 p-3 rounded border border-gray-200">
+                    <span>3. Tổng số file ảnh TRÊN STORAGE (thư mục images/):</span>
+                    <span id="countStorage" class="font-bold text-gray-700">0</span>
+                </div>
+                <div class="flex justify-between items-center bg-red-50 p-3 rounded border border-red-200">
+                    <span>4. Số file RÁC (Không sử dụng):</span>
+                    <span id="countTrash" class="font-bold text-red-600 text-xl">0</span>
+                </div>
+            </div>
+
+            <div class="flex gap-4 mb-6">
+                <button id="btnScan" onclick="startScan()" class="flex-1 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition-colors shadow-lg">
+                    <i class="fa-solid fa-magnifying-glass"></i> Bắt đầu Quét
+                </button>
+                <button id="btnDelete" onclick="deleteTrash()" disabled class="flex-1 py-3 bg-gray-300 text-white font-bold rounded-xl transition-colors cursor-not-allowed">
+                    <i class="fa-solid fa-dumpster-fire"></i> Xóa vĩnh viễn
+                </button>
+            </div>
+
+            <div class="border rounded-xl overflow-hidden">
+                <div class="bg-gray-100 px-4 py-2 font-bold text-xs uppercase text-gray-500">Nhật ký chi tiết</div>
+                <div id="logArea" class="h-64 overflow-y-auto p-4 text-xs font-mono bg-black text-green-400 space-y-1">
+                    <p class="text-gray-500">> Sẵn sàng. Vui lòng bấm "Bắt đầu Quét"...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getFirestore, collection, getDocs } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { getStorage, ref, listAll, deleteObject } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js";
+
+        // CẤU HÌNH FIREBASE (Lấy từ code của bạn)
+        const firebaseConfig = {
+            apiKey: "AIzaSyCqAX3x1MbJ3do7m3EaH9JA4kFuVhlAc78",
+            authDomain: "lms-thitracnghiem.firebaseapp.com",
+            projectId: "lms-thitracnghiem",
+            storageBucket: "lms-thitracnghiem.firebasestorage.app",
+            messagingSenderId: "760187217240",
+            appId: "1:760187217240:web:d043cd5808c349f87a712d"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const storage = getStorage(app);
+
+        let usedImageUrls = new Set();
+        let storageFiles = [];
+        let trashFiles = []; // Danh sách file sẽ xóa
+
+        function log(msg, type = 'info') {
+            const logArea = document.getElementById('logArea');
+            const p = document.createElement('p');
+            if(type === 'error') p.className = "text-red-500";
+            else if(type === 'warning') p.className = "text-yellow-400";
+            else if(type === 'success') p.className = "text-white font-bold";
+            p.textContent = `> ${msg}`;
+            logArea.appendChild(p);
+            logArea.scrollTop = logArea.scrollHeight;
+        }
+
+        // 1. QUÉT DATABASE ĐỂ TÌM ẢNH ĐANG DÙNG
+        async function getUsedImages() {
+            log("Đang tải danh sách đề thi từ Firestore...");
+            const querySnapshot = await getDocs(collection(db, "exams"));
+            document.getElementById('countExams').textContent = querySnapshot.size;
+            
+            const regex = /https:\/\/firebasestorage\.googleapis\.com\/v0\/b\/[^"'\s\\]+/g;
+            let count = 0;
+
+            querySnapshot.forEach((doc) => {
+                const data = doc.data();
+                // Chuyển toàn bộ object thành string để tìm link ảnh
+                const str = JSON.stringify(data);
+                const matches = str.match(regex);
+                if (matches) {
+                    matches.forEach(url => {
+                        // Giải mã URL để lấy đúng tên file (xử lý ký tự %2F, %20...)
+                        try {
+                            const decoded = decodeURIComponent(url);
+                            usedImageUrls.add(decoded);
+                            count++;
+                        } catch(e) {}
+                    });
+                }
+            });
+            log(`Tìm thấy ${count} link ảnh đang được sử dụng trong các đề thi.`, 'success');
+            document.getElementById('countUsed').textContent = count;
+        }
+
+        // 2. QUÉT STORAGE ĐỂ LẤY TẤT CẢ FILE
+        async function getStorageFiles() {
+            log("Đang liệt kê file trong thư mục 'images/' trên Storage...");
+            const listRef = ref(storage, 'images');
+            
+            try {
+                // Lưu ý: listAll có thể chậm nếu có quá nhiều file. 
+                // Với số lượng file trong ảnh bạn gửi (vài chục/trăm) thì vẫn ổn.
+                const res = await listAll(listRef);
+                storageFiles = res.items; // Mảng các Reference
+                document.getElementById('countStorage').textContent = storageFiles.length;
+                log(`Tìm thấy ${storageFiles.length} file trong kho.`, 'success');
+            } catch (error) {
+                log("Lỗi quét Storage: " + error.message, 'error');
+            }
+        }
+
+        // 3. SO SÁNH VÀ TÌM RÁC
+        window.startScan = async () => {
+            const btnScan = document.getElementById('btnScan');
+            btnScan.disabled = true;
+            btnScan.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang quét...';
+            
+            // Reset
+            usedImageUrls = new Set();
+            storageFiles = [];
+            trashFiles = [];
+
+            try {
+                await getUsedImages();
+                await getStorageFiles();
+
+                log("Đang so sánh dữ liệu...", 'warning');
+                
+                // Thuật toán so sánh
+                storageFiles.forEach((fileRef) => {
+                    // fileRef.fullPath ví dụ: "images/batch_123.jpg"
+                    // Chúng ta kiểm tra xem fullPath này có nằm trong danh sách URL đã dùng không
+                    let isUsed = false;
+                    
+                    // Kiểm tra từng URL đã dùng xem có chứa path của file này không
+                    for (let usedUrl of usedImageUrls) {
+                        if (usedUrl.includes(fileRef.fullPath)) {
+                            isUsed = true;
+                            break;
+                        }
+                    }
+
+                    if (!isUsed) {
+                        trashFiles.push(fileRef);
+                    }
+                });
+
+                document.getElementById('countTrash').textContent = trashFiles.length;
+
+                if (trashFiles.length > 0) {
+                    log(`PHÁT HIỆN ${trashFiles.length} FILE RÁC!`, 'error');
+                    const btnDelete = document.getElementById('btnDelete');
+                    btnDelete.disabled = false;
+                    btnDelete.classList.remove('bg-gray-300', 'cursor-not-allowed');
+                    btnDelete.classList.add('bg-red-600', 'hover:bg-red-700', 'shadow-lg');
+                    btnDelete.innerHTML = `<i class="fa-solid fa-dumpster-fire"></i> Xóa vĩnh viễn ${trashFiles.length} file rác`;
+                } else {
+                    log("Tuyệt vời! Hệ thống sạch sẽ, không có file rác.", 'success');
+                }
+
+            } catch (error) {
+                log("Lỗi nghiêm trọng: " + error.message, 'error');
+            } finally {
+                btnScan.disabled = false;
+                btnScan.innerHTML = '<i class="fa-solid fa-magnifying-glass"></i> Quét lại';
+            }
+        };
+
+        // 4. XÓA FILE
+        window.deleteTrash = async () => {
+            if (!confirm(`CẢNH BÁO CUỐI CÙNG:\nBạn sắp xóa vĩnh viễn ${trashFiles.length} file ảnh.\nHành động này không thể hoàn tác.\nBạn có chắc chắn không?`)) return;
+
+            const btnDelete = document.getElementById('btnDelete');
+            btnDelete.disabled = true;
+            btnDelete.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang xóa...';
+
+            log("Bắt đầu xóa...", 'warning');
+            
+            let deletedCount = 0;
+            // Xóa song song từng đợt 5 file để không bị quá tải request
+            const batchSize = 5;
+            for (let i = 0; i < trashFiles.length; i += batchSize) {
+                const batch = trashFiles.slice(i, i + batchSize);
+                await Promise.all(batch.map(async (fileRef) => {
+                    try {
+                        await deleteObject(fileRef);
+                        log(`Đã xóa: ${fileRef.name}`);
+                        deletedCount++;
+                    } catch (error) {
+                        log(`Lỗi xóa ${fileRef.name}: ${error.message}`, 'error');
+                    }
+                }));
+                // Cập nhật tiến độ
+                document.getElementById('countTrash').textContent = trashFiles.length - deletedCount;
+            }
+
+            log(`HOÀN TẤT! Đã xóa thành công ${deletedCount} file.`, 'success');
+            btnDelete.innerHTML = '<i class="fa-solid fa-check"></i> Đã dọn dẹp xong';
+            
+            // Tự động quét lại để xác nhận
+            setTimeout(() => window.startScan(), 2000);
+        };
+    </script>
+</body>
+</html>

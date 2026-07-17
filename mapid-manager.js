@@ -1,4 +1,3 @@
-import { parseTopicFromTex } from './topic-parser.js';
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
 import { getFirestore, doc, getDoc, setDoc, enableIndexedDbPersistence } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
@@ -102,10 +101,9 @@ function renderTree() {
         toggleBtn.onclick = (e) => { e.stopPropagation(); if (hasChildren) { isExpanded ? expandedNodes.delete(currentPathId) : expandedNodes.add(currentPathId); renderTree(); } };
 
         let iconHtml = '<i class="fa-solid fa-circle text-[6px] text-gray-300"></i>';
-        if (node.level === 0) iconHtml = '<i class="fa-solid fa-layer-group text-yellow-500"></i>';
-        else if (node.level === 1) iconHtml = '<i class="fa-solid fa-book-open text-blue-500"></i>';
+        if (node.level === 0) iconHtml = '<i class="fa-solid fa-folder text-yellow-500"></i>';
+        else if (node.level === 1) iconHtml = '<i class="fa-solid fa-book text-blue-500"></i>';
         else if (node.level === 2) iconHtml = '<i class="fa-solid fa-bookmark text-green-500"></i>';
-        else iconHtml = '<i class="fa-solid fa-file-lines text-purple-500"></i>';
 
         const idBadge = document.createElement('span');
         idBadge.className = "font-mono text-xs font-bold text-gray-600 bg-gray-200 px-1.5 rounded min-w-[24px] text-center hover:bg-white hover:border hover:border-blue-400 outline-none";
@@ -133,7 +131,7 @@ function renderTree() {
         if (node.isRealWorld) tagsDiv.innerHTML += '<span class="px-1.5 py-0.5 rounded bg-green-100 text-green-700 text-[9px] font-bold shadow-sm" title="Thực tế">TT</span>';
 
         const addBtn = document.createElement('button');
-        addBtn.className = "w-6 h-6 rounded flex items-center justify-center text-gray-300 hover:text-green-600 hover:bg-green-100 opacity-100 transition-all";
+        addBtn.className = "w-6 h-6 rounded flex items-center justify-center text-gray-300 hover:text-green-600 hover:bg-green-100 opacity-0 group-hover:opacity-100 transition-all";
         addBtn.innerHTML = '<i class="fa-solid fa-plus text-xs"></i>';
         addBtn.onclick = (e) => { e.stopPropagation(); if (!node.children) node.children = []; node.children.push({ id: "?", name: "Mục mới", level: node.level + 1, children: [], isTheory: false, isRealWorld: false }); expandedNodes.add(currentPathId); renderTree(); };
 
@@ -162,9 +160,6 @@ function renderTree() {
     }
 }
 
-window.currentTopicId = "";
-    const btnGrp = document.getElementById("topicActionButtons");
-    if (btnGrp) btnGrp.style.display = "none";
 function updateRightPanel() {
     const infoPanel = document.getElementById('infoPanel');
     const infoEmpty = document.getElementById('infoEmpty');
@@ -183,9 +178,7 @@ function updateRightPanel() {
         if (pathContainer) {
             pathContainer.innerHTML = '';
             document.getElementById('previewID').innerText = path.map(n => n.id).join('');
-            window.currentTopicId = path.map(n => n.id).join("");
-              window.loadTopicContent(window.currentTopicId);
-              path.forEach((p, idx) => {
+            path.forEach((p, idx) => {
                 const div = document.createElement('div');
                 div.className = "flex items-start gap-3 text-sm";
                 div.innerHTML = `
@@ -345,248 +338,3 @@ function showToast(msg) {
         }, 3000);
     }
 }
-
-
-// --- LOGIC QUẢN LÝ CHUYÊN ĐỀ (TOPIC MANAGER) ---
-window.globalBankQuestions = [];
-window.topicQuestions = [];
-
-window.loadBankData = async () => {
-    try {
-        const res = await fetch("https://upload-helper.phamngockhanh-942001.workers.dev/bank");
-        if (res.ok) {
-            window.globalBankQuestions = await res.json();
-        }
-    } catch (e) {
-        console.error("Lỗi tải Ngân hàng:", e);
-    }
-};
-
-window.loadTopicContent = async (mapId) => {
-    if (!mapId) return;
-    const guide = document.getElementById('topicBuilderGuide');
-    if (guide) guide.style.display = 'none';
-    const content = document.getElementById('topicBuilderContent');
-    if (content) content.style.display = 'flex';
-    const title2 = document.getElementById('topicContentTitle2');
-    if (title2) title2.innerHTML = '<i class="fa-solid fa-bookmark mr-2"></i>' + mapId;
-    document.getElementById('topicContentTitle').innerHTML = `<i class="fa-solid fa-book-open text-blue-500 mr-2"></i>Nội dung Chuyên đề: ${mapId}`;
-    const listDiv = document.getElementById('topicQuestionsList');
-    listDiv.innerHTML = '<div class="text-center py-20 text-gray-400"><i class="fa-solid fa-spinner fa-spin text-3xl mb-3 text-blue-500"></i><br>Đang tải câu hỏi...</div>';
-    
-    if (window.globalBankQuestions.length === 0) {
-        await window.loadBankData();
-    }
-    
-    window.topicQuestions = window.globalBankQuestions.filter(q => q.mapId === mapId || (q.id && q.id.startsWith(mapId + "_")));
-    
-    renderTopicQuestions();
-};
-
-function renderTopicQuestions() {
-    const listDiv = document.getElementById('topicQuestionsList');
-    if (window.topicQuestions.length === 0) {
-        listDiv.innerHTML = `
-            <div class="text-center text-gray-400 py-20 flex flex-col items-center">
-                <i class="fa-solid fa-box-open text-4xl mb-3 text-gray-300"></i>
-                <p>Chuyên đề này chưa có câu hỏi nào.</p>
-                <p class="text-xs mt-2">Bấm "Nhập file" hoặc "Chọn từ kho" để thêm.</p>
-            </div>
-        `;
-        return;
-    }
-    
-    let html = '';
-    window.topicQuestions.forEach((q, idx) => {
-        let optionsHtml = '';
-        if (q.options && q.options.length > 0) {
-            optionsHtml = '<div class="grid grid-cols-2 gap-2 mt-3">';
-            q.options.forEach(opt => {
-                const isCorrect = (opt.key === q.correctAnswer);
-                optionsHtml += `<div class="p-2 rounded text-sm ${isCorrect ? 'bg-green-50 border border-green-200 text-green-700 font-bold' : 'bg-gray-50 border border-gray-100 text-gray-600'}">${opt.key}. ${opt.text}</div>`;
-            });
-            optionsHtml += '</div>';
-        }
-        
-        html += `
-            <div class="bg-white p-4 rounded-xl border border-gray-200 shadow-sm relative group">
-                <div class="flex justify-between items-start mb-2">
-                    <span class="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-1 rounded">Câu ${idx + 1}</span>
-                    <button onclick="window.removeQuestionFromTopic('${q.id}')" class="text-gray-400 hover:text-red-500 hidden group-hover:block transition-colors"><i class="fa-solid fa-trash-can"></i></button>
-                </div>
-                <div class="text-sm text-gray-800 math-content">${q.content}</div>
-                ${optionsHtml}
-            </div>
-        `;
-    });
-    listDiv.innerHTML = html;
-    if (window.MathJax) {
-        MathJax.typesetPromise([listDiv]).catch(() => {});
-    }
-}
-
-window.removeQuestionFromTopic = async (qId) => {
-    if(!confirm("Bạn có muốn bỏ câu hỏi này khỏi chuyên đề?")) return;
-    try {
-        const qData = await (await fetch(`https://upload-helper.phamngockhanh-942001.workers.dev/bank?id=${qId}`)).json();
-        qData.mapId = ""; // Remove mapId
-        const blob = new Blob([JSON.stringify(qData)], { type: 'application/json' });
-        const formData = new FormData();
-        formData.append('file', blob, `bank/${qId}.json`);
-        await fetch("https://upload-helper.phamngockhanh-942001.workers.dev/", { method: 'PUT', body: formData });
-        
-        showToast("Đã loại bỏ khỏi chuyên đề!", "success");
-        window.loadTopicContent(window.currentTopicId); // Reload
-    } catch (e) {
-        showToast("Lỗi: " + e.message, "error");
-    }
-};
-
-// --- LOGIC NHẬP FILE ---
-document.getElementById('btnImportTopic').addEventListener('click', () => {
-    if (!window.currentTopicId) {
-        showToast("Vui lòng chọn một chuyên đề bên trái!", "error");
-        return;
-    }
-    let input = document.getElementById('hiddenImportTopicInput');
-    if (!input) {
-        input = document.createElement('input');
-        input.id = 'hiddenImportTopicInput';
-        input.type = 'file';
-        input.accept = '.txt,.tex';
-        input.style.display = 'none';
-        document.body.appendChild(input);
-    }
-    input.value = ''; // Reset
-    input.onchange = async (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
-        showToast("Đang xử lý file...", "info");
-        const reader = new FileReader();
-        reader.onload = async (event) => {
-            try {
-                const text = event.target.result;
-                const fileMap = new Map();
-                fileMap.set(file.name, text);
-                
-                const parsedTopic = await parseTopicFromTex(fileMap, new Map(), () => {});
-                if (!parsedTopic.questions || parsedTopic.questions.length === 0) {
-                    showToast("Không tìm thấy câu hỏi nào trong file!", "error");
-                    return;
-                }
-                
-                showToast(`Đã bóc tách ${parsedTopic.questions.length} câu. Đang tải lên...`, "info");
-                for (let i = 0; i < parsedTopic.questions.length; i++) {
-                    const q = parsedTopic.questions[i];
-                    const qId = `${window.currentTopicId}_${Date.now()}_${i}`;
-                    q.id = qId;
-                    q.mapId = window.currentTopicId;
-                    
-                    const blob = new Blob([JSON.stringify(q)], { type: 'application/json' });
-                    const formData = new FormData();
-                    formData.append('file', blob, `bank/${qId}.json`);
-                    await fetch("https://upload-helper.phamngockhanh-942001.workers.dev/", { method: 'PUT', body: formData });
-                }
-                
-                showToast("Nhập file thành công!", "success");
-                window.loadTopicContent(window.currentTopicId); // Reload
-            } catch (err) {
-                console.error(err);
-                showToast("Lỗi phân tích file", "error");
-            }
-        };
-        reader.readAsText(file);
-    };
-    input.click();
-});
-
-// --- LOGIC CHỌN TỪ NGÂN HÀNG ---
-document.getElementById('btnSelectBank').addEventListener('click', async () => {
-    if (!window.currentTopicId) {
-        showToast("Vui lòng chọn một chuyên đề bên trái!", "error");
-        return;
-    }
-    document.getElementById('selectBankModalSubtitle').innerText = `Đang thêm vào: ${window.currentTopicId}`;
-    document.getElementById('selectBankModal').classList.remove('hidden');
-    document.getElementById('selectBankModal').classList.add('flex');
-    
-    if (window.globalBankQuestions.length === 0) {
-        await window.loadBankData();
-    }
-    window.renderBankModalList();
-});
-
-window.renderBankModalList = () => {
-    const listDiv = document.getElementById('bankModalList');
-    const search = document.getElementById('bankSearch').value.toLowerCase();
-    const filterLvl = document.getElementById('bankFilterLevel').value;
-    
-    let filtered = window.globalBankQuestions.filter(q => {
-        if (q.mapId === window.currentTopicId) return false; // Hide already in this topic
-        if (filterLvl !== 'all' && q.level !== filterLvl) return false;
-        if (search && !q.content.toLowerCase().includes(search) && !(q.id && q.id.toLowerCase().includes(search))) return false;
-        return true;
-    });
-    
-    if (filtered.length === 0) {
-        listDiv.innerHTML = '<div class="text-center py-10 text-gray-400">Không có câu hỏi nào phù hợp.</div>';
-        return;
-    }
-    
-    let html = '';
-    filtered.forEach(q => {
-        html += `
-            <label class="bg-white p-3 rounded-xl border border-gray-200 flex gap-3 cursor-pointer hover:bg-blue-50 transition-colors mb-2">
-                <input type="checkbox" value="${q.id}" class="bank-item-checkbox w-5 h-5 mt-1 text-blue-600 rounded">
-                <div class="flex-1 overflow-hidden">
-                    <div class="text-xs text-gray-500 mb-1 flex justify-between"><span>ID: ${q.id}</span><span class="bg-gray-100 px-2 py-0.5 rounded">${q.level || 'Chưa phân loại'}</span></div>
-                    <div class="text-sm text-gray-800 math-content max-h-16 overflow-hidden">${q.content}</div>
-                </div>
-            </label>
-        `;
-    });
-    listDiv.innerHTML = html;
-    if (window.MathJax) MathJax.typesetPromise([listDiv]).catch(()=>{});
-    
-    // Checkbox event
-    document.querySelectorAll('.bank-item-checkbox').forEach(cb => {
-        cb.addEventListener('change', () => {
-            const count = document.querySelectorAll('.bank-item-checkbox:checked').length;
-            document.getElementById('bankSelectedCount').innerText = count;
-        });
-    });
-};
-
-document.getElementById('bankSearch').addEventListener('input', window.renderBankModalList);
-document.getElementById('bankFilterLevel').addEventListener('change', window.renderBankModalList);
-
-document.getElementById('btnConfirmBankSelection').addEventListener('click', async () => {
-    const selected = Array.from(document.querySelectorAll('.bank-item-checkbox:checked')).map(cb => cb.value);
-    if (selected.length === 0) return;
-    
-    const btn = document.getElementById('btnConfirmBankSelection');
-    const oldHtml = btn.innerHTML;
-    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang xử lý...';
-    btn.disabled = true;
-    
-    try {
-        for (let qId of selected) {
-            const qData = await (await fetch(`https://upload-helper.phamngockhanh-942001.workers.dev/bank?id=${qId}`)).json();
-            qData.mapId = window.currentTopicId;
-            const blob = new Blob([JSON.stringify(qData)], { type: 'application/json' });
-            const formData = new FormData();
-            formData.append('file', blob, `bank/${qId}.json`);
-            await fetch("https://upload-helper.phamngockhanh-942001.workers.dev/", { method: 'PUT', body: formData });
-        }
-        showToast(`Đã thêm ${selected.length} câu hỏi vào chuyên đề!`, "success");
-        document.getElementById('selectBankModal').classList.remove('flex');
-        document.getElementById('selectBankModal').classList.add('hidden');
-        window.loadTopicContent(window.currentTopicId);
-    } catch (e) {
-        showToast("Lỗi: " + e.message, "error");
-    } finally {
-        btn.innerHTML = oldHtml;
-        btn.disabled = false;
-        document.getElementById('bankSelectedCount').innerText = '0';
-    }
-});
