@@ -10,9 +10,15 @@ const getTikzApiUrl = () => {
     const customUrl = localStorage.getItem('tikzVpsUrl') || 'http://42.96.4.216:3000';
     
     if (mode === 'personal' && customUrl) {
-        // Xóa dấu / ở cuối nếu có để chuẩn hóa URL
         const baseUrl = customUrl.replace(/\/+$/, '');
-        // Nếu người dùng đã gõ sẵn /compile thì không nối thêm
+        
+        // Sửa lỗi Mixed Content trên Github Pages
+        if (window.location.protocol === 'https:' && baseUrl.startsWith('http://')) {
+            console.warn("Trình duyệt chặn kết nối HTTP từ trang HTTPS (Mixed Content). Tạm thời chuyển sang server Free.");
+            if (window.showToast) window.showToast("Trình duyệt chặn HTTP từ trang HTTPS. Tạm thời chuyển sang server Free.", "error");
+            return "https://compile.qmath.io.vn/compile"; // Fallback
+        }
+
         if (baseUrl.endsWith('/compile')) return baseUrl;
         return `${baseUrl}/compile`;
     }

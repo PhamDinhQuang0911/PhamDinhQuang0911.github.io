@@ -1915,9 +1915,65 @@
                 workers.push(runLocalWorker());
             }
 
-            // Luôn dùng các worker tuần tự để tương thích 100% với cả VPS cá nhân cũ và Free tier.
-            for (let i = 1; i <= 4; i++) {
-                workers.push(runVpsSingleWorker(i, vpsQueue));
+            if (vpsMode === 'free') {
+                // Free tier: 2 luồng, mỗi luồng 1 ảnh
+                for (let i = 1; i <= 2; i++) {
+                    workers.push(runVpsSingleWorker(i, vpsQueue));
+                }
+            } else {
+                // Personal / Premium VPS: 4 luồng, batch size 20 với logic fallback xé nhỏ
+                let jobQueue = [];
+                for (let i = 0; i < vpsQueue.length; i += 20) {
+                    jobQueue.push(vpsQueue.slice(i, i + 20));
+                }
+                
+                const runBatchWorker = async (workerId) => {
+                    while (jobQueue.length > 0) {
+                        const job = jobQueue.shift();
+                        if (job.length === 1) {
+                            const item = job[0];
+                            try {
+                                console.log(`[VPS Batch ${workerId}] Xử lý 1 ảnh (Câu ${item.questionIdx + 1})...`);
+                                const url = await compileTikZToImage(item.contentCode);
+                                processSuccessItem(item, url);
+                            } catch (err) {
+                                item.retries = (item.retries || 0) + 1;
+                                const original = pendingImageUploads.find(i => i.id === item.id);
+                                if(original) original.retries = item.retries;
+
+                                if (item.retries < 3) {
+                                    jobQueue.unshift([item]);
+                                    await new Promise(r => setTimeout(r, 3000));
+                                } else {
+                                    processFailItem(item, err.message);
+                                }
+                            }
+                        } else {
+                            try {
+                                console.log(`[VPS Batch ${workerId}] Đang xử lý khối ${job.length} ảnh...`);
+                                const codes = job.map(c => c.contentCode);
+                                const urls = await compileTikZBatch(codes);
+                                for(let i = 0; i < job.length; i++) {
+                                    processSuccessItem(job[i], urls[i]);
+                                }
+                            } catch (e) {
+                                console.warn(`[VPS Batch ${workerId}] Khối ${job.length} ảnh lỗi: ${e.message}. Đang chia nhỏ...`);
+                                // Chia nhỏ: 20 -> 5 -> 1
+                                let newSize = job.length <= 5 ? 1 : Math.ceil(job.length / 4);
+                                const newJobs = [];
+                                for (let i = 0; i < job.length; i += newSize) {
+                                    newJobs.push(job.slice(i, i + newSize));
+                                }
+                                jobQueue.unshift(...newJobs);
+                            }
+                        }
+                        await new Promise(r => setTimeout(r, 500));
+                    }
+                };
+
+                for (let i = 1; i <= 4; i++) {
+                    workers.push(runBatchWorker(i));
+                }
             }
             
             await Promise.all(workers);
