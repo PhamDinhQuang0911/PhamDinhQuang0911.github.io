@@ -1961,27 +1961,32 @@ async function loadLobbyData(id) {
             const theoryContainer = document.getElementById('hwTheoryContainer');
             let sidebarHtml = '';
             
-            if (isMixed && examData.tlQuestions && examData.tlQuestions.length > 0) {
+            if (isMixed) {
                 const listContainer = document.getElementById('hwTlQuestionsList');
                 const theoryContent = document.getElementById('hwTheoryContent');
                 listContainer.innerHTML = '';
                 theoryContent.innerHTML = '';
                 
+                window._renderedTheoryContents = []; // To deduplicate
                 let hasTheory = false;
                 let hasTl = false;
                 let tlCounter = 1;
 
-                examData.tlQuestions.forEach((q, i) => {
-                    const qIdx = `tl_upload_${i}`;
-                    const isTheory = q.isTheory === true || (q.solution && q.solution.toLowerCase().includes("lý thuyết")) || (q.content && (q.content.includes("ĐỊNH NGHĨA") || q.content.includes("KHÁI NIỆM")));
-                    
-                    if (isTheory) {
-                        hasTheory = true;
-                        const tItem = document.createElement('div');
-                        tItem.className = "bg-blue-50 p-5 rounded-2xl border border-blue-200 mb-4";
-                        tItem.innerHTML = `<div class="latex-container text-blue-900">${q.content}</div>`;
-                        theoryContent.appendChild(tItem);
-                    } else {
+                if (examData.tlQuestions && examData.tlQuestions.length > 0) {
+                    examData.tlQuestions.forEach((q, i) => {
+                        const qIdx = `tl_upload_${i}`;
+                        const isTheory = q.isTheory === true || (q.solution === "Đây là phần lý thuyết để ôn tập.") || (q.solution === '' && q.content && (q.content.includes("boxdn") || q.content.includes("boxdl") || q.content.includes("KHÁI NIỆM") || q.content.includes("Lý thuyết") || q.content.includes("lý thuyết")));
+                        
+                        if (isTheory) {
+                            if (!window._renderedTheoryContents.includes(q.content)) {
+                                window._renderedTheoryContents.push(q.content);
+                                hasTheory = true;
+                                const tItem = document.createElement('div');
+                                tItem.className = "bg-blue-50 p-5 rounded-2xl border border-blue-200 mb-4";
+                                tItem.innerHTML = `<div class="latex-container text-blue-900">${q.content}</div>`;
+                                theoryContent.appendChild(tItem);
+                            }
+                        } else {
                         hasTl = true;
                         const item = document.createElement('div');
                         item.className = "bg-green-50 p-5 rounded-2xl border border-green-200 mb-6";
@@ -1997,12 +2002,12 @@ async function loadLobbyData(id) {
                         
                         listContainer.appendChild(item);
                     }
-                });
+                }); // End of forEach
                 
                 if (hasTheory) {
                     theoryContainer.classList.remove('hidden');
                     sidebarHtml += `
-                        <div class="mb-5">
+                        <div class="mb-5" id="sb-theory-header">
                             <h4 class="font-bold text-blue-700 text-sm mb-2 uppercase cursor-pointer hover:text-blue-500 transition-colors" onclick="document.getElementById('hwTheoryContainer').scrollIntoView({behavior: 'smooth'})">
                                 <i class="fa-solid fa-book mr-1.5"></i> Phần Lý Thuyết
                             </h4>
@@ -2024,7 +2029,7 @@ async function loadLobbyData(id) {
                     let sbTlCounter = 1;
                     examData.tlQuestions.forEach((q, i) => {
                         const qIdx = `tl_upload_${i}`;
-                        const isTheory = q.isTheory === true || (q.solution && q.solution.toLowerCase().includes("lý thuyết")) || (q.content && (q.content.includes("ĐỊNH NGHĨA") || q.content.includes("KHÁI NIỆM")));
+                        const isTheory = q.isTheory === true || (q.solution === "Đây là phần lý thuyết để ôn tập.") || (q.solution === '' && q.content && (q.content.includes("boxdn") || q.content.includes("boxdl") || q.content.includes("KHÁI NIỆM") || q.content.includes("Lý thuyết") || q.content.includes("lý thuyết")));
                         if (!isTheory) {
                             const isDone = userAnswers[qIdx] && userAnswers[qIdx].trim() !== '';
                             const bgClass = isDone ? 'bg-blue-100 border-blue-200 text-blue-700' : 'bg-gray-100 border-gray-200 text-gray-500';
@@ -2041,11 +2046,12 @@ async function loadLobbyData(id) {
                 } else {
                     tlContainer.classList.add('hidden');
                 }
-            } else {
+            } else { // Close if (examData.tlQuestions && examData.tlQuestions.length > 0)
                 tlContainer.classList.add('hidden');
                 theoryContainer.classList.add('hidden');
             }
-
+            } // Close if (isMixed)
+            
             // Render phần Trắc Nghiệm (Mixed)
             const mcqContainer = document.getElementById('hwMixedMcqContainer');
             if (isMixed && currentQuestions && currentQuestions.length > 0) {
@@ -2064,6 +2070,32 @@ async function loadLobbyData(id) {
                 let qInDangCounter = 1;
 
                 currentQuestions.forEach((q, qIdx) => {
+                    const isTheory = q.isTheory === true || q.type === 'essay' || (q.solution === "Đây là phần lý thuyết để ôn tập.") || (!q.options && q.content && (q.content.includes("boxdn") || q.content.includes("boxdl") || q.content.includes("KHÁI NIỆM")));
+                    
+                    if (isTheory) {
+                        if (!window._renderedTheoryContents.includes(q.content)) {
+                            window._renderedTheoryContents.push(q.content);
+                            const theoryContainer = document.getElementById('hwTheoryContainer');
+                            const theoryContent = document.getElementById('hwTheoryContent');
+                            theoryContainer.classList.remove('hidden');
+                            const tItem = document.createElement('div');
+                            tItem.className = "bg-blue-50 p-5 rounded-2xl border border-blue-200 mb-4";
+                            tItem.innerHTML = `<div class="latex-container text-blue-900">${q.content}</div>`;
+                            theoryContent.appendChild(tItem);
+                            
+                            if (!sidebarHtml.includes('sb-theory-header')) {
+                                sidebarHtml = `
+                                    <div class="mb-5" id="sb-theory-header">
+                                        <h4 class="font-bold text-blue-700 text-sm mb-2 uppercase cursor-pointer hover:text-blue-500 transition-colors" onclick="document.getElementById('hwTheoryContainer').scrollIntoView({behavior: 'smooth'})">
+                                            <i class="fa-solid fa-book mr-1.5"></i> Phần Lý Thuyết
+                                        </h4>
+                                    </div>
+                                ` + sidebarHtml;
+                            }
+                        }
+                        return; // Bỏ qua không render thành câu trắc nghiệm
+                    }
+                    
                     const savedAns = userAnswers[qIdx];
                     const dangTitle = q.dangTitle || 'Bài tập trắc nghiệm';
                     
