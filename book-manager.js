@@ -1767,8 +1767,19 @@ window.saveBookToCloudflare = async function() {
         }
         localStorage.setItem('digitized_books', JSON.stringify(books));
         
+        // Cập nhật lên Cloudflare
+        try {
+            let blob = new Blob([JSON.stringify(books)], { type: "application/json" });
+            let formData = new FormData();
+            formData.append('file', blob, 'book_index_global.json');
+            await fetch(CLOUDFLARE_UPLOAD_API, { method: 'PUT', body: formData });
+            console.log("Synced book index to Cloudflare");
+        } catch (e) {
+            console.error("Failed to sync book index", e);
+        }
+        
         showToast("Lưu sách lên Cloudflare thành công!", "success");
-        loadBookList();
+        loadBookList(true);
         
         setTimeout(() => {
             document.getElementById('headerActions').innerHTML = `
@@ -1809,8 +1820,18 @@ window.deleteCurrentBook = async function() {
     books = books.filter(b => b.mapId !== mapId);
     localStorage.setItem('digitized_books', JSON.stringify(books));
     
+    // Cập nhật lên Cloudflare
+    try {
+        let blob = new Blob([JSON.stringify(books)], { type: "application/json" });
+        let formData = new FormData();
+        formData.append('file', blob, 'book_index_global.json');
+        await fetch(CLOUDFLARE_UPLOAD_API, { method: 'PUT', body: formData });
+    } catch (e) {
+        console.error("Failed to sync book index", e);
+    }
+    
     showToast("Đã xóa tài liệu!", "success");
-    loadBookList();
+    loadBookList(true);
     window.exitEditorMode();
 }
 
@@ -1878,8 +1899,24 @@ window.loadBookToEditor = async function(mapId) {
     }
 }
 
-function loadBookList() {
+async function loadBookList(skipFetch = false) {
     const list = document.getElementById('bookList');
+    
+    if (!skipFetch) {
+        // Thử đồng bộ từ Cloudflare
+        try {
+            const res = await fetch('https://pub-2efc95bbe7924897bdd0db54d0da243f.r2.dev/book_index_global.json?t=' + Date.now());
+            if (res.ok) {
+                const cloudBooks = await res.json();
+                if (cloudBooks && Array.isArray(cloudBooks) && cloudBooks.length > 0) {
+                    localStorage.setItem('digitized_books', JSON.stringify(cloudBooks));
+                }
+            }
+        } catch (e) {
+            console.warn("Failed to fetch cloud book index", e);
+        }
+    }
+    
     let books = JSON.parse(localStorage.getItem('digitized_books') || '[]');
     if (books.length === 0) {
         list.innerHTML = `<div class="text-center text-sm text-gray-400 py-4">Chưa có bài nào</div>`;
