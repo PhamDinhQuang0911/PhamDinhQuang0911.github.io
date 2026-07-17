@@ -1893,7 +1893,7 @@
                         const url = await compileTikZToImage(item.contentCode);
                         processSuccessItem(item, url);
                     } catch (err) {
-                        item.retries++;
+                        item.retries = (item.retries || 0) + 1;
                         const original = pendingImageUploads.find(i => i.id === item.id);
                         if(original) original.retries = item.retries;
 
@@ -1915,57 +1915,9 @@
                 workers.push(runLocalWorker());
             }
 
-            if (vpsMode === 'free') {
-                workers.push(runVpsSingleWorker(1, vpsQueue));
-                workers.push(runVpsSingleWorker(2, vpsQueue));
-            } else {
-                const runBatchWorkers = async () => {
-                    const CHUNK_SIZE = 25;
-                    const chunks = [];
-                    for (let i = 0; i < vpsQueue.length; i += CHUNK_SIZE) {
-                        chunks.push(vpsQueue.slice(i, i + CHUNK_SIZE));
-                    }
-                    
-                    let fallbackQueue = [];
-                    let chunkIndex = 0;
-
-                    const processChunk = async (chunk, workerId) => {
-                        try {
-                            console.log(`[VPS Batch ${workerId}] Đang gom khối ${chunk.length} ảnh...`);
-                            const codes = chunk.map(c => c.contentCode);
-                            const urls = await compileTikZBatch(codes);
-                            for(let i = 0; i < chunk.length; i++) {
-                                processSuccessItem(chunk[i], urls[i]);
-                            }
-                        } catch(e) {
-                            console.warn(`[VPS Batch ${workerId}] Khối lỗi, xé lẻ để cô lập: ${e.message}`);
-                            fallbackQueue.push(...chunk);
-                        }
-                    };
-
-                    const batchWorkerPromises = [];
-                    for (let w = 1; w <= 4; w++) { // 4 Cores
-                        batchWorkerPromises.push((async () => {
-                            while (chunkIndex < chunks.length) {
-                                const idx = chunkIndex++;
-                                if (chunks[idx]) await processChunk(chunks[idx], w);
-                            }
-                        })());
-                    }
-                    await Promise.all(batchWorkerPromises);
-
-                    if (fallbackQueue.length > 0) {
-                        console.log(`[Fallback] Cứu hộ ${fallbackQueue.length} ảnh bị rớt khỏi Batch...`);
-                        const fallbackPromises = [
-                            runVpsSingleWorker('F1', fallbackQueue),
-                            runVpsSingleWorker('F2', fallbackQueue),
-                            runVpsSingleWorker('F3', fallbackQueue),
-                            runVpsSingleWorker('F4', fallbackQueue)
-                        ];
-                        await Promise.all(fallbackPromises);
-                    }
-                };
-                workers.push(runBatchWorkers());
+            // Luôn dùng các worker tuần tự để tương thích 100% với cả VPS cá nhân cũ và Free tier.
+            for (let i = 1; i <= 4; i++) {
+                workers.push(runVpsSingleWorker(i, vpsQueue));
             }
             
             await Promise.all(workers);
