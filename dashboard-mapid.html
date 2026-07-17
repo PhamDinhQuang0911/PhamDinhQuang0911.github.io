@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Quản lý MapID - Smart Tree V2.3</title>
+    <title>Quản lý Chuyên đề V2.3</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
@@ -22,6 +22,19 @@
         .tree-children { padding-left: 22px; border-left: 1px dashed #CBD5E1; margin-left: 10px; }
         .tree-children.collapsed { display: none; }
 
+        
+        /* Level Colors */
+        .tree-node[data-level="0"] { background-color: #FEF3C7; border-radius: 8px; margin-bottom: 8px; border: 1px solid #FDE68A; }
+        .tree-node[data-level="0"] .node-name { color: #92400E; font-weight: 800; font-size: 15px; }
+        .tree-node[data-level="0"] code { background-color: #FDE68A !important; color: #92400E !important; }
+        
+        .tree-node[data-level="1"] { background-color: #EFF6FF; border-radius: 6px; margin: 4px 0; border: 1px solid #BFDBFE; }
+        .tree-node[data-level="1"] .node-name { color: #1D4ED8; font-weight: 700; font-size: 14px; }
+        .tree-node[data-level="1"] code { background-color: #BFDBFE !important; color: #1D4ED8 !important; }
+        
+        .tree-node[data-level="2"] { border-bottom: 1px solid #F1F5F9; padding: 4px 0; }
+        .tree-node[data-level="2"]:hover { background-color: #F8FAFC; border-radius: 4px; }
+
         /* Inline Edit Styling */
         [contenteditable="true"] { outline: none; border-bottom: 1px dashed #94A3B8; padding: 0 2px; min-width: 20px; display: inline-block; }
         [contenteditable="true"]:focus { border-bottom: 2px solid #3B82F6; background: #fff; }
@@ -39,7 +52,7 @@
     <header class="h-14 bg-white border-b border-gray-200 flex items-center justify-between px-4 shadow-sm z-20 shrink-0">
         <div class="flex items-center gap-3">
             <a href="dashboard.html" class="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center text-gray-50 hover:bg-gray-200 transition-colors"><i class="fa-solid fa-arrow-left"></i></a>
-            <h1 class="font-bold text-lg text-gray-800 flex items-center gap-2"><i class="fa-solid fa-folder-tree text-blue-600"></i> Quản lý MapID</h1>
+            <h1 class="font-bold text-lg text-gray-800 flex items-center gap-2"><i class="fa-solid fa-folder-tree text-blue-600"></i> Quản lý Chuyên đề</h1>
         </div>
         <div class="flex items-center gap-2">
             <button id="btnImport" class="px-3 py-1.5 bg-white border border-gray-300 rounded text-sm font-bold text-gray-600 hover:bg-gray-50"><i class="fa-solid fa-upload mr-1"></i> Nhập</button>
@@ -48,9 +61,15 @@
         </div>
     </header>
 
+    <!-- Tabs Navigation -->
+    <div class="flex border-b border-gray-200 bg-white px-6 pt-3 gap-8 shrink-0">
+        <button id="tabIDManager" class="pb-3 border-b-2 border-blue-600 text-blue-600 font-bold text-sm transition-colors"><i class="fa-solid fa-code-branch mr-1"></i> Quản lý ID Cây kiến thức</button>
+        <button id="tabTopicBuilder" class="pb-3 border-b-2 border-transparent text-gray-500 hover:text-gray-700 font-bold text-sm transition-colors"><i class="fa-solid fa-layer-group mr-1"></i> Xây dựng Chuyên đề</button>
+    </div>
+
     <main class="flex-1 flex overflow-hidden">
         
-        <div class="w-2/3 md:w-3/4 flex flex-col bg-white border-r border-gray-200">
+        <div class="w-1/2 flex flex-col bg-white border-r border-gray-200" id="treePanel">
             <div class="p-3 bg-gray-50 border-b border-gray-200 flex justify-between items-center text-xs font-bold text-gray-500 uppercase">
                 <span><i class="fa-solid fa-list-ul mr-1"></i> Cây kiến thức</span>
                 <span id="nodeCountBadge" class="bg-gray-200 px-2 py-0.5 rounded text-gray-700">0 mục</span>
@@ -66,7 +85,45 @@
             </div>
         </div>
 
-        <div class="w-1/3 md:w-1/4 flex flex-col bg-gray-50 overflow-y-auto custom-scroll">
+        
+        <!-- Middle Panel: Topic Content -->
+        <div class="flex-1 flex flex-col bg-gray-50 min-w-0" id="topicContentPanel" style="display:none;">
+            <div class="p-3 bg-white border-b border-gray-200 flex justify-between items-center shrink-0">
+                <h2 class="font-bold text-gray-800 text-base truncate flex-1" id="topicContentTitle"><i class="fa-solid fa-layer-group text-blue-500 mr-2"></i>Xây dựng Chuyên đề Luyện tập</h2>
+            </div>
+            <!-- Step 1: Select node from tree -->
+            <div id="topicBuilderGuide" class="flex-1 flex flex-col items-center justify-center text-gray-400 p-8">
+                <div class="text-center max-w-sm">
+                    <i class="fa-solid fa-diagram-project text-6xl mb-6 text-blue-200"></i>
+                    <h3 class="text-lg font-bold text-gray-600 mb-3">Bắt đầu xây dựng Chuyên đề</h3>
+                    <p class="text-sm mb-6 text-gray-500">Hãy click vào một mục trong Cây kiến thức bên trái để chọn Lớp, Phân môn, hoặc Chuyên đề bạn muốn bổ sung câu hỏi.</p>
+                    <div class="bg-blue-50 border border-blue-200 rounded-xl p-4 text-left space-y-3">
+                        <div class="flex items-center gap-3 text-blue-800 text-sm"><span class="w-7 h-7 bg-blue-600 text-white rounded-full flex items-center justify-center font-bold text-xs shrink-0">1</span><span>Bấm vào một <b>Chuyên đề / Bài</b> bên trái</span></div>
+                        <div class="flex items-center gap-3 text-blue-800 text-sm"><span class="w-7 h-7 bg-blue-600 text-white rounded-full flex items-center justify-center font-bold text-xs shrink-0">2</span><span>Chọn cách thêm câu hỏi: <b>Nhập file</b> hoặc <b>Chọn từ Ngân hàng</b></span></div>
+                        <div class="flex items-center gap-3 text-blue-800 text-sm"><span class="w-7 h-7 bg-blue-600 text-white rounded-full flex items-center justify-center font-bold text-xs shrink-0">3</span><span>Kiểm tra nội dung rồi bấm <b>Lưu cấu hình</b></span></div>
+                    </div>
+                </div>
+            </div>
+            <!-- Step 2: Show content after selecting a node -->
+            <div id="topicBuilderContent" class="flex-1 flex flex-col" style="display: none;">
+                <div class="p-3 bg-blue-600 text-white flex justify-between items-center shrink-0">
+                    <span class="font-bold text-sm" id="topicContentTitle2"><i class="fa-solid fa-bookmark mr-2"></i>Chuyên đề đang chọn</span>
+                    <div class="flex gap-2">
+                        <button class="px-3 py-1.5 bg-white/20 hover:bg-white/30 border border-white/30 rounded text-xs font-bold transition-colors" id="btnImportTopic"><i class="fa-solid fa-file-import mr-1"></i> Nhập file .tex</button>
+                        <button class="px-3 py-1.5 bg-white/20 hover:bg-white/30 border border-white/30 rounded text-xs font-bold transition-colors" id="btnSelectBank"><i class="fa-solid fa-database mr-1"></i> Chọn từ Ngân hàng</button>
+                    </div>
+                </div>
+                <div id="topicQuestionsList" class="flex-1 overflow-y-auto p-4 custom-scroll space-y-4">
+                    <div class="text-center text-gray-400 py-10 flex flex-col items-center">
+                        <i class="fa-solid fa-box-open text-4xl mb-3 text-gray-300"></i>
+                        <p>Chuyên đề này chưa có câu hỏi nào.</p>
+                        <p class="text-xs mt-2">Bấm "Nhập file" hoặc "Chọn từ kho" ở trên để thêm câu hỏi.</p>
+                    </div>
+                </div>
+            </div>
+            <div class="p-2 bg-blue-50 text-blue-700 text-xs text-center border-b border-blue-100 hidden" id="topicContentSubtitle"></div>
+        </div>
+<div class="w-1/2 flex flex-col bg-gray-50 overflow-y-auto custom-scroll" id="panelIDManager">
             
             <div class="p-4 border-b border-gray-200 bg-white">
                 <h3 class="text-xs font-bold text-gray-400 uppercase mb-3">Thông tin mã hóa</h3>
@@ -148,5 +205,58 @@
             alert("Đã sao chép: " + text);
         }
     </script>
+
+    <!-- Modal Select From Bank -->
+    <div id="selectBankModal" class="fixed inset-0 bg-black/60 z-[100] hidden items-center justify-center p-4 backdrop-blur-sm">
+        <div class="bg-white rounded-2xl w-full max-w-5xl h-[85vh] flex flex-col shadow-2xl transform transition-all overflow-hidden">
+            <div class="p-4 border-b border-gray-100 bg-gray-50 flex justify-between items-center shrink-0">
+                <div>
+                    <h3 class="font-bold text-lg text-gray-800"><i class="fa-solid fa-database text-blue-600 mr-2"></i>Chọn câu hỏi từ Ngân hàng</h3>
+                    <p class="text-xs text-gray-500 mt-1" id="selectBankModalSubtitle">Đang thêm vào: ...</p>
+                </div>
+                <button onclick="document.getElementById('selectBankModal').classList.remove('flex'); document.getElementById('selectBankModal').classList.add('hidden');" class="text-gray-400 hover:text-red-500 w-8 h-8 flex items-center justify-center rounded-full hover:bg-red-50 transition-colors"><i class="fa-solid fa-times"></i></button>
+            </div>
+            <div class="p-3 border-b border-gray-100 bg-white flex gap-2 overflow-x-auto items-center shrink-0">
+                <input type="text" id="bankSearch" placeholder="Tìm ID hoặc nội dung..." class="h-9 px-3 border border-gray-300 rounded text-sm w-64 outline-none focus:border-blue-500">
+                <select id="bankFilterLevel" class="h-9 px-2 border border-gray-300 rounded text-sm outline-none bg-white">
+                    <option value="all">Mọi mức độ</option>
+                    <option value="Nhận biết">Nhận biết</option>
+                    <option value="Thông hiểu">Thông hiểu</option>
+                    <option value="Vận dụng">Vận dụng</option>
+                    <option value="Vận dụng cao">Vận dụng cao</option>
+                </select>
+                <div class="flex-1"></div>
+                <button class="px-3 py-1.5 bg-blue-600 text-white font-bold rounded text-sm hover:bg-blue-700 transition-colors shadow-sm" id="btnConfirmBankSelection"><i class="fa-solid fa-check mr-1"></i> Xác nhận (<span id="bankSelectedCount">0</span>)</button>
+            </div>
+            <div class="flex-1 overflow-y-auto p-4 bg-gray-100" id="bankModalList">
+                <div class="text-center py-20 text-gray-400"><i class="fa-solid fa-spinner fa-spin text-3xl mb-3 text-blue-500"></i><br>Đang tải dữ liệu...</div>
+            </div>
+        </div>
+    </div>
+
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const tab1 = document.getElementById('tabIDManager');
+            const tab2 = document.getElementById('tabTopicBuilder');
+            const pnlID = document.getElementById('panelIDManager');
+            const pnlTopic = document.getElementById('topicContentPanel');
+
+            tab1.addEventListener('click', () => {
+                tab1.className = "pb-3 border-b-2 border-blue-600 text-blue-600 font-bold text-sm transition-colors";
+                tab2.className = "pb-3 border-b-2 border-transparent text-gray-500 hover:text-gray-700 font-bold text-sm transition-colors";
+                pnlID.style.display = '';
+                pnlTopic.style.display = 'none';
+            });
+
+            tab2.addEventListener('click', () => {
+                tab2.className = "pb-3 border-b-2 border-blue-600 text-blue-600 font-bold text-sm transition-colors";
+                tab1.className = "pb-3 border-b-2 border-transparent text-gray-500 hover:text-gray-700 font-bold text-sm transition-colors";
+                pnlID.style.display = 'none';
+                pnlTopic.style.display = 'flex';
+            });
+        });
+    </script>
 </body>
+
 </html>
