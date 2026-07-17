@@ -62,7 +62,7 @@ export const compileTikZToImage = async (tikzCode) => {
 
 // --- HÀM MỚI: BIÊN DỊCH BATCH (Nhiều hình 1 lúc) ---
 export const compileTikZBatch = async (codesArray) => {
-    const TIMEOUT_MS = 120000; // Tăng lên 120 giây
+    const TIMEOUT_MS = 60000;
     const controller = new AbortController();
     
     const timeoutPromise = new Promise((_, reject) => {
@@ -153,12 +153,17 @@ const initTikzIframe = () => {
                         
                         observer.observe(container, { childList: true, subtree: true });
                         container.appendChild(script);
-                        // Force tikzjax to process the newly added script
-                        document.dispatchEvent(new Event('DOMContentLoaded'));
+                        
+                        if (window.tikzjax && typeof window.tikzjax.process === 'function') {
+                            window.tikzjax.process();
+                        }
                     }
                 });
-            </script>
-            <script src="https://tikzjax.com/v1/tikzjax.js" onload="window.parent.postMessage({ type: 'tikz-iframe-ready' }, '*');"></script>
+                window.addEventListener('load', function() {
+                    window.parent.postMessage({ type: 'tikz-iframe-ready' }, '*');
+                });
+            <\/script>
+            <script src="https://tikzjax.com/v1/tikzjax.js"><\/script>
         </head>
         <body></body>
         </html>
@@ -220,72 +225,8 @@ export const compileTikzLocalViaTikzJax = async (code) => {
 // --- CÁC HÀM EXPORT HỖ TRỢ ---
 
 export function cleanTikzCode(code) {
-    let cleaned = code;
-
-    // 1. Xóa \resizebox bọc ngoài
-    cleaned = cleaned.replace(/\\resizebox\{[^}]+\}\{[^}]+\}\{\s*(\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\})\s*\}/g, "$1");
-
-    // 2. Xóa môi trường center bọc ngoài
-    cleaned = cleaned.replace(/\\begin\{center\}/g, "").replace(/\\end\{center\}/g, "");
-
-    // 3. Xóa các \usepackage{} không được cài trên VPS tiêu chuẩn
-    const unsupportedPackages = [
-        'twemoji',       // emoji Twitter - cần LuaLaTeX + font đặc biệt
-        'emoji',         // tương tự twemoji
-        'fontawesome5',  // icon font - không phải lúc nào cũng có
-        'fontawesome',
-        'marvosym',
-        'wasysym',
-        'pifont',        // thường có nhưng đôi khi thiếu
-        'awesomebox',
-        'tcolorbox',     // nặng, có thể không có
-        'mdframed',
-        'soul',
-        'ulem',
-        'luacode',
-        'luatexja',
-    ];
-    unsupportedPackages.forEach(pkg => {
-        // Xóa: \usepackage{pkg}, \usepackage[...]{pkg}
-        const re = new RegExp(`\\\\usepackage(?:\\[[^\\]]*\\])?\\{${pkg}\\}[^\\n]*\\n?`, 'g');
-        cleaned = cleaned.replace(re, '');
-    });
-
-    // 4. Thay lệnh \twemoji{...} bằng text đơn giản
-    // 4. Hàm chuyển chuỗi codepoint hex (kiểu "1f9cd-1f3ff-200d-2642-fe0f") → emoji Unicode thực
-    const codePointsToEmoji = (codeStr) => {
-        try {
-            return codeStr.split('-')
-                .map(cp => String.fromCodePoint(parseInt(cp, 16)))
-                .join('');
-        } catch(e) {
-            return ''; // nếu codepoint không hợp lệ thì trả về rỗng
-        }
-    };
-
-    // Thay \twemoji[scale=...]{codepoints} và \twemoji{codepoints}
-    // Tham số là chuỗi hex codepoint (VD: 1f3eb) hoặc tên (VD: check mark)
-    cleaned = cleaned.replace(/\\twemoji(?:\[[^\]]*\])?\{([^}]+)\}/g, (match, arg) => {
-        const trimmed = arg.trim();
-        // Nếu là chuỗi hex (chứa chữ số và dấu gạch ngang) → chuyển sang emoji
-        if (/^[0-9a-fA-F]+(-[0-9a-fA-F]+)*$/.test(trimmed)) {
-            return codePointsToEmoji(trimmed);
-        }
-        // Nếu là tên chữ thường → tra bảng
-        const emojiMap = {
-            'check mark': '✓', 'heavy check mark': '✔', 'cross mark': '✗',
-            'warning': '⚠', 'star': '★', 'heart': '♥', 'circle': '●',
-            'arrow right': '→', 'arrow left': '←', 'arrow up': '↑', 'arrow down': '↓',
-        };
-        return emojiMap[trimmed.toLowerCase()] || '';
-    });
-
-    // 5. Xóa các lệnh liên quan đến emoji khác (có hoặc không có tham số tùy chọn)
-    cleaned = cleaned.replace(/\\emoji(?:\[[^\]]*\])?\{[^}]*\}/g, '');
-    cleaned = cleaned.replace(/\\faIcon(?:\[[^\]]*\])?\{[^}]*\}/g, '');
-    cleaned = cleaned.replace(/\\textSFx(?:\[[^\]]*\])?\{[^}]*\}/g, '');
-
-    return cleaned;
+    let cleaned = code.replace(/\\resizebox\{[^}]+\}\{[^}]+\}\{\s*(\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\})\s*\}/g, "$1");
+    return cleaned.replace(/\\begin\{center\}/g, "").replace(/\\end\{center\}/g, "");
 }
 
 export function extractNextBrace(text) {
