@@ -1000,9 +1000,25 @@ window.replaceSection = async function(sectionType, subIdx) {
         }
         
         showToast("Đã thay thế mục " + (sectionType === 'theory' ? 'Lý thuyết' : (sectionType === 'TL' ? 'Tự luận' : 'Trắc nghiệm')), "success");
-        window.selectNode(cIdx, lIdx);
+        // Gọi refreshCurrentPane() thay vì selectNode() để buộc render lại ngay cả khi đang ở cùng node
+        window.refreshCurrentPane();
     };
     input.click();
+};
+
+// Buộc render lại panel hiện tại mà không qua guard của selectNode
+window.refreshCurrentPane = function() {
+    renderTreeSidebar();
+    requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+            showEditorPane();
+            // Khởi động MathJax nếu có
+            if (window.MathJax) {
+                const preview = document.getElementById('previewArea');
+                if (preview) MathJax.typesetPromise([preview]).catch(console.error);
+            }
+        });
+    });
 };
 
 window.selectNode = function(cIdx, lIdx) {
