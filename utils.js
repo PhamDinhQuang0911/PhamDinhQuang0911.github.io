@@ -5,7 +5,7 @@
 /**
  * utils.js - Phiên bản "Strict Timeout"
  */
-const getTikzApiUrl = () => {
+export const getTikzApiUrl = () => {
     // Tự động nâng cấp URL cũ trong máy người dùng lên tên miền HTTPS mới
     if (localStorage.getItem('tikzVpsUrl') === 'http://42.96.4.216:3000') {
         localStorage.setItem('tikzVpsUrl', 'https://api.qmath.io.vn');
