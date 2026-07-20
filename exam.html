@@ -1725,7 +1725,42 @@ async function loadLobbyData(id) {
                 sbItem.classList.add('bg-blue-100', 'border-blue-200', 'text-blue-700');
             }
         };
-        
+
+        window.saveMixedTfAnswer = (qIdx, realIdx, value) => {
+            if (window.isReviewMode) return;
+            if (!userAnswers[qIdx]) userAnswers[qIdx] = {};
+            userAnswers[qIdx][realIdx] = value;
+            saveLocal();
+            // Update Sidebar UI
+            const sbItem = document.getElementById(`sb-mcq-${qIdx}`);
+            if (sbItem) {
+                // Determine if all TF statements are answered
+                const q = currentQuestions[qIdx];
+                const answeredCount = Object.keys(userAnswers[qIdx]).length;
+                if (answeredCount === (q.statements ? q.statements.length : 0)) {
+                    sbItem.classList.remove('bg-gray-50', 'text-gray-500');
+                    sbItem.classList.add('bg-blue-100', 'border-blue-200', 'text-blue-700');
+                }
+            }
+        };
+
+        window.saveMixedShortAnswer = (qIdx, value) => {
+            if (window.isReviewMode) return;
+            userAnswers[qIdx] = value;
+            saveLocal();
+            // Update Sidebar UI
+            const sbItem = document.getElementById(`sb-mcq-${qIdx}`);
+            if (sbItem) {
+                if (value && String(value).trim() !== '') {
+                    sbItem.classList.remove('bg-gray-50', 'text-gray-500');
+                    sbItem.classList.add('bg-blue-100', 'border-blue-200', 'text-blue-700');
+                } else {
+                    sbItem.classList.add('bg-gray-50', 'text-gray-500');
+                    sbItem.classList.remove('bg-blue-100', 'border-blue-200', 'text-blue-700');
+                }
+            }
+        };
+
         window.renderTlUploadArea = (container, answerKey, showSubmitBtn = false, showStatus = true) => {
             container.innerHTML = '';
             
@@ -2146,17 +2181,53 @@ async function loadLobbyData(id) {
                         <div class="bg-purple-50 p-5 rounded-2xl border border-purple-200 mb-5" id="mixed-mcq-${qIdx}">
                             <div class="font-bold text-purple-800 mb-3"><i class="fa-solid fa-circle-question mr-1"></i> Câu ${qInDangCounter}:</div>
                             <div class="latex-container text-gray-800 mb-4">${window.formatContent ? window.formatContent(q.content) : q.content}</div>
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
-                                ${(q.options || []).map((opt, optIdx) => {
-                                    const checked = savedAns == optIdx ? 'checked' : '';
+                            ${(() => {
+                                if (q.type === 'tf') {
+                                    let displayIndices = q.statements ? q.statements.map((_,k)=>k) : [];
+                                    if (examData.shuffle && q.shuffleMapTF) displayIndices = q.shuffleMapTF;
+                                    let html = '<div class="flex flex-col gap-3 mb-4">';
+                                    displayIndices.forEach((realIdx) => {
+                                        const stmt = q.statements[realIdx];
+                                        const val = savedAns ? savedAns[realIdx] : null;
+                                        html += `
+                                            <div class="bg-white border-2 border-gray-100 rounded-xl p-4 hover:border-orange-200 transition-all">
+                                                <div class="font-medium text-gray-800 mb-2 latex-container">${window.formatContent ? window.formatContent(stmt.text) : stmt.text}</div>
+                                                <div class="flex gap-4">
+                                                    <label class="flex-1 cursor-pointer hover:bg-green-50 p-2 rounded border border-gray-100 transition-colors ${val===true?'bg-green-50 border-green-300':''}">
+                                                        <input type="radio" name="mixed_tf_${qIdx}_${realIdx}" value="true" ${val===true?'checked':''} onchange="window.saveMixedTfAnswer(${qIdx}, ${realIdx}, true)" class="mr-2 accent-green-600" ${window.isReviewMode ? 'disabled' : ''}>Đúng
+                                                    </label>
+                                                    <label class="flex-1 cursor-pointer hover:bg-red-50 p-2 rounded border border-gray-100 transition-colors ${val===false?'bg-red-50 border-red-300':''}">
+                                                        <input type="radio" name="mixed_tf_${qIdx}_${realIdx}" value="false" ${val===false?'checked':''} onchange="window.saveMixedTfAnswer(${qIdx}, ${realIdx}, false)" class="mr-2 accent-red-600" ${window.isReviewMode ? 'disabled' : ''}>Sai
+                                                    </label>
+                                                </div>
+                                            </div>
+                                        `;
+                                    });
+                                    html += '</div>';
+                                    return html;
+                                } else if (q.type === 'short') {
                                     return `
-                                        <label class="cursor-pointer group flex items-start gap-3 p-3 bg-white rounded-xl border ${checked ? 'border-purple-500 bg-purple-100/50' : 'border-purple-200'} hover:border-purple-400 transition-colors" onclick="window.saveMixedMcqAnswer(${qIdx}, ${optIdx})">
-                                            <input type="radio" name="mixed_q_${qIdx}" value="${optIdx}" class="mt-1 text-purple-600 focus:ring-purple-500" ${checked} ${window.isReviewMode ? 'disabled' : ''}>
-                                            <div class="latex-container flex-1">${window.formatContent ? window.formatContent(opt) : opt}</div>
-                                        </label>
+                                        <div class="mb-4">
+                                            <input type="text" class="w-full p-4 border-2 rounded-xl font-bold text-lg outline-none focus:border-green-500 transition-all ${window.isReviewMode ? 'bg-gray-100' : ''}" placeholder="Nhập đáp án của bạn..." value="${savedAns || ''}" onchange="window.saveMixedShortAnswer(${qIdx}, this.value)" ${window.isReviewMode ? 'readonly' : ''}>
+                                        </div>
                                     `;
-                                }).join('')}
-                            </div>
+                                } else {
+                                    return `
+                                        <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+                                            ${(q.options || []).map((opt, optIdx) => {
+                                                const realIdx = q.shuffleMap ? q.shuffleMap[optIdx] : optIdx;
+                                                const checked = savedAns == realIdx ? 'checked' : '';
+                                                return `
+                                                    <label class="cursor-pointer group flex items-start gap-3 p-3 bg-white rounded-xl border ${checked ? 'border-purple-500 bg-purple-100/50' : 'border-purple-200'} hover:border-purple-400 transition-colors" onclick="window.saveMixedMcqAnswer(${qIdx}, ${realIdx})">
+                                                        <input type="radio" name="mixed_q_${qIdx}" value="${realIdx}" class="mt-1 text-purple-600 focus:ring-purple-500" ${checked} ${window.isReviewMode ? 'disabled' : ''}>
+                                                        <div class="latex-container flex-1">${window.formatContent ? window.formatContent(opt) : opt}</div>
+                                                    </label>
+                                                `;
+                                            }).join('')}
+                                        </div>
+                                    `;
+                                }
+                            })()}
                             ${examData.briefNote ? `<div id="brief-note-container-${qIdx}" class="mt-4 pt-4 border-t border-purple-200"></div>` : ''}
                         </div>
                     `;
@@ -2347,7 +2418,7 @@ window.requestResubmit = async () => {
                             }
                             
                             // Check in examData's assignTo array (used by homework assignments)
-                            if (examData && examData.assignTo && Array.isArray(examData.assignTo) && examData.assignTo.includes(clsDoc.id)) {
+                                            if (examData && examData.assignTo && Array.isArray(examData.assignTo) && examData.assignTo.includes(clsDoc.id)) {
                                 hasExam = true;
                             }
                             
@@ -2402,6 +2473,68 @@ window.requestResubmit = async () => {
 
                 await deleteDoc(doc(db, "exam_attempts", `${currentUser.uid}_${examId}`));
                 localStorage.removeItem(`ans_${currentUser.uid}_${examId}`);
+
+                // --- GỬI WEBHOOK NỘP BÀI (ZALO) ---
+                try {
+                    const webhookUrl = examData.n8nWebhooks?.submit || examData.n8nWebhooks?.assign || examData.n8nWebhooks?.publish;
+                    if (webhookUrl && !window.isEditMode) {
+                        let pPhone = "";
+                        let pPhoneParent = "";
+                        let pZaloUid = "";
+                        
+                        const userSnap = await getDoc(doc(db, "users", currentUser.uid));
+                        if(userSnap.exists()) {
+                            pPhone = userSnap.data().phoneStudent || "";
+                            pZaloUid = userSnap.data().zaloUid ? String(userSnap.data().zaloUid) : "";
+                        }
+                        
+                        if ((!pPhone || !pZaloUid) && detectedClassId !== "vang_lai") {
+                            const classSnap = await getDoc(doc(db, "classes", detectedClassId));
+                            if(classSnap.exists()) {
+                                const st = classSnap.data().students?.find(s => s.uid === currentUser.uid);
+                                if (st) {
+                                    if(!pPhone) pPhone = st.phoneStudent || "";
+                                    if(!pPhoneParent) pPhoneParent = st.phoneParent || "";
+                                    if(!pZaloUid) pZaloUid = st.zaloUid ? String(st.zaloUid) : "";
+                                }
+                            }
+                        }
+                        
+                        const d = new Date();
+                        const timeStr = d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0') + ' ngày ' + d.getDate().toString().padStart(2, '0') + '/' + (d.getMonth()+1).toString().padStart(2, '0');
+                        const sName = currentUser.displayName || currentUser.email;
+
+                        const formatVNPhone = (phone) => {
+                            if (!phone) return "";
+                            let cleanPhone = String(phone).replace(/\D/g, ''); 
+                            if (cleanPhone.length === 9 && !cleanPhone.startsWith('0')) return '0' + cleanPhone;
+                            if (cleanPhone.startsWith('84') && cleanPhone.length === 11) return '0' + cleanPhone.substring(2);
+                            return cleanPhone;
+                        };
+
+                        const payload = {
+                            action: "student_submit",
+                            examTitle: examData.title,
+                            messages: [
+                                {
+                                    type: "individual",
+                                    targetName: sName,
+                                    targetPhone: formatVNPhone(pPhone),
+                                    targetPhoneParent: formatVNPhone(pPhoneParent),
+                                    targetZaloUid: pZaloUid,
+                                    messageContent: `Xác nhận: ${sName} đã nộp bài tập [${examData.title}].\nTrắc nghiệm: ${correctCount}/${totalQuestions} câu đúng.\nTự luận: Giáo viên sẽ chấm sau.\nThời gian nộp: ${timeStr}.`
+                                }
+                            ]
+                        };
+                        
+                        fetch(webhookUrl, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(payload)
+                        }).catch(e => console.warn("Lỗi push webhook", e));
+                    }
+                } catch(e) { console.warn("Lỗi xử lý webhook:", e); }
+                // ----------------------------------
 
                 document.getElementById('resultTitle').textContent = window.isEditMode ? "Đã cập nhật bài!" : "Đã nộp bài!";
                 document.getElementById('resultTitle').className = "text-2xl font-extrabold text-blue-600 mb-2";

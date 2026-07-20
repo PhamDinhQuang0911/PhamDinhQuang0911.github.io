@@ -505,7 +505,7 @@
                 <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-3">
                     <h1 class="text-2xl font-bold text-gray-800"><i class="fa-solid fa-pen-nib mr-2 text-orange-500"></i>Chấm bài học sinh</h1>
                     <div class="flex gap-2">
-                        <button onclick="window.scanAndRemindZalo()" class="px-4 py-2 bg-yellow-500 text-white rounded-lg font-bold shadow hover:bg-yellow-600 text-sm flex items-center gap-2"><i class="fa-solid fa-bell"></i> Quét nhắc nhở Zalo</button>
+                        <button onclick="window.smartZaloRemind(event)" class="px-4 py-2 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-lg font-bold shadow hover:shadow-lg text-sm flex items-center gap-2" title="Tự động Nhắc nhở (chưa hết hạn) hoặc Tổng kết (đã hết hạn)"><i class="fa-solid fa-bolt"></i> Zalo Nhắc nhở / Tổng kết</button>
                         <button onclick="window.sendSelectedResultsZalo()" class="px-4 py-2 bg-green-600 text-white rounded-lg font-bold shadow hover:bg-green-700 text-sm flex items-center gap-2"><i class="fa-solid fa-paper-plane"></i> Gửi kết quả (Zalo)</button>
                     </div>
                 </div>
@@ -551,9 +551,22 @@
                 <i class="fa-solid fa-toolbox"></i>
             </button>
             <div class="flex-1 flex flex-col md:flex-row overflow-hidden bg-gray-100 relative">
-                <!-- Left: Image Viewer (Scrollable) -->
-                <div class="flex-1 overflow-auto relative p-6 custom-scrollbar flex flex-col items-center gap-8" id="gradingImagesContainer">
-                    <!-- Canvases will be injected here dynamically -->
+                <!-- Left: Content Viewer (Scrollable) -->
+                <div class="flex-1 overflow-auto relative p-4 md:p-6 custom-scrollbar flex flex-col items-center gap-6">
+                    <!-- MC Details (Collapsible) -->
+                    <details class="group bg-white border border-gray-200 rounded-xl shadow-sm w-full max-w-[900px]" id="gradingMCToggle" open>
+                        <summary class="bg-indigo-50 p-4 font-bold text-indigo-800 text-sm uppercase cursor-pointer rounded-xl group-open:rounded-b-none border-b border-transparent group-open:border-indigo-100 flex justify-between items-center transition-colors hover:bg-indigo-100 list-none [&::-webkit-details-marker]:hidden">
+                            <span><i class="fa-solid fa-list-check mr-2"></i> Chi tiết chấm Trắc nghiệm / Tự luận ngắn</span>
+                            <i class="fa-solid fa-chevron-down transform group-open:rotate-180 transition-transform"></i>
+                        </summary>
+                        <div id="gradingQuestionList" class="p-4 space-y-4 bg-gray-50/50">
+                            <!-- Injected by renderGradingView() -->
+                        </div>
+                    </details>
+                    
+                    <div id="gradingImagesContainer" class="flex flex-col items-center gap-8 w-full max-w-[900px]">
+                        <!-- Canvases will be injected here dynamically -->
+                    </div>
                 </div>
                 
                 <!-- Right: Tools & Score (Fixed width) -->
@@ -562,8 +575,9 @@
                     <div class="p-5 border-b border-gray-100 space-y-4">
                         <h4 class="font-bold text-gray-700 text-sm uppercase flex items-center gap-2"><i class="fa-solid fa-toolbox text-blue-500"></i> Công cụ chấm</h4>
                         
-                        <div class="grid grid-cols-4 gap-2">
-                            <button onclick="window.setTool('pen')" id="toolPen" class="flex flex-col items-center justify-center p-2 bg-blue-50 text-blue-700 rounded-xl ring-2 ring-blue-400 font-bold text-xs hover:bg-blue-100 transition-colors gap-1"><i class="fa-solid fa-pen text-lg"></i> Vẽ</button>
+                        <div class="grid grid-cols-5 gap-1">
+                            <button onclick="window.setTool('cursor')" id="toolCursor" class="flex flex-col items-center justify-center p-2 bg-blue-50 text-blue-700 rounded-xl ring-2 ring-blue-400 font-bold text-xs hover:bg-blue-100 transition-colors gap-1"><i class="fa-solid fa-arrow-pointer text-lg"></i> Di chuyển</button>
+                            <button onclick="window.setTool('pen')" id="toolPen" class="flex flex-col items-center justify-center p-2 bg-gray-50 text-gray-600 rounded-xl hover:bg-gray-200 font-bold text-xs transition-colors gap-1"><i class="fa-solid fa-pen text-lg"></i> Vẽ</button>
                             <button onclick="window.setTool('eraser')" id="toolEraser" class="flex flex-col items-center justify-center p-2 bg-gray-50 text-gray-600 rounded-xl hover:bg-gray-200 font-bold text-xs transition-colors gap-1"><i class="fa-solid fa-eraser text-lg"></i> Tẩy</button>
                             <button onclick="window.setTool('check')" id="toolCheck" class="flex flex-col items-center justify-center p-2 bg-green-50 text-green-600 border border-green-200 hover:bg-green-100 rounded-xl font-bold text-xs transition-colors gap-1"><i class="fa-solid fa-check text-lg"></i> Đúng</button>
                             <button onclick="window.setTool('cross')" id="toolCross" class="flex flex-col items-center justify-center p-2 bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 rounded-xl font-bold text-xs transition-colors gap-1"><i class="fa-solid fa-xmark text-lg"></i> Sai</button>
@@ -596,8 +610,14 @@
                         <p class="text-[10px] text-indigo-500 text-center mt-1 font-medium"><i class="fa-solid fa-wand-magic-sparkles"></i> Phân tích tự động toàn bộ ảnh bằng AI</p>
                     </div>
 
+                    <!-- Nav List -->
+                    <div class="p-4 border-b border-gray-100 bg-gray-50 flex-1 overflow-y-auto custom-scrollbar flex flex-col min-h-[120px]">
+                        <h4 class="font-bold text-gray-700 text-xs uppercase mb-3 flex items-center gap-2"><i class="fa-solid fa-route text-indigo-500"></i> Điều hướng câu hỏi</h4>
+                        <div id="gradingNavList" class="space-y-1"></div>
+                    </div>
+
                     <!-- Feedback & Score -->
-                    <div class="p-5 flex-1 flex flex-col gap-4">
+                    <div class="p-4 flex flex-col gap-4">
                         <div class="flex-1 flex flex-col min-h-[150px]">
                             <label class="block font-bold text-gray-700 text-sm mb-2 flex justify-between items-center">
                                 <span><i class="fa-solid fa-comment-dots text-orange-500"></i> Lời phê của Giáo viên</span>
@@ -697,6 +717,7 @@
                 </div>
             </div>
             <div class="flex justify-center gap-3">
+                <button onclick="window.sendZaloPublishWebhook()" class="flex-1 px-5 py-2.5 bg-green-600 hover:bg-green-700 text-white font-bold rounded-xl transition-colors shadow flex items-center justify-center gap-2" title="Gửi thông báo xuất bản qua Zalo"><i class="fa-solid fa-paper-plane"></i> Gửi Zalo</button>
                 <button onclick="closeShareModal()" class="flex-1 px-5 py-2.5 bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold rounded-xl transition-colors">Đóng</button>
             </div>
         </div>
@@ -1391,6 +1412,7 @@
                 const docSnap = await getDoc(doc(db, "exams", id));
                 if (docSnap.exists()) {
                     const data = docSnap.data();
+                    window.examData = data;
                     document.getElementById('settingTitle').value = data.title || '';
                     document.getElementById('settingType').value = data.type || 'exam';
                     document.getElementById('settingFileUrl').value = data.fileUrl || '';
@@ -1636,7 +1658,7 @@
             const solEl = document.getElementById('editSolution'); if(solEl) q.solution = solEl.value;
             const pointEl = document.getElementById('editPoint'); if(pointEl) q.point = parseFloat(pointEl.value) || 0;
             if (q.type === 'mc') { const optInputs = document.querySelectorAll('.mc-option'); q.options = Array.from(optInputs).map(i => i.value); } 
-            else if (q.type === 'tf') { const rows = document.querySelectorAll('#editorArea .flex.items-center.border'); q.statements = []; rows.forEach(row => { const text = row.querySelector('.tf-text').value; const isTrue = row.querySelector('.tf-check').checked; q.statements.push({text, isTrue}); }); } 
+            else if (q.type === 'tf') { const rows = document.querySelectorAll('#editorArea .tf-row'); q.statements = []; rows.forEach(row => { const text = row.querySelector('.tf-text').value; const isTrue = row.querySelector('.tf-check').checked; q.statements.push({text, isTrue}); }); } 
             else if (q.type === 'short') { const ansEl = document.getElementById('editShortAns'); if(ansEl) q.answer = ansEl.value; }
         };
 
@@ -1673,7 +1695,7 @@
             } else if (q.type === 'tf') {
                 html += `<div class="space-y-2 mb-4">`;
                 const stmts = q.statements || [{text:"", isTrue:false}, {text:"", isTrue:false}, {text:"", isTrue:false}, {text:"", isTrue:false}];
-                stmts.forEach((s, i) => { html += `<div class="flex items-center gap-2 border p-2 rounded"><span class="font-bold text-xs text-gray-400 w-4">${i+1}</span><input type="text" class="form-input tf-text" value="${s.text}" oninput="autoSaveMemory()"><label class="flex items-center gap-1"><input type="checkbox" class="w-4 h-4 tf-check" ${s.isTrue?'checked':''} onchange="autoSaveMemory()"><span class="text-xs font-bold text-green-600">Đúng</span></label></div>`; });
+                stmts.forEach((s, i) => { html += `<div class="tf-row flex items-center gap-2 border p-2 rounded"><span class="font-bold text-xs text-gray-400 w-4">${i+1}</span><input type="text" class="form-input tf-text" value="${s.text}" oninput="autoSaveMemory()"><label class="flex items-center gap-1"><input type="checkbox" class="w-4 h-4 tf-check" ${s.isTrue?'checked':''} onchange="autoSaveMemory()"><span class="text-xs font-bold text-green-600">Đúng</span></label></div>`; });
                 html += `</div>`;
             } else if (q.type === 'short') {
                 html += `<div class="mb-4"><label class="form-group-title">Đáp án mẫu</label><input type="text" id="editShortAns" class="form-input font-bold text-green-700" value="${q.answer || ''}" oninput="autoSaveMemory()"></div>`;
@@ -2266,14 +2288,24 @@
                         }));
                     }
                 }
+                // 3. Lấy cấu hình n8n webhooks
+                let webhooksConfig = {};
+                try {
+                    const webhookSnap = await getDoc(doc(db, "configurations", "n8n_webhooks"));
+                    if (webhookSnap.exists()) {
+                        webhooksConfig = webhookSnap.data();
+                    }
+                } catch(e) { console.error("Error fetching webhooks:", e); }
+
                 sessionUploadedFiles = [];
                 window.originalQuestionsData = JSON.parse(JSON.stringify(window.questions));
 
-                // 3. Lưu dữ liệu vào Firestore
+                // 4. Lưu dữ liệu vào Firestore
                 const examRef = currentExamId ? doc(db, "exams", currentExamId) : doc(collection(db, "exams"));
                 
                 await setDoc(examRef, { 
                     ...settings, 
+                    n8nWebhooks: webhooksConfig,
                     teacherId: currentUser.uid, 
                     questions: window.questions, 
                     questionCount: window.questions.length, 
@@ -2389,6 +2421,9 @@
                                 fullStudentList.push({ 
                                     studentId: st.uid, 
                                     studentName: st.name || st.username || "Không tên", 
+                                    phoneStudent: st.phoneStudent || "",
+                                    phoneParent: st.phoneParent || "",
+                                    zaloUid: st.zaloUid ? String(st.zaloUid) : "",
                                     className: cls.name, 
                                     classId: clsDoc.id 
                                 });
@@ -2429,7 +2464,7 @@
 
             } catch (e) {
                 console.error("Lỗi loadStats:", e);
-                window.showNotification("Lỗi tải dữ liệu thống kê: " + e.message, "error");
+                window.showToast("Lỗi tải dữ liệu thống kê: " + e.message, "error");
             } finally {
                 if (classContainer && classContainer.innerHTML.includes('spinner')) {
                      // Lỗi tải hoặc trống
@@ -2719,6 +2754,163 @@
         window.copyLink = () => { document.getElementById("shareLinkInput").select(); document.execCommand("copy"); window.showToast("Đã sao chép link!"); };
         window.copySettingLink = () => { document.getElementById("settingShareLink").select(); document.execCommand("copy"); window.showToast("Đã sao chép link!"); };
         window.closeShareModal = () => { document.getElementById('shareModal').classList.add('opacity-0', 'pointer-events-none'); };
+        
+        window.sendZaloPublishWebhook = async () => {
+            const btn = document.querySelector('#shareModal button[onclick="window.sendZaloPublishWebhook()"]');
+            if(btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang gửi...'; }
+            
+            try {
+                const examSnap = await getDoc(doc(db, "exams", currentExamId));
+                if (!examSnap.exists()) throw new Error("Không tìm thấy đề thi!");
+                const examData = examSnap.data();
+                
+                const webhookUrl = examData.n8nWebhooks?.publish;
+                if (!webhookUrl) throw new Error("Chưa cấu hình Publish Webhook trong Bảng điều khiển!");
+                
+                let messages = [];
+                const examLinkStr = window.location.origin + window.location.pathname.replace('exam-editor.html', 'exam.html') + '?id=' + currentExamId;
+                const formatDateTimeVN = (dt) => {
+                    if (!dt) return "Không giới hạn";
+                    if (!dt.includes("T")) return dt;
+                    const [d, t] = dt.split("T");
+                    const [y, m, day] = d.split("-");
+                    return `${t} ngày ${parseInt(day)}/${parseInt(m)}/${y}`;
+                };
+                const deadlineStr = formatDateTimeVN(examData.endTime);
+
+                let extraInfo = "";
+                let instruction = "";
+                
+                if (examData.type === 'homework') {
+                    extraInfo = `📝 Hình thức: Bài tập Tự luận (Đính kèm File)\n`;
+                    if (examData.fileUrl) extraInfo += `📄 Link đề bài: ${examData.fileUrl}\n`;
+                    if (examData.description) extraInfo += `${examData.description}\n`;
+                    instruction = `💡 Hướng dẫn: Các em làm ra vở và chụp ảnh sau đó gửi theo từng bài.\n`;
+                } else {
+                    extraInfo = `📝 Nội dung bài tập:\n`;
+                    let structure = [];
+                    
+                    if (examData.tlQuestions && examData.tlQuestions.length > 0) {
+                        let tlIndexes = examData.tlQuestions.map((q, i) => q.originalIndex || (i+1));
+                        structure.push(`🔸 Tự luận: Bài ${tlIndexes.join(", ")}`);
+                    }
+
+                    if (examData.questions && examData.questions.length > 0) {
+                        let groups = { mc: {}, short: {}, tf: {}, essay: {} }; 
+                        examData.questions.forEach((q) => {
+                            let t = q.type;
+                            let dIdx = q.dangIndex;
+                            let qIdx = q.dangQIndex;
+                            if (dIdx) {
+                                if (!groups[t]) groups[t] = {};
+                                if (!groups[t][dIdx]) groups[t][dIdx] = [];
+                                if (qIdx) {
+                                    let numQ = parseInt(qIdx.toString().replace(/[^0-9]/g, ''));
+                                    if (numQ && !groups[t][dIdx].includes(numQ)) groups[t][dIdx].push(numQ);
+                                }
+                            }
+                        });
+
+                        const renderType = (typeKey, typeName) => {
+                            if (!groups[typeKey] || Object.keys(groups[typeKey]).length === 0) return null;
+                            let dList = [];
+                            for (let dIdx in groups[typeKey]) {
+                                let qArr = groups[typeKey][dIdx];
+                                if (qArr.length > 0) {
+                                    qArr.sort((a,b) => a - b);
+                                    dList.push(`Dạng ${dIdx} (bài ${qArr.join(",")})`);
+                                } else {
+                                    dList.push(`Dạng ${dIdx}`);
+                                }
+                            }
+                            return `🔸 ${typeName}: ${dList.join("; ")}`;
+                        };
+
+                        let mcStr = renderType('mc', 'Trắc nghiệm');
+                        if (mcStr) structure.push(mcStr);
+                        let shortStr = renderType('short', 'Trả lời ngắn');
+                        if (shortStr) structure.push(shortStr);
+                        let tfStr = renderType('tf', 'Đúng sai');
+                        if (tfStr) structure.push(tfStr);
+                        let essayStr = renderType('essay', 'Tự luận (TN)');
+                        if (essayStr) structure.push(essayStr);
+                    }
+                    
+                    if (structure.length > 0) {
+                        extraInfo += structure.join("\n") + "\n";
+                    }
+                    
+                    if (examData.type === 'mixed') {
+                        instruction = `💡 Hướng dẫn:\n- Tự luận: Các em làm ra vở và chụp ảnh sau đó gửi theo từng bài.\n- Trắc nghiệm: Các em làm theo bài trên link, đính kèm phần trình bày vắn tắt ở mỗi câu nếu được yêu cầu.\n`;
+                    } else {
+                        instruction = `💡 Hướng dẫn: Các em làm theo bài trên link, đính kèm phần trình bày vắn tắt ở mỗi câu nếu được yêu cầu.\n`;
+                    }
+                }
+                
+                extraInfo += instruction;
+
+                if (examData.accessType === 'class' && examData.allowedClassIds) {
+                    for (let cid of examData.allowedClassIds) {
+                        const classSnap = await getDoc(doc(db, "classes", cid));
+                        if(classSnap.exists()) {
+                            const cData = classSnap.data();
+                            
+                            if (cData.zaloGroupUid) {
+                                messages.push({
+                                    type: "group",
+                                    targetName: cData.name,
+                                    targetGroupUid: cData.zaloGroupUid,
+                                    messageContent: `Kính gửi quý Phụ huynh và các em học sinh ${cData.name}.\nThầy vừa giao bài tập mới: ${examData.title}.\n${extraInfo}⏰ Hạn nộp: ${deadlineStr}.\n🔗 Link làm bài: ${examLinkStr}`
+                                });
+                            }
+                            
+                            if (cData.students && cData.students.length > 0) {
+                                const formatVNPhone = (phone) => {
+                                    if (!phone) return "";
+                                    let cleanPhone = String(phone).replace(/\D/g, ''); 
+                                    if (cleanPhone.length === 9 && !cleanPhone.startsWith('0')) return '0' + cleanPhone;
+                                    if (cleanPhone.startsWith('84') && cleanPhone.length === 11) return '0' + cleanPhone.substring(2);
+                                    return cleanPhone;
+                                };
+
+                                cData.students.forEach(st => {
+                                    messages.push({
+                                        type: "individual",
+                                        targetName: st.name || st.username || "Học sinh",
+                                        targetPhone: formatVNPhone(st.phoneStudent),
+                                        targetPhoneParent: formatVNPhone(st.phoneParent),
+                                        targetZaloUid: st.zaloUid ? String(st.zaloUid) : "",
+                                        messageContent: `${st.name || st.username || "Học sinh"} chú ý, thầy vừa giao bài tập mới: ${examData.title}.\n${extraInfo}⏰ Hạn nộp: ${deadlineStr}.\n🔗 Link làm bài: ${examLinkStr}`
+                                    });
+                                });
+                            }
+                        }
+                    }
+                }
+                
+                const payload = {
+                    action: "publish_exam",
+                    examId: currentExamId,
+                    examTitle: examData.title,
+                    examLink: examLinkStr,
+                    deadline: deadlineStr,
+                    messages: messages
+                };
+                
+                await fetch(webhookUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                window.showToast("Đã gửi tín hiệu Zalo thành công!", "success");
+            } catch(e) {
+                console.error(e);
+                window.showToast(e.message || "Có lỗi xảy ra khi gửi Zalo", "error");
+            } finally {
+                if(btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-paper-plane"></i> Gửi Zalo'; }
+            }
+        };
         window.showToast = (message, type='success') => { const c = document.getElementById('toastContainer'); const d = document.createElement('div'); d.className = `bg-white border-l-4 border-green-500 shadow-xl rounded-lg p-4 flex items-center gap-3 min-w-[300px] transform translate-x-full transition-transform duration-300`; d.innerHTML = `<div><h4 class="font-bold text-gray-800 text-sm">THÔNG BÁO</h4><p class="text-sm text-gray-600">${message}</p></div>`; c.appendChild(d); requestAnimationFrame(()=>d.classList.remove('translate-x-full')); setTimeout(()=>{d.classList.add('translate-x-full'); setTimeout(()=>d.remove(), 500);}, 3000); };
         window.togglePrivasySettings = (type) => { document.getElementById('classSelectionArea').className = type === 'class' ? 'pl-6 block mt-2' : 'hidden'; };
         
@@ -3044,100 +3236,96 @@
         };
 
         window.openGrading = (attempt) => {
+            if (!window.examData) {
+                return window.customAlert ? window.customAlert("Đang tải dữ liệu đề thi hoặc xảy ra lỗi kết nối. Vui lòng tải lại trang và chờ giây lát!", "error") : alert("Đang tải dữ liệu đề thi hoặc xảy ra lỗi kết nối. Vui lòng tải lại trang và chờ giây lát!");
+            }
             currentGradingAttempt = attempt;
             document.getElementById('historyModal').classList.add('opacity-0', 'pointer-events-none');
             
             const examType = document.getElementById('settingType').value; 
 
-            if (examType === 'homework') {
-                document.getElementById('gradingStudentName').innerHTML = `<i class="fa-solid fa-user-graduate"></i> Chấm bài: ${attempt.studentName || 'Học sinh ẩn danh'}`;
-                window.currentResultIdForAI = attempt.id;
+            document.getElementById('gradingStudentName').innerHTML = `<i class="fa-solid fa-user-graduate"></i> Chấm bài: ${attempt.studentName || 'Học sinh ẩn danh'}`;
+            window.currentResultIdForAI = attempt.id;
 
-                // Xử lý Resubmit Request
-                const resubmitArea = document.getElementById('resubmitActionArea');
-                if (attempt.resubmitStatus === 'requested') {
-                    resubmitArea.classList.remove('hidden');
-                    // Reset nội dung lại ban đầu nếu trước đó đã bấm duyệt/từ chối
-                    resubmitArea.innerHTML = `
-                        <span class="text-xs font-bold text-red-500 bg-red-100 px-2 py-1 rounded shadow-inner animate-pulse">Học sinh xin nộp lại</span>
-                        <button onclick="window.handleResubmitRequest(true)" class="px-3 py-1.5 bg-green-500 text-white rounded-lg text-sm font-bold hover:bg-green-600 shadow-sm transition-transform active:scale-95"><i class="fa-solid fa-check"></i> Cho phép</button>
-                        <button onclick="window.handleResubmitRequest(false)" class="px-3 py-1.5 bg-gray-500 text-white rounded-lg text-sm font-bold hover:bg-gray-600 shadow-sm transition-transform active:scale-95"><i class="fa-solid fa-xmark"></i> Từ chối</button>
-                    `;
-                } else {
-                    resubmitArea.classList.add('hidden');
-                }
-
-                // Trích xuất TẤT CẢ url ảnh
-                let imageUrls = [];
-                if (attempt.gradedImageUrls && attempt.gradedImageUrls.length > 0) {
-                    imageUrls = attempt.gradedImageUrls;
-                } else {
-                    const ans = attempt.answers && attempt.answers[0] ? attempt.answers[0] : '';
-                    if (ans.includes('<img')) {
-                        const parser = new DOMParser();
-                        const doc = parser.parseFromString(ans, 'text/html');
-                        const imgs = doc.querySelectorAll('img');
-                        imgs.forEach(img => imageUrls.push(img.src));
-                    } else if (ans.startsWith('http') || ans.startsWith('data:image')) {
-                        imageUrls.push(ans);
-                    }
-                }
-
-                const container = document.getElementById('gradingImagesContainer');
-                container.innerHTML = '';
-                window.currentGradingCanvases = [];
-
-                if (imageUrls.length === 0) {
-                    container.innerHTML = `<div class="text-gray-500 mt-32 text-center flex flex-col items-center"><i class="fa-regular fa-image text-5xl mb-4 text-gray-300 block"></i><p>Học sinh chưa nộp ảnh nào.</p></div>`;
-                } else {
-                    imageUrls.forEach((url, idx) => {
-                        const wrapper = document.createElement('div');
-                        wrapper.className = "relative shadow-2xl border-4 border-white bg-white inline-block mb-10 shrink-0 transform transition-transform hover:scale-[1.01]";
-                        
-                        const imgEl = document.createElement('img');
-                        imgEl.className = "block max-w-[900px] w-full h-auto pointer-events-none select-none rounded";
-                        imgEl.crossOrigin = "anonymous";
-                        imgEl.src = url + (url.includes('?') ? '&' : '?') + 'bypassCache=' + Date.now();
-                        
-                        const canvas = document.createElement('canvas');
-                        canvas.className = "absolute top-0 left-0 w-full h-full cursor-crosshair touch-none rounded";
-                        
-                        const pageLabel = document.createElement('div');
-                        pageLabel.className = "absolute -left-5 -top-5 w-10 h-10 bg-blue-600 border-4 border-white text-white font-black text-lg flex items-center justify-center rounded-full shadow-lg z-10 ring-4 ring-blue-100";
-                        pageLabel.innerText = idx + 1;
-
-                        wrapper.appendChild(pageLabel);
-                        wrapper.appendChild(imgEl);
-                        wrapper.appendChild(canvas);
-                        container.appendChild(wrapper);
-
-                        imgEl.onload = () => {
-                            canvas.width = imgEl.clientWidth;
-                            canvas.height = imgEl.clientHeight;
-                            const ctx = canvas.getContext('2d');
-                            ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-                            window.setupCanvasEvents(canvas, ctx);
-                            window.currentGradingCanvases.push({ imgEl, canvas, ctx });
-                        };
-                    });
-                }
-
-                document.getElementById('gradingScore').value = attempt.score || '';
-                document.getElementById('gradingFeedback').value = attempt.teacherFeedback || '';
-                
-                const saveBtn = document.getElementById('btnSaveGrade');
-                if(saveBtn) saveBtn.onclick = () => window.saveAdvancedGrade(attempt.id);
-                
-                window.toggleModal('essayGradingModal', true);
+            // Xử lý Resubmit Request
+            const resubmitArea = document.getElementById('resubmitActionArea');
+            if (attempt.resubmitStatus === 'requested') {
+                resubmitArea.classList.remove('hidden');
+                resubmitArea.innerHTML = `
+                    <span class="text-xs font-bold text-red-500 bg-red-100 px-2 py-1 rounded shadow-inner animate-pulse">Học sinh xin nộp lại</span>
+                    <button onclick="window.handleResubmitRequest(true)" class="px-3 py-1.5 bg-green-500 text-white rounded-lg text-sm font-bold hover:bg-green-600 shadow-sm transition-transform active:scale-95"><i class="fa-solid fa-check"></i> Cho phép</button>
+                    <button onclick="window.handleResubmitRequest(false)" class="px-3 py-1.5 bg-gray-500 text-white rounded-lg text-sm font-bold hover:bg-gray-600 shadow-sm transition-transform active:scale-95"><i class="fa-solid fa-xmark"></i> Từ chối</button>
+                `;
             } else {
-                const modal = document.getElementById('gradingModal');
-                document.getElementById('gradingStudentName').textContent = attempt.studentName;
-                document.getElementById('gradingTotalScore').textContent = attempt.score;
-                
-                renderGradingView();
-                modal.classList.remove('hidden');
-                setTimeout(() => modal.classList.remove('opacity-0'), 50);
+                resubmitArea.classList.add('hidden');
             }
+
+            // Trích xuất TẤT CẢ url ảnh
+            let imageUrls = [];
+            if (attempt.gradedImageUrls && attempt.gradedImageUrls.length > 0) {
+                imageUrls = attempt.gradedImageUrls;
+            } else {
+                const ans = attempt.answers && attempt.answers[0] ? attempt.answers[0] : '';
+                if (ans.includes('<img')) {
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(ans, 'text/html');
+                    const imgs = doc.querySelectorAll('img');
+                    imgs.forEach(img => imageUrls.push(img.src));
+                } else if (ans.startsWith('http') || ans.startsWith('data:image')) {
+                    imageUrls.push(ans);
+                }
+            }
+
+            const container = document.getElementById('gradingImagesContainer');
+            container.innerHTML = '';
+            window.currentGradingCanvases = [];
+
+            if (imageUrls.length === 0) {
+                container.innerHTML = `<div class="text-gray-500 mt-16 text-center flex flex-col items-center"><i class="fa-regular fa-image text-4xl mb-3 text-gray-300 block"></i><p class="text-sm">Học sinh chưa nộp ảnh nào.</p></div>`;
+            } else {
+                imageUrls.forEach((url, idx) => {
+                    const wrapper = document.createElement('div');
+                    wrapper.className = "relative shadow-xl border-4 border-white bg-white inline-block mb-8 shrink-0 transform transition-transform hover:scale-[1.01]";
+                    
+                    const imgEl = document.createElement('img');
+                    imgEl.className = "block max-w-[900px] w-full h-auto pointer-events-none select-none rounded";
+                    imgEl.crossOrigin = "anonymous";
+                    imgEl.src = url + (url.includes('?') ? '&' : '?') + 'bypassCache=' + Date.now();
+                    
+                    const canvas = document.createElement('canvas');
+                    canvas.className = "absolute top-0 left-0 w-full h-full cursor-crosshair touch-none rounded";
+                    
+                    const pageLabel = document.createElement('div');
+                    pageLabel.className = "absolute -left-4 -top-4 w-8 h-8 bg-blue-600 border-2 border-white text-white font-black text-sm flex items-center justify-center rounded-full shadow-lg z-10 ring-2 ring-blue-100";
+                    pageLabel.innerText = idx + 1;
+
+                    wrapper.appendChild(pageLabel);
+                    wrapper.appendChild(imgEl);
+                    wrapper.appendChild(canvas);
+                    container.appendChild(wrapper);
+
+                    imgEl.onload = () => {
+                        canvas.width = imgEl.clientWidth;
+                        canvas.height = imgEl.clientHeight;
+                        const ctx = canvas.getContext('2d');
+                        ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+                        window.setupCanvasEvents(canvas, ctx);
+                        window.currentGradingCanvases.push({ imgEl, canvas, ctx });
+                    };
+                });
+            }
+
+            document.getElementById('gradingScore').value = attempt.score || '';
+            document.getElementById('gradingFeedback').value = attempt.teacherFeedback || '';
+            
+            const saveBtn = document.getElementById('btnSaveGrade');
+            if(saveBtn) saveBtn.onclick = () => window.saveAdvancedGrade(attempt.id);
+            
+            // Render the Multiple Choice / Essay textual results
+            renderGradingView();
+            
+            // Show the unified essay grading modal
+            window.toggleModal('essayGradingModal', true);
         };
 
         // --- CÁC HÀM XỬ LÝ CANVAS (VẼ, TẨY, DẤU TÍCH ĐÚNG/SAI) ---
@@ -3146,17 +3334,22 @@
 
         window.setTool = (tool) => {
             window.currentTool = tool;
-            ['toolPen', 'toolEraser', 'toolCheck', 'toolCross'].forEach(id => {
+            ['toolCursor', 'toolPen', 'toolEraser', 'toolCheck', 'toolCross'].forEach(id => {
                 const b = document.getElementById(id);
                 if(b) {
-                    b.classList.remove('ring-2', 'ring-blue-400', 'bg-blue-100');
-                    if(b.id !== 'toolCheck' && b.id !== 'toolCross') b.classList.add('bg-gray-50');
+                    b.classList.remove('ring-2', 'ring-blue-400', 'bg-blue-100', 'text-blue-700');
+                    if(b.id !== 'toolCheck' && b.id !== 'toolCross') {
+                        b.classList.add('bg-gray-50', 'text-gray-600');
+                    }
                 }
             });
-            const activeBtn = document.getElementById(tool === 'pen' ? 'toolPen' : tool === 'eraser' ? 'toolEraser' : tool === 'check' ? 'toolCheck' : 'toolCross');
+            const activeBtn = document.getElementById(tool === 'cursor' ? 'toolCursor' : tool === 'pen' ? 'toolPen' : tool === 'eraser' ? 'toolEraser' : tool === 'check' ? 'toolCheck' : 'toolCross');
             if(activeBtn) {
                 activeBtn.classList.add('ring-2', 'ring-blue-400', 'bg-blue-100');
-                activeBtn.classList.remove('bg-gray-50');
+                if (activeBtn.id === 'toolCursor' || activeBtn.id === 'toolPen' || activeBtn.id === 'toolEraser') {
+                    activeBtn.classList.remove('bg-gray-50', 'text-gray-600');
+                    activeBtn.classList.add('text-blue-700');
+                }
             }
         };
 
@@ -3291,7 +3484,9 @@
 
         // --- HÀM AI (GEMINI) CHẤM ĐIỂM TỰ ĐỘNG ---
         
-        window.gradeSingleEssayWithAI = async (idx, answerKey, qContent) => {
+        window.gradeSingleEssayWithAI = async (idx, answerKey, qContent, qSolution = '') => {
+            qContent = decodeURIComponent(qContent);
+            qSolution = decodeURIComponent(qSolution);
             const btn = document.getElementById('btnAIGrade-' + idx);
             if (!btn) return;
             
@@ -3366,8 +3561,8 @@
                     studentImages: studentImages,
                     examFileUrl: "",
                     solutionUrl: "",
-                    examTitle: "ĐỀ BÀI (Chỉ chấm duy nhất câu hỏi này): " + qContent.replace(/<[^>]+>/g, ''),
-                    examDescription: "Hãy chấm điểm bài làm của học sinh cho câu hỏi trên. Tìm lỗi sai nếu có.",
+                    examTitle: "Câu hỏi: " + qContent.replace(/<[^>]+>/g, ''),
+                    examDescription: "Hãy phân tích chi tiết bài làm của học sinh, đối chiếu với đáp án chuẩn nếu có để tìm ra lỗi sai và đưa ra nhận xét." + (qSolution ? `\n\nĐÁP ÁN CHUẨN TỪ GIÁO VIÊN (Dùng để đối chiếu):\n${qSolution.replace(/<[^>]+>/g, '')}` : ""),
                     totalStudentPages: studentImages.length,
                     mode: 'gradeOnly',
                     existingFeedback: ''
@@ -3389,11 +3584,27 @@
                 let feedbackText = aiResult.feedback ? aiResult.feedback : "";
                 feedbackText = feedbackText.replace(/<br\s*\/?>/gi, '\n');
                 
-                const container = document.getElementById('ai-feedback-container-' + idx);
-                const ta = document.getElementById('ai-feedback-' + idx);
-                if (container && ta) {
+                const container = document.getElementById('ai-feedback-' + idx);
+                const contentDiv = document.getElementById('ai-feedback-content-' + idx);
+                
+                if (container && contentDiv) {
                     container.classList.remove('hidden');
-                    ta.value = feedbackText.trim();
+                    let formattedFeedback = feedbackText.trim();
+                    if (window.formatContent) formattedFeedback = window.formatContent(formattedFeedback);
+                    // Add newlines as breaks if no markdown is rendered
+                    if (!formattedFeedback.includes('<p>') && !formattedFeedback.includes('<br>')) {
+                        formattedFeedback = formattedFeedback.replace(/\n/g, '<br>');
+                    }
+                    contentDiv.innerHTML = formattedFeedback;
+                    if (window.MathJax) MathJax.typesetPromise([contentDiv]).catch(()=>{});
+                } else {
+                    // Fallback for older UI just in case
+                    const containerOld = document.getElementById('ai-feedback-container-' + idx);
+                    const taOld = document.getElementById('ai-feedback-' + idx);
+                    if (containerOld && taOld && taOld.tagName === 'TEXTAREA') {
+                        containerOld.classList.remove('hidden');
+                        taOld.value = feedbackText.trim();
+                    }
                 }
 
                 if (window.showToast) window.showToast("Đã chấm xong câu " + (idx+1), "success");
@@ -3402,9 +3613,43 @@
                 if (window.customAlert) window.customAlert("Lỗi AI: " + e.message, "error");
                 else alert("Lỗi AI: " + e.message);
             } finally {
-                btn.innerHTML = '<i class="fa-solid fa-robot"></i> Chấm lại bằng AI';
+                btn.innerHTML = '<img src="https://upload.wikimedia.org/wikipedia/commons/8/8a/Google_Gemini_logo.svg" class="w-4 h-4 invert" alt="Gemini"> Chấm lại bằng AI';
                 btn.disabled = false;
             }
+        };
+
+        window.gradeAllEssaysWithAI = async () => {
+            const essayQuestions = [];
+            if (!window.gradingQuestions) return;
+            
+            // Lọc tất cả các câu tự luận có ảnh bài làm
+            window.gradingQuestions.forEach((q, idx) => {
+                if (q.type === 'essay') {
+                    const ans = currentGradingAttempt.answers && currentGradingAttempt.answers[q.answerKey] ? currentGradingAttempt.answers[q.answerKey] : '';
+                    if (ans && (ans.includes('<img') || ans.startsWith('http') || ans.startsWith('data:image'))) {
+                        essayQuestions.push({ q, idx });
+                    }
+                }
+            });
+
+            if (essayQuestions.length === 0) {
+                return window.customAlert ? window.customAlert("Không có câu tự luận nào có bài làm để chấm!", "info") : alert("Không có bài làm tự luận để chấm!");
+            }
+
+            if (window.showToast) window.showToast(`Bắt đầu chấm ${essayQuestions.length} câu tự luận...`, "info");
+
+            // Chấm song song tối đa 6 luồng (chunck = 6)
+            const chunkSize = 6;
+            for (let i = 0; i < essayQuestions.length; i += chunkSize) {
+                const chunk = essayQuestions.slice(i, i + chunkSize);
+                await Promise.all(chunk.map(item => {
+                    let encodedSolution = item.q.solution ? encodeURIComponent(item.q.solution) : '';
+                    let encodedContent = item.q.originalContent ? encodeURIComponent(item.q.originalContent) : encodeURIComponent(item.q.content);
+                    return window.gradeSingleEssayWithAI(item.idx, item.q.answerKey, encodedContent, encodedSolution);
+                }));
+            }
+            
+            if (window.showToast) window.showToast("Đã hoàn tất chấm điểm toàn bộ câu tự luận!", "success");
         };
 
         window.gradeWithAI = async (mode = 'gradeOnly') => {
@@ -3662,10 +3907,32 @@
                // --- [FIX] CẬP NHẬT GIAO DIỆN CHẤM: XỬ LÝ ĐẢO ĐỀ & HIỂN THỊ ĐÚNG ---
         
         window.renderGradingView = () => {
+            window.setTool('cursor'); // Reset tool to cursor when opening grading view
             const container = document.getElementById('gradingQuestionList');
             const nav = document.getElementById('gradingNavList');
-            container.innerHTML = '';
+            container.innerHTML = `
+                <details id="mcGroupDetails" class="group mb-4 bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden hidden" open>
+                    <summary class="p-4 font-bold text-gray-700 cursor-pointer bg-gray-50 flex justify-between items-center select-none hover:bg-gray-100 transition-colors">
+                        <span><i class="fa-solid fa-list-check mr-2 text-blue-600"></i>Phần Trắc Nghiệm</span>
+                        <i class="fa-solid fa-chevron-down transition-transform group-open:rotate-180"></i>
+                    </summary>
+                    <div id="mcContainer" class="p-4 flex flex-col gap-4"></div>
+                </details>
+                <div id="essayHeader" class="flex items-center justify-between mb-4 mt-6 hidden flex-wrap gap-2">
+                    <h3 class="font-bold text-gray-700 text-lg"><i class="fa-solid fa-pen-nib mr-2 text-purple-600"></i>Phần Tự Luận</h3>
+                    <button onclick="window.gradeAllEssaysWithAI()" class="px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg font-bold shadow-md hover:shadow-lg flex items-center gap-2 text-sm transition-transform active:scale-95"><img src="https://upload.wikimedia.org/wikipedia/commons/8/8a/Google_Gemini_logo.svg" class="w-4 h-4 invert" alt="Gemini"> Chấm tất cả bằng AI</button>
+                </div>
+                <div id="essayContainer" class="flex flex-col gap-4"></div>
+            `;
             nav.innerHTML = '';
+            
+            const mcContainer = document.getElementById('mcContainer');
+            const essayContainer = document.getElementById('essayContainer');
+            const mcGroupDetails = document.getElementById('mcGroupDetails');
+            const essayHeader = document.getElementById('essayHeader');
+
+            let hasMC = false;
+            let hasEssay = false;
             
             const answers = currentGradingAttempt.answers || {};
             const config = currentGradingAttempt.shuffleConfig || {};
@@ -3673,10 +3940,20 @@
             window.gradingQuestions = [...window.questions];
             if (window.examData.type === 'mixed') {
                 if (window.examData.tlQuestions && window.examData.tlQuestions.length > 0) {
+                    let tlCounter = 1;
                     window.examData.tlQuestions.forEach((tq, i) => {
+                        const sol = (tq.solution || "").toLowerCase().trim();
+                        const contentUpper = (tq.content || "").toUpperCase();
+                        const isTheory = tq.isTheory === true || 
+                                         tq.type === 'theory' ||
+                                         sol.includes("lý thuyết") || 
+                                         (sol === "" && (contentUpper.includes("BOXDN") || contentUpper.includes("BOXDL") || contentUpper.includes("KHÁI NIỆM") || contentUpper.includes("LÝ THUYẾT") || contentUpper.includes("ĐỊNH NGHĨA")));
+                        if (isTheory) return;
                         window.gradingQuestions.push({
                             type: 'essay',
-                            content: `<div class="mb-2 font-bold text-green-700">Phần Tự Luận - Bài ${i+1}:</div>${tq.content}`,
+                            content: `<div class="mb-2 font-bold text-green-700">Phần Tự Luận - Bài ${tlCounter++}:</div>${tq.content}`,
+                            originalContent: tq.content,
+                            solution: tq.solution,
                             point: window.examData.tlScore ? (window.examData.tlScore / window.examData.tlQuestions.length) : 0,
                             answerKey: `tl_upload_${i}`
                         });
@@ -3699,6 +3976,8 @@
             }
 
             window.gradingQuestions.forEach((q, idx) => {
+                if (q.type === 'theory') return; // Bỏ qua phần lý thuyết cho đỡ vướng
+                
                 let u = undefined;
                 if (q.type === 'essay') {
                     u = answers[q.answerKey]; // Fetch from specific tl_upload_X
@@ -3721,7 +4000,13 @@
                 const navItem = document.createElement('button');
                 navItem.className = `w-full text-left p-3 rounded-lg text-xs font-bold mb-1 border ${q.type==='essay' ? 'bg-purple-50 border-purple-200 text-purple-700' : (isCorrect ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700')}`;
                 navItem.innerHTML = `Câu ${idx+1} <span class="float-right">${q.type.toUpperCase()}</span>`;
-                navItem.onclick = () => document.getElementById(`grade-q-${idx}`).scrollIntoView({behavior:'smooth', block:'center'});
+                navItem.onclick = () => {
+                    const details = document.getElementById('gradingMCToggle');
+                    if (details && !details.open) details.open = true;
+                    setTimeout(() => {
+                        document.getElementById(`grade-q-${idx}`).scrollIntoView({behavior:'smooth', block:'center'});
+                    }, 50);
+                };
                 nav.appendChild(navItem);
 
                 const card = document.createElement('div');
@@ -3735,7 +4020,23 @@
                     } else {
                         answerHtml = `<div class="p-4 text-gray-400 italic text-sm">Học sinh không nộp bài cho câu này.</div>`;
                     }
-                    answerHtml += `<div class="p-4 bg-yellow-50 flex items-center justify-between"><span class="font-bold text-yellow-800 text-sm"><i class="fa-solid fa-pen-nib mr-2"></i>Chấm điểm:</span><div class="flex items-center gap-2"><input type="number" id="manual-score-${idx}" class="form-input w-24 text-right font-bold text-lg text-blue-600" value="${maxPoint}" max="${maxPoint}" min="0" step="0.1" onchange="updateTotalScore()"><span class="text-gray-500 font-bold">/ ${maxPoint}đ</span></div></div>`;
+                    let encodedSolution = q.solution ? encodeURIComponent(q.solution) : '';
+                    let encodedContent = q.originalContent ? encodeURIComponent(q.originalContent) : encodeURIComponent(q.content);
+                    
+                    answerHtml += `
+                        <div class="p-4 bg-yellow-50 flex flex-col md:flex-row md:items-center justify-between gap-3 border-t border-yellow-100">
+                            <button id="btnAIGrade-${idx}" onclick="window.gradeSingleEssayWithAI(${idx}, '${q.answerKey}', '${encodedContent}', '${encodedSolution}')" class="px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg font-bold shadow-md hover:shadow-lg flex items-center justify-center gap-2 text-sm transition-transform active:scale-95 shrink-0"><img src="https://upload.wikimedia.org/wikipedia/commons/8/8a/Google_Gemini_logo.svg" class="w-4 h-4 invert" alt="Gemini"> Chấm bằng AI</button>
+                            <div class="flex items-center gap-2 self-end md:self-auto">
+                                <span class="font-bold text-yellow-800 text-sm mr-2"><i class="fa-solid fa-pen-nib mr-1"></i>Điểm:</span>
+                                <input type="number" id="manual-score-${idx}" class="form-input w-24 text-right font-bold text-lg text-blue-600" value="${maxPoint}" max="${maxPoint}" min="0" step="0.1" onchange="updateTotalScore()">
+                                <span class="text-gray-500 font-bold">/ ${maxPoint}đ</span>
+                            </div>
+                        </div>
+                        <div id="ai-feedback-${idx}" class="p-4 bg-indigo-50 border-t border-indigo-100 hidden">
+                            <div class="text-xs font-bold text-indigo-800 uppercase mb-2"><i class="fa-solid fa-robot mr-1"></i>AI Phân tích & Gợi ý điểm:</div>
+                            <div id="ai-feedback-content-${idx}" class="text-sm text-gray-700 latex-container"></div>
+                        </div>
+                    `;
                 } else {
                     let userText = 'Bỏ trống';
                     let correctText = '';
@@ -3782,8 +4083,17 @@
                     <div class="p-4 text-gray-800 latex-container">${window.formatContent ? window.formatContent(q.content) : q.content}</div>
                     ${answerHtml}
                 `;
-                container.appendChild(card);
+                if (q.type === 'essay') {
+                    hasEssay = true;
+                    essayContainer.appendChild(card);
+                } else {
+                    hasMC = true;
+                    mcContainer.appendChild(card);
+                }
             });
+            
+            if (hasMC) mcGroupDetails.classList.remove('hidden');
+            if (hasEssay) essayHeader.classList.remove('hidden');
             
             if(window.MathJax) MathJax.typesetPromise([container]).catch(()=>{});
         };
@@ -3929,11 +4239,10 @@
             };
 
             const start = (e) => {
-                if(gradingTool === 'cursor') return;
+                if(window.currentTool === 'cursor') return;
                 
-                // Nếu là cảm ứng hoặc vẽ, chặn scroll màn hình
-                if(e.type === 'touchstart' || gradingTool === 'pen') {
-                    // e.preventDefault(); // (Có thể bỏ dòng này nếu muốn scroll bằng 2 ngón)
+                if(e.type === 'touchstart' || window.currentTool === 'pen' || window.currentTool === 'eraser' || window.currentTool === 'check' || window.currentTool === 'cross') {
+                    // Cảm ứng vẽ -> chặn scroll màn hình
                 }
 
                 isDown = true;
@@ -3941,8 +4250,7 @@
                 lastX = pos.x; 
                 lastY = pos.y;
 
-                // --- LOGIC CHẤM NHANH (1 CLICK) ---
-                if (gradingTool === 'mark_correct' || gradingTool === 'mark_wrong') {
+                if (window.currentTool === 'check' || window.currentTool === 'cross') {
                     ctx.lineWidth = 4; 
                     ctx.lineCap = 'round';
                     ctx.lineJoin = 'round';
@@ -3950,24 +4258,20 @@
                     const input = document.getElementById(`manual-score-${idx}`);
                     let currentVal = parseFloat(input ? input.value : 0) || 0;
 
-                    if (gradingTool === 'mark_correct') {
-                        // Vẽ dấu V (Xanh)
+                    if (window.currentTool === 'check') {
                         ctx.strokeStyle = '#10B981';
                         ctx.beginPath();
                         ctx.moveTo(lastX - 10, lastY);
-                        ctx.lineTo(lastX - 3, lastY + 10); // Đỉnh nhọn
+                        ctx.lineTo(lastX - 3, lastY + 10);
                         ctx.lineTo(lastX + 15, lastY - 15);
                         ctx.stroke();
-                        // Cộng điểm (+0.25)
                         if(input) input.value = (currentVal + 0.25).toFixed(2);
                     } else {
-                        // Vẽ dấu X (Đỏ)
                         ctx.strokeStyle = '#EF4444';
                         ctx.beginPath();
                         ctx.moveTo(lastX - 10, lastY - 10); ctx.lineTo(lastX + 10, lastY + 10);
                         ctx.moveTo(lastX + 10, lastY - 10); ctx.lineTo(lastX - 10, lastY + 10);
                         ctx.stroke();
-                        // Trừ điểm (-0.25)
                         if(input) {
                             let newVal = currentVal - 0.25;
                             input.value = (newVal < 0 ? 0 : newVal).toFixed(2);
@@ -3981,25 +4285,25 @@
 
             const move = (e) => {
                 if(!isDown) return;
-                if(gradingTool === 'cursor' || gradingTool.startsWith('mark_')) return;
+                if(window.currentTool === 'cursor' || window.currentTool === 'check' || window.currentTool === 'cross') return;
 
-                e.preventDefault(); // Chặn scroll khi đang vẽ nét
+                e.preventDefault(); 
                 const pos = getPos(e);
                 
                 ctx.beginPath();
                 ctx.moveTo(lastX, lastY);
                 ctx.lineTo(pos.x, pos.y);
                 
-                // Cấu hình nét vẽ
-                const color = document.getElementById('penColor').value;
+                const color = document.getElementById('penColor') ? document.getElementById('penColor').value : '#ef4444';
+                let size = document.getElementById('penSize') ? parseInt(document.getElementById('penSize').value) : 3;
                 ctx.strokeStyle = color;
                 
-                if(gradingTool === 'eraser') {
+                if(window.currentTool === 'eraser') {
                     ctx.globalCompositeOperation = 'destination-out';
-                    ctx.lineWidth = 20; // Tẩy to
+                    ctx.lineWidth = size * 5; 
                 } else {
                     ctx.globalCompositeOperation = 'source-over';
-                    ctx.lineWidth = 2; // Nét bút thanh mảnh
+                    ctx.lineWidth = size; 
                 }
 
                 ctx.stroke();
@@ -4492,45 +4796,138 @@
             document.querySelectorAll('.grading-student-checkbox').forEach(cb => cb.checked = el.checked);
         };
 
-        window.scanAndRemindZalo = async () => {
-            if (!window.n8nWebhook) {
-                window.showNotification("Vui lòng cấu hình Webhook n8n trong bảng điều khiển trước!", "error");
-                return;
-            }
-            
-            const missingStudents = window.fullStudentList.filter(st => {
-                return !(window.statsMap[st.studentId] || window.statsMap[st.studentName]);
-            });
-            
-            if (missingStudents.length === 0) {
-                window.showNotification("Tất cả học sinh đã nộp bài!", "success");
-                return;
-            }
-
+        window.smartZaloRemind = async (event) => {
             const btn = event.currentTarget;
             const originalHTML = btn.innerHTML;
-            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang quét...';
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang xử lý...';
             btn.disabled = true;
 
             try {
+                const examSnap = await getDoc(doc(db, "exams", window.currentExamId));
+                if (!examSnap.exists()) throw new Error("Không tìm thấy đề thi!");
+                const examData = examSnap.data();
+                
+                // Cùng gọi webhook giao bài (để chung 1 API n8n xử lý)
+                const webhookUrl = examData.n8nWebhooks?.assign || examData.n8nWebhooks?.remind;
+                if (!webhookUrl) throw new Error("Chưa cấu hình Webhook Giao Bài qua Zalo!");
+
+                const eTitle = examData.title || document.getElementById('settingTitle').value;
+                const eDeadline = examData.endTime || document.getElementById('settingEndTime').value;
+                
+                const formatDateTimeVN = (dt) => {
+                    if (!dt) return "Không giới hạn";
+                    if (!dt.includes("T")) return dt;
+                    const [d, t] = dt.split("T");
+                    const [y, m, day] = d.split("-");
+                    return `${t} ngày ${parseInt(day)}/${parseInt(m)}/${y}`;
+                };
+                const deadlineStr = formatDateTimeVN(eDeadline);
+
+                // Kiểm tra xem đã quá hạn hay chưa
+                let isOverdue = false;
+                if (eDeadline) {
+                    const dlDate = new Date(eDeadline);
+                    if (new Date() > dlDate) {
+                        isOverdue = true;
+                    }
+                }
+
+                const missingStudents = window.fullStudentList.filter(st => {
+                    return !(window.statsMap[st.studentId] || window.statsMap[st.studentName]);
+                });
+                
+                if (missingStudents.length === 0) {
+                    window.showToast("Tất cả học sinh đã nộp bài! Không cần nhắc nhở hay tổng kết.", "success");
+                    return;
+                }
+
+                let messages = [];
+                const examLinkStr = window.location.origin + window.location.pathname.replace('exam-editor.html', 'exam.html') + '?id=' + window.currentExamId;
+
+                // 1. TIN NHẮN NHÓM
+                let missingText = `\n❌ CHƯA NỘP (${missingStudents.length}):\n`;
+                missingStudents.forEach((st, idx) => {
+                    missingText += `${idx+1}. ${st.studentName || st.name}\n`;
+                });
+
+                let groupMsg = "";
+                if (isOverdue) {
+                    const submittedStudents = window.fullStudentList.filter(st => {
+                        return (window.statsMap[st.studentId] || window.statsMap[st.studentName]);
+                    }).map(st => {
+                        const rec = window.statsMap[st.studentId] || window.statsMap[st.studentName];
+                        return { name: st.studentName || st.name, score: rec.score };
+                    });
+                    let submittedText = `✅ ĐÃ NỘP (${submittedStudents.length}):\n`;
+                    submittedStudents.forEach((st, idx) => {
+                        submittedText += `${idx+1}. ${st.name} - ${st.score}đ\n`;
+                    });
+                    groupMsg = `📊 TỔNG KẾT BÀI TẬP: ${eTitle}\n⏰ Hạn nộp: ${deadlineStr} (ĐÃ HẾT HẠN)\n\n${submittedText}${missingText}`;
+                } else {
+                    groupMsg = `🔔 NHẮC NHỞ BÀI TẬP: ${eTitle}\n⏰ Hạn chót: ${deadlineStr} (SẮP HẾT HẠN)\n${missingText}\n⏳ Các em học sinh có tên chưa nộp bài vui lòng nhanh chóng hoàn thành nhé!`;
+                }
+
+                if (examData.accessType === 'class' && examData.allowedClassIds) {
+                    for (let cid of examData.allowedClassIds) {
+                        const classSnap = await getDoc(doc(db, "classes", cid));
+                        if(classSnap.exists()) {
+                            const cName = classSnap.data().name;
+                            const zUid = classSnap.data().zaloGroupUid;
+                            if(zUid) {
+                                messages.push({
+                                    type: "group",
+                                    targetName: cName,
+                                    targetGroupUid: zUid,
+                                    messageContent: groupMsg
+                                });
+                            }
+                        }
+                    }
+                }
+
+                // 2. TIN NHẮN CÁ NHÂN (chỉ gửi cho người chưa nộp)
+                const formatVNPhone = (phone) => {
+                    if (!phone) return "";
+                    let cleanPhone = String(phone).replace(/\D/g, ''); 
+                    if (cleanPhone.length === 9 && !cleanPhone.startsWith('0')) return '0' + cleanPhone;
+                    if (cleanPhone.startsWith('84') && cleanPhone.length === 11) return '0' + cleanPhone.substring(2);
+                    return cleanPhone;
+                };
+
+                missingStudents.forEach(st => {
+                    let indivMsg = "";
+                    if (isOverdue) {
+                        indivMsg = `🚨 THÔNG BÁO QUÁ HẠN: Em ${st.studentName || st.name} chưa nộp bài tập [${eTitle}].\n⏰ Hạn nộp là ${deadlineStr} đã kết thúc.\n👉 Em vui lòng thu xếp làm bài và nộp bù sớm nhất có thể nhé!\n🔗 Link làm bài: ${examLinkStr}`;
+                    } else {
+                        indivMsg = `🔔 NHẮC NHỞ HỌC TẬP: Em ${st.studentName || st.name} chưa nộp bài tập [${eTitle}].\n⏰ Hạn chót là ${deadlineStr}.\n👉 Thời gian không còn nhiều, em tranh thủ hoàn thành và nộp bài đúng hạn nhé!\n🔗 Link làm bài: ${examLinkStr}`;
+                    }
+
+                    messages.push({
+                        type: "individual",
+                        targetName: st.studentName || st.name || "Học sinh",
+                        targetPhone: formatVNPhone(st.phoneStudent),
+                        targetPhoneParent: formatVNPhone(st.phoneParent),
+                        targetZaloUid: st.zaloUid ? String(st.zaloUid) : "",
+                        messageContent: indivMsg
+                    });
+                });
+
                 const payload = {
-                    action: "remind_missing",
-                    examTitle: document.getElementById('settingTitle').value,
-                    examId: window.currentExamId,
-                    endTime: document.getElementById('settingEndTime').value,
-                    students: missingStudents
+                    action: isOverdue ? "zalo_summary" : "zalo_remind",
+                    examTitle: eTitle,
+                    messages: messages
                 };
                 
-                await fetch(window.n8nWebhook, {
+                await fetch(webhookUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
                 });
                 
-                window.showNotification(`Đã gửi danh sách ${missingStudents.length} học sinh chưa nộp lên n8n!`, "success");
+                window.showToast(`Đã gửi Zalo ${isOverdue ? 'Tổng kết' : 'Nhắc nhở'} thành công!`, "success");
             } catch(e) {
                 console.error(e);
-                window.showNotification("Lỗi kết nối n8n: " + e.message, "error");
+                window.showToast("Lỗi gửi Zalo: " + e.message, "error");
             } finally {
                 btn.innerHTML = originalHTML;
                 btn.disabled = false;
@@ -4539,12 +4936,12 @@
 
         window.sendSelectedResultsZalo = async () => {
             if (!window.n8nWebhook) {
-                window.showNotification("Vui lòng cấu hình Webhook n8n trong bảng điều khiển trước!", "error");
+                window.showToast("Vui lòng cấu hình Webhook n8n trong bảng điều khiển trước!", "error");
                 return;
             }
             const selected = Array.from(document.querySelectorAll('.grading-student-checkbox:checked')).map(cb => JSON.parse(cb.value));
             if (selected.length === 0) {
-                window.showNotification("Vui lòng chọn ít nhất một học sinh!", "error");
+                window.showToast("Vui lòng chọn ít nhất một học sinh!", "error");
                 return;
             }
             
@@ -4554,11 +4951,26 @@
             btn.disabled = true;
 
             try {
+                let messages = [];
+                selected.forEach(att => {
+                    const st = window.fullStudentList.find(s => s.uid === att.userId);
+                    const sName = att.studentName || "Học sinh";
+                    const score = att.totalScore || 0;
+                    messages.push({
+                        type: "individual",
+                        targetName: sName,
+                        targetPhone: st ? formatVNPhone(st.phoneStudent) : "",
+                        targetPhoneParent: st ? formatVNPhone(st.phoneParent) : "",
+                        targetZaloUid: st && st.zaloUid ? String(st.zaloUid) : "",
+                        messageContent: `Thông báo kết quả: Em ${sName} đã hoàn thành bài tập [${document.getElementById('settingTitle').value}].\nĐiểm số: ${score}đ.\nChúc em học tốt!`
+                    });
+                });
+
                 const payload = {
                     action: "send_results",
                     examTitle: document.getElementById('settingTitle').value,
                     examId: window.currentExamId,
-                    students: selected
+                    messages: messages
                 };
                 
                 await fetch(window.n8nWebhook, {
@@ -4567,10 +4979,10 @@
                     body: JSON.stringify(payload)
                 });
                 
-                window.showNotification(`Đã gửi yêu cầu n8n cho ${selected.length} học sinh thành công!`, "success");
+                window.showToast(`Đã gửi yêu cầu n8n cho ${selected.length} học sinh thành công!`, "success");
             } catch(e) {
                 console.error(e);
-                window.showNotification("Lỗi kết nối n8n: " + e.message, "error");
+                window.showToast("Lỗi kết nối n8n: " + e.message, "error");
             } finally {
                 btn.innerHTML = originalHTML;
                 btn.disabled = false;
@@ -5018,7 +5430,7 @@
                     if (cb.dataset.type === 'tl') {
                         const ex = currentBookData.exercises_TL[cb.dataset.idx];
                         if (!window.mixedTlQuestions) window.mixedTlQuestions = [];
-                        window.mixedTlQuestions.push({ content: ex.content, solution: ex.solution });
+                        window.mixedTlQuestions.push({ content: ex.content, solution: ex.solution, originalIndex: parseInt(cb.dataset.idx) + 1 });
                         addedCount++;
                     } else if (cb.dataset.type === 'theory') {
                         let theoryContent = Array.isArray(currentBookData.theory) ? currentBookData.theory.map(t => t.content || t).join('<br><br>') : currentBookData.theory;
@@ -5241,57 +5653,7 @@
             </div>
         </div>
     </div>
-    <div id="gradingModal" class="fixed inset-0 z-[120] bg-gray-900 bg-opacity-95 hidden flex flex-col transition-opacity duration-300 opacity-0">
-        <div class="h-16 bg-white border-b border-gray-200 flex justify-between items-center px-4 shrink-0 shadow-md z-20">
-            <div class="flex items-center gap-4">
-                <button onclick="closeGradingModal()" class="w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-600"><i class="fa-solid fa-arrow-left"></i></button>
-                <div>
-                    <h3 class="font-bold text-gray-800 text-lg leading-tight" id="gradingStudentName">Tên học sinh</h3>
-                    <p class="text-xs text-gray-500">Đang chấm: <span id="gradingAttemptNum">--</span></p>
-                </div>
-            </div>
-
-            <div id="gradingToolbar" class="flex items-center gap-3">
-                <div class="flex items-center gap-1 bg-gray-100 p-1 rounded-lg border">
-                    <button onclick="setGradingTool('cursor')" class="grading-tool-btn p-1.5 rounded bg-white shadow-sm text-blue-600" title="Di chuyển"><i class="fa-solid fa-arrow-pointer"></i></button>
-                    <button onclick="setGradingTool('pen')" class="grading-tool-btn p-1.5 rounded hover:bg-white text-gray-600" title="Bút viết"><i class="fa-solid fa-pen"></i></button>
-                    <button onclick="setGradingTool('eraser')" class="grading-tool-btn p-1.5 rounded hover:bg-white text-gray-600" title="Tẩy"><i class="fa-solid fa-eraser"></i></button>
-                    <div class="w-[1px] h-4 bg-gray-300 mx-1"></div>
-                    <input type="color" id="penColor" value="#ff0000" class="w-6 h-6 border-0 p-0 rounded cursor-pointer">
-                </div>
-
-                <div class="flex items-center gap-1 bg-gray-100 p-1 rounded-lg border hidden md:flex">
-                    <button onclick="setGradingTool('mark_correct')" class="grading-tool-btn p-1.5 rounded hover:bg-green-100 text-green-600" title="Đúng (Click để chấm)"><i class="fa-solid fa-check"></i></button>
-                    <button onclick="setGradingTool('mark_wrong')" class="grading-tool-btn p-1.5 rounded hover:bg-red-100 text-red-600" title="Sai (Click để chấm)"><i class="fa-solid fa-xmark"></i></button>
-                </div>
-
-                <button onclick="runAIGrading()" class="px-3 py-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg text-xs font-bold shadow hover:opacity-90 flex items-center gap-1">
-                    <i class="fa-solid fa-robot"></i> <span class="hidden md:inline">Chấm AI</span>
-                </button>
-            </div>
-
-            <div class="flex items-center gap-4">
-                <div class="text-right hidden md:block">
-                    <p class="text-xs text-gray-500 uppercase font-bold">Tổng điểm</p>
-                    <p class="text-2xl font-black text-blue-600" id="gradingTotalScore">0.0</p>
-                </div>
-                <button onclick="saveGradingResult()" class="px-5 py-2 bg-green-600 hover:bg-green-700 text-white font-bold rounded-xl shadow-lg transition-all flex items-center gap-2">
-                    <i class="fa-solid fa-floppy-disk"></i> Lưu
-                </button>
-            </div>
-        </div>
-
-        <div class="flex-1 flex overflow-hidden bg-gray-100 relative">
-            <div class="w-64 bg-gray-50 border-r border-gray-200 flex flex-col hidden lg:flex">
-                <div class="p-4 font-bold text-gray-600 text-sm uppercase border-b bg-gray-100">Danh sách câu hỏi</div>
-                <div class="flex-1 overflow-y-auto p-3 space-y-2" id="gradingNavList"></div>
-            </div>
-
-            <div class="flex-1 overflow-y-auto p-4 md:p-8 flex justify-center" id="gradingWorkspace">
-                <div class="max-w-4xl w-full space-y-6" id="gradingQuestionList"></div>
-            </div>
-        </div>
-    </div>
+    <!-- gradingModal has been merged into essayGradingModal -->
     
     <script>
         // Toggle Sidebar on Mobile
