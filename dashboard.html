@@ -827,13 +827,20 @@
             return cleanPhone;
         };
 
-        window.switchView = (viewName) => {
+        window.switchView = (viewName, pushHistory = true) => {
             document.querySelectorAll('.view-section').forEach(el => el.classList.add('hidden'));
             const target = document.getElementById(`view-${viewName}`);
             if(target) target.classList.remove('hidden');
             document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
             const activeNav = document.getElementById(`nav-${viewName}`);
             if(activeNav) activeNav.classList.add('active');
+
+            if (pushHistory) {
+                const url = new URL(window.location);
+                url.searchParams.set('view', viewName);
+                url.searchParams.delete('id');
+                history.pushState({ view: viewName }, '', url);
+            }
 
             // [TỐI ƯU] Chỉ gọi tải Ngân hàng đề khi bấm vào tab này
             if (viewName === 'exambank') {
@@ -851,6 +858,34 @@
                 }
             }
         }
+
+        window.addEventListener('popstate', (e) => {
+            if (e.state) {
+                if (e.state.view === 'class_detail') {
+                    window.openTeacherClassDetail(e.state.id, e.state.name, false);
+                } else {
+                    window.switchView(e.state.view, false);
+                }
+            } else {
+                const urlParams = new URLSearchParams(window.location.search);
+                const view = urlParams.get('view') || 'home';
+                if (view === 'class_detail') {
+                    window.openTeacherClassDetail(urlParams.get('id'), urlParams.get('name'), false);
+                } else {
+                    window.switchView(view, false);
+                }
+            }
+        });
+
+        window.addEventListener('DOMContentLoaded', () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            const view = urlParams.get('view') || 'home';
+            if (view === 'class_detail') {
+                history.replaceState({ view: 'class_detail', id: urlParams.get('id'), name: urlParams.get('name') }, '', window.location.href);
+            } else {
+                history.replaceState({ view: view }, '', window.location.href);
+            }
+        });
 
         window.showNotification = (msg, type = 'success') => {
             const container = document.getElementById('notificationContainer');
@@ -1056,37 +1091,28 @@
             const container = document.getElementById('classList'); 
             if(!container) return;
 
-            if (!forceReload) {
-                const cached = localStorage.getItem('lms_cached_classes');
-                if (cached) {
-                    window.allClassesData = JSON.parse(cached);
-                    const savedView = localStorage.getItem('classViewMode') || 'grid';
-                    renderClasses(savedView);
-                    // Fetch in background
-                    const q = query(collection(db, "classes"), where("teacherId", "==", currentUserUid), limit(100));
-                    getDocs(q).then(snap => {
-                        window.allClassesData = [];
-                        snap.forEach(d => window.allClassesData.push({ id: d.id, ...d.data() }));
-                        localStorage.setItem('lms_cached_classes', JSON.stringify(window.allClassesData));
-                        renderClasses(savedView);
-                    });
-                    return;
-                }
+            const cached = localStorage.getItem('lms_cached_classes');
+            const savedView = localStorage.getItem('classViewMode') || 'grid';
+            
+            if (cached) {
+                window.allClassesData = JSON.parse(cached);
+                renderClasses(savedView);
+            } else {
+                container.innerHTML = `<div class="col-span-full grid grid-cols-1 md:grid-cols-3 gap-6 animate-pulse">${'<div class="h-40 bg-gray-200 rounded-2xl"></div>'.repeat(3)}</div>`;
             }
-
-            container.innerHTML = `<div class="col-span-full grid grid-cols-1 md:grid-cols-3 gap-6 animate-pulse">${'<div class="h-40 bg-gray-200 rounded-2xl"></div>'.repeat(3)}</div>`;
 
             try {
                 const q = query(collection(db, "classes"), where("teacherId", "==", currentUserUid), limit(100));
                 const snap = await getDocs(q);
-                window.allClassesData = [];
-                snap.forEach(d => window.allClassesData.push({ id: d.id, ...d.data() }));
+                const newData = [];
+                snap.forEach(d => newData.push({ id: d.id, ...d.data() }));
 
-                localStorage.setItem('lms_cached_classes', JSON.stringify(window.allClassesData));
-
-                const savedView = localStorage.getItem('classViewMode') || 'grid';
-                renderClasses(savedView);
-                
+                // Avoid re-rendering if data hasn't changed to prevent flickering
+                if (JSON.stringify(window.allClassesData) !== JSON.stringify(newData)) {
+                    window.allClassesData = newData;
+                    localStorage.setItem('lms_cached_classes', JSON.stringify(window.allClassesData));
+                    renderClasses(savedView);
+                }
             } catch (e) { console.error(e); }
         }
 
@@ -1240,8 +1266,15 @@
             }
         }
 
-        window.openTeacherClassDetail = async (id, name) => {
-            window.switchView('teacher-class-detail');
+        window.openTeacherClassDetail = async (id, name, pushHistory = true) => {
+            window.switchView('teacher-class-detail', false);
+            if (pushHistory) {
+                const url = new URL(window.location);
+                url.searchParams.set('view', 'class_detail');
+                url.searchParams.set('id', id);
+                if (name) url.searchParams.set('name', name);
+                history.pushState({ view: 'class_detail', id: id, name: name }, '', url);
+            }
             currentViewingClassId = id;
             window.currentClassId = id; // Store for global access
             const titleEl = document.getElementById('teacherClassTitle');

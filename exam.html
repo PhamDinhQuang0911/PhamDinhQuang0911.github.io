@@ -519,7 +519,7 @@
         });
 
         function showLoginRequestModal() {
-            const modalHtml = `<div class="fixed inset-0 bg-gray-900/90 z-[100] flex items-center justify-center p-4 backdrop-blur-sm"><div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 text-center animate-bounce-in relative"><div class="w-16 h-16 bg-orange-100 text-orange-600 rounded-full flex items-center justify-center mx-auto mb-4 text-3xl border border-orange-200"><i class="fa-solid fa-user-lock"></i></div><h3 class="text-xl font-black text-gray-800 mb-2">Yêu cầu tài khoản</h3><p class="text-gray-500 mb-6 text-sm">Em cần đăng nhập để làm bài.</p><button onclick="window.location.href='index.html'" class="w-full py-3 bg-blue-600 text-white font-bold rounded-xl">Đăng nhập ngay</button></div></div>`;
+            const modalHtml = `<div class="fixed inset-0 bg-gray-900/90 z-[100] flex items-center justify-center p-4 backdrop-blur-sm"><div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 text-center animate-bounce-in relative"><div class="w-16 h-16 bg-orange-100 text-orange-600 rounded-full flex items-center justify-center mx-auto mb-4 text-3xl border border-orange-200"><i class="fa-solid fa-user-lock"></i></div><h3 class="text-xl font-black text-gray-800 mb-2">Yêu cầu tài khoản</h3><p class="text-gray-500 mb-6 text-sm">Em cần đăng nhập để làm bài.</p><button onclick="window.location.href='index.html?mode=login'" class="w-full py-3 bg-blue-600 text-white font-bold rounded-xl">Đăng nhập ngay</button></div></div>`;
             document.body.insertAdjacentHTML('beforeend', modalHtml);
         }
 
@@ -2488,18 +2488,6 @@ window.requestResubmit = async () => {
                             pZaloUid = userSnap.data().zaloUid ? String(userSnap.data().zaloUid) : "";
                         }
                         
-                        if ((!pPhone || !pZaloUid) && detectedClassId !== "vang_lai") {
-                            const classSnap = await getDoc(doc(db, "classes", detectedClassId));
-                            if(classSnap.exists()) {
-                                const st = classSnap.data().students?.find(s => s.uid === currentUser.uid);
-                                if (st) {
-                                    if(!pPhone) pPhone = st.phoneStudent || "";
-                                    if(!pPhoneParent) pPhoneParent = st.phoneParent || "";
-                                    if(!pZaloUid) pZaloUid = st.zaloUid ? String(st.zaloUid) : "";
-                                }
-                            }
-                        }
-                        
                         const d = new Date();
                         const timeStr = d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0') + ' ngày ' + d.getDate().toString().padStart(2, '0') + '/' + (d.getMonth()+1).toString().padStart(2, '0');
                         const sName = currentUser.displayName || currentUser.email;
@@ -2511,23 +2499,90 @@ window.requestResubmit = async () => {
                             if (cleanPhone.startsWith('84') && cleanPhone.length === 11) return '0' + cleanPhone.substring(2);
                             return cleanPhone;
                         };
+                        
+                        let matchedStudent = null;
+                        
+                        // 1. Thử lấy từ classId đã nhận diện
+                        if (detectedClassId !== "vang_lai") {
+                            try {
+                                const classSnap = await getDoc(doc(db, "classes", detectedClassId));
+                                if(classSnap.exists()) {
+                                    const cData = classSnap.data();
+                                    matchedStudent = cData.students?.find(s => s.uid === currentUser.uid || (s.email && s.email.toLowerCase() === currentUser.email.toLowerCase()));
+                                }
+                            } catch (e) { console.warn("Lỗi tải lớp:", e); }
+                        }
+                        
+                        // 2. Fallback: Dò tìm trong các lớp được giao bài
+                        if (!matchedStudent && examData.assignTo && Array.isArray(examData.assignTo)) {
+                            for (let cid of examData.assignTo) {
+                                try {
+                                    const classSnap = await getDoc(doc(db, "classes", cid));
+                                    if(classSnap.exists()) {
+                                        const cData = classSnap.data();
+                                        matchedStudent = cData.students?.find(s => s.uid === currentUser.uid || (s.email && s.email.toLowerCase() === currentUser.email.toLowerCase()));
+                                        if (matchedStudent) {
+                                            detectedClassId = cid; // Cập nhật luôn classId
+                                            break;
+                                        }
+                                    }
+                                } catch (e) { console.warn("Lỗi dò tìm lớp từ assignTo:", e); }
+                            }
+                        }
+
+                        if (matchedStudent) {
+                            if(!pPhone) pPhone = matchedStudent.phoneStudent || matchedStudent.phone || "";
+                            if(!pPhoneParent) pPhoneParent = matchedStudent.phoneParent || "";
+                            if(!pZaloUid) pZaloUid = matchedStudent.zaloUid ? String(matchedStudent.zaloUid) : "";
+                        }
+                        
+                        let totalEssay = 0;
+                        let completedEssay = 0;
+                        let totalMC = 0;
+                        let unansweredMC = 0;
+                        
+                        if (isMixed && currentQuestions && currentQuestions.length > 0) {
+                            currentQuestions.forEach((q, i) => {
+                                const u = resultAnswers[i];
+                                if (q.type === 'essay') {
+                                    totalEssay++;
+                                    if (u !== undefined && u !== null && String(u).trim() !== '') completedEssay++;
+                                } else if (q.type === 'mc') {
+                                    totalMC++;
+                                    if (u === undefined || u === null || String(u).trim() === '') unansweredMC++;
+                                }
+                            });
+                        }
+                        let correctMC = correctCount;
+                        let wrongMC = Math.max(0, totalMC - correctMC - unansweredMC);
+                        
+                        let messageContentStr = `✅ XÁC NHẬN NỘP BÀI\n👤 Học sinh: ${sName}\n📚 Bài tập: [${examData.title}]`;
+                        if (totalMC > 0) {
+                            messageContentStr += `\n\n🎯 PHẦN TRẮC NGHIỆM:\n✔️ Đúng: ${correctMC}\n❌ Sai: ${wrongMC}\n⚠️ Chưa làm: ${unansweredMC}`;
+                        }
+                        if (totalEssay > 0) {
+                            messageContentStr += `\n\n✍️ PHẦN TỰ LUẬN:\n📝 Đã làm: ${completedEssay}/${totalEssay} bài\n(Giáo viên sẽ chấm sau)`;
+                        }
+                        messageContentStr += `\n\n⏰ Thời gian nộp: ${timeStr}`;
+                        
+                        const msgs = [];
+                        
+                        msgs.push({
+                            type: "individual",
+                            targetName: sName,
+                            targetPhone: formatVNPhone(pPhone),
+                            targetPhoneParent: formatVNPhone(pPhoneParent),
+                            targetZaloUid: pZaloUid,
+                            messageContent: messageContentStr
+                        });
 
                         const payload = {
                             action: "student_submit",
                             examTitle: examData.title,
-                            messages: [
-                                {
-                                    type: "individual",
-                                    targetName: sName,
-                                    targetPhone: formatVNPhone(pPhone),
-                                    targetPhoneParent: formatVNPhone(pPhoneParent),
-                                    targetZaloUid: pZaloUid,
-                                    messageContent: `Xác nhận: ${sName} đã nộp bài tập [${examData.title}].\nTrắc nghiệm: ${correctCount}/${totalQuestions} câu đúng.\nTự luận: Giáo viên sẽ chấm sau.\nThời gian nộp: ${timeStr}.`
-                                }
-                            ]
+                            messages: msgs
                         };
                         
-                        fetch(webhookUrl, {
+                        await fetch(webhookUrl, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify(payload)

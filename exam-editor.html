@@ -551,7 +551,15 @@
                 <i class="fa-solid fa-toolbox"></i>
             </button>
             <div class="flex-1 flex flex-col md:flex-row overflow-hidden bg-gray-100 relative">
-                <!-- Left: Content Viewer (Scrollable) -->
+                <!-- Left Sidebar: Nav List -->
+                <div class="w-full md:w-56 lg:w-64 bg-white border-b md:border-b-0 md:border-r border-gray-200 flex flex-col shrink-0 max-h-48 md:max-h-full">
+                    <div class="p-4 bg-gray-50 flex-1 overflow-y-auto custom-scrollbar flex flex-col">
+                        <h4 class="font-bold text-gray-700 text-xs uppercase mb-3 flex items-center gap-2 sticky top-0 bg-gray-50 py-1 z-10"><i class="fa-solid fa-route text-indigo-500"></i> Điều hướng câu hỏi</h4>
+                        <div id="gradingNavList" class="space-y-1 pb-2"></div>
+                    </div>
+                </div>
+
+                <!-- Middle: Content Viewer (Scrollable) -->
                 <div class="flex-1 overflow-auto relative p-4 md:p-6 custom-scrollbar flex flex-col items-center gap-6">
                     <!-- MC Details (Collapsible) -->
                     <details class="group bg-white border border-gray-200 rounded-xl shadow-sm w-full max-w-[900px]" id="gradingMCToggle" open>
@@ -609,13 +617,6 @@
                         </button>
                         <p class="text-[10px] text-indigo-500 text-center mt-1 font-medium"><i class="fa-solid fa-wand-magic-sparkles"></i> Phân tích tự động toàn bộ ảnh bằng AI</p>
                     </div>
-
-                    <!-- Nav List -->
-                    <div class="p-4 border-b border-gray-100 bg-gray-50 flex-1 overflow-y-auto custom-scrollbar flex flex-col min-h-[120px]">
-                        <h4 class="font-bold text-gray-700 text-xs uppercase mb-3 flex items-center gap-2"><i class="fa-solid fa-route text-indigo-500"></i> Điều hướng câu hỏi</h4>
-                        <div id="gradingNavList" class="space-y-1"></div>
-                    </div>
-
                     <!-- Feedback & Score -->
                     <div class="p-4 flex flex-col gap-4">
                         <div class="flex-1 flex flex-col min-h-[150px]">
@@ -2841,9 +2842,11 @@
                     }
                     
                     if (examData.type === 'mixed') {
-                        instruction = `💡 Hướng dẫn:\n- Tự luận: Các em làm ra vở và chụp ảnh sau đó gửi theo từng bài.\n- Trắc nghiệm: Các em làm theo bài trên link, đính kèm phần trình bày vắn tắt ở mỗi câu nếu được yêu cầu.\n`;
+                        instruction = `💡 Hướng dẫn:\n- Tự luận: Các em làm ra vở và chụp ảnh sau đó gửi theo từng bài.\n- Trắc nghiệm: Các em làm theo bài trên link`;
+                        instruction += examData.briefNote ? `, nhớ đính kèm phần trình bày vắn tắt ở mỗi câu.\n` : `.\n`;
                     } else {
-                        instruction = `💡 Hướng dẫn: Các em làm theo bài trên link, đính kèm phần trình bày vắn tắt ở mỗi câu nếu được yêu cầu.\n`;
+                        instruction = `💡 Hướng dẫn: Các em làm theo bài trên link`;
+                        instruction += examData.briefNote ? `, nhớ đính kèm phần trình bày vắn tắt ở mỗi câu.\n` : `.\n`;
                     }
                 }
                 
@@ -3910,6 +3913,15 @@
             window.setTool('cursor'); // Reset tool to cursor when opening grading view
             const container = document.getElementById('gradingQuestionList');
             const nav = document.getElementById('gradingNavList');
+            
+            // Hide global AI buttons if it's mixed or essay, to avoid duplication
+            const btnOnly = document.getElementById('btnAIGradeOnly');
+            if (btnOnly && (window.examData.type === 'mixed' || window.examData.type === 'essay' || window.examData.type === 'homework')) {
+                btnOnly.classList.add('hidden');
+            } else if (btnOnly) {
+                btnOnly.classList.remove('hidden');
+            }
+
             container.innerHTML = `
                 <details id="mcGroupDetails" class="group mb-4 bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden hidden" open>
                     <summary class="p-4 font-bold text-gray-700 cursor-pointer bg-gray-50 flex justify-between items-center select-none hover:bg-gray-100 transition-colors">
@@ -3976,7 +3988,14 @@
             }
 
             window.gradingQuestions.forEach((q, idx) => {
-                if (q.type === 'theory') return; // Bỏ qua phần lý thuyết cho đỡ vướng
+                const sol = (q.solution || "").toLowerCase().trim();
+                const contentUpper = (q.content || "").toUpperCase();
+                const isTheory = q.isTheory === true || 
+                                 q.type === 'theory' ||
+                                 sol.includes("lý thuyết") || 
+                                 (sol === "" && (contentUpper.includes("BOXDN") || contentUpper.includes("BOXDL") || contentUpper.includes("KHÁI NIỆM") || contentUpper.includes("LÝ THUYẾT") || contentUpper.includes("ĐỊNH NGHĨA")));
+                
+                if (isTheory) return; // Bỏ qua phần lý thuyết cho đỡ vướng
                 
                 let u = undefined;
                 if (q.type === 'essay') {
@@ -4095,6 +4114,39 @@
             if (hasMC) mcGroupDetails.classList.remove('hidden');
             if (hasEssay) essayHeader.classList.remove('hidden');
             
+            // Khởi tạo Canvas cho các ảnh tự luận trong mode Mixed/Essay
+            if (window.examData.type === 'mixed' || window.examData.type === 'essay') {
+                window.currentGradingCanvases = [];
+                const inlineImgs = essayContainer.querySelectorAll('.grading-essay-content img');
+                inlineImgs.forEach((img, i) => {
+                    const wrapper = document.createElement('div');
+                    wrapper.className = "relative inline-block border border-gray-200 rounded my-2 bg-white shadow-sm";
+                    img.parentNode.insertBefore(wrapper, img);
+                    wrapper.appendChild(img);
+                    
+                    img.id = `essay-img-${i}`;
+                    img.className = "block max-w-full h-auto pointer-events-none select-none rounded";
+                    img.crossOrigin = "anonymous";
+                    if(!img.src.includes('bypassCache')) img.src = img.src + (img.src.includes('?') ? '&' : '?') + 'bypassCache=' + Date.now();
+                    
+                    const canvas = document.createElement('canvas');
+                    canvas.id = `grading-canvas-${i}`;
+                    canvas.className = "absolute top-0 left-0 w-full h-full cursor-crosshair touch-none rounded";
+                    wrapper.appendChild(canvas);
+                    
+                    const ctx = canvas.getContext('2d');
+                    
+                    window.currentGradingCanvases.push({
+                        imgEl: img,
+                        canvas: canvas,
+                        ctx: ctx
+                    });
+                    
+                    // Delay để ảnh load xong mới set kích thước
+                    setTimeout(() => window.initCanvas(i), 100);
+                });
+            }
+            
             if(window.MathJax) MathJax.typesetPromise([container]).catch(()=>{});
         };
 
@@ -4149,6 +4201,33 @@
             });
 
             try {
+                // Upload canvases if they exist
+                let finalUrls = [];
+                if (window.currentGradingCanvases && window.currentGradingCanvases.length > 0) {
+                    for (let i = 0; i < window.currentGradingCanvases.length; i++) {
+                        const obj = window.currentGradingCanvases[i];
+                        if (!obj.imgEl || !obj.canvas) continue;
+                        
+                        const finalCanvas = document.createElement('canvas');
+                        finalCanvas.width = obj.imgEl.naturalWidth || obj.imgEl.width || 800;
+                        finalCanvas.height = obj.imgEl.naturalHeight || obj.imgEl.height || 1000;
+                        const fctx = finalCanvas.getContext('2d');
+                        fctx.drawImage(obj.imgEl, 0, 0, finalCanvas.width, finalCanvas.height);
+                        fctx.drawImage(obj.canvas, 0, 0, finalCanvas.width, finalCanvas.height);
+                        
+                        const mergedBase64 = finalCanvas.toDataURL('image/jpeg', 0.8);
+                        const blob = await (await fetch(mergedBase64)).blob();
+                        const formData = new FormData();
+                        formData.append('file', blob, `graded_${Date.now()}_${i}.jpg`);
+                        
+                        const uploadRes = await fetch("https://upload-helper.phamngockhanh-942001.workers.dev/", { method: 'PUT', body: formData });
+                        const uploadData = await uploadRes.json();
+                        if (uploadData.url) {
+                            finalUrls.push(uploadData.url);
+                        }
+                    }
+                }
+
                 // Cập nhật điểm mới vào Firestore
                 const updateData = {
                     score: newScore,
@@ -4157,6 +4236,10 @@
                 };
                 if (combinedFeedback.trim() !== "") {
                     updateData.teacherFeedback = combinedFeedback.trim();
+                }
+                if (finalUrls.length > 0) {
+                    updateData.gradedImageUrls = finalUrls;
+                    updateData.gradedImageUrl = finalUrls[0];
                 }
 
                 await updateDoc(doc(db, "results", currentGradingAttempt.id), updateData);
@@ -4328,37 +4411,7 @@
         // Hàm cập nhật tổng điểm khi chấm nhanh
         
 
-        // [FIX LỖI] Hàm Lưu Kết Quả
-        window.saveGradingResult = async () => {
-            if (!currentGradingAttempt || !currentGradingAttempt.id) return window.customAlert("Lỗi dữ liệu bài thi!", "error");
-            
-            const btn = document.querySelector('#gradingModal button[onclick="saveGradingResult()"]');
-            const oldText = btn.innerHTML;
-            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang lưu...'; btn.disabled = true;
 
-            try {
-                const newScore = parseFloat(document.getElementById('gradingTotalScore').textContent);
-                
-                // Gọi updateDoc (đã được import ở bước 1)
-                await updateDoc(doc(db, "results", currentGradingAttempt.id), {
-                    score: newScore,
-                    gradedAt: new Date().toISOString(),
-                    graderId: currentUser.uid 
-                });
-                
-                window.showToast("Đã lưu kết quả chấm thi!", "success");
-                
-                // Refresh lại bảng thống kê
-                if(window.loadStats) window.loadStats(); 
-                window.closeGradingModal();
-
-            } catch (e) {
-                console.error(e);
-                window.customAlert("Lỗi lưu điểm: " + e.message, "error");
-            } finally {
-                btn.innerHTML = oldText; btn.disabled = false;
-            }
-        };
     // --- HÀM DUYỆT YÊU CẦU LÀM LẠI ---
         // --- HÀM DUYỆT YÊU CẦU LÀM LẠI ---
         window.approveReattempt = async (studentId, requestId, studentName) => {
@@ -4803,12 +4856,12 @@
             btn.disabled = true;
 
             try {
-                const examSnap = await getDoc(doc(db, "exams", window.currentExamId));
+                const examSnap = await getDoc(doc(db, "exams", currentExamId));
                 if (!examSnap.exists()) throw new Error("Không tìm thấy đề thi!");
                 const examData = examSnap.data();
                 
                 // Cùng gọi webhook giao bài (để chung 1 API n8n xử lý)
-                const webhookUrl = examData.n8nWebhooks?.assign || examData.n8nWebhooks?.remind;
+                const webhookUrl = examData.n8nWebhooks?.assign || examData.n8nWebhooks?.remind || examData.n8nWebhooks?.publish;
                 if (!webhookUrl) throw new Error("Chưa cấu hình Webhook Giao Bài qua Zalo!");
 
                 const eTitle = examData.title || document.getElementById('settingTitle').value;
@@ -4832,8 +4885,8 @@
                     }
                 }
 
-                const missingStudents = window.fullStudentList.filter(st => {
-                    return !(window.statsMap[st.studentId] || window.statsMap[st.studentName]);
+                const missingStudents = fullStudentList.filter(st => {
+                    return !(statsMap[st.studentId] || statsMap[st.studentName]);
                 });
                 
                 if (missingStudents.length === 0) {
@@ -4842,7 +4895,7 @@
                 }
 
                 let messages = [];
-                const examLinkStr = window.location.origin + window.location.pathname.replace('exam-editor.html', 'exam.html') + '?id=' + window.currentExamId;
+                const examLinkStr = window.location.origin + window.location.pathname.replace('exam-editor.html', 'exam.html') + '?id=' + currentExamId;
 
                 // 1. TIN NHẮN NHÓM
                 let missingText = `\n❌ CHƯA NỘP (${missingStudents.length}):\n`;
@@ -4852,10 +4905,10 @@
 
                 let groupMsg = "";
                 if (isOverdue) {
-                    const submittedStudents = window.fullStudentList.filter(st => {
-                        return (window.statsMap[st.studentId] || window.statsMap[st.studentName]);
+                    const submittedStudents = fullStudentList.filter(st => {
+                        return (statsMap[st.studentId] || statsMap[st.studentName]);
                     }).map(st => {
-                        const rec = window.statsMap[st.studentId] || window.statsMap[st.studentName];
+                        const rec = statsMap[st.studentId] || statsMap[st.studentName];
                         return { name: st.studentName || st.name, score: rec.score };
                     });
                     let submittedText = `✅ ĐÃ NỘP (${submittedStudents.length}):\n`;
@@ -4934,46 +4987,68 @@
             }
         };
 
-        window.sendSelectedResultsZalo = async () => {
-            if (!window.n8nWebhook) {
-                window.showToast("Vui lòng cấu hình Webhook n8n trong bảng điều khiển trước!", "error");
-                return;
-            }
+        window.sendSelectedResultsZalo = async (event) => {
             const selected = Array.from(document.querySelectorAll('.grading-student-checkbox:checked')).map(cb => JSON.parse(cb.value));
             if (selected.length === 0) {
                 window.showToast("Vui lòng chọn ít nhất một học sinh!", "error");
                 return;
             }
             
-            const btn = event.currentTarget;
+            const btn = event.currentTarget || document.activeElement;
             const originalHTML = btn.innerHTML;
             btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang gửi...';
             btn.disabled = true;
 
             try {
+                const examSnap = await getDoc(doc(db, "exams", currentExamId));
+                if (!examSnap.exists()) throw new Error("Không tìm thấy đề thi!");
+                const examData = examSnap.data();
+                
+                const webhookUrl = examData.n8nWebhooks?.submit || examData.n8nWebhooks?.assign || examData.n8nWebhooks?.remind || examData.n8nWebhooks?.publish;
+                if (!webhookUrl) {
+                    throw new Error("Vui lòng cấu hình Webhook n8n trong cài đặt đề thi trước!");
+                }
+
                 let messages = [];
-                selected.forEach(att => {
-                    const st = window.fullStudentList.find(s => s.uid === att.userId);
+                for (let att of selected) {
+                    const st = fullStudentList.find(s => s.studentId === att.userId);
                     const sName = att.studentName || "Học sinh";
                     const score = att.totalScore || 0;
+                    
+                    let targetPhone = st ? formatVNPhone(st.phoneStudent) : "";
+                    let targetPhoneParent = st ? formatVNPhone(st.phoneParent) : "";
+                    let targetZaloUid = st && st.zaloUid ? String(st.zaloUid) : "";
+
+                    if ((!targetPhone && !targetPhoneParent) || !targetZaloUid) {
+                        try {
+                            const uSnap = await getDoc(doc(db, "users", att.userId));
+                            if (uSnap.exists()) {
+                                const uData = uSnap.data();
+                                if (!targetPhone) targetPhone = formatVNPhone(uData.phoneStudent);
+                                if (!targetPhoneParent) targetPhoneParent = formatVNPhone(uData.phoneParent);
+                                if (!targetZaloUid && uData.zaloUid) targetZaloUid = String(uData.zaloUid);
+                            }
+                        } catch (e) { console.warn("Lỗi lấy thông tin user cho Gửi kết quả", e); }
+                    }
+
                     messages.push({
                         type: "individual",
                         targetName: sName,
-                        targetPhone: st ? formatVNPhone(st.phoneStudent) : "",
-                        targetPhoneParent: st ? formatVNPhone(st.phoneParent) : "",
-                        targetZaloUid: st && st.zaloUid ? String(st.zaloUid) : "",
+                        targetPhone: targetPhone,
+                        targetPhoneParent: targetPhoneParent,
+                        targetZaloUid: targetZaloUid,
                         messageContent: `Thông báo kết quả: Em ${sName} đã hoàn thành bài tập [${document.getElementById('settingTitle').value}].\nĐiểm số: ${score}đ.\nChúc em học tốt!`
                     });
-                });
+                }
 
                 const payload = {
                     action: "send_results",
                     examTitle: document.getElementById('settingTitle').value,
-                    examId: window.currentExamId,
+                    examId: currentExamId,
                     messages: messages
                 };
                 
-                await fetch(window.n8nWebhook, {
+                await fetch(webhookUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
@@ -4984,8 +5059,10 @@
                 console.error(e);
                 window.showToast("Lỗi kết nối n8n: " + e.message, "error");
             } finally {
-                btn.innerHTML = originalHTML;
-                btn.disabled = false;
+                if (btn && typeof btn.disabled !== 'undefined') {
+                    btn.innerHTML = originalHTML;
+                    btn.disabled = false;
+                }
             }
         };
     </script>
