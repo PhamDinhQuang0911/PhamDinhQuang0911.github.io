@@ -1332,33 +1332,39 @@ async function loadLobbyData(id) {
                 } 
                 // 2. Nếu không có, quét DB để xem học sinh thuộc lớp nào đang giao đề này
                 else {
-                    // Truy vấn các lớp mà user là thành viên
-                    const classQuery = query(collection(db, "classes"), where("members", "array-contains", currentUser.uid));
-                    const classSnaps = await getDocs(classQuery);
+                    const possibleClasses = examData.allowedClassIds || examData.assignTo || [];
+                    if (possibleClasses && Array.isArray(possibleClasses) && possibleClasses.length > 0) {
+                        for (let cid of possibleClasses) {
+                            try {
+                                const clsSnap = await getDoc(doc(db, "classes", cid));
+                                if (clsSnap.exists()) {
+                                    const clsData = clsSnap.data();
+                                    const hasStudent = clsData.students?.find(s => s.uid === currentUser.uid || (s.email && s.email.toLowerCase() === currentUser.email.toLowerCase()));
+                                    if (hasStudent) {
+                                        detectedClassId = cid;
+                                        console.log("Auto-detected Class from allowedClassIds:", clsData.name);
+                                        break;
+                                    }
+                                }
+                            } catch(e) { console.warn("Lỗi đọc lớp:", e); }
+                        }
+                    } 
                     
-                    for (const clsDoc of classSnaps.docs) {
-                        const clsData = clsDoc.data();
-                        let hasExam = false;
-                        
-                        // Case A: Mảng exams chứa ID string đơn giản
-                        if (clsData.exams && Array.isArray(clsData.exams) && clsData.exams.includes(examId)) {
-                            hasExam = true;
-                        }
-                        // Case B: Mảng exams chứa object {id: "...", ...}
-                        else if (clsData.exams && Array.isArray(clsData.exams)) {
-                            hasExam = clsData.exams.some(e => (e.id === examId || e.examId === examId));
-                        }
-                        // Case C: Kiểm tra trong giáo trình (curriculum)
-                        else if (clsData.curriculum) {
-                             const strCurriculum = JSON.stringify(clsData.curriculum);
-                             if (strCurriculum.includes(examId)) hasExam = true;
-                        }
-
-                        if (hasExam) {
-                            detectedClassId = clsDoc.id;
-                            console.log("Auto-detected Class:", clsData.name);
-                            break; 
-                        }
+                    if (detectedClassId === "vang_lai" && examData.createdBy) {
+                        // Fallback: Tìm trong tất cả các lớp của giáo viên tạo đề
+                        try {
+                            const qTeacherClasses = query(collection(db, "classes"), where("teacherId", "==", examData.createdBy));
+                            const snaps = await getDocs(qTeacherClasses);
+                            for (let docSnap of snaps.docs) {
+                                const clsData = docSnap.data();
+                                const hasStudent = clsData.students?.find(s => s.uid === currentUser.uid || (s.email && s.email.toLowerCase() === currentUser.email.toLowerCase()));
+                                if (hasStudent) {
+                                    detectedClassId = docSnap.id;
+                                    console.log("Auto-detected Class from Teacher's classes:", clsData.name);
+                                    break;
+                                }
+                            }
+                        } catch(e) { console.warn("Lỗi tìm lớp GV:", e); }
                     }
                 }
             } catch (err) {
@@ -2402,27 +2408,31 @@ window.requestResubmit = async () => {
                 } else {
                     // Dò tìm lớp học của học sinh (giống logic thi thông thường)
                     try {
-                        const classQueryHW = query(collection(db, "classes"), where("members", "array-contains", currentUser.uid));
-                        const classSnapsHW = await getDocs(classQueryHW);
-                        for (const clsDoc of classSnapsHW.docs) {
-                            const clsData = clsDoc.data();
-                            let hasExam = false;
-                            
-                            // Check in class's exams array
-                            if (clsData.exams && Array.isArray(clsData.exams) && clsData.exams.includes(examId)) {
-                                hasExam = true;
-                            } else if (clsData.exams && Array.isArray(clsData.exams)) {
-                                hasExam = clsData.exams.some(e => (e.id === examId || e.examId === examId));
-                            } else if (clsData.curriculum && JSON.stringify(clsData.curriculum).includes(examId)) {
-                                hasExam = true;
+                        const possibleClassesHW = examData.allowedClassIds || examData.assignTo || [];
+                        if (possibleClassesHW && Array.isArray(possibleClassesHW) && possibleClassesHW.length > 0) {
+                            for (let cid of possibleClassesHW) {
+                                const clsSnap = await getDoc(doc(db, "classes", cid));
+                                if (clsSnap.exists()) {
+                                    const clsData = clsSnap.data();
+                                    const hasStudent = clsData.students?.find(s => s.uid === currentUser.uid || (s.email && s.email.toLowerCase() === currentUser.email.toLowerCase()));
+                                    if (hasStudent) {
+                                        detectedClassId = cid;
+                                        break;
+                                    }
+                                }
                             }
-                            
-                            // Check in examData's assignTo array (used by homework assignments)
-                                            if (examData && examData.assignTo && Array.isArray(examData.assignTo) && examData.assignTo.includes(clsDoc.id)) {
-                                hasExam = true;
+                        }
+                        if (detectedClassId === "vang_lai" && examData.createdBy) {
+                            const qTeacherClasses = query(collection(db, "classes"), where("teacherId", "==", examData.createdBy));
+                            const snaps = await getDocs(qTeacherClasses);
+                            for (let docSnap of snaps.docs) {
+                                const clsData = docSnap.data();
+                                const hasStudent = clsData.students?.find(s => s.uid === currentUser.uid || (s.email && s.email.toLowerCase() === currentUser.email.toLowerCase()));
+                                if (hasStudent) {
+                                    detectedClassId = docSnap.id;
+                                    break;
+                                }
                             }
-                            
-                            if (hasExam) { detectedClassId = clsDoc.id; break; }
                         }
                     } catch (err) { console.warn("Lỗi dò tìm lớp HW:", err); }
                 }
@@ -2451,11 +2461,18 @@ window.requestResubmit = async () => {
                 const resultAnswers = isMixed ? userAnswers : { 0: userAnswers[0] };
                 const totalQuestions = isMixed ? currentQuestions.length : 1;
 
+                let currentSubmitCount = 1;
+                if (window.isEditMode && window.currentResultId) {
+                    currentSubmitCount = (window.currentResultData && window.currentResultData.submitCount) ? window.currentResultData.submitCount : 1;
+                }
+
                 const resultData = { 
-                    examId, classId: detectedClassId, studentId: currentUser.uid, studentName: currentUser.displayName || currentUser.email, 
+                    examId, classId: detectedClassId, studentId: currentUser.uid, studentName: currentUser.displayName || currentUser.email,
+                    email: currentUser.email || "", 
                     score: score, answers: resultAnswers, 
                     cheatCount: 0, correctCount: correctCount, totalQuestions: totalQuestions, 
-                    isPassed: false, passScoreSnapshot: 5, duration: 0, submittedAt: new Date().toISOString() 
+                    isPassed: false, passScoreSnapshot: 5, duration: 0, submittedAt: new Date().toISOString(),
+                    submitCount: currentSubmitCount
                 };
 
                 if (window.isEditMode && window.currentResultId) {
@@ -2464,7 +2481,8 @@ window.requestResubmit = async () => {
                         answers: resultAnswers,
                         score: score,
                         correctCount: correctCount,
-                        submittedAt: new Date().toISOString() // Cập nhật giờ nộp mới
+                        submittedAt: new Date().toISOString(), // Cập nhật giờ nộp mới
+                        submitCount: currentSubmitCount + 1
                     });
                 } else {
                     // TẠO KẾT QUẢ MỚI
@@ -2477,7 +2495,7 @@ window.requestResubmit = async () => {
                 // --- GỬI WEBHOOK NỘP BÀI (ZALO) ---
                 try {
                     const webhookUrl = examData.n8nWebhooks?.submit || examData.n8nWebhooks?.assign || examData.n8nWebhooks?.publish;
-                    if (webhookUrl && !window.isEditMode) {
+                    if (webhookUrl) {
                         let pPhone = "";
                         let pPhoneParent = "";
                         let pZaloUid = "";
@@ -2556,7 +2574,8 @@ window.requestResubmit = async () => {
                         let correctMC = correctCount;
                         let wrongMC = Math.max(0, totalMC - correctMC - unansweredMC);
                         
-                        let messageContentStr = `✅ XÁC NHẬN NỘP BÀI\n👤 Học sinh: ${sName}\n📚 Bài tập: [${examData.title}]`;
+                        let prefixMsg = window.isEditMode ? `🔄 CẬP NHẬT BÀI LÀM LẦN ${currentSubmitCount + 1}` : `✅ XÁC NHẬN NỘP BÀI`;
+                        let messageContentStr = `${prefixMsg}\n👤 Học sinh: ${sName}\n📚 Bài tập: [${examData.title}]`;
                         if (totalMC > 0) {
                             messageContentStr += `\n\n🎯 PHẦN TRẮC NGHIỆM:\n✔️ Đúng: ${correctMC}\n❌ Sai: ${wrongMC}\n⚠️ Chưa làm: ${unansweredMC}`;
                         }
