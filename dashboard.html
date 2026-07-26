@@ -722,7 +722,7 @@
     <script type="module">
         import { initializeApp, deleteApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getAuth, onAuthStateChanged, signOut, createUserWithEmailAndPassword, updateProfile, updatePassword } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
-        import { getFirestore, doc, getDoc, setDoc, collection, addDoc, query, where, getDocs, updateDoc, deleteDoc, arrayUnion, limit, enableIndexedDbPersistence, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { getFirestore, doc, getDoc, setDoc, collection, addDoc, query, where, getDocs, updateDoc, deleteDoc, arrayUnion, limit, enableMultiTabIndexedDbPersistence, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
         import { getStorage, ref, deleteObject } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js";
         import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-functions.js";
 
@@ -742,12 +742,12 @@
         const storage = getStorage(app);
         const functions = getFunctions(app);
 
-        // --- KÍCH HOẠT CACHE OFFLINE (TĂNG TỐC ĐỘ TẢI LẠI TRANG) ---
-        enableIndexedDbPersistence(db).catch((err) => {
+        // --- KÍCH HOẠT CACHE MULTI-TAB (HỖ TRỢ MỞ NHIỀU TAB SONG SONG) ---
+        enableMultiTabIndexedDbPersistence(db).catch((err) => {
             if (err.code == 'failed-precondition') {
-                console.log('Lỗi: Đang mở quá nhiều tab (Chỉ 1 tab được dùng cache).');
+                console.warn('Đang mở nhiều tab (Multi-tab mode active).');
             } else if (err.code == 'unimplemented') {
-                console.log('Trình duyệt này không hỗ trợ cache offline (Sẽ dùng chế độ Online).');
+                console.warn('Trình duyệt không hỗ trợ cache offline.');
             }
         });
 
@@ -1655,22 +1655,46 @@
             const username = document.getElementById('editStuUsername').value;
             const studentEmail = document.getElementById('editStuEmail').value;
             let studentData = currentClassStudents[editingStudentIndex];
+            const isTeacherCreated = studentData.password && studentData.password !== "";
+            
             try {
                 let targetUid = studentData.uid;
+                
+                // Dò tìm UID nếu chưa có trên bản ghi lớp học (ví dụ: học sinh tự đăng ký tài khoản)
                 if (!targetUid) {
-                    const qUser = query(collection(db, "users"), where("email", "==", studentEmail));
-                    const snapUser = await getDocs(qUser);
-                    if (!snapUser.empty) { targetUid = snapUser.docs[0].id; }
+                    if (studentEmail && studentEmail.trim()) {
+                        try {
+                            const qUser = query(collection(db, "users"), where("email", "==", studentEmail.trim().toLowerCase()));
+                            const snapUser = await getDocs(qUser);
+                            if (!snapUser.empty) { targetUid = snapUser.docs[0].id; }
+                        } catch (e) {}
+                    }
+                    if (!targetUid && username && username.trim()) {
+                        try {
+                            const qUser = query(collection(db, "users"), where("username", "==", username.trim().toLowerCase()));
+                            const snapUser = await getDocs(qUser);
+                            if (!snapUser.empty) { targetUid = snapUser.docs[0].id; }
+                        } catch (e) {}
+                    }
                 }
-                if (newPassword && newPassword.trim() !== "") {
-                    if (!targetUid) throw new Error("Không tìm thấy UID của học sinh này trong hệ thống. Không thể đổi mật khẩu.");
-                    const resetFunc = httpsCallable(functions, 'resetStudentPassword');
-                    await resetFunc({ studentUid: targetUid, newPassword: newPassword });
-                    window.showNotification("Đã cập nhật mật khẩu đăng nhập thành công!", "success");
+
+                // Chỉ thực hiện đổi mật khẩu trên Firebase Auth nếu là tài khoản do giáo viên tạo VÀ mật khẩu thực sự có sự thay đổi
+                const isPasswordChanged = isTeacherCreated && newPassword && newPassword.trim() !== "" && newPassword !== studentData.password;
+                if (isPasswordChanged) {
+                    if (targetUid) {
+                        try {
+                            const resetFunc = httpsCallable(functions, 'resetStudentPassword');
+                            await resetFunc({ studentUid: targetUid, newPassword: newPassword });
+                            window.showNotification("Đã cập nhật mật khẩu đăng nhập thành công!", "success");
+                        } catch (passErr) {
+                            console.warn("Lỗi resetStudentPassword Cloud Function:", passErr);
+                        }
+                    }
                 }
+
                 const updatedStudent = {
                     ...studentData,
-                    uid: targetUid || studentData.uid,
+                    uid: targetUid || studentData.uid || "",
                     name: name,
                     sbd: document.getElementById('editStuSBD').value,
                     gender: document.getElementById('editStuGender').value,
@@ -1679,7 +1703,7 @@
                     email: studentEmail,
                     zaloUid: document.getElementById('editStuZaloUid').value.trim(),
                     username: username,
-                    password: newPassword || studentData.password 
+                    password: isTeacherCreated ? (newPassword || studentData.password) : (studentData.password || "")
                 };
 
                 // NẾU GIÁO VIÊN XÓA UID TRONG FORM, TA XÓA LUÔN TRÊN FIREBASE (zalo_uids) ĐỂ TRÁNH SYNC LẠI CÁI CŨ
@@ -1720,7 +1744,13 @@
                 window.showNotification("Lưu thông tin hồ sơ thành công!", "success");
                 renderStudentList(currentClassStudents);
                 window.toggleModal('editStudentModal', false);
-            } catch (e) { console.error(e); window.showNotification("Lỗi: " + e.message, "error"); } finally { btn.innerHTML = originalText; btn.disabled = false; }
+            } catch (e) { 
+                console.error(e); 
+                window.showNotification("Lỗi: " + e.message, "error"); 
+            } finally { 
+                btn.innerHTML = originalText; 
+                btn.disabled = false; 
+            }
         });
 
         document.getElementById('addStudentBtn').addEventListener('click', async () => {

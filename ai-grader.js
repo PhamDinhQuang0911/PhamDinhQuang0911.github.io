@@ -18,7 +18,7 @@ window.AIGrader = {
      * @param {string} params.existingFeedback - Feedback cũ (dùng cho drawOnly)
      * @returns {Object} { score, feedback, mistakes }
      */
-    async gradeEssay({ apiKey, apiKeys, studentImages, examFileUrl, solutionUrl, examTitle, examDescription, totalStudentPages, mode, existingFeedback }) {
+    async gradeEssay({ apiKey, apiKeys, studentImages, examFileUrl, solutionUrl, examTitle, examDescription, totalStudentPages, mode, existingFeedback, isSingleQuestion = false }) {
         let keysToUse = apiKeys || [];
         if (keysToUse.length === 0 && apiKey) keysToUse = [apiKey];
         
@@ -59,6 +59,38 @@ Lưu ý:
 - "xmin", "xmax": Phải CỰC KỲ CHẶT CHẼ, CHỈ bao quanh đúng chỗ sai, KHÔNG gạch cả câu dài.
 - "note": Vắn tắt nhất có thể (VD: "Sai dấu").
 - "correction": CHỈ GHI KẾT QUẢ ĐÚNG (VD: "+x"), TUYỆT ĐỐI KHÔNG ghi chữ "Sửa thành".`;
+        } else if (isSingleQuestion) {
+            let examContext = "";
+            if (examTitle) examContext += `\n- Tên / Yêu cầu câu hỏi: "${examTitle}"`;
+            if (examDescription) examContext += `\n- Nội dung chi tiết & Đáp án đối chiếu: "${examDescription}"`;
+
+            promptText = `Bạn là hệ thống AI hỗ trợ chấm bài tập Toán chuyên nghiệp, ngắn gọn và chính xác.
+
+== THÔNG TIN CÂU HỎI ==${examContext}
+
+== YÊU CẦU QUAN TRỌNG VỀ NHẬN XẾT ==
+1. KHÔNG GẠCH ĐẦU DÒNG. Viết đoạn văn tự nhiên, ngắn gọn (tối đa 3-4 dòng).
+2. TUYỆT ĐỐI KHÔNG CHÀO HỎI, KHÔNG CHÚC MỪNG VÀ KHÔNG ĐỘNG VIÊN (TUYỆT ĐỐI KHÔNG viết "Thầy Quang chào con", "Chúc con học tốt", "Cố lên con nhé", v.v.).
+3. Tập trung trực tiếp nêu: Bài làm đã làm được những gì, mắc lỗi sai gì (nếu có) và hướng dẫn vắn tắt cách sửa sai.
+`;
+            if (mode === 'gradeAndDraw') {
+                promptText += `4. TÌM LỖI SAI VÀ TRẢ VỀ BOUNDING BOX: Trả về tọa độ chính xác của từng lỗi sai trên ảnh theo [ymin, xmin, ymax, xmax] chuẩn hóa 0-1000.
+
+BẮT BUỘC trả về chuỗi JSON nguyên gốc tuân thủ CẤU TRÚC SAU:
+{
+  "score": 8.5,
+  "feedback": "Học sinh giải đúng phương trình thứ nhất. Tuy nhiên ở phương trình thứ hai khi chuyển -2y sang vế phải bị sai dấu thành +2y. Cần đổi dấu đúng khi chuyển vế -2y thành +2y.",
+  "mistakes": [
+    { "pageIndex": 0, "ymin": 300, "xmin": 200, "ymax": 350, "xmax": 450, "note": "Sai dấu", "correction": "+2y" }
+  ]
+}`;
+            } else {
+                promptText += `BẮT BUỘC trả về chuỗi JSON nguyên gốc tuân thủ CẤU TRÚC SAU (không có mistakes):
+{
+  "score": 8.5,
+  "feedback": "Học sinh giải đúng phương trình thứ nhất. Tuy nhiên ở phương trình thứ hai khi chuyển -2y sang vế phải bị sai dấu thành +2y. Cần đổi dấu đúng khi chuyển vế -2y thành +2y."
+}`;
+            }
         } else {
             // Xây dựng phần mô tả đề bài cho AI
             let examContext = "";

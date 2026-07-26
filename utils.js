@@ -429,12 +429,16 @@ function processLatexLists(text) {
         const rawItems = bodyStr.split(/\\item(?![a-zA-Z])/).filter(s => s.trim().length > 0);
         return rawItems.map((item) => {
             let content = item.trim();
+            let label = '';
             if (content.startsWith('[')) {
                 const cb = content.indexOf(']');
-                if (cb > -1) content = content.substring(cb + 1).trim();
+                if (cb > -1) {
+                    label = content.substring(1, cb).trim();
+                    content = content.substring(cb + 1).trim();
+                }
             }
             content = processTabular(content);
-            return { content };
+            return { label, content };
         });
     };
 
@@ -444,15 +448,32 @@ function processLatexLists(text) {
         return `<ul class="my-3 pl-2 list-none">${htmlItems}</ul>`;
     });
 
-    const regexCols = /\\begin\{(?:listEX|enumEX)\}(?:\[(\d+)\]|\{(\d+)\}(?:\[(.*?)\])?)([\s\S]*?)\\end\{(?:listEX|enumEX)\}/g;
-    processed = processed.replace(regexCols, (match, c1, c2, style, body) => {
-        const cols = c1 || c2 || 1;
+    const regexCols = /\\begin\{(?:listEX|enumEX)\}([\s\S]*?)\\end\{(?:listEX|enumEX)\}/g;
+    processed = processed.replace(regexCols, (match, bodyWithHeader) => {
+        let cols = 1;
+        const colMatch = match.match(/\\begin\{(?:listEX|enumEX)\}\s*(?:\[[^\]]*\])*\s*\{?(\d+)\}?/);
+        if (colMatch) {
+            cols = parseInt(colMatch[1]) || 1;
+        }
+
+        let body = bodyWithHeader;
+        const firstItemIdx = body.indexOf('\\item');
+        if (firstItemIdx !== -1) {
+            body = body.substring(firstItemIdx);
+        }
+
         const items = parseItems(body);
-        let gridHtml = `<div class="grid grid-cols-1 md:grid-cols-${cols} gap-4 my-3">`;
+        let gridColsClass = 'grid-cols-1';
+        if (cols === 2) gridColsClass = 'grid-cols-1 sm:grid-cols-2';
+        else if (cols === 3) gridColsClass = 'grid-cols-1 sm:grid-cols-2 md:grid-cols-3';
+        else if (cols === 4) gridColsClass = 'grid-cols-1 sm:grid-cols-2 md:grid-cols-4';
+        else if (cols > 4) gridColsClass = `grid-cols-2 md:grid-cols-${cols}`;
+
+        let gridHtml = `<div class="grid ${gridColsClass} gap-3 my-3">`;
         items.forEach((it, idx) => {
             let displayLabel = it.label;
             if (!displayLabel && match.includes('enumEX')) displayLabel = String.fromCharCode(97 + idx) + ')';
-            gridHtml += `<div class="flex gap-2">${displayLabel ? `<span class="font-bold text-gray-700 shrink-0">${displayLabel}</span>` : `<span class="text-gray-400 shrink-0">•</span>`}<div>${it.content}</div></div>`;
+            gridHtml += `<div class="flex items-start gap-1.5">${displayLabel ? `<span class="font-bold text-gray-700 shrink-0 mt-0.5">${displayLabel}</span>` : `<span class="text-gray-400 shrink-0 mt-0.5">•</span>`}<div class="flex-1">${it.content}</div></div>`;
         });
         gridHtml += `</div>`;
         return gridHtml;
