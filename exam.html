@@ -6,13 +6,12 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="QMath">
-    <link rel="apple-touch-icon" href="/app-icon.jpg">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="theme-color" content="#ea580c">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Làm bài thi - Toán thầy Choang Choang</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png">
     <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     
@@ -163,6 +162,7 @@
         .text-\[10px\], .text-xs.font-bold.text-blue-700 { display: none !important; }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+    <link rel="stylesheet" href="/styles.css?v=5">
 </head>
 <body class="h-screen flex flex-col overflow-hidden text-gray-800 bg-gray-50">
 
@@ -570,6 +570,16 @@ async function loadLobbyData(id) {
                 window.examHistory.sort((a,b)=>new Date(b.submittedAt)-new Date(a.submittedAt));
                 const att = window.examHistory.length;
 
+                // --- VÉ LÀM LẠI ĐÃ DUYỆT: nếu giáo viên đã duyệt yêu cầu làm lại,
+                // học sinh được vào làm kể cả khi số lượt đã hết (bài cũ có thể chưa xóa được)
+                window.retryGrantRefs = [];
+                try {
+                    const qGrant = query(collection(db, "access_requests"), where("examId", "==", id), where("studentId", "==", currentUser.uid), where("status", "==", "approved"));
+                    const snapGrant = await getDocs(qGrant);
+                    window.retryGrantRefs = snapGrant.docs.map(d => d.ref);
+                } catch (grantErr) { console.warn("Không đọc được vé làm lại:", grantErr); }
+                const hasRetryGrant = window.retryGrantRefs.length > 0;
+
                 // --- [MỚI] XỬ LÝ RIÊNG NẾU LÀ BÀI TẬP TỰ LUẬN (HOMEWORK) HOẶC HỖN HỢP (MIXED) ---
                 if (examData.type === 'homework' || examData.type === 'mixed') {
                     if (examData.type === 'homework') {
@@ -719,7 +729,8 @@ async function loadLobbyData(id) {
                     
                     if(examData.startTime && now < new Date(examData.startTime)) { ok=false; msg="Chưa đến giờ mở đề"; color="text-orange-500"; document.getElementById('lobbyTimeRange').classList.remove('hidden'); document.getElementById('lobbyTimeText').textContent=new Date(examData.startTime).toLocaleString('vi-VN'); }
                     if(examData.endTime && now > new Date(examData.endTime)) { ok=false; msg="Đề thi đã đóng"; color="text-red-500"; }
-                    if(!isPracticeMode && examData.attempts > 0 && att >= examData.attempts) { ok=false; msg="Hết lượt làm bài"; color="text-red-500"; }
+                    if(!isPracticeMode && examData.attempts > 0 && att >= examData.attempts && !hasRetryGrant) { ok=false; msg="Hết lượt làm bài"; color="text-red-500"; }
+                    if(!isPracticeMode && hasRetryGrant && att >= (examData.attempts || 1)) { msg = "Được duyệt làm lại"; color = "text-green-600"; }
                     if(isPracticeMode) { msg = "Chế độ luyện tập"; color = "text-blue-600"; if(document.getElementById('lobbyMaxAttempts')) document.getElementById('lobbyMaxAttempts').innerText = '∞ (Luyện tập)'; }
 
                     const stat = document.getElementById('lobbyStatusBadge'); if(stat) { stat.textContent = msg; stat.className = `font-bold ${color}`; }
@@ -779,22 +790,32 @@ async function loadLobbyData(id) {
             if (examData.shuffle) {
                 if (!savedConfig) {
                     // --- A. NẾU CHƯA CÓ CẤU HÌNH -> TIẾN HÀNH ĐẢO VÀ LƯU ---
-                    
-                    // 1. Phân nhóm câu hỏi để đảo trong nhóm
-                    const groups = { mc: [], tf: [], short: [], essay: [] };
-                    // Lưu kèm index gốc để sau này truy vết
-                    rawQuestions.forEach((q, originalIndex) => { 
-                        if(groups[q.type]) groups[q.type].push({ ...q, _originalIndex: originalIndex }); 
-                    });
-                    
-                    // 2. Đảo thứ tự câu hỏi trong từng nhóm
-                    shuffleArray(groups.mc); 
-                    shuffleArray(groups.tf); 
-                    shuffleArray(groups.short); 
-                    shuffleArray(groups.essay);
-                    
-                    // 3. Gộp lại thành danh sách câu hỏi mới (đã đảo thứ tự)
-                    const shuffledQuestions = [...groups.mc, ...groups.tf, ...groups.short, ...groups.essay];
+
+                    // [MỚI] BÀI TẬP (homework / mixed - tự luận + trắc nghiệm, sách số hóa)
+                    // KHÔNG đảo THỨ TỰ CÂU (giữ đúng trình tự tài liệu) - chỉ đảo đáp án trắc nghiệm.
+                    // Đề thi thuần trắc nghiệm (type 'exam') vẫn đảo như cũ.
+                    const keepOrder = (examData.type === 'homework' || examData.type === 'mixed');
+
+                    let shuffledQuestions;
+                    if (keepOrder) {
+                        shuffledQuestions = rawQuestions.map((q, originalIndex) => ({ ...q, _originalIndex: originalIndex }));
+                    } else {
+                        // 1. Phân nhóm câu hỏi để đảo trong nhóm
+                        const groups = { mc: [], tf: [], short: [], essay: [] };
+                        // Lưu kèm index gốc để sau này truy vết
+                        rawQuestions.forEach((q, originalIndex) => { 
+                            if(groups[q.type]) groups[q.type].push({ ...q, _originalIndex: originalIndex }); 
+                        });
+                        
+                        // 2. Đảo thứ tự câu hỏi trong từng nhóm
+                        shuffleArray(groups.mc); 
+                        shuffleArray(groups.tf); 
+                        shuffleArray(groups.short); 
+                        shuffleArray(groups.essay);
+                        
+                        // 3. Gộp lại thành danh sách câu hỏi mới (đã đảo thứ tự)
+                        shuffledQuestions = [...groups.mc, ...groups.tf, ...groups.short, ...groups.essay];
+                    }
                     
                     // 4. Tạo Map đảo đáp án cho từng câu (chỉ câu Trắc nghiệm)
                     const optionMaps = {}; // Key: _originalIndex, Value: Mảng thứ tự hiển thị
@@ -1393,6 +1414,15 @@ async function loadLobbyData(id) {
             // Lưu lên Cloud
             await addDoc(collection(db, "results"), resultData);
 
+            // [VÉ LÀM LẠI] Nộp bài xong thì hủy vé đã dùng (1 lần duyệt = 1 lượt làm lại)
+            if (window.retryGrantRefs && window.retryGrantRefs.length) {
+                for (const ref of window.retryGrantRefs) {
+                    try { await deleteDoc(ref); }
+                    catch (e1) { try { await updateDoc(ref, { status: 'used', usedAt: new Date().toISOString() }); } catch (e2) { console.warn("Không hủy được vé:", e2); } }
+                }
+                window.retryGrantRefs = [];
+            }
+
             // [QUAN TRỌNG] Đẩy ngay vào đầu danh sách lịch sử trên máy (để hiện list ngay lập tức)
             if (!window.examHistory) window.examHistory = [];
             window.examHistory.unshift(resultData);
@@ -1472,9 +1502,69 @@ async function loadLobbyData(id) {
             } catch(e) { window.customAlert("Lỗi lưu bài: "+e.message, "error"); }
         }
 
+        // ===== [MỚI] QUYỀN XEM LỜI GIẢI - một cửa kiểm soát duy nhất =====
+        // Đề thi: theo cấu hình showResult (ngay sau nộp / hết hạn / đạt điểm / không cho / Qpoint)
+        // Bài tập (tự luận + hỗn hợp): CHỈ xem được sau khi giáo viên chấm xong (gradedAt)
+        window.canViewSolutions = () => {
+            try {
+                const latest = (window.examHistory && window.examHistory[0]) || null;
+                const isHwLike = examData && (examData.type === 'homework' || examData.type === 'mixed');
+                if (isHwLike) {
+                    if (latest && latest.gradedAt) return { ok: true };
+                    return { ok: false, msg: "Bài tập này chỉ xem được lời giải và bài chấm SAU KHI giáo viên chấm xong. Em chờ thầy cô chấm nhé!" };
+                }
+                const mode = (examData && examData.showResult) || 'immediate';
+                if (mode === 'never') return { ok: false, msg: "Đề thi này không cho phép xem lời giải." };
+                if (mode === 'pass_score') {
+                    const need = parseFloat(examData.passScore) || 5;
+                    const best = (window.examHistory || []).reduce((mx, r) => Math.max(mx, parseFloat(r.score) || 0), 0);
+                    if (best >= need) return { ok: true };
+                    return { ok: false, msg: `Cần đạt tối thiểu ${need} điểm mới được xem lời giải. Điểm cao nhất của em hiện là ${best}.` };
+                }
+                if (mode === 'fee_qpoint') {
+                    const fee = parseInt(examData.feeQpoint) || 0;
+                    const paidKey = `solPaid_${currentUser ? currentUser.uid : 'guest'}_${examId}`;
+                    if (fee <= 0 || localStorage.getItem(paidKey) === '1') return { ok: true };
+                    return { ok: false, msg: `Lời giải này cần mở khóa bằng ${fee} Qpoint — bấm nút "Mở khóa lời giải" ở màn hình kết quả nhé.` };
+                }
+                if (mode === 'after_exam') {
+                    if (examData.endTime && new Date() < new Date(examData.endTime)) {
+                        return { ok: false, msg: `Lời giải sẽ mở sau khi đề thi đóng (${new Date(examData.endTime).toLocaleString('vi-VN')}).` };
+                    }
+                    return { ok: true };
+                }
+                return { ok: true }; // immediate
+            } catch (e) { return { ok: true }; }
+        };
+
+        // ===== [MỚI] Mở khóa lời giải bằng Qpoint (trước đây nút này chưa có hàm xử lý) =====
+        window.handlePayAndShowSolution = async (fee) => {
+            if (!currentUser) return window.customAlert("Vui lòng đăng nhập để dùng Qpoint.", "error");
+            fee = parseInt(fee) || 0;
+            const paidKey = `solPaid_${currentUser.uid}_${examId}`;
+            if (fee <= 0 || localStorage.getItem(paidKey) === '1') return window.viewDetailSolutions();
+            try {
+                const uRef = doc(db, "users", currentUser.uid);
+                const uSnap = await getDoc(uRef);
+                const bal = (uSnap.exists() && typeof uSnap.data().qpoints === 'number') ? uSnap.data().qpoints : 0;
+                if (bal < fee) return window.customAlert(`Không đủ Qpoint (cần ${fee}, em đang có ${bal}). Vào Phòng Luyện Tập làm bài để kiếm thêm nhé!`, "error");
+                await updateDoc(uRef, { qpoints: bal - fee });
+                await addDoc(collection(db, "qpoint_transactions"), {
+                    uid: currentUser.uid, amount: -fee, reason: 'unlock_solution',
+                    meta: { examId }, balanceAfter: bal - fee, at: new Date().toISOString()
+                });
+                localStorage.setItem(paidKey, '1');
+                window.customAlert(`Đã mở khóa lời giải (-${fee} Qpoint). Số dư còn: ${bal - fee}.`, "success");
+                window.viewDetailSolutions();
+            } catch (e) { window.customAlert("Lỗi mở khóa: " + e.message, "error"); }
+        };
+
         // --- HÀM XEM LẠI BÀI (ĐÃ NÂNG CẤP: SWITCH LỊCH SỬ & HIỆN THÔNG SỐ) ---
         // --- HÀM XEM LẠI BÀI (ĐÃ FIX: HIỆN DANH SÁCH LỊCH SỬ CHUẨN) ---
         window.viewDetailSolutions = () => {
+            // [GÁC CỔNG] mọi đường vào lời giải đều qua đây (kể cả link ?mode=review)
+            const gate = window.canViewSolutions();
+            if (!gate.ok) { window.customAlert(gate.msg, "error"); return; }
             // 1. Chuyển view
             document.getElementById('resultModal').classList.add('hidden'); 
             document.getElementById('examMain').classList.add('hidden'); 
@@ -1985,6 +2075,8 @@ async function loadLobbyData(id) {
             document.getElementById('homeworkMain').classList.remove('hidden');
 
             document.getElementById('hwBannerImg').src = examData.bannerUrl || "https://placehold.co/1200x400?text=Homework";
+            // [MỚI] Được phép lộ đáp án/lời giải khi: đang xem lại + đã qua cổng canViewSolutions (bài tập = đã chấm xong)
+            window.__revealSolutions = !!(window.isReviewMode && window.canViewSolutions && window.canViewSolutions().ok);
             const isMixed = examData.type === 'mixed';
             const answerKey = isMixed ? 'tl_upload' : 0;
             const tlAnswers = isMixed ? userAnswers['tl_upload'] : userAnswers[0];
@@ -2014,6 +2106,33 @@ async function loadLobbyData(id) {
 
             document.getElementById('hwDescDisplay').textContent = isMixed ? (examData.tlDesc || 'Hoàn thành phần tự luận và tải ảnh bài làm lên hệ thống.') : (examData.description || 'Các em vui lòng xem đề bài trong tài liệu đính kèm bên dưới.');
             
+            // [MỚI] BÀI CHẤM CỦA GIÁO VIÊN cho bài HỖN HỢP (trước đây chỉ bài tự luận thuần mới thấy)
+            try {
+                const oldSum = document.getElementById('mixedGradedSummary');
+                if (oldSum) oldSum.remove();
+                const r0 = window.currentResultData;
+                if (isMixed && window.isReviewMode && r0 && r0.gradedAt) {
+                    const urls = r0.gradedImageUrls || (r0.gradedImageUrl ? [r0.gradedImageUrl] : []);
+                    let imgs = '';
+                    urls.forEach((url) => { imgs += `<a href="${url}" target="_blank" title="Bấm để phóng to" class="block mb-4"><img src="${url}" class="w-full h-auto rounded-xl border-2 border-gray-200 shadow-sm hover:border-green-300 transition-colors"></a>`; });
+                    const fb = (r0.teacherFeedback || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                    const div = document.createElement('div');
+                    div.id = 'mixedGradedSummary';
+                    div.className = 'bg-white p-6 rounded-2xl shadow-sm border-2 border-green-200 mb-6';
+                    div.innerHTML = `
+                        <div class="flex items-center justify-between flex-wrap gap-3 mb-4 border-b border-gray-100 pb-3">
+                            <h3 class="font-black text-gray-800 text-lg"><i class="fa-solid fa-clipboard-check text-green-600"></i> Bài chấm của giáo viên</h3>
+                            <div class="px-4 py-1.5 bg-orange-50 border border-orange-200 rounded-xl text-orange-700 font-black text-lg">Điểm: ${r0.score !== undefined ? r0.score : '?'}</div>
+                        </div>
+                        ${fb ? `<div class="bg-blue-50 p-4 rounded-xl border border-blue-100 mb-4"><div class="text-xs font-black text-blue-800 uppercase mb-2"><i class="fa-solid fa-comment-dots"></i> Nhận xét của giáo viên (theo từng câu)</div><div class="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">${fb}</div></div>` : ''}
+                        ${imgs ? `<div><div class="text-xs font-black text-gray-500 uppercase mb-2"><i class="fa-solid fa-image"></i> Ảnh bài chấm (AI khoanh lỗi / giáo viên viết trực tiếp)</div>${imgs}</div>` : ''}
+                        ${(!fb && !imgs) ? '<p class="text-sm text-gray-400 italic">Giáo viên đã chấm điểm (chưa có nhận xét chi tiết).</p>' : ''}
+                    `;
+                    const anchorEl = document.getElementById('hwIframeContainer');
+                    if (anchorEl && anchorEl.parentElement) anchorEl.parentElement.insertBefore(div, anchorEl);
+                }
+            } catch (eG) { console.warn("graded summary:", eG); }
+
             const iframeUrl = isMixed ? examData.tlFileUrl : examData.fileUrl;
             if (iframeUrl) {
                 document.getElementById('hwIframeContainer').classList.remove('hidden');
@@ -2041,7 +2160,7 @@ async function loadLobbyData(id) {
                 if (examData.tlQuestions && examData.tlQuestions.length > 0) {
                     examData.tlQuestions.forEach((q, i) => {
                         const qIdx = `tl_upload_${i}`;
-                        const isTheory = q.isTheory === true || (q.solution === "Đây là phần lý thuyết để ôn tập.") || (q.solution === '' && q.content && (q.content.includes("boxdn") || q.content.includes("boxdl") || q.content.includes("KHÁI NIỆM") || q.content.includes("Lý thuyết") || q.content.includes("lý thuyết")));
+                        const isTheory = q.isTheory === true || q.solution === "Đây là phần lý thuyết để ôn tập."; // [FIX] chỉ nhận lý thuyết khi được ĐÁNH DẤU rõ ràng, không đoán theo nội dung
                         
                         if (isTheory) {
                             if (!window._renderedTheoryContents.includes(q.content)) {
@@ -2095,7 +2214,7 @@ async function loadLobbyData(id) {
                     let sbTlCounter = 1;
                     examData.tlQuestions.forEach((q, i) => {
                         const qIdx = `tl_upload_${i}`;
-                        const isTheory = q.isTheory === true || (q.solution === "Đây là phần lý thuyết để ôn tập.") || (q.solution === '' && q.content && (q.content.includes("boxdn") || q.content.includes("boxdl") || q.content.includes("KHÁI NIỆM") || q.content.includes("Lý thuyết") || q.content.includes("lý thuyết")));
+                        const isTheory = q.isTheory === true || q.solution === "Đây là phần lý thuyết để ôn tập."; // [FIX] chỉ nhận lý thuyết khi được ĐÁNH DẤU rõ ràng, không đoán theo nội dung
                         if (!isTheory) {
                             const isDone = userAnswers[qIdx] && userAnswers[qIdx].trim() !== '';
                             const bgClass = isDone ? 'bg-blue-100 border-blue-200 text-blue-700' : 'bg-gray-100 border-gray-200 text-gray-500';
@@ -2136,7 +2255,7 @@ async function loadLobbyData(id) {
                 let qInDangCounter = 1;
 
                 currentQuestions.forEach((q, qIdx) => {
-                    const isTheory = q.isTheory === true || q.type === 'essay' || (q.solution === "Đây là phần lý thuyết để ôn tập.") || (!q.options && q.content && (q.content.includes("boxdn") || q.content.includes("boxdl") || q.content.includes("KHÁI NIỆM")));
+                    const isTheory = q.isTheory === true || q.type === 'essay' || q.solution === "Đây là phần lý thuyết để ôn tập."; // [FIX] không đoán theo nội dung
                     
                     if (isTheory) {
                         if (!window._renderedTheoryContents.includes(q.content)) {
@@ -2223,16 +2342,40 @@ async function loadLobbyData(id) {
                                             ${(q.options || []).map((opt, optIdx) => {
                                                 const realIdx = q.shuffleMap ? q.shuffleMap[optIdx] : optIdx;
                                                 const checked = savedAns == realIdx ? 'checked' : '';
+                                                const rv = window.__revealSolutions;
+                                                const isAns = rv && realIdx === q.correct;
+                                                const isWrongPick = rv && checked && realIdx !== q.correct;
+                                                const rvClass = isAns ? ' !border-green-400 !bg-green-50' : (isWrongPick ? ' !border-red-400 !bg-red-50' : '');
+                                                const rvIcon = isAns ? '<i class="fa-solid fa-circle-check text-green-500 mr-1"></i>' : (isWrongPick ? '<i class="fa-solid fa-circle-xmark text-red-500 mr-1"></i>' : '');
                                                 return `
-                                                    <label class="cursor-pointer group flex items-start gap-3 p-3 bg-white rounded-xl border ${checked ? 'border-purple-500 bg-purple-100/50' : 'border-purple-200'} hover:border-purple-400 transition-colors" onclick="window.saveMixedMcqAnswer(${qIdx}, ${realIdx})">
+                                                    <label class="cursor-pointer group flex items-start gap-3 p-3 bg-white rounded-xl border ${rvClass} ${checked ? 'border-purple-500 bg-purple-100/50' : 'border-purple-200'} hover:border-purple-400 transition-colors" onclick="window.saveMixedMcqAnswer(${qIdx}, ${realIdx})">
                                                         <input type="radio" name="mixed_q_${qIdx}" value="${realIdx}" class="mt-1 text-purple-600 focus:ring-purple-500" ${checked} ${window.isReviewMode ? 'disabled' : ''}>
-                                                        <div class="latex-container flex-1">${window.formatContent ? window.formatContent(opt) : opt}</div>
+                                                        <div class="latex-container flex-1">${typeof rvIcon !== "undefined" ? rvIcon : ""}${window.formatContent ? window.formatContent(opt) : opt}</div>
                                                     </label>
                                                 `;
                                             }).join('')}
                                         </div>
                                     `;
                                 }
+                            })()}
+                            ${(() => {
+                                if (!window.__revealSolutions) return '';
+                                let ansText = '';
+                                if (q.type === 'mc') {
+                                    let dIdx = q.shuffleMap ? q.shuffleMap.indexOf(q.correct) : q.correct;
+                                    if (dIdx === -1 || dIdx === undefined || dIdx === null) dIdx = q.correct;
+                                    ansText = 'Phương án ' + String.fromCharCode(65 + dIdx);
+                                } else if (q.type === 'short') {
+                                    ansText = q.answer !== undefined ? String(q.answer) : '';
+                                } else if (q.type === 'tf' && q.statements) {
+                                    ansText = q.statements.map((st, k) => `Ý ${k + 1}: ${st.isTrue ? 'Đúng' : 'Sai'}`).join(' • ');
+                                }
+                                const solHtml = (q.solution && String(q.solution).trim()) ? `<div class="latex-container text-gray-700 mt-2 pt-2 border-t border-green-200">${window.formatContent ? window.formatContent(q.solution) : q.solution}</div>` : '';
+                                if (!ansText && !solHtml) return '';
+                                return `<div class="mt-3 p-3 bg-green-50 border border-green-200 rounded-xl text-sm">
+                                    <div class="text-[11px] font-black text-green-700 uppercase"><i class="fa-solid fa-circle-check"></i> Đáp án đúng${ansText ? ': ' : ''}<span class="normal-case">${ansText}</span></div>
+                                    ${solHtml}
+                                </div>`;
                             })()}
                             ${examData.briefNote ? `<div id="brief-note-container-${qIdx}" class="mt-4 pt-4 border-t border-purple-200"></div>` : ''}
                         </div>
@@ -2323,7 +2466,7 @@ async function loadLobbyData(id) {
                 
                 // Call render for each question
                 examData.tlQuestions.forEach((q, i) => {
-                    const isTheory = q.isTheory || (q.solution && q.solution.includes("lý thuyết"));
+                    const isTheory = q.isTheory === true || q.solution === "Đây là phần lý thuyết để ôn tập.";
                     if (!isTheory) {
                         const uArea = document.getElementById(`upload-container-tl_upload_${i}`);
                         if (uArea) {
@@ -2488,6 +2631,15 @@ window.requestResubmit = async () => {
                     // TẠO KẾT QUẢ MỚI
                     await addDoc(collection(db, "results"), resultData);
                 }
+
+            // [VÉ LÀM LẠI] Nộp bài xong thì hủy vé đã dùng (1 lần duyệt = 1 lượt làm lại)
+            if (window.retryGrantRefs && window.retryGrantRefs.length) {
+                for (const ref of window.retryGrantRefs) {
+                    try { await deleteDoc(ref); }
+                    catch (e1) { try { await updateDoc(ref, { status: 'used', usedAt: new Date().toISOString() }); } catch (e2) { console.warn("Không hủy được vé:", e2); } }
+                }
+                window.retryGrantRefs = [];
+            }
 
                 await deleteDoc(doc(db, "exam_attempts", `${currentUser.uid}_${examId}`));
                 localStorage.removeItem(`ans_${currentUser.uid}_${examId}`);
@@ -3161,5 +3313,10 @@ window.requestResubmit = async () => {
             </button>
         </div>
     </div>
+<script>
+if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
+}
+</script>
 </body>
 </html>

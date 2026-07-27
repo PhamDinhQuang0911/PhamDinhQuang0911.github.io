@@ -6,13 +6,12 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="QMath">
-    <link rel="apple-touch-icon" href="/app-icon.jpg">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="theme-color" content="#ea580c">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Quản lý đề thi - Smart LaTeX Import</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
@@ -114,6 +113,7 @@
     </style>
     
     
+    <link rel="stylesheet" href="/styles.css?v=5">
 </head>
 <body class="h-screen flex overflow-hidden text-gray-800">
 
@@ -2681,8 +2681,15 @@
                 Object.values(statsMap).forEach(student => { 
                     student.attempts.forEach(attempt => { 
                         if(attempt.answers) { 
+                            const aCfg = attempt.shuffleConfig || {};
                             window.questions.forEach((q, idx) => { 
-                                const u = attempt.answers[idx]; 
+                                // [FIX] tra dung vi tri cau khi de co dao thu tu
+                                let aKey = idx;
+                                if (aCfg.questionOrder && Array.isArray(aCfg.questionOrder)) {
+                                    const dIdx = aCfg.questionOrder.indexOf(idx);
+                                    if (dIdx !== -1) aKey = dIdx;
+                                }
+                                const u = attempt.answers[aKey]; 
                                 if (u !== undefined && u !== null) { 
                                     qStats[idx].total++; 
                                     let isCorrect = false; 
@@ -3126,6 +3133,19 @@
                 `;
                 container.appendChild(div);
             }); 
+
+            // [MỚI] Giao bài TỪ TRONG LỚP: tự tick sẵn lớp đó (giáo viên vẫn tick thêm/bỏ được)
+            try {
+                const presetClassId = new URLSearchParams(window.location.search).get('classId');
+                if (presetClassId && !currentExamId) {
+                    const cb = document.querySelector(`.class-checkbox[value="${presetClassId}"]`);
+                    if (cb) {
+                        cb.checked = true;
+                        const rClass = document.querySelector('input[name="settingAccess"][value="class"]');
+                        if (rClass) { rClass.checked = true; if (window.togglePrivasySettings) window.togglePrivasySettings('class'); }
+                    }
+                }
+            } catch (ePre) { console.warn("preset class:", ePre); }
         };
 
         window.toggleSidebar = () => { const s = document.getElementById('mainSidebar'); const o = document.getElementById('sidebarOverlay'); if (s.classList.contains('-translate-x-full')) { s.classList.remove('-translate-x-full'); o.classList.remove('hidden'); } else { s.classList.add('-translate-x-full'); o.classList.add('hidden'); } };
@@ -4339,14 +4359,34 @@
                 if (q.type === 'essay') {
                     u = answers[q.answerKey]; // Fetch from specific tl_upload_X
                 } else {
-                    u = answers[idx];
+                    // [FIX] Đề có ĐẢO THỨ TỰ CÂU: đáp án học sinh được lưu theo vị trí HIỂN THỊ
+                    // trên máy học sinh, nên phải tra ngược qua questionOrder mới đúng câu.
+                    let ansKey = idx;
+                    if (config.questionOrder && Array.isArray(config.questionOrder)) {
+                        const dIdx = config.questionOrder.indexOf(idx);
+                        if (dIdx !== -1) ansKey = dIdx;
+                    }
+                    u = answers[ansKey];
                 }
+
+                // [FIX] So khớp trả lời ngắn "dễ tính" hơn: bỏ khoảng trắng thừa,
+                // chấp nhận dấu phẩy/chấm thập phân, so số nếu cả hai là số (0,5 = 0.5 = .5)
+                const normShort = (v) => String(v ?? '').trim().toLowerCase().replace(/\s+/g, ' ').replace(/,/g, '.');
+                const shortMatch = (a, b) => {
+                    const na = normShort(a), nb = normShort(b);
+                    if (na === '' || nb === '') return false;
+                    if (na === nb) return true;
+                    // Nếu cả hai đều là SỐ thuần (vd 0.5 và .5, hay 2.0 và 2) thì so theo giá trị
+                    const isNum = (t) => /^[-+]?\d*\.?\d+$/.test(t);
+                    if (isNum(na) && isNum(nb)) return Math.abs(parseFloat(na) - parseFloat(nb)) < 1e-9;
+                    return false;
+                };
 
                 let isCorrect = false; 
                 let maxPoint = parseFloat(q.point) || 0;
                 
                 if (q.type === 'mc' && u === q.correct) isCorrect = true;
-                else if (q.type === 'short' && q.answer && String(u).trim().toLowerCase() === String(q.answer).trim().toLowerCase()) isCorrect = true;
+                else if (q.type === 'short' && q.answer && shortMatch(u, q.answer)) isCorrect = true;
                 else if (q.type === 'tf') {
                     if (Array.isArray(u) && q.statements) {
                         const correctCount = q.statements.reduce((acc, s, i) => acc + (u[i] === s.isTrue ? 1 : 0), 0);
@@ -4433,22 +4473,29 @@
                     let userText = 'Bỏ trống';
                     let correctText = '';
 
+                    let mcOptionsHtml = '';
                     if (q.type === 'mc') {
-                        const getDisplayChar = (originalVal) => {
-                            if (originalVal === undefined || originalVal === null) return '?';
-                            if (config.optionMaps && config.optionMaps[idx]) {
-                                const map = config.optionMaps[idx]; 
-                                const displayIdx = map.indexOf(originalVal);
-                                return displayIdx !== -1 ? String.fromCharCode(65 + displayIdx) : '?';
-                            }
-                            return String.fromCharCode(65 + originalVal);
-                        };
-
-                        if (u !== undefined) {
-                            userText = `Phương án ${getDisplayChar(u)}`;
-                            if(q.options && q.options[u]) userText += ` <span class="text-gray-500 text-xs">(${window.formatContent(q.options[u]).substring(0, 50)}...)</span>`;
+                        // [MỚI] Hiện đủ 4 phương án theo đúng thứ tự học sinh nhìn thấy:
+                        // - Đáp án đúng: viền + nền XANH (kèm dấu check)
+                        // - Học sinh chọn sai: viền + nền ĐỎ (kèm dấu x)
+                        const displayOrder = (config.optionMaps && config.optionMaps[idx]) ? config.optionMaps[idx] : (q.options || []).map((_, i) => i);
+                        mcOptionsHtml = '<div class="grid grid-cols-1 md:grid-cols-2 gap-2">';
+                        displayOrder.forEach((origIdx, j) => {
+                            const letter = String.fromCharCode(65 + j);
+                            const optContent = (q.options && q.options[origIdx] !== undefined) ? (window.formatContent ? window.formatContent(q.options[origIdx]) : q.options[origIdx]) : '';
+                            const isAns = (origIdx === q.correct);
+                            const isPicked = (u !== undefined && u !== null && origIdx === u);
+                            let cls = 'border-gray-200 bg-white text-gray-700';
+                            let icon = '';
+                            if (isAns) { cls = 'border-green-400 bg-green-50 text-green-800 font-bold'; icon = '<i class="fa-solid fa-circle-check text-green-500 mr-1"></i>'; }
+                            if (isPicked && !isAns) { cls = 'border-red-400 bg-red-50 text-red-700 font-bold'; icon = '<i class="fa-solid fa-circle-xmark text-red-500 mr-1"></i>'; }
+                            const pickedTag = isPicked ? '<span class="ml-auto shrink-0 text-[10px] font-black uppercase px-1.5 py-0.5 rounded ' + (isAns ? 'bg-green-200 text-green-800' : 'bg-red-200 text-red-700') + '">HS chọn</span>' : '';
+                            mcOptionsHtml += `<div class="px-3 py-2 rounded-xl border ${cls} text-sm latex-container flex items-start gap-1.5"><span class="shrink-0">${icon}<b>${letter}.</b></span><span class="min-w-0">${optContent}</span>${pickedTag}</div>`;
+                        });
+                        mcOptionsHtml += '</div>';
+                        if (u === undefined || u === null) {
+                            mcOptionsHtml += '<div class="mt-2 text-xs font-bold text-red-500"><i class="fa-solid fa-triangle-exclamation"></i> Học sinh bỏ trống câu này.</div>';
                         }
-                        correctText = `Phương án ${getDisplayChar(q.correct)}`;
                     } else if (q.type === 'tf') {
                         if (Array.isArray(u)) {
                             userText = u.map((ans, i) => `Ý ${i+1}: ${ans ? 'Đúng' : 'Sai'}`).join(', ');
@@ -4474,7 +4521,12 @@
                         `;
                     }
 
-                    answerHtml = `
+                    if (q.type === 'mc') {
+                        answerHtml = `
+                            <div class="p-4 bg-gray-50 border-t border-gray-100">${mcOptionsHtml}</div>
+                            ${solutionToggleHtml}
+                        `;
+                    } else answerHtml = `
                         <div class="p-4 bg-gray-50 border-t border-gray-100 grid grid-cols-2 gap-4">
                             <div><div class="text-[10px] font-bold text-gray-400 uppercase mb-1">Học sinh chọn</div><div class="${isCorrect ? 'text-green-600 font-bold' : 'text-red-500 line-through'}">${userText}</div></div>
                             <div><div class="text-[10px] font-bold text-gray-400 uppercase mb-1">Đáp án đúng</div><div class="text-blue-600 font-bold">${correctText}</div></div>
@@ -4811,22 +4863,34 @@
             if (await window.customConfirm(confirmMsg)) {
                 try {
                     window.showToast("Đang xử lý...", "info");
-                    
-                    // 1. Xóa tất cả kết quả thi cũ của học sinh này
-                    const qRes = query(collection(db, "results"), where("examId", "==", currentExamId), where("studentId", "==", studentId));
-                    const snapRes = await getDocs(qRes);
-                    
-                    const deletePromises = snapRes.docs.map(d => deleteDoc(d.ref));
-                    await Promise.all(deletePromises);
 
-                    // 2. Xóa yêu cầu (nếu có)
+                    // 1. CẤP VÉ LÀM LẠI TRƯỚC (chắc chắn nhất): status 'approved'.
+                    // Học sinh được làm lại nhờ vé này kể cả khi bước xóa bài cũ thất bại vì Rules.
                     if (requestId) {
-                        await deleteDoc(doc(db, "access_requests", requestId));
+                        await updateDoc(doc(db, "access_requests", requestId), {
+                            status: 'approved',
+                            approvedAt: new Date().toISOString()
+                        });
                     } else {
-                        // Quét sạch request treo nếu duyệt thủ công
-                        const qReq = query(collection(db, "access_requests"), where("examId", "==", currentExamId), where("studentId", "==", studentId));
-                        const snapReq = await getDocs(qReq);
-                        snapReq.docs.forEach(async d => await deleteDoc(d.ref));
+                        // Duyệt thủ công (không có yêu cầu sẵn): tạo vé approved mới cho học sinh
+                        await addDoc(collection(db, "access_requests"), {
+                            examId: currentExamId,
+                            studentId: studentId,
+                            studentName: studentName || "Học sinh",
+                            reason: "Giáo viên cấp quyền thủ công",
+                            status: 'approved',
+                            createdAt: new Date().toISOString(),
+                            approvedAt: new Date().toISOString()
+                        });
+                    }
+
+                    // 2. Cố gắng xóa kết quả thi cũ (bước phụ - lỗi cũng không ảnh hưởng quyền làm lại)
+                    try {
+                        const qRes = query(collection(db, "results"), where("examId", "==", currentExamId), where("studentId", "==", studentId));
+                        const snapRes = await getDocs(qRes);
+                        await Promise.all(snapRes.docs.map(d => deleteDoc(d.ref)));
+                    } catch (delErr) {
+                        console.warn("Không xóa được bài cũ (vẫn ổn nhờ vé approved):", delErr);
                     }
 
                     window.showToast(`Đã cấp quyền cho ${studentName}`, "success");
@@ -6268,6 +6332,11 @@
         if(btnToggleSidebar) btnToggleSidebar.addEventListener('click', toggleSidebar);
         if(overlay) overlay.addEventListener('click', toggleSidebar);
     </script>
+<script>
+if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
+}
+</script>
 </body>
 </html>
 

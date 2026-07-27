@@ -4,7 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Luyện Tập Thông Minh - AI Powered</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#ea580c">
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="QMath">
     <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     
@@ -152,10 +158,20 @@
               }
           };
 
-          window.use5050 = function(idx) {
+          window.use5050 = async function(idx) {
               const q = window.practiceQuestions ? window.practiceQuestions[idx] : null; if(!q) return;
               const btn = document.getElementById(`fiftyBtn-${idx}`);
               if(!btn) return;
+
+              // ===== QPOINT: trợ giúp 50/50 tốn điểm (giáo viên miễn phí) =====
+              if (window.QP && window.QP.loaded && !window.QP.free) {
+                  const cost = (window.QP_COSTS?.use_5050 || 3);
+                  const r = await window.QP.spend(cost, 'use_5050', { qId: q.id });
+                  if (!r.ok) {
+                      if (window.showNotification) window.showNotification(`Không đủ Qpoint (cần ${cost}). Làm đúng câu hỏi để kiếm thêm nhé!`, "error");
+                      return;
+                  }
+              }
               
               if (q.type === 'mc' && q.shuffleMap) {
                   let correctRealIdx = q.correct;
@@ -187,6 +203,16 @@
               if (!q) return;
               const btn = document.getElementById(`hintBtn-${idx}`);
               if(!btn) return;
+
+              // ===== QPOINT: gợi ý AI tốn điểm (giáo viên miễn phí) =====
+              if (window.QP && window.QP.loaded && !window.QP.free) {
+                  const cost = (window.QP_COSTS?.ai_hint || 5);
+                  const r = await window.QP.spend(cost, 'ai_hint', { qId: q.id });
+                  if (!r.ok) {
+                      if (window.showNotification) window.showNotification(`Không đủ Qpoint (cần ${cost}). Làm đúng câu hỏi để kiếm thêm nhé!`, "error");
+                      return;
+                  }
+              }
               btn.disabled = true;
               btn.classList.add('opacity-50', 'cursor-not-allowed');
               btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Đang hỏi AI...`;
@@ -239,19 +265,50 @@
           };
 
           // Các hàm giao diện cơ bản (được định nghĩa sớm để tránh lỗi "not defined")
+        // ===== LUYỆN NHANH 1 CHẠM: bỏ qua wizard, dùng cấu hình mặc định =====
+        window.quickStart = function(count, levels) {
+            try {
+                window.selectMode('random');
+                setTimeout(() => {
+                    // Chọn đúng khối lớp đã chọn ở thanh Luyện nhanh
+                    const g = document.getElementById('quickGrade')?.value || '9';
+                    const gradeRadio = document.querySelector(`input[name="grade"][value="${g}"]`);
+                    if (gradeRadio) gradeRadio.checked = true;
+                    const qc = document.getElementById('inputQCount');
+                    if (qc) qc.value = count || 10;
+                    document.querySelectorAll('.level-checkbox').forEach(cb => {
+                        cb.checked = levels ? levels.includes(cb.value) : true;
+                    });
+                    // khong tich chuyen de nao -> lay ngau nhien toan bo khoi/mon dang chon
+                    document.querySelectorAll('.tree-item .map-check:checked').forEach(cb => cb.checked = false);
+                    if (window.startPractice) window.startPractice();
+                }, 350);
+            } catch (e) { console.error("quickStart:", e); }
+        };
+
         window.selectMode = function(mode) {
             document.getElementById('landingStep').classList.add('hidden');
-            document.getElementById('configStep').classList.remove('hidden');
-            if(window.renderTopicList) window.renderTopicList(); 
+            if (mode === 'topic') {
+                // HỌC THEO LỘ TRÌNH: hiện danh sách chuyên đề giáo viên đã xây
+                document.getElementById('roadmapStep').classList.remove('hidden');
+                if (window.loadRoadmaps) window.loadRoadmaps();
+            } else {
+                document.getElementById('configStep').classList.remove('hidden');
+                if(window.renderTopicList) window.renderTopicList();
+            }
         };
         window.backToLanding = function() {
             document.getElementById('configStep').classList.add('hidden');
+            const rm = document.getElementById('roadmapStep');
+            if (rm) rm.classList.add('hidden');
             document.getElementById('landingStep').classList.remove('hidden');
         };
     </script>
+    <script>/* Đồng bộ dark mode với Góc Học Tập */ try { if (localStorage.getItem('qmath_theme') === 'dark') document.documentElement.classList.add('dark'); } catch(e) {}</script>
     <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+    <link rel="stylesheet" href="/styles.css?v=6">
 </head>
-<body class="min-h-screen flex flex-col text-gray-800">
+<body class="min-h-screen flex flex-col text-gray-800" data-page="student">
     <div id="tutorialModal" class="hidden fixed inset-0 tutorial-overlay flex items-center justify-center p-4 z-[9999]">
         <div class="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden relative transform transition-all scale-100 opacity-100">
             <button onclick="closeTutorial()" class="absolute top-4 right-4 text-gray-400 hover:text-red-500 z-50 p-2 transition-colors">
@@ -299,7 +356,7 @@
                 </div>
             </div>
            <div class="flex gap-2">
-                <button onclick="openHistory()" class="w-9 h-9 rounded-full bg-blue-50 hover:bg-blue-100 flex items-center justify-center text-blue-600 border border-blue-200" title="Xem lịch sử"><i class="fa-solid fa-clock-rotate-left"></i></button>
+                <div id="qpChip" class="hidden h-9 px-3 rounded-full bg-amber-50 border border-amber-200 flex items-center gap-1.5 text-amber-700 font-black text-sm" title="Qpoint - làm bài để kiếm thêm, dùng để mua Gợi ý AI / 50-50"><i class="fa-solid fa-coins"></i><span class="qp-balance">0</span></div><button onclick="openHistory()" class="w-9 h-9 rounded-full bg-blue-50 hover:bg-blue-100 flex items-center justify-center text-blue-600 border border-blue-200" title="Xem lịch sử"><i class="fa-solid fa-clock-rotate-left"></i></button>
                 
                 <button onclick="openTutorial()" class="w-9 h-9 rounded-full bg-yellow-50 hover:bg-yellow-100 flex items-center justify-center text-yellow-600 border border-yellow-200" title="Xem hướng dẫn"><i class="fa-solid fa-question"></i></button>
                 <button onclick="window.location.reload()" class="w-9 h-9 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-500"><i class="fa-solid fa-rotate"></i></button>
@@ -357,7 +414,16 @@
                 </div>
             </div>
 
-<div class="grid grid-cols-1 md:grid-cols-2 gap-6 w-full max-w-4xl px-4">
+<div class="w-full max-w-4xl px-4 mb-5 flex flex-wrap items-center justify-center gap-2">
+                <span class="text-xs font-black text-gray-400 uppercase tracking-wider mr-1"><i class="fa-solid fa-bolt text-amber-500"></i> Luyện nhanh:</span>
+                <select id="quickGrade" class="px-3 py-2 bg-white border border-gray-200 rounded-full text-sm font-bold text-gray-700 shadow-sm outline-none">
+                    <option value="9" selected>Lớp 9</option><option value="10">Lớp 10</option><option value="11">Lớp 11</option><option value="12">Lớp 12</option>
+                </select>
+                <button onclick="quickStart(10)" class="px-4 py-2 bg-white border border-gray-200 rounded-full text-sm font-bold text-gray-700 hover:border-teal-400 hover:text-teal-700 shadow-sm transition-all">10 câu ngẫu nhiên</button>
+                <button onclick="quickStart(20)" class="px-4 py-2 bg-white border border-gray-200 rounded-full text-sm font-bold text-gray-700 hover:border-teal-400 hover:text-teal-700 shadow-sm transition-all">20 câu ngẫu nhiên</button>
+                <button onclick="quickStart(5, ['VD','VDC'])" class="px-4 py-2 bg-white border border-red-100 rounded-full text-sm font-bold text-red-500 hover:border-red-300 shadow-sm transition-all">🔥 5 câu Vận dụng</button>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 w-full max-w-4xl px-4">
                 <div onclick="selectMode('topic')" class="mode-card bg-white p-8 rounded-3xl border-2 border-gray-100 cursor-pointer transition-all duration-300 relative group overflow-hidden">
                     <div class="absolute top-0 right-0 bg-blue-100 w-32 h-32 rounded-bl-full -mr-10 -mt-10 transition-transform group-hover:scale-110"></div>
                     <div class="relative z-10">
@@ -376,6 +442,27 @@
                 </div>
             </div>
         </div>
+        <!-- ===== HỌC THEO LỘ TRÌNH: chuyên đề giáo viên đã xây (từ Xưởng Chuyên Đề) ===== -->
+        <div id="roadmapStep" class="hidden max-w-5xl mx-auto py-6 animate-fade-in">
+            <div class="flex items-center justify-between mb-5 flex-wrap gap-3">
+                <div class="flex items-center gap-3">
+                    <button onclick="backToLanding()" class="w-9 h-9 rounded-full bg-white border border-gray-200 text-gray-500 hover:text-teal-600 shadow-sm"><i class="fa-solid fa-arrow-left"></i></button>
+                    <div>
+                        <h2 class="text-xl font-black text-gray-800">Lộ trình & Chuyên đề luyện tập</h2>
+                        <p class="text-xs text-gray-400 font-bold">Do giáo viên biên soạn — chọn một lộ trình để bắt đầu</p>
+                    </div>
+                </div>
+                <select id="roadmapGrade" onchange="loadRoadmaps()" class="px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm font-bold text-gray-700 shadow-sm outline-none">
+                    <option value="">Tất cả khối lớp</option>
+                    <option value="9" selected>Lớp 9</option><option value="10">Lớp 10</option><option value="11">Lớp 11</option><option value="12">Lớp 12</option>
+                    <option value="6">Lớp 6</option><option value="7">Lớp 7</option><option value="8">Lớp 8</option>
+                </select>
+            </div>
+            <div id="roadmapList" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div class="col-span-full text-center py-16 text-gray-400 font-bold">Đang tải danh sách...</div>
+            </div>
+        </div>
+
         <div id="configStep" class="hidden grid grid-cols-1 lg:grid-cols-12 gap-6 h-[calc(100vh-140px)] animate-slideIn">
             <div class="lg:col-span-4 flex flex-col gap-4 h-full overflow-y-auto custom-scrollbar pr-1">
                 <div class="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
@@ -527,6 +614,7 @@
         import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
         import { getFirestore, doc, getDoc, collection, getDocs, query, where, addDoc, orderBy, limit } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
         import { formatContent, renderTikz, autoScaleTables } from "./utils.js"; 
+        import { createQPoint, QP_COSTS, QP_REWARDS } from "./qpoint.js";
         // Gán vào window
         window.formatContent = formatContent;
         window.renderTikz = renderTikz;
@@ -545,6 +633,21 @@
             if (user) {
                 
                                 checkTutorial(); // Kiểm tra hiển thị hướng dẫn
+
+                // ===== QPOINT: khởi tạo ví điểm =====
+                try {
+                    window.QP = createQPoint(db, user.uid);
+                    window.QP_COSTS = QP_COSTS; window.QP_REWARDS = QP_REWARDS;
+                    getDoc(doc(db, "users", user.uid)).then(uSnap => {
+                        if (uSnap.exists() && uSnap.data().role && uSnap.data().role !== 'student') window.QP.free = true;
+                    }).catch(()=>{});
+                    window.QP.onChange((bal) => {
+                        document.querySelectorAll('.qp-balance').forEach(el => el.innerText = bal);
+                        const chip = document.getElementById('qpChip');
+                        if (chip) chip.classList.remove('hidden');
+                    });
+                    window.QP.load();
+                } catch (e) { console.warn("QPoint init:", e); }
                 
                 // Nạp API Key Gemini
                 getDoc(doc(db, "configurations", "ai_keys")).then(snap => {
@@ -694,12 +797,119 @@
                 }
             } catch (error) { console.error("Lỗi tải MapID:", error); }
         }
+        // ===== Dem so cau co san cho tung dang bai tren cay (chi doc metadata, khong sua ID) =====
+        window.annotateTreeCounts = () => {
+            if (!globalBankMetadata || globalBankMetadata.length === 0) return;
+            const baseOf = (id) => {
+                let raw = String(id || "").split('_')[0];
+                const match = raw.match(/^(\d+[a-zA-Z])/i);
+                if (!match) return raw;
+                const prefix = match[1].toUpperCase();
+                const parts = raw.substring(prefix.length).match(/\d+/g) || [];
+                return prefix + (parts.length > 0 ? "|" + parts.join("|") : "");
+            };
+            // Dem so cau theo tung goc path
+            const counts = {};
+            globalBankMetadata.forEach(q => {
+                const b = baseOf(q.mapId || q.id);
+                if (!b) return;
+                // cong don cho moi prefix cua path (de nhanh cha cong ca con)
+                const segs = b.split('|');
+                let acc = segs[0];
+                counts[acc] = (counts[acc] || 0) + 1;
+                for (let i = 1; i < segs.length; i++) { acc += '|' + segs[i]; counts[acc] = (counts[acc] || 0) + 1; }
+            });
+            document.querySelectorAll('.qcount-badge').forEach(el => {
+                const n = counts[baseOf(el.dataset.mid)] || 0;
+                el.innerText = n > 0 ? `${n} câu` : 'chưa có';
+                el.className = 'qcount-badge text-[10px] font-black px-1.5 py-0.5 rounded-md align-middle ' + (n > 0 ? 'text-teal-600 bg-teal-50' : 'text-gray-300 bg-gray-50');
+            });
+        };
+
+        // ===== HỌC THEO LỘ TRÌNH: đọc chuyên đề đã xuất bản từ Xưởng Chuyên Đề =====
+        window.loadRoadmaps = async () => {
+            const box = document.getElementById('roadmapList');
+            box.innerHTML = '<div class="col-span-full text-center py-16 text-gray-400 font-bold"><i class="fa-solid fa-spinner fa-spin"></i> Đang tải danh sách...</div>';
+            try {
+                const qT = query(collection(db, "custom_topics"), where("status", "==", "published"));
+                const snap = await getDocs(qT);
+                let topics = [];
+                snap.forEach(d => topics.push({ id: d.id, ...d.data() }));
+                const g = document.getElementById('roadmapGrade').value;
+                if (g) topics = topics.filter(t => String(t.grade) === g);
+                topics.sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
+                if (topics.length === 0) {
+                    box.innerHTML = '<div class="col-span-full text-center py-16 text-gray-400"><i class="fa-solid fa-box-open text-3xl mb-3 opacity-50"></i><p class="font-bold">Chưa có lộ trình nào cho khối lớp này.</p><p class="text-xs mt-1">Giáo viên sẽ sớm cập nhật trong Xưởng Chuyên Đề nhé!</p></div>';
+                    return;
+                }
+                box.innerHTML = '';
+                const GRADIENTS = ['from-teal-500 to-cyan-600', 'from-indigo-500 to-purple-600', 'from-orange-400 to-rose-500', 'from-blue-500 to-indigo-600', 'from-emerald-500 to-teal-600'];
+                topics.forEach((t, i) => {
+                    const chapters = (t.outline || []).length;
+                    const card = document.createElement('div');
+                    card.className = 'bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden hover:shadow-lg hover:-translate-y-1 transition-all flex flex-col';
+                    card.innerHTML = `
+                        <div class="h-24 bg-gradient-to-br ${GRADIENTS[i % GRADIENTS.length]} p-4 flex items-end relative overflow-hidden bg-cover bg-center" ${t.bannerUrl ? `style="background-image:url('${t.bannerUrl}')"` : ''}>
+                            ${t.bannerUrl ? '<div class="absolute inset-0 bg-gradient-to-t from-black/45 to-transparent"></div>' : '<div class="absolute -top-6 -right-6 w-24 h-24 bg-white/10 rounded-full"></div>'}
+                            <span class="relative z-10 text-[10px] font-black text-white/95 bg-black/25 backdrop-blur-sm px-2 py-0.5 rounded-full uppercase">Lớp ${t.grade || '?'}</span>
+                        </div>
+                        <div class="p-4 flex-1 flex flex-col">
+                            <h3 class="font-black text-gray-800 leading-snug mb-1">${t.title || 'Chuyên đề'}</h3>
+                            <p class="text-xs text-gray-500 mb-3 flex-1">${(t.desc || 'Luyện tập theo chuyên đề do giáo viên biên soạn.').slice(0, 90)}</p>
+                            <div class="flex items-center gap-3 text-[11px] font-bold text-gray-400 mb-3">
+                                <span><i class="fa-solid fa-book text-teal-500"></i> ${chapters} chương</span>
+                                <span><i class="fa-solid fa-circle-question text-indigo-500"></i> ${t.questionCount || 0} câu</span>
+                            </div>
+                            <button onclick="startRoadmap('${t.id}', this)" class="w-full py-2.5 bg-brand text-white font-bold rounded-xl text-sm shadow-sm hover:bg-teal-700 transition-all"><i class="fa-solid fa-play"></i> Bắt đầu luyện</button>
+                        </div>`;
+                    box.appendChild(card);
+                });
+            } catch (e) {
+                console.error(e);
+                box.innerHTML = `<div class="col-span-full text-center py-16 text-red-400 font-bold">Lỗi tải: ${e.message}</div>`;
+            }
+        };
+
+        window.startRoadmap = async (topicDocId, btn) => {
+            const og = btn ? btn.innerHTML : '';
+            if (btn) { btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang tải câu hỏi...'; btn.disabled = true; }
+            try {
+                const snap = await getDoc(doc(db, "custom_topics", topicDocId));
+                if (!snap.exists()) throw new Error("Không tìm thấy chuyên đề.");
+                const t = snap.data();
+                // Gom danh sách ID câu hỏi theo đúng thứ tự mục lục
+                const qIds = [];
+                (t.outline || []).forEach(ch => (ch.children || []).forEach(ls => (ls.items || []).forEach(it => {
+                    if (it.type === 'question' && it.qId && !qIds.includes(it.qId)) qIds.push(it.qId);
+                })));
+                if (qIds.length === 0) throw new Error("Chuyên đề này chưa có câu hỏi.");
+                const WORKER_URL = "https://upload-helper.phamngockhanh-942001.workers.dev/bank";
+                const results = await Promise.all(qIds.map(async (id) => {
+                    try { const r = await fetch(`${WORKER_URL}?id=${encodeURIComponent(id)}`); if (r.ok) return await r.json(); } catch (e) {}
+                    return null;
+                }));
+                practiceQuestions = results.filter(q => q !== null);
+                window.practiceQuestions = practiceQuestions;
+                if (practiceQuestions.length === 0) throw new Error("Không tải được nội dung câu hỏi.");
+                let totalSeconds = 0;
+                practiceQuestions.forEach(q => { totalSeconds += (q.type === 'tf') ? 240 : 108; });
+                document.getElementById('roadmapStep').classList.add('hidden');
+                document.getElementById('practiceStep').classList.remove('hidden');
+                renderPracticeInterface();
+                startTimer(Math.ceil(totalSeconds / 60) * 60);
+            } catch (e) {
+                if (window.showNotification) window.showNotification(e.message, "error");
+            }
+            if (btn) { btn.innerHTML = og; btn.disabled = false; }
+        };
+
         async function loadBankMetadata() {
             try {
                 const WORKER_URL = "https://upload-helper.phamngockhanh-942001.workers.dev/bank";
                 const res = await fetch(WORKER_URL);
                 if (res.ok) globalBankMetadata = await res.json();
             } catch (e) { console.error("Lỗi tải Bank:", e); }
+            window.annotateTreeCounts();
         }
 // --- 3. RENDER DANH SÁCH BÀI (CHỈ LẤY ID BÀI HỌC CHI TIẾT) ---
         window.renderTopicList = () => {
@@ -746,7 +956,7 @@
                                 <div class="absolute left-0 top-1/2 w-4 h-[1px] bg-gray-300 -translate-y-1/2"></div>
                                 <div class="tree-item flex items-start gap-2">
                                     <input type="checkbox" id="${cbId}" value="${currentId}" class="map-check w-4 h-4 mt-1 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500 cursor-pointer flex-shrink-0" onchange="handleCheckTree(this)">
-                                    <label for="${cbId}" class="map-text cursor-pointer block math-content tex2jax_process text-sm text-gray-600 leading-snug">${formattedName}</label>
+                                    <label for="${cbId}" class="map-text cursor-pointer block math-content tex2jax_process text-sm text-gray-600 leading-snug">${formattedName} <span class="qcount-badge text-[10px] font-black text-teal-600 bg-teal-50 px-1.5 py-0.5 rounded-md align-middle" data-mid="${currentId}"></span></label>
                                 </div>
                             </div>`;
                     }
@@ -797,6 +1007,7 @@
             if (!hasContent) container.innerHTML = `<div class="text-center py-10"><p class="text-gray-400">Không tìm thấy chuyên đề phù hợp.</p></div>`;
             updateSelectionStatus();
             if(window.MathJax) MathJax.typesetPromise([container]).catch(()=>{});
+            if (window.annotateTreeCounts) window.annotateTreeCounts();
 };
 
             
@@ -1075,11 +1286,11 @@
                   let lifelineHtml = '';
                   let hintHtml = '';
                   if (q.solution) {
-                      hintHtml = `<button onclick="useHint(${idx})" id="hintBtn-${idx}" class="text-xs text-yellow-500 font-bold hover:text-yellow-600 transition-colors flex items-center gap-1 px-3 py-1.5 bg-yellow-50 rounded-lg"><i class="fa-solid fa-lightbulb"></i> Gợi ý</button>`;
+                      hintHtml = `<button onclick="useHint(${idx})" id="hintBtn-${idx}" class="text-xs text-yellow-500 font-bold hover:text-yellow-600 transition-colors flex items-center gap-1 px-3 py-1.5 bg-yellow-50 rounded-lg"><i class="fa-solid fa-lightbulb"></i> Gợi ý AI <span class="text-[9px] opacity-70">(5 Qp)</span></button>`;
                   }
                   let fiftyHtml = '';
                   if (q.type === 'mc') {
-                      fiftyHtml = `<button onclick="use5050(${idx})" id="fiftyBtn-${idx}" class="text-xs text-indigo-500 font-bold hover:text-indigo-600 transition-colors flex items-center gap-1 px-3 py-1.5 bg-indigo-50 rounded-lg"><i class="fa-solid fa-wand-magic-sparkles"></i> 50/50</button>`;
+                      fiftyHtml = `<button onclick="use5050(${idx})" id="fiftyBtn-${idx}" class="text-xs text-indigo-500 font-bold hover:text-indigo-600 transition-colors flex items-center gap-1 px-3 py-1.5 bg-indigo-50 rounded-lg"><i class="fa-solid fa-wand-magic-sparkles"></i> 50/50 <span class="text-[9px] opacity-70">(3 Qp)</span></button>`;
                   }
                   if (hintHtml || fiftyHtml) {
                       lifelineHtml = `<div class="flex justify-end gap-2 mt-4 pt-3 border-t border-gray-50/10 w-full">${hintHtml}${fiftyHtml}</div>`;
@@ -1217,7 +1428,27 @@
         function showResultScreen(scoreStr, correct, total) {
             document.getElementById('practiceStep').classList.add('hidden');
             document.getElementById('resultStep').classList.remove('hidden');
-            
+
+            // ===== QPOINT: thưởng điểm theo số câu đúng =====
+            try {
+                if (window.QP && window.QP.loaded && total > 0) {
+                    let earned = correct * (window.QP_REWARDS?.perCorrect || 2);
+                    if (correct / total >= 0.8) earned += (window.QP_REWARDS?.goodScoreBonus || 10);
+                    if (earned > 0) {
+                        window.QP.award(earned, 'practice_complete', { correct, total });
+                        const scoreEl = document.getElementById('resScore');
+                        let qpNote = document.getElementById('qpEarnedNote');
+                        if (!qpNote && scoreEl) {
+                            qpNote = document.createElement('div');
+                            qpNote.id = 'qpEarnedNote';
+                            qpNote.className = 'mt-3 inline-flex items-center gap-1.5 px-4 py-1.5 bg-amber-100 text-amber-700 rounded-full text-sm font-black animate-fade-in';
+                            scoreEl.parentElement.appendChild(qpNote);
+                        }
+                        if (qpNote) qpNote.innerHTML = `<i class="fa-solid fa-coins"></i> +${earned} Qpoint`;
+                    }
+                }
+            } catch (e) { console.warn("QPoint award:", e); }
+
             document.getElementById('resScore').textContent = scoreStr;
             document.getElementById('resCorrect').textContent = correct;
             document.getElementById('resWrong').textContent = total - correct;
@@ -1460,5 +1691,10 @@
             </div>
         </div>
     </div>
+<script>
+if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
+}
+</script>
 </body>
 </html>

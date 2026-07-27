@@ -3,42 +3,42 @@ const courseData = [
     {
         title: "LUYỆN THI TSA - ĐH BÁCH KHOA",
         desc: "Khóa học chuyên sâu tư duy Toán học, giải chi tiết đề thi mẫu và phát triển kỹ năng tư duy logic.",
-        img: "https://images.unsplash.com/photo-1635070041078-e363dbe005cb?q=80&w=2070&auto=format&fit=crop",
+        img: "https://images.unsplash.com/photo-1635070041078-e363dbe005cb?q=80&w=800&auto=format&fit=crop",
         tag: "Hot nhất",
         students: "1.2k"
     },
     {
         title: "TOÁN TƯ DUY LỚP 12",
         desc: "Hệ thống lại kiến thức 12 theo hướng tư duy trắc nghiệm, chuẩn bị cho kỳ thi THPTQG.",
-        img: "https://images.unsplash.com/photo-1596495578065-6e0763fa1178?q=80&w=2071&auto=format&fit=crop",
+        img: "https://images.unsplash.com/photo-1596495578065-6e0763fa1178?q=80&w=800&auto=format&fit=crop",
         tag: "Cơ bản",
         students: "850"
     },
     {
         title: "TOÁN TƯ DUY LỚP 11",
         desc: "Nền tảng vững chắc cho lớp 12. Tiếp cận sớm với các dạng bài thi đánh giá năng lực.",
-        img: "https://images.unsplash.com/photo-1509228468518-180dd4864904?q=80&w=2070&auto=format&fit=crop",
+        img: "https://images.unsplash.com/photo-1509228468518-180dd4864904?q=80&w=800&auto=format&fit=crop",
         tag: "Nền tảng",
         students: "600"
     },
     {
         title: "LỚP 10 - BỨT PHÁ ĐIỂM SỐ",
         desc: "Làm quen với phương pháp học mới cấp 3. Xây dựng tư duy toán học hiện đại.",
-        img: "https://images.unsplash.com/photo-1516321318423-f06f85e504b3?q=80&w=2070&auto=format&fit=crop",
+        img: "https://images.unsplash.com/photo-1516321318423-f06f85e504b3?q=80&w=800&auto=format&fit=crop",
         tag: "Mới",
         students: "450"
     },
     {
         title: "KHO TÀI LIỆU LATEX",
         desc: "Bộ tài liệu soạn thảo bằng Latex chuẩn đẹp, hỗ trợ giáo viên và học sinh tra cứu.",
-        img: "https://images.unsplash.com/photo-1580582932707-520aed937b7b?q=80&w=2060&auto=format&fit=crop",
+        img: "https://images.unsplash.com/photo-1580582932707-520aed937b7b?q=80&w=800&auto=format&fit=crop",
         tag: "Tài liệu",
         students: "Free"
     },
     {
         title: "GIẢI ĐỀ THI THỬ 2026",
         desc: "Cập nhật các đề thi thử mới nhất từ các trường chuyên trên cả nước.",
-        img: "https://images.unsplash.com/photo-1434030216411-0b793f4b4173?q=80&w=2070&auto=format&fit=crop",
+        img: "https://images.unsplash.com/photo-1434030216411-0b793f4b4173?q=80&w=800&auto=format&fit=crop",
         tag: "Luyện đề",
         students: "900"
     }
