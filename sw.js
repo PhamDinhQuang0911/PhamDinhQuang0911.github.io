@@ -14,7 +14,7 @@
  * (network-first) nhưng nên tăng khi đổi styles.css/utils.js để chắc chắn.
  */
 
-const VERSION = 'qmath-v7';
+const VERSION = 'qmath-v8';
 const STATIC_CACHE = `${VERSION}-static`;
 const PAGE_CACHE = `${VERSION}-pages`;
 const CDN_CACHE = `${VERSION}-cdn`;
@@ -82,7 +82,7 @@ self.addEventListener('fetch', (event) => {
           return res;
         })
         .catch(() =>
-          caches.match(req)
+          caches.match(req, { ignoreSearch: true })
             .then((hit) => hit || caches.match('/index.html'))
             .then((r) => r || new Response('<h1>Mất kết nối</h1><p>Kiểm tra mạng rồi tải lại trang nhé.</p>', { status: 503, headers: { 'Content-Type': 'text/html; charset=utf-8' } }))
         )

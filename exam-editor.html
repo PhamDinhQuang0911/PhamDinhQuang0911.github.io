@@ -5540,30 +5540,137 @@
                     }
                 }
                 if (!webhookUrl) {
-                    throw new Error("Vui lòng cấu hình Webhook n8n trong cài đặt đề thi trước!");
+                    throw new Error("Vui lòng cấu hình Webhook n8n (Ô số 2: Webhook khi học sinh nộp bài/gửi kết quả) trước!");
                 }
+
+                const formatVNPhone = (phone) => {
+                    if (!phone) return "";
+                    let cleanPhone = String(phone).replace(/\D/g, ''); 
+                    if (cleanPhone.length === 9 && !cleanPhone.startsWith('0')) return '0' + cleanPhone;
+                    if (cleanPhone.startsWith('84') && cleanPhone.length === 11) return '0' + cleanPhone.substring(2);
+                    return cleanPhone;
+                };
 
                 let messages = [];
                 for (let att of selected) {
-                    const st = fullStudentList.find(s => s.studentId === att.userId);
-                    const sName = att.studentName || "Học sinh";
-                    const score = att.totalScore || 0;
+                    const stId = att.userId || att.studentId || att.uid || "";
+                    const attEmail = (att.email || "").toLowerCase().trim();
+                    const attUsername = (att.username || "").toLowerCase().trim();
+                    const attNameClean = (att.studentName || att.name || att.displayName || "").toLowerCase().trim();
                     
-                    let targetPhone = st ? formatVNPhone(st.phoneStudent) : "";
-                    let targetPhoneParent = st ? formatVNPhone(st.phoneParent) : "";
-                    let targetZaloUid = st && st.zaloUid ? String(st.zaloUid) : "";
+                    // 1. Tìm học sinh trong fullStudentList bằng đa điều kiện (ID -> Email -> Username -> Họ Tên)
+                    const st = fullStudentList.find(s => {
+                        if (stId && ((s.studentId && s.studentId === stId) || (s.uid && s.uid === stId))) return true;
+                        if (attEmail && s.email && s.email.toLowerCase().trim() === attEmail) return true;
+                        if (attUsername && s.username && s.username.toLowerCase().trim() === attUsername) return true;
+                        if (attEmail && s.username && `${s.username.toLowerCase().trim()}@hocsinh.com` === attEmail) return true;
+                        if (attNameClean && (s.studentName || s.name || s.fullName || "").toLowerCase().trim() === attNameClean) return true;
+                        return false;
+                    });
 
+                    const sName = att.studentName || att.name || att.displayName || (st ? (st.studentName || st.name || st.fullName) : "Học sinh");
+                    const totalScore = att.score !== undefined ? att.score : (att.totalScore || 0);
+                    
+                    // Ưu tiên lấy từ att nếu có, sau đó đến st trong fullStudentList
+                    let targetPhone = formatVNPhone(att.phoneStudent || att.phone || (st ? st.phoneStudent : ""));
+                    let targetPhoneParent = formatVNPhone(att.phoneParent || (st ? st.phoneParent : ""));
+                    let targetZaloUid = att.zaloUid ? String(att.zaloUid) : (st && st.zaloUid ? String(st.zaloUid) : "");
+
+                    // 2. Nếu vẫn thiếu thông tin, tìm bổ sung từ Firestore (users collection) bằng đa điều kiện
                     if ((!targetPhone && !targetPhoneParent) || !targetZaloUid) {
                         try {
-                            const uSnap = await getDoc(doc(db, "users", att.userId));
-                            if (uSnap.exists()) {
-                                const uData = uSnap.data();
-                                if (!targetPhone) targetPhone = formatVNPhone(uData.phoneStudent);
-                                if (!targetPhoneParent) targetPhoneParent = formatVNPhone(uData.phoneParent);
+                            let uData = null;
+                            if (stId) {
+                                const uSnap = await getDoc(doc(db, "users", stId));
+                                if (uSnap.exists()) uData = uSnap.data();
+                            }
+                            if (!uData && attEmail) {
+                                const qEmail = query(collection(db, "users"), where("email", "==", attEmail));
+                                const snapEmail = await getDocs(qEmail);
+                                if (!snapEmail.empty) uData = snapEmail.docs[0].data();
+                            }
+                            if (!uData && attUsername) {
+                                const qUser = query(collection(db, "users"), where("username", "==", attUsername));
+                                const snapUser = await getDocs(qUser);
+                                if (!snapUser.empty) uData = snapUser.docs[0].data();
+                            }
+                            if (!uData && attNameClean) {
+                                const qName = query(collection(db, "users"), where("displayName", "==", att.studentName || sName));
+                                const snapName = await getDocs(qName);
+                                if (!snapName.empty) uData = snapName.docs[0].data();
+                            }
+
+                            if (uData) {
+                                if (!targetPhone) targetPhone = formatVNPhone(uData.phoneStudent || uData.phone || "");
+                                if (!targetPhoneParent) targetPhoneParent = formatVNPhone(uData.phoneParent || "");
                                 if (!targetZaloUid && uData.zaloUid) targetZaloUid = String(uData.zaloUid);
                             }
-                        } catch (e) { console.warn("Lỗi lấy thông tin user cho Gửi kết quả", e); }
+                        } catch (e) { console.warn("Lỗi tra cứu bổ sung users cho Gửi kết quả:", e); }
                     }
+
+                    // 3. Nếu có số điện thoại nhưng chưa có Zalo UID, thử tìm trong bộ nhớ zalo_uids
+                    if (!targetZaloUid && (targetPhoneParent || targetPhone)) {
+                        try {
+                            const pToCheck = targetPhoneParent || targetPhone;
+                            const zSnap = await getDoc(doc(db, "zalo_uids", pToCheck));
+                            if (zSnap.exists() && zSnap.data().uid) {
+                                targetZaloUid = String(zSnap.data().uid);
+                            }
+                        } catch (e) {}
+                    }
+
+                    // 1. Thống kê Trắc nghiệm (MC)
+                    const totalMC = examData.questions ? examData.questions.length : (att.totalQuestions || 0);
+                    const mcCorrect = att.correctCount !== undefined ? att.correctCount : (att.correctMC || 0);
+                    const mcWrong = Math.max(0, totalMC - mcCorrect);
+                    const maxTnScore = examData.tnScore !== undefined ? Number(examData.tnScore) : 100;
+                    let mcScore = 0;
+                    if (att.mcScore !== undefined) {
+                        mcScore = att.mcScore;
+                    } else if (totalMC > 0) {
+                        mcScore = parseFloat(((mcCorrect / totalMC) * maxTnScore).toFixed(2));
+                    }
+
+                    // 2. Thống kê Tự luận (Essay)
+                    const totalTl = examData.tlQuestions ? examData.tlQuestions.length : 0;
+                    const maxTlScore = examData.tlScore !== undefined ? Number(examData.tlScore) : 100;
+                    let essayScore = 0;
+                    if (att.essayScore !== undefined) {
+                        essayScore = att.essayScore;
+                    } else if (totalTl > 0) {
+                        essayScore = Math.max(0, parseFloat((totalScore - mcScore).toFixed(2)));
+                    }
+
+                    // 3. Link xem lại bài làm đã chấm
+                    const originUrl = window.location.origin.includes('localhost') ? 'https://qmath.io.vn' : window.location.origin;
+                    const reviewLink = `${originUrl}/exam.html?id=${currentExamId}&mode=review`;
+
+                    // 4. Định dạng nội dung tin nhắn Gửi kết quả BTVN chuẩn yêu cầu
+                    let contentLines = [
+                        `📢 THÔNG BÁO KẾT QUẢ BÀI TẬP VỀ NHÀ`,
+                        `👤 Học sinh: ${sName}`,
+                        `📚 Bài tập: [${document.getElementById('settingTitle')?.value || examData.title || ''}]`,
+                        `---`
+                    ];
+
+                    if (totalMC > 0) {
+                        contentLines.push(`🎯 PHẦN TRẮC NGHIỆM:`);
+                        contentLines.push(`• Số câu đúng: ${mcCorrect}/${totalMC} câu`);
+                        contentLines.push(`• Số câu sai: ${mcWrong} câu`);
+                        contentLines.push(`• Điểm trắc nghiệm: ${mcScore}/${maxTnScore} điểm`);
+                    }
+
+                    if (totalTl > 0) {
+                        if (totalMC > 0) contentLines.push(``);
+                        contentLines.push(`✍️ PHẦN TỰ LUẬN:`);
+                        contentLines.push(`• Số câu tự luận: ${totalTl} câu`);
+                        contentLines.push(`• Điểm tự luận: ${essayScore}/${maxTlScore} điểm`);
+                    }
+
+                    contentLines.push(`---`);
+                    contentLines.push(`🌟 TỔNG ĐIỂM BÀI LÀM: ${totalScore} điểm`);
+                    contentLines.push(`👩‍🏫 Giáo viên đã chấm xong bài làm của em.`);
+                    contentLines.push(`👉 Em bấm vào link dưới đây để xem lại chi tiết bài làm đã được chấm nhé:\n${reviewLink}`);
 
                     messages.push({
                         type: "individual",
@@ -5571,22 +5678,48 @@
                         targetPhone: targetPhone,
                         targetPhoneParent: targetPhoneParent,
                         targetZaloUid: targetZaloUid,
-                        messageContent: `Thông báo kết quả: Em ${sName} đã hoàn thành bài tập [${document.getElementById('settingTitle').value}].\nĐiểm số: ${score}đ.\nChúc em học tốt!`
+                        messageContent: contentLines.join('\n')
                     });
                 }
 
                 const payload = {
                     action: "send_results",
+                    subAction: "student_submit",
                     examTitle: document.getElementById('settingTitle').value,
                     examId: currentExamId,
                     messages: messages
                 };
                 
-                await fetch(webhookUrl, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
+                let actualUrl = webhookUrl;
+                try {
+                    const res = await fetch(actualUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    if (!res.ok) {
+                        throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+                    }
+                } catch (fetchErr) {
+                    if (actualUrl.includes('/webhook-test/')) {
+                        console.warn("Link test n8n ngắt kết nối sau preflight CORS, tự động chuyển sang link Production (/webhook/)...");
+                        const prodUrl = actualUrl.replace('/webhook-test/', '/webhook/');
+                        try {
+                            const resProd = await fetch(prodUrl, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify(payload)
+                            });
+                            if (!resProd.ok) throw new Error(`HTTP ${resProd.status}: ${resProd.statusText}`);
+                            window.showToast(`Đã tự động chuyển sang link Production (/webhook/) và gửi thành công cho ${selected.length} học sinh!`, "success");
+                            return;
+                        } catch (prodErr) {
+                            console.error("Lỗi fetch production webhook:", prodErr);
+                        }
+                    }
+                    console.error("Lỗi fetch webhook:", fetchErr);
+                    throw new Error(`Không thể gửi tới n8n (${actualUrl}). Khi dùng link '/webhook-test/' trên trình duyệt, n8n thường tự động tắt chế độ chờ sau khi trình duyệt gửi kiểm tra CORS preflight (OPTIONS). Thầy vui lòng BẬT Active luồng n8n và đổi chữ '/webhook-test/' thành '/webhook/' (link Production) nhé!`);
+                }
                 
                 window.showToast(`Đã gửi yêu cầu n8n cho ${selected.length} học sinh thành công!`, "success");
             } catch(e) {
