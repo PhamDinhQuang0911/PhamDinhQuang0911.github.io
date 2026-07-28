@@ -1250,8 +1250,9 @@
 
             // 4. Thay thế & Xóa chữ thừa (Dùng DOM + Marker như cũ)
             let replacedCount = 0;
-            window.questions.forEach(q => {
-                ['content', 'solution'].forEach(field => {
+            const allQs = [...(window.questions || []), ...(window.mixedTlQuestions || [])];
+            allQs.forEach(q => {
+                ['content', 'solution', 'question'].forEach(field => {
                     if (q[field] && q[field].includes(batchId)) {
                         // Tạo DOM ảo
                         const tempDiv = document.createElement('div');
@@ -1780,8 +1781,9 @@
         };
 
         window.saveCurrentQuestionToMemory = () => { 
-            if (window.currentQIndex === -1 || !window.questions[window.currentQIndex]) return;
-            const q = window.questions[window.currentQIndex];
+            if (window.currentQIndex === -1) return;
+            const q = window.currentQListType === 'mixed-tl' ? window.mixedTlQuestions[window.currentQIndex] : window.questions[window.currentQIndex];
+            if (!q) return;
             const contentEl = document.getElementById('editContent'); if (!contentEl) return; 
             q.content = contentEl.value;
             const solEl = document.getElementById('editSolution'); if(solEl) q.solution = solEl.value;
@@ -1791,12 +1793,14 @@
             else if (q.type === 'short') { const ansEl = document.getElementById('editShortAns'); if(ansEl) q.answer = ansEl.value; }
         };
 
-        window.loadQuestionToEditor = (index) => { 
-            if (window.currentQIndex !== -1 && window.currentQIndex !== index) saveCurrentQuestionToMemory();
+        window.loadQuestionToEditor = (index, listType = 'normal') => { 
+            if (window.currentQIndex !== -1 && (window.currentQIndex !== index || window.currentQListType !== listType)) saveCurrentQuestionToMemory();
             window.currentQIndex = index;
+            window.currentQListType = listType;
             renderPreviewList(); 
-            setTimeout(() => { const activeItem = document.getElementById(`q-preview-${index}`); if(activeItem) activeItem.scrollIntoView({behavior: 'smooth', block: 'nearest'}); }, 100);
-            const q = window.questions[index];
+            if (typeof window.renderMixedTlList === 'function') window.renderMixedTlList();
+            setTimeout(() => { const activeItem = document.getElementById(listType === 'mixed-tl' ? `q-preview-tl-${index}` : `q-preview-${index}`); if(activeItem) activeItem.scrollIntoView({behavior: 'smooth', block: 'nearest'}); }, 100);
+            const q = listType === 'mixed-tl' ? window.mixedTlQuestions[index] : window.questions[index];
             const editor = document.getElementById('editorArea');
             
             let alertHtml = '';
@@ -2026,8 +2030,9 @@
 
             const processSuccessItem = (item, url, customHtml = null) => {
                 const imgTag = customHtml || `<div class="flex justify-center my-1"><img src="${url}" class="rounded-lg shadow-sm max-h-[250px] object-contain mx-auto w-full md:w-auto" loading="lazy"></div>`;
-                window.questions.forEach(q => {
-                    ['content', 'solution'].forEach(key => {
+                const allQs = [...(window.questions || []), ...(window.mixedTlQuestions || [])];
+                allQs.forEach(q => {
+                    ['content', 'solution', 'question'].forEach(key => {
                         if (q[key] && q[key].includes(item.id)) {
                             const tempDiv = document.createElement('div');
                             tempDiv.innerHTML = q[key];
@@ -2906,7 +2911,7 @@
             
             const tbody = document.getElementById('histTbody'); 
             // Sắp xếp: Mới nhất lên đầu
-            const sortedAttempts = [...studentData.attempts].sort((a,b) => new Date(b.submittedAt) - new Date(a.submittedAt));
+            const sortedAttempts = [...studentData.attempts].sort((a,b) => new Date(b.submittedAt || 0) - new Date(a.submittedAt || 0));
             
             sortedAttempts.forEach((att, idx) => { 
                 const attemptIndex = sortedAttempts.length - idx; // Lần 1, Lần 2...
@@ -5804,15 +5809,18 @@
                 if (!window.mixedTlQuestions || window.mixedTlQuestions.length === 0) {
                     container.innerHTML = '<p class="text-xs text-gray-400 italic text-center py-2">Chưa có bài tự luận nào. Bấm "Chọn từ Sách Số Hóa" hoặc "Nạp file TeX" để thêm.</p>';
                 } else {
-                    container.innerHTML = window.mixedTlQuestions.map((q, i) => `
-                        <div class="flex items-start gap-2 p-3 bg-white rounded-lg border border-green-200 shadow-sm">
+                    container.innerHTML = window.mixedTlQuestions.map((q, i) => {
+                        const isActive = window.currentQListType === 'mixed-tl' && window.currentQIndex === i;
+                        const activeClass = isActive ? 'border-blue-500 bg-blue-50 shadow-md ring-2 ring-blue-300' : 'border-green-200';
+                        return `
+                        <div id="q-preview-tl-${i}" onclick="window.loadQuestionToEditor(${i}, 'mixed-tl')" class="flex items-start gap-2 p-3 bg-white rounded-lg border ${activeClass} cursor-pointer hover:bg-green-50 transition-all shadow-sm group">
                             <span class="text-xs font-bold text-green-700 bg-green-100 px-2 py-1 rounded shrink-0 mt-0.5">Bài ${i+1}</span>
                             <div class="flex-1 text-xs text-gray-800 math-content overflow-x-auto">${window.formatContent(q.content || q.question || '')}</div>
-                            <button onclick="window.removeMixedTlQuestion(${i})" class="px-2.5 py-1 bg-red-50 text-red-600 hover:bg-red-100 rounded-lg text-xs font-bold border border-red-200 shrink-0 flex items-center gap-1 transition-all mt-0.5" title="Xóa bài này">
-                                <i class="fa-solid fa-trash-can"></i> Xóa
+                            <button onclick="event.stopPropagation(); window.removeMixedTlQuestion(${i})" class="px-2.5 py-1 bg-red-50 text-red-600 hover:bg-red-100 rounded-lg text-xs font-bold border border-red-200 shrink-0 flex items-center gap-1 transition-all mt-0.5 opacity-0 group-hover:opacity-100" title="Xóa bài này">
+                                <i class="fa-solid fa-trash-can"></i>
                             </button>
                         </div>
-                    `).join('');
+                    `}).join('');
                 }
                 if (window.MathJax) MathJax.typesetPromise([container]);
             }
