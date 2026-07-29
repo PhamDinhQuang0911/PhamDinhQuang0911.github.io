@@ -55,6 +55,7 @@
         ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
     </style>
     <link rel="stylesheet" href="/styles.css?v=5">
+    <script src="ai-id-assigner.js"></script>
 </head>
 <body class="h-screen flex overflow-hidden text-gray-800 bg-gray-50">
 
@@ -303,7 +304,33 @@
                     subsubsection: document.getElementById('optSubsubsection').value.trim() || 'Phần'
                 };
                 const topicData = await parseTopicFromTex(window.selectedTexFiles, window.selectedImgFiles, updateProgress, options);
-                
+
+                // [AI ID ASSIGNER] Thu thập tất cả câu hỏi từ cây chapters
+                const allQuestions = [];
+                (topicData.chapters || []).forEach(ch => {
+                    (ch.sections || []).forEach(sec => {
+                        (sec.dangs || []).forEach(dang => {
+                            (dang.items || []).forEach(item => {
+                                if (item.type && item.type !== 'theory' && item.type !== 'subsubsection') {
+                                    allQuestions.push(item);
+                                }
+                            });
+                        });
+                    });
+                });
+
+                if (allQuestions.length > 0 && typeof window.checkAndAssignMissingIds === 'function' && (window.globalIdTree || []).length > 0) {
+                    const missingCount = allQuestions.filter(q => !q.mapId || !q.mapId.trim()).length;
+                    if (missingCount > 0) {
+                        updateProgress(`Phát hiện ${missingCount} câu hỏi chưa có ID. Đang gán bằng AI...`, 88);
+                        try {
+                            await window.checkAndAssignMissingIds(allQuestions, { db: db });
+                        } catch (e) {
+                            console.warn('[AI ID Assigner] Bỏ qua gán ID:', e.message);
+                        }
+                    }
+                }
+
                 updateProgress("Đang nén dữ liệu lên Cloudflare...", 96);
                 
                 // Lưu JSON lên Cloudflare thay vì Firebase
@@ -452,8 +479,20 @@
         };
 
         // Load initial data
-        onAuthStateChanged(auth, user => {
+        window.globalIdTree = [];
+        window.aiKeys = [];
+
+        onAuthStateChanged(auth, async user => {
             if(user) {
+                // Tải MapID Tree và AI Keys song song
+                await Promise.all([
+                    getDoc(doc(db, 'configurations', 'map_id_tree')).then(snap => {
+                        if (snap.exists()) window.globalIdTree = snap.data().tree || [];
+                    }).catch(() => {}),
+                    getDoc(doc(db, 'configurations', 'ai_keys')).then(snap => {
+                        if (snap.exists()) window.aiKeys = snap.data().keys || [];
+                    }).catch(() => {})
+                ]);
                 loadTopicList();
             } else {
                 window.location.href = 'index.html';

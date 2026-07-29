@@ -395,13 +395,19 @@
                 <div class="flex items-center justify-between px-2 md:px-4 py-2 gap-1.5 md:gap-2">
                     <div class="flex bg-gray-100 p-1 rounded-lg shrink-0">
                         <button onclick="window.switchBankTab('exam')" id="tabBankExam" class="px-2.5 md:px-4 py-1 md:py-1.5 text-[11px] md:text-sm font-bold rounded-md transition-all text-blue-700 bg-white shadow-sm">Đề trắc nghiệm</button>
-                        <button onclick="window.switchBankTab('homework')" id="tabBankHomework" class="px-2.5 md:px-4 py-1 md:py-1.5 text-[11px] md:text-sm font-bold rounded-md transition-all text-gray-500 hover:text-gray-700">Bài tập Tự luận</button>
+                        <button onclick="window.switchBankTab('homework')" id="tabBankHomework" class="px-2.5 md:px-4 py-1 md:py-1.5 text-[11px] md:text-sm font-bold rounded-md transition-all text-gray-500 hover:text-gray-700">Tự luận</button>
+                        <button onclick="window.switchBankTab('mixed')" id="tabBankMixed" class="px-2.5 md:px-4 py-1 md:py-1.5 text-[11px] md:text-sm font-bold rounded-md transition-all text-gray-500 hover:text-gray-700">Đề hỗn hợp</button>
                     </div>
                     <div class="flex items-center gap-1.5 md:gap-2 shrink-0">
+                        <select id="explorerTagFilter" onchange="window.filterByTag(this.value)" class="text-xs md:text-sm border border-gray-300 rounded p-1 md:p-1.5 bg-white text-gray-700 outline-none w-24 md:w-32 hidden">
+                            <option value="">Tất cả nhãn</option>
+                        </select>
+
                         <div class="bg-gray-100 p-1 rounded-lg flex items-center shrink-0">
                             <button onclick="window.switchExplorerView('grid')" id="btnExpGrid" class="p-1 md:p-1.5 rounded text-blue-600 bg-white shadow-sm transition-all text-xs md:text-sm" title="Lưới"><i class="fa-solid fa-border-all"></i></button>
                             <button onclick="window.switchExplorerView('list')" id="btnExpList" class="p-1 md:p-1.5 rounded text-gray-400 hover:text-blue-600 transition-all text-xs md:text-sm" title="Danh sách"><i class="fa-solid fa-list"></i></button>
                         </div>
+                        <button onclick="window.pasteExplorerItem()" id="btnPasteItem" class="p-2 md:px-3 md:py-2 bg-blue-100 text-blue-700 hover:bg-blue-200 rounded-lg text-xs md:text-sm font-bold transition-colors flex items-center justify-center shrink-0 hidden" title="Dán (Paste)"><i class="fa-solid fa-paste"></i><span class="hidden sm:inline ml-1.5">Dán</span></button>
                         <button onclick="window.createNewFolder()" class="p-2 md:px-3 md:py-2 bg-yellow-100 text-yellow-700 hover:bg-yellow-200 rounded-lg text-xs md:text-sm font-bold transition-colors flex items-center justify-center shrink-0" title="Tạo thư mục"><i class="fa-solid fa-folder-plus"></i><span class="hidden sm:inline ml-1.5">Tạo thư mục</span></button>
                         <button id="btnCreateContent" onclick="window.location.href='exam-editor.html'" class="p-2 md:px-3 md:py-2 bg-green-100 text-green-700 hover:bg-green-200 rounded-lg text-xs md:text-sm font-bold transition-colors flex items-center justify-center shrink-0" title="Soạn đề mới"><i class="fa-solid fa-file-circle-plus"></i><span class="hidden sm:inline ml-1.5">Soạn đề mới</span></button>
                     </div>
@@ -409,7 +415,8 @@
                 <!-- Dòng 2: Breadcrumb (chỉ hiện trên desktop) -->
                 <div class="hidden md:flex items-center text-gray-500 text-xs border-t border-gray-100 px-4 py-1.5 gap-1">
                     <button onclick="window.navigateFolder('root')" class="hover:text-blue-600 font-bold flex items-center gap-1" title="Về thư mục gốc"><i class="fa-solid fa-house"></i></button>
-                    <span id="breadcrumbContainer" class="flex items-center"></span>
+                    <button onclick="window.navigateUpFolder()" class="hover:text-blue-600 font-bold flex items-center gap-1 ml-2" title="Quay lại"><i class="fa-solid fa-arrow-left"></i></button>
+                    <span id="breadcrumbContainer" class="flex items-center ml-1"></span>
                 </div>
             </div>
             <div class="flex-1 overflow-y-auto p-4 md:p-6 bg-gray-50" id="fileExplorerArea">
@@ -777,6 +784,7 @@
         let currentFolderId = null;
         let folderData = [];
         let examData = [];
+        let tagData = []; // [MỚI] Dữ liệu tag
         let currentActionItem = null;
         let cachedClassStudents = {}; // Cache danh sách học sinh theo lớp
         window.globalBankQuestions = []; 
@@ -786,25 +794,39 @@
         // --- VIEW MODE STATE ---
         let currentExplorerView = 'list'; // Mặc định là List theo yêu cầu
         window.currentBankTab = 'exam'; // 'exam' hoặc 'homework'
+        window.currentTagFilter = ''; // ID của nhãn đang được chọn để lọc
+
+        window.filterByTag = (tagId) => {
+            window.currentTagFilter = tagId;
+            renderExplorer();
+        };
 
         window.switchBankTab = (tab) => {
             window.currentBankTab = tab;
             const btnExam = document.getElementById('tabBankExam');
             const btnHw = document.getElementById('tabBankHomework');
+            const btnMixed = document.getElementById('tabBankMixed');
             const btnCreate = document.getElementById('btnCreateContent');
 
+            const activeClass = "px-2.5 md:px-4 py-1 md:py-1.5 text-[11px] md:text-sm font-bold rounded-md transition-all text-blue-700 bg-white shadow-sm";
+            const inactiveClass = "px-2.5 md:px-4 py-1 md:py-1.5 text-[11px] md:text-sm font-bold rounded-md transition-all text-gray-500 hover:text-gray-700";
+
+            btnExam.className = tab === 'exam' ? activeClass : inactiveClass;
+            btnHw.className = tab === 'homework' ? activeClass : inactiveClass;
+            btnMixed.className = tab === 'mixed' ? activeClass : inactiveClass;
+
             if (tab === 'exam') {
-                btnExam.className = "px-2.5 md:px-4 py-1 md:py-1.5 text-[11px] md:text-sm font-bold rounded-md transition-all text-blue-700 bg-white shadow-sm";
-                btnHw.className = "px-2.5 md:px-4 py-1 md:py-1.5 text-[11px] md:text-sm font-bold rounded-md transition-all text-gray-500 hover:text-gray-700";
                 btnCreate.onclick = () => window.location.href='exam-editor.html' + (currentViewingClassId ? '?classId=' + currentViewingClassId : '');
                 btnCreate.className = "p-2 md:px-3 md:py-2 bg-green-100 text-green-700 hover:bg-green-200 rounded-lg text-xs md:text-sm font-bold transition-colors flex items-center justify-center shrink-0";
                 btnCreate.innerHTML = '<i class="fa-solid fa-file-circle-plus"></i><span class="hidden sm:inline ml-1.5">Soạn đề mới</span>';
-            } else {
-                btnHw.className = "px-2.5 md:px-4 py-1 md:py-1.5 text-[11px] md:text-sm font-bold rounded-md transition-all text-blue-700 bg-white shadow-sm";
-                btnExam.className = "px-2.5 md:px-4 py-1 md:py-1.5 text-[11px] md:text-sm font-bold rounded-md transition-all text-gray-500 hover:text-gray-700";
+            } else if (tab === 'homework') {
                 btnCreate.onclick = () => window.location.href = 'exam-editor.html?type=homework' + (currentViewingClassId ? '&classId=' + currentViewingClassId : '');
                 btnCreate.className = "p-2 md:px-3 md:py-2 bg-red-100 text-red-700 hover:bg-red-200 rounded-lg text-xs md:text-sm font-bold transition-colors flex items-center justify-center shrink-0";
                 btnCreate.innerHTML = '<i class="fa-solid fa-file-pdf"></i><span class="hidden sm:inline ml-1.5">Tạo bài Tự luận</span>';
+            } else {
+                btnCreate.onclick = () => window.location.href = 'exam-editor.html?type=mixed' + (currentViewingClassId ? '&classId=' + currentViewingClassId : '');
+                btnCreate.className = "p-2 md:px-3 md:py-2 bg-purple-100 text-purple-700 hover:bg-purple-200 rounded-lg text-xs md:text-sm font-bold transition-colors flex items-center justify-center shrink-0";
+                btnCreate.innerHTML = '<i class="fa-solid fa-file-pen"></i><span class="hidden sm:inline ml-1.5">Soạn đề hỗn hợp</span>';
             }
             renderExplorer();
         };
@@ -2096,26 +2118,33 @@ async function loadFileManager(forceRefresh = false) {
     // 1. KIỂM TRA BỘ NHỚ ĐỆM (CACHE)
     const cachedF = localStorage.getItem('bank_folders');
     const cachedE = localStorage.getItem('bank_exams');
+    const cachedT = localStorage.getItem('bank_tags'); // Cache tags
 
-    if (cachedF && cachedE && !forceRefresh) {
+    if (cachedF && cachedE && cachedT && !forceRefresh) {
         folderData = JSON.parse(cachedF);
         examData = JSON.parse(cachedE);
-        if (container) renderExplorer(); // Vẽ ngay lập tức trong 0s
+        tagData = JSON.parse(cachedT);
+        if (container) {
+            renderTagFilterUI();
+            renderExplorer(); // Vẽ ngay lập tức trong 0s
+        }
     } else if (container && container.innerHTML === '') {
         container.innerHTML = `<div class="col-span-full grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 animate-pulse">${'<div class="bg-gray-200 rounded-xl aspect-square"></div>'.repeat(6)}</div>`;
     }
 
     // [TỐI ƯU CHÍNH]: Nếu đã tải xong rồi và KHÔNG bị bắt buộc làm mới thì DỪNG LẠI, không gọi Firebase
-    if (isBankLoaded && !forceRefresh && cachedF && cachedE) return;
+    if (isBankLoaded && !forceRefresh && cachedF && cachedE && cachedT) return;
 
     // 2. TẢI TỪ FIREBASE
     try { 
         const qFolders = query(collection(db, "folders"), where("teacherId", "==", currentUserUid), limit(100)); 
         const qExams = query(collection(db, "exams"), where("teacherId", "==", currentUserUid), limit(100)); 
+        const qTags = query(collection(db, "tags"), where("teacherId", "==", currentUserUid), limit(100)); 
         
-        const [snapFolders, snapExams] = await Promise.all([
+        const [snapFolders, snapExams, snapTags] = await Promise.all([
             getDocs(qFolders),
-            getDocs(qExams)
+            getDocs(qExams),
+            getDocs(qTags)
         ]);
         
         const newFolderData = []; 
@@ -2123,21 +2152,47 @@ async function loadFileManager(forceRefresh = false) {
         
         const newExamData = []; 
         snapExams.forEach(d => newExamData.push({id: d.id, ...d.data()})); 
+
+        const newTagData = [];
+        snapTags.forEach(d => newTagData.push({id: d.id, ...d.data()}));
         
         // Cập nhật lại mảng và Cache
         folderData = newFolderData; 
         examData = newExamData;
+        tagData = newTagData;
         localStorage.setItem('bank_folders', JSON.stringify(folderData));
         localStorage.setItem('bank_exams', JSON.stringify(examData));
+        localStorage.setItem('bank_tags', JSON.stringify(tagData));
         
         isBankLoaded = true; // Đánh dấu là hệ thống đã có dữ liệu mới nhất
 
         // Vẽ lại giao diện nếu đang ở tab Ngân hàng
         const bankView = document.getElementById('view-exambank');
         if (bankView && !bankView.classList.contains('hidden')) {
+            renderTagFilterUI();
             renderExplorer(); 
         }
-    } catch (e) { console.error(e); } 
+    } catch(e) { 
+        console.error("Lỗi tải ngân hàng:", e);
+    } 
+} 
+
+function renderTagFilterUI() {
+    const select = document.getElementById('explorerTagFilter');
+    if(!select || !tagData) return;
+    
+    if(tagData.length === 0) {
+        select.classList.add('hidden');
+        return;
+    }
+    
+    select.classList.remove('hidden');
+    let html = '<option value="">Tất cả nhãn</option>';
+    tagData.forEach(t => {
+        const selected = window.currentTagFilter === t.id ? 'selected' : '';
+        html += `<option value="${t.id}" ${selected}>${t.name}</option>`;
+    });
+    select.innerHTML = html;
 }
         function getValidFolderIds(folders) {
             const validIds = new Set();
@@ -2171,9 +2226,18 @@ async function loadFileManager(forceRefresh = false) {
             const currentExams = examData.filter(e => {
                 const isMatchFolder = (e.folderId || null) === currentFolderId;
                 const isHomework = e.type === 'homework';
+                const isMixed = e.type === 'mixed';
+                let tabMatch = false;
                 // Lọc theo Tab đang chọn
-                if (window.currentBankTab === 'homework') return isMatchFolder && isHomework;
-                return isMatchFolder && !isHomework;
+                if (window.currentBankTab === 'homework') tabMatch = isMatchFolder && isHomework;
+                else if (window.currentBankTab === 'mixed') tabMatch = isMatchFolder && isMixed;
+                else tabMatch = isMatchFolder && !isHomework && !isMixed;
+                
+                // Lọc theo tag filter
+                if (tabMatch && window.currentTagFilter) {
+                    return e.tagIds && e.tagIds.includes(window.currentTagFilter);
+                }
+                return tabMatch;
             });
             
             // Xử lý thông báo trống
@@ -2191,6 +2255,10 @@ async function loadFileManager(forceRefresh = false) {
             }
 
             // HÀM RENDER ITEM (FOLDER)
+            function getTagsHtml(item) {
+                return ''; // User requested to hide tags outside
+            }
+
             currentFolders.forEach(f => { 
                 const div = document.createElement('div'); 
                 div.draggable = true; 
@@ -2206,10 +2274,14 @@ async function loadFileManager(forceRefresh = false) {
                     div.innerHTML = `
                         <div class="flex items-center gap-1.5 md:gap-2.5 overflow-hidden flex-1 min-w-0">
                             <div class="text-base md:text-xl text-yellow-400 shrink-0"><i class="fa-solid fa-folder"></i></div>
-                            <p class="text-[10px] sm:text-xs md:text-sm font-bold text-gray-700 truncate pointer-events-none">${f.name}</p>
+                            <div class="flex flex-col min-w-0 flex-1 pointer-events-none">
+                                <p class="text-[10px] sm:text-xs md:text-sm font-bold text-gray-700 truncate">${f.name}</p>
+                                ${getTagsHtml(f)}
+                            </div>
                         </div>
                         <div class="flex items-center gap-0.5 md:gap-1 shrink-0">
                             <button onclick="event.stopPropagation(); window.openActionDirect('rename', '${f.id}', 'folder', '${f.name.replace(/'/g, "\\'")}')" class="p-1 md:p-2 text-blue-600 hover:bg-blue-100 rounded-lg transition-colors" title="Đổi tên"><i class="fa-solid fa-pen text-[11px] md:text-sm"></i></button>
+                            <button onclick="event.stopPropagation(); window.copyExplorerItem('${f.id}', 'folder')" class="p-1 md:p-2 text-green-600 hover:bg-green-100 rounded-lg transition-colors" title="Sao chép"><i class="fa-solid fa-copy text-[11px] md:text-sm"></i></button>
                             <button onclick="event.stopPropagation(); window.openActionDirect('move', '${f.id}', 'folder', '${f.name.replace(/'/g, "\\'")}')" class="p-1 md:p-2 text-purple-600 hover:bg-purple-100 rounded-lg transition-colors" title="Di chuyển"><i class="fa-solid fa-arrow-right-to-bracket text-[11px] md:text-sm"></i></button>
                             <button onclick="event.stopPropagation(); window.openActionDirect('delete', '${f.id}', 'folder', '${f.name.replace(/'/g, "\\'")}')" class="p-1 md:p-2 text-red-600 hover:bg-red-100 rounded-lg transition-colors" title="Xóa"><i class="fa-solid fa-trash-can text-[11px] md:text-sm"></i></button>
                         </div>
@@ -2220,8 +2292,10 @@ async function loadFileManager(forceRefresh = false) {
                     div.innerHTML = `
                         <div class="text-4xl text-yellow-400 mb-2 pointer-events-none"><i class="fa-solid fa-folder"></i></div>
                         <p class="text-sm font-bold text-gray-700 text-center truncate w-full px-1 pointer-events-none">${f.name}</p>
+                        <div class="pointer-events-none">${getTagsHtml(f)}</div>
                         <div class="absolute top-1.5 right-1.5 flex items-center gap-0.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity bg-white/95 shadow-sm px-1 py-0.5 rounded-lg border border-gray-200">
                             <button onclick="event.stopPropagation(); window.openActionDirect('rename', '${f.id}', 'folder', '${f.name.replace(/'/g, "\\'")}')" class="p-1 text-blue-600 hover:bg-blue-50 rounded" title="Đổi tên"><i class="fa-solid fa-pen text-xs"></i></button>
+                            <button onclick="event.stopPropagation(); window.copyExplorerItem('${f.id}', 'folder')" class="p-1 text-green-600 hover:bg-green-50 rounded" title="Sao chép"><i class="fa-solid fa-copy text-xs"></i></button>
                             <button onclick="event.stopPropagation(); window.openActionDirect('move', '${f.id}', 'folder', '${f.name.replace(/'/g, "\\'")}')" class="p-1 text-purple-600 hover:bg-purple-50 rounded" title="Di chuyển"><i class="fa-solid fa-arrow-right-to-bracket text-xs"></i></button>
                             <button onclick="event.stopPropagation(); window.openActionDirect('delete', '${f.id}', 'folder', '${f.name.replace(/'/g, "\\'")}')" class="p-1 text-red-600 hover:bg-red-50 rounded" title="Xóa"><i class="fa-solid fa-trash-can text-xs"></i></button>
                         </div>
@@ -2243,14 +2317,16 @@ async function loadFileManager(forceRefresh = false) {
                     div.innerHTML = `
                         <div class="flex items-center gap-1.5 md:gap-2.5 overflow-hidden flex-1 min-w-0">
                             <div class="text-base md:text-xl text-blue-500 shrink-0"><i class="fa-regular fa-file-lines"></i></div>
-                            <div class="flex flex-col overflow-hidden min-w-0 flex-1">
-                                <p class="text-[10px] sm:text-xs md:text-sm font-bold text-gray-700 truncate pointer-events-none" title="${exam.title}">${exam.title}</p>
+                            <div class="flex flex-col overflow-hidden min-w-0 flex-1 pointer-events-none">
+                                <p class="text-[10px] sm:text-xs md:text-sm font-bold text-gray-700 truncate" title="${exam.title}">${exam.title}</p>
                                 <p class="text-[10px] text-gray-400 hidden md:block">Ngày tạo: ${new Date(exam.createdAt).toLocaleDateString('vi-VN')}</p>
+                                ${getTagsHtml(exam)}
                             </div>
                         </div>
                         <div class="flex items-center gap-0.5 md:gap-1.5 shrink-0">
                             <button onclick="event.stopPropagation(); window.showExamInfo('${exam.id}')" class="p-1 md:p-2 text-cyan-600 hover:bg-cyan-50 rounded-lg transition-colors" title="Thông tin đề thi"><i class="fa-solid fa-circle-info text-[11px] md:text-sm"></i></button>
                             <button onclick="event.stopPropagation(); window.openActionDirect('rename', '${exam.id}', 'exam', '${exam.title.replace(/'/g, "\\'")}')" class="p-1 md:p-2 text-blue-600 hover:bg-blue-100 rounded-lg transition-colors" title="Đổi tên"><i class="fa-solid fa-pen text-[11px] md:text-sm"></i></button>
+                            <button onclick="event.stopPropagation(); window.copyExplorerItem('${exam.id}', 'exam')" class="p-1 md:p-2 text-green-600 hover:bg-green-100 rounded-lg transition-colors" title="Sao chép"><i class="fa-solid fa-copy text-[11px] md:text-sm"></i></button>
                             <button onclick="event.stopPropagation(); window.openActionDirect('move', '${exam.id}', 'exam', '${exam.title.replace(/'/g, "\\'")}')" class="p-1 md:p-2 text-purple-600 hover:bg-purple-100 rounded-lg transition-colors" title="Di chuyển"><i class="fa-solid fa-arrow-right-to-bracket text-[11px] md:text-sm"></i></button>
                             <button onclick="event.stopPropagation(); window.openActionDirect('delete', '${exam.id}', 'exam', '${exam.title.replace(/'/g, "\\'")}')" class="p-1 md:p-2 text-red-600 hover:bg-red-100 rounded-lg transition-colors" title="Xóa"><i class="fa-solid fa-trash-can text-[11px] md:text-sm"></i></button>
                         </div>
@@ -2261,9 +2337,11 @@ async function loadFileManager(forceRefresh = false) {
                     div.innerHTML = `
                         <div class="text-4xl text-blue-500 mb-2 pointer-events-none"><i class="fa-regular fa-file-lines"></i></div>
                         <p class="text-xs md:text-sm font-bold text-gray-700 text-center truncate w-full px-1 pointer-events-none" title="${exam.title}">${exam.title}</p>
+                        <div class="pointer-events-none">${getTagsHtml(exam)}</div>
                         <div class="absolute top-1.5 right-1.5 flex items-center gap-0.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity bg-white/95 shadow-sm px-1 py-0.5 rounded-lg border border-gray-200">
                             <button onclick="event.stopPropagation(); window.showExamInfo('${exam.id}')" class="p-1 text-cyan-600 hover:bg-cyan-50 rounded" title="Thông tin đề thi"><i class="fa-solid fa-circle-info text-xs"></i></button>
                             <button onclick="event.stopPropagation(); window.openActionDirect('rename', '${exam.id}', 'exam', '${exam.title.replace(/'/g, "\\'")}')" class="p-1 text-blue-600 hover:bg-blue-50 rounded" title="Đổi tên"><i class="fa-solid fa-pen text-xs"></i></button>
+                            <button onclick="event.stopPropagation(); window.copyExplorerItem('${exam.id}', 'exam')" class="p-1 text-green-600 hover:bg-green-50 rounded" title="Sao chép"><i class="fa-solid fa-copy text-xs"></i></button>
                             <button onclick="event.stopPropagation(); window.openActionDirect('move', '${exam.id}', 'exam', '${exam.title.replace(/'/g, "\\'")}')" class="p-1 text-purple-600 hover:bg-purple-50 rounded" title="Di chuyển"><i class="fa-solid fa-arrow-right-to-bracket text-xs"></i></button>
                             <button onclick="event.stopPropagation(); window.openActionDirect('delete', '${exam.id}', 'exam', '${exam.title.replace(/'/g, "\\'")}')" class="p-1 text-red-600 hover:bg-red-50 rounded" title="Xóa"><i class="fa-solid fa-trash-can text-xs"></i></button>
                         </div>
@@ -2275,16 +2353,87 @@ async function loadFileManager(forceRefresh = false) {
             renderBreadcrumb(); 
         }
         window.handleDragStart = (e, id, type) => { e.dataTransfer.setData("text/plain", JSON.stringify({id, type})); e.target.classList.add('dragging'); e.stopPropagation(); }
-        window.handleDragOver = (e) => { e.preventDefault(); e.currentTarget.classList.add('drag-over'); }
-        window.handleDragLeave = (e) => { e.currentTarget.classList.remove('drag-over'); }
-        window.handleDrop = async (e, targetId) => { e.preventDefault(); e.stopPropagation(); e.currentTarget.classList.remove('drag-over'); try { const data = JSON.parse(e.dataTransfer.getData("text/plain")); if (data.id === targetId) return; const collName = data.type === 'folder' ? 'folders' : 'exams'; const field = data.type === 'folder' ? 'parentId' : 'folderId'; await updateDoc(doc(db, collName, data.id), { [field]: targetId }); 
-window.showNotification("Đã di chuyển thành công!"); 
-loadFileManager(true);  } catch (err) { console.error("Drop error", err); } document.querySelectorAll('.dragging').forEach(el => el.classList.remove('dragging')); }
+        window.handleDragOver = (e) => { e.preventDefault(); e.currentTarget.classList.add('bg-yellow-50', 'border-dashed', 'border-yellow-400', 'drag-over'); }
+        window.handleDragLeave = (e) => { e.currentTarget.classList.remove('bg-yellow-50', 'border-dashed', 'border-yellow-400', 'drag-over'); }
+        window.handleDrop = async (e, targetId) => { 
+            e.preventDefault(); e.stopPropagation(); 
+            e.currentTarget.classList.remove('bg-yellow-50', 'border-dashed', 'border-yellow-400', 'drag-over'); 
+            try { 
+                const data = JSON.parse(e.dataTransfer.getData("text/plain")); 
+                if (data.id === targetId) return; 
+                const collName = data.type === 'folder' ? 'folders' : 'exams'; 
+                const field = data.type === 'folder' ? 'parentId' : 'folderId'; 
+                await updateDoc(doc(db, collName, data.id), { [field]: targetId }); 
+                if (data.type === 'folder') {
+                    const f = folderData.find(x => x.id === data.id);
+                    if (f) f.parentId = targetId;
+                    localStorage.setItem('bank_folders', JSON.stringify(folderData));
+                } else {
+                    const ex = examData.find(x => x.id === data.id);
+                    if (ex) ex.folderId = targetId;
+                    localStorage.setItem('bank_exams', JSON.stringify(examData));
+                }
+                renderExplorer();
+                window.showNotification("Đã di chuyển thành công!"); 
+                loadFileManager(true);  
+            } catch (err) { console.error("Drop error", err); } 
+            document.querySelectorAll('.dragging').forEach(el => el.classList.remove('dragging')); 
+        }
         window.navigateFolder = (id, name) => { if(id === 'root') { currentFolderId = null; breadcrumbs = []; } else { currentFolderId = id; breadcrumbs.push({id, name}); } renderExplorer(); }
-        window.createNewFolder = async () => { const n = await window.customPrompt("Tên thư mục:"); if(n) { 
-    await addDoc(collection(db, "folders"), { name: n, parentId: currentFolderId, teacherId: currentUserUid, createdAt: new Date().toISOString() }); 
-    loadFileManager(true); 
-} }
+        
+        window.explorerClipboard = { item: null, type: null, action: null };
+        window.copyExplorerItem = (id, type) => {
+            window.explorerClipboard = { item: id, type: type, action: 'copy' };
+            document.getElementById('btnPasteItem').classList.remove('hidden');
+            window.showNotification("Đã sao chép vào bộ nhớ tạm");
+        };
+        window.pasteExplorerItem = async () => {
+            const cb = window.explorerClipboard;
+            if (!cb.item) return;
+            try {
+                if (cb.type === 'folder') {
+                    const originalFolder = folderData.find(f => f.id === cb.item);
+                    if (!originalFolder) return;
+                    const newDoc = { name: originalFolder.name + ' (Bản sao)', parentId: currentFolderId, teacherId: currentUserUid, createdAt: new Date().toISOString() };
+                    const docRef = await addDoc(collection(db, "folders"), newDoc);
+                    folderData.push({ id: docRef.id, ...newDoc });
+                    localStorage.setItem('bank_folders', JSON.stringify(folderData));
+                } else if (cb.type === 'exam') {
+                    const originalExam = examData.find(e => e.id === cb.item);
+                    if (!originalExam) return;
+                    const newDoc = { ...originalExam, title: originalExam.title + ' (Bản sao)', folderId: currentFolderId, createdAt: new Date().toISOString() };
+                    delete newDoc.id;
+                    const docRef = await addDoc(collection(db, "exams"), newDoc);
+                    examData.push({ id: docRef.id, ...newDoc });
+                    localStorage.setItem('bank_exams', JSON.stringify(examData));
+                }
+                window.showNotification("Dán thành công!");
+                renderExplorer();
+            } catch (err) {
+                console.error("Paste error", err);
+                window.showNotification("Có lỗi xảy ra khi dán", "error");
+            }
+        };
+        window.navigateUpFolder = () => {
+            if (!currentFolderId) return;
+            const currentFolder = folderData.find(f => f.id === currentFolderId);
+            if (currentFolder && currentFolder.parentId && currentFolder.parentId !== 'root' && currentFolder.parentId !== 'null' && currentFolder.parentId !== 'undefined') {
+                const parent = folderData.find(f => f.id === currentFolder.parentId);
+                window.navigateFolder(currentFolder.parentId, parent ? parent.name : '');
+            } else {
+                window.navigateFolder('root');
+            }
+        };
+        window.createNewFolder = async () => { 
+            const n = await window.customPrompt("Tên thư mục:"); 
+            if(n) { 
+                const newDoc = { name: n, parentId: currentFolderId, teacherId: currentUserUid, createdAt: new Date().toISOString() };
+                const docRef = await addDoc(collection(db, "folders"), newDoc); 
+                folderData.push({ id: docRef.id, ...newDoc });
+                localStorage.setItem('bank_folders', JSON.stringify(folderData));
+                renderExplorer();
+            } 
+        }
         let breadcrumbs = [];
         function renderBreadcrumb() { const container = document.getElementById('breadcrumbContainer'); if (!currentFolderId) { container.innerHTML = '<span class="mx-2 text-gray-400">/</span><span>Tất cả</span>'; return; } let path = []; let curr = folderData.find(f => f.id === currentFolderId); while(curr) { path.unshift(curr); curr = folderData.find(f => f.id === curr.parentId); } let html = '<span class="mx-2 text-gray-400">/</span><button onclick="window.navigateFolder(\'root\')" class="hover:text-blue-600">...</button><span class="mx-2">/</span>Current'; path.forEach((p, idx) => { html += `<span class="mx-2 text-gray-400">/</span>`; if (idx === path.length - 1) html += `<span class="font-bold text-gray-800">${p.name}</span>`; else html += `<button onclick="window.navigateFolder(\'${p.id}\')" class="hover:text-blue-600">${p.name}</button>`; }); container.innerHTML = html; }
         window.showExamInfo = (examId) => {
@@ -2292,6 +2441,15 @@ loadFileManager(true);  } catch (err) { console.error("Drop error", err); } docu
             if (!exam) return;
             const qCount = exam.questions ? exam.questions.length : (exam.questionCount || 0);
             const createdStr = exam.createdAt ? new Date(exam.createdAt).toLocaleDateString('vi-VN') : 'N/A';
+            
+            let tagsHtml = '';
+            if (exam.tagIds && exam.tagIds.length > 0 && typeof tagData !== 'undefined' && tagData) {
+                const tags = exam.tagIds.map(tid => tagData.find(t => t.id === tid)).filter(Boolean);
+                if (tags.length > 0) {
+                    tagsHtml = `<div class="p-3 bg-gray-50 rounded-lg border border-gray-200"><p class="text-xs text-gray-500 font-bold mb-1"><i class="fa-solid fa-tags mr-1"></i> Thẻ (Tags)</p><div class="flex flex-wrap gap-1 mt-1">` + tags.map(t => `<span class="px-2 py-1 rounded-md text-xs font-bold" style="background-color:${t.color}20; color:${t.color}; border: 1px solid ${t.color}40">${t.name}</span>`).join('') + `</div></div>`;
+                }
+            }
+
             const infoHtml = `
                 <div class="space-y-3 text-left">
                     <div class="p-3 bg-blue-50 rounded-lg border border-blue-100">
@@ -2309,6 +2467,7 @@ loadFileManager(true);  } catch (err) { console.error("Drop error", err); } docu
                         </div>
                     </div>
                     ${qCount ? `<div class="p-3 bg-green-50 rounded-lg border border-green-200"><p class="text-xs text-green-600 font-bold mb-1"><i class="fa-solid fa-list-check mr-1"></i> Số câu hỏi</p><p class="text-sm font-bold text-gray-800">${qCount} câu</p></div>` : ''}
+                    ${tagsHtml}
                 </div>
             `;
             document.getElementById('actionModalTitle').textContent = 'Thông tin đề thi';
@@ -2321,18 +2480,33 @@ loadFileManager(true);  } catch (err) { console.error("Drop error", err); } docu
                 window.triggerAction('delete');
                 return;
             }
-            document.getElementById('actionModalTitle').textContent = `${action === 'rename' ? 'Đổi tên' : 'Di chuyển'}: ${name}`;
+            document.getElementById('actionModalTitle').textContent = `${action === 'rename' ? 'Đổi tên' : action === 'move' ? 'Di chuyển' : 'Gắn Thẻ'}: ${name}`;
             const content = document.getElementById('dynamicContent');
-            content.innerHTML = `<div class="grid grid-cols-3 gap-2 mb-4">
+            content.innerHTML = `<div class="grid grid-cols-4 gap-2 mb-4">
                 <button onclick="window.openActionDirect('rename', '${id}', '${type}', '${name.replace(/'/g, "\\'")}')" class="${action==='rename'?'bg-blue-600 text-white shadow':'bg-blue-50 text-blue-600 hover:bg-blue-100'} p-2 rounded-lg font-bold flex items-center justify-center transition-all text-sm md:text-base" title="Đổi tên"><i class="fa-solid fa-pen"></i></button>
                 <button onclick="window.openActionDirect('move', '${id}', '${type}', '${name.replace(/'/g, "\\'")}')" class="${action==='move'?'bg-purple-600 text-white shadow':'bg-purple-50 text-purple-600 hover:bg-purple-100'} p-2 rounded-lg font-bold flex items-center justify-center transition-all text-sm md:text-base" title="Di chuyển"><i class="fa-solid fa-arrow-right-to-bracket"></i></button>
+                <button onclick="window.openActionDirect('assignTag', '${id}', '${type}', '${name.replace(/'/g, "\\'")}')" class="${action==='assignTag'?'bg-emerald-600 text-white shadow':'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'} p-2 rounded-lg font-bold flex items-center justify-center transition-all text-sm md:text-base" title="Gắn Thẻ"><i class="fa-solid fa-tags"></i></button>
                 <button onclick="window.openActionDirect('delete', '${id}', '${type}', '${name.replace(/'/g, "\\'")}')" class="p-2 bg-red-50 text-red-600 rounded-lg font-bold hover:bg-red-100 flex items-center justify-center transition-all text-sm md:text-base" title="Xóa"><i class="fa-solid fa-trash"></i></button>
             </div><div id="subActionContent"></div>`;
             window.toggleModal('actionModal', true);
             window.triggerAction(action);
         };
         async function deleteR2Image(fileKeyOrUrl) { if (!fileKeyOrUrl) return; try { let keyName = fileKeyOrUrl; if (fileKeyOrUrl.startsWith('http')) { try { const urlObj = new URL(fileKeyOrUrl); keyName = urlObj.pathname.substring(1); keyName = decodeURIComponent(keyName); } catch(e) { console.warn("Không parse được URL:", fileKeyOrUrl); } } return fetch(`https://upload-helper.phamngockhanh-942001.workers.dev/?key=${encodeURIComponent(keyName)}`, { method: 'DELETE', keepalive: true }); } catch (e) { console.error("Lỗi xóa R2:", e); } }
-        window.triggerAction = async (action) => { const container = document.getElementById('subActionContent'); if (container) container.innerHTML = ''; if (action === 'rename') { container.innerHTML = `<label class="block text-xs md:text-sm font-bold text-gray-700 mb-1.5">Tên mới</label><div class="flex gap-2"><input type="text" id="renameInput" value="${currentActionItem.name}" class="flex-1 border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs md:text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"><button onclick="window.commitRename()" class="bg-blue-600 hover:bg-blue-700 text-white px-3 md:px-4 py-1.5 rounded-lg font-bold text-xs md:text-sm shrink-0 flex items-center gap-1 shadow-sm"><i class="fa-solid fa-check"></i> Lưu</button></div>`; } else if (action === 'delete') {
+        window.triggerAction = async (action) => { const container = document.getElementById('subActionContent'); if (container) container.innerHTML = ''; if (action === 'rename') { container.innerHTML = `<label class="block text-xs md:text-sm font-bold text-gray-700 mb-1.5">Tên mới</label><div class="flex gap-2"><input type="text" id="renameInput" value="${currentActionItem.name}" class="flex-1 border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs md:text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"><button onclick="window.commitRename()" class="bg-blue-600 hover:bg-blue-700 text-white px-3 md:px-4 py-1.5 rounded-lg font-bold text-xs md:text-sm shrink-0 flex items-center gap-1 shadow-sm"><i class="fa-solid fa-check"></i> Lưu</button></div>`; } 
+        else if (action === 'assignTag') {
+            const itemObj = currentActionItem.type === 'folder' ? folderData.find(f => f.id === currentActionItem.id) : examData.find(e => e.id === currentActionItem.id);
+            const currentTagIds = itemObj?.tagIds || [];
+            if(tagData.length === 0) {
+                container.innerHTML = `<div class="text-center text-sm text-gray-500 py-4">Chưa có thẻ nào. <button onclick="window.openTagManagementModal(); window.toggleModal('actionModal', false)" class="text-blue-600 font-bold hover:underline">Tạo thẻ ngay</button></div>`;
+            } else {
+                let tagsHtml = tagData.map(tag => {
+                    const isChecked = currentTagIds.includes(tag.id) ? 'checked' : '';
+                    return `<label class="flex items-center gap-2 p-2 hover:bg-gray-50 rounded cursor-pointer border mb-2"><input type="checkbox" value="${tag.id}" class="tag-checkbox rounded text-blue-600 focus:ring-blue-500" ${isChecked}><div class="w-3 h-3 rounded-full" style="background-color:${tag.color}"></div><span class="text-sm font-bold text-gray-700">${tag.name}</span></label>`;
+                }).join('');
+                container.innerHTML = `<div class="max-h-[50vh] overflow-y-auto mb-3 custom-scrollbar p-1">${tagsHtml}</div><button onclick="window.commitAssignTags()" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl font-bold text-sm shadow-sm transition-colors"><i class="fa-solid fa-check mr-1"></i> Lưu Thẻ</button>`;
+            }
+        }
+        else if (action === 'delete') {
             window.toggleModal('actionModal', false);
             if(await window.customConfirm(`CẢNH BÁO: Xóa "${currentActionItem.name}" sẽ xóa vĩnh viễn và KHÔNG THỂ KHÔI PHỤC.\nNếu đây là đề thi, các bài đã giao cho học sinh cũng sẽ bị xóa theo.\nBạn có chắc chắn không?`)) {
                 window.showNotification("Đang tiến hành xóa dữ liệu...", "info");
@@ -2420,6 +2594,34 @@ loadFileManager(true);  } catch (err) { console.error("Drop error", err); } docu
             html += '</div>'; 
             container.innerHTML = html; 
         } }
+        window.commitAssignTags = async () => {
+            const checkboxes = document.querySelectorAll('.tag-checkbox');
+            const selectedTagIds = Array.from(checkboxes).filter(cb => cb.checked).map(cb => cb.value);
+            try {
+                window.showNotification("Đang lưu thẻ...", "info");
+                const collName = currentActionItem.type === 'folder' ? 'folders' : 'exams';
+                await updateDoc(doc(db, collName, currentActionItem.id), {
+                    tagIds: selectedTagIds
+                });
+                
+                if (currentActionItem.type === 'folder') {
+                    const f = folderData.find(x => x.id === currentActionItem.id);
+                    if (f) f.tagIds = selectedTagIds;
+                    localStorage.setItem('bank_folders', JSON.stringify(folderData));
+                } else {
+                    const e = examData.find(x => x.id === currentActionItem.id);
+                    if (e) e.tagIds = selectedTagIds;
+                    localStorage.setItem('bank_exams', JSON.stringify(examData));
+                }
+                
+                window.showNotification("Đã lưu thẻ thành công", "success");
+                window.toggleModal('actionModal', false);
+                renderExplorer();
+            } catch(e) {
+                console.error(e);
+                window.showNotification("Lỗi khi lưu thẻ", "error");
+            }
+        };
         window.commitRename = async () => { 
             const newName = document.getElementById('renameInput').value; 
             if(!newName) return; 
@@ -4262,6 +4464,93 @@ loadFileManager(true);  } catch (err) { console.error("Drop error", err); } docu
             }
         };
 
+window.openTagManagementModal = () => {
+    window.toggleModal('tagManagementModal', true);
+    window.renderTagList();
+};
+
+window.renderTagList = () => {
+    const container = document.getElementById('tagListContainer');
+    if(!tagData || tagData.length === 0) {
+        container.innerHTML = '<div class="text-center text-sm text-gray-400 py-4">Chưa có thẻ nào</div>';
+        return;
+    }
+    container.innerHTML = tagData.map(tag => `
+        <div class="flex items-center justify-between p-3 border rounded-xl hover:bg-gray-50 transition-colors">
+            <div class="flex items-center gap-3">
+                <div class="w-4 h-4 rounded-full shadow-sm" style="background-color: ${tag.color}"></div>
+                <span class="font-bold text-sm text-gray-700">${tag.name}</span>
+            </div>
+            <button onclick="window.deleteTag('${tag.id}')" class="text-red-500 hover:text-red-700 p-2"><i class="fa-solid fa-trash"></i></button>
+        </div>
+    `).join('');
+};
+
+window.selectTagColor = (btn, color) => {
+    document.querySelectorAll('.tag-color-btn').forEach(b => {
+        b.classList.remove('active-color', 'ring-gray-800');
+        b.classList.add('ring-transparent');
+    });
+    btn.classList.remove('ring-transparent');
+    btn.classList.add('active-color', 'ring-gray-800');
+    document.getElementById('newTagColor').value = color;
+};
+
+window.createNewTag = async () => {
+    const name = document.getElementById('newTagName').value.trim();
+    const color = document.getElementById('newTagColor').value;
+    if(!name) { window.showNotification('Vui lòng nhập tên thẻ', 'error'); return; }
+    
+    try {
+        const docRef = await addDoc(collection(db, "tags"), {
+            name: name,
+            color: color,
+            teacherId: currentUserUid,
+            createdAt: new Date().toISOString()
+        });
+        
+        tagData.push({ id: docRef.id, name, color, teacherId: currentUserUid });
+        document.getElementById('newTagName').value = '';
+        window.renderTagList();
+        
+        localStorage.setItem('bank_tags', JSON.stringify(tagData));
+        if (typeof renderExplorer === 'function') renderExplorer();
+        if (typeof renderTagFilterUI === 'function') renderTagFilterUI();
+        window.showNotification('Tạo thẻ thành công', 'success');
+    } catch (e) {
+        console.error(e);
+        window.showNotification('Lỗi tạo thẻ', 'error');
+    }
+};
+
+window.deleteTag = async (id) => {
+    if(!confirm('Bạn có chắc muốn xóa thẻ này? Những đề thi và thư mục đang dùng thẻ này sẽ mất liên kết thẻ.')) return;
+    try {
+        await deleteDoc(doc(db, "tags", id));
+        tagData = tagData.filter(t => t.id !== id);
+        window.renderTagList();
+        
+        // Remove tag from folders and exams
+        folderData.forEach(f => {
+            if(f.tagIds) f.tagIds = f.tagIds.filter(tid => tid !== id);
+        });
+        examData.forEach(e => {
+            if(e.tagIds) e.tagIds = e.tagIds.filter(tid => tid !== id);
+        });
+
+        localStorage.setItem('bank_tags', JSON.stringify(tagData));
+        localStorage.setItem('bank_folders', JSON.stringify(folderData));
+        localStorage.setItem('bank_exams', JSON.stringify(examData));
+        
+        if (typeof renderExplorer === 'function') renderExplorer();
+        if (typeof renderTagFilterUI === 'function') renderTagFilterUI();
+        window.showNotification('Đã xóa thẻ', 'success');
+    } catch (e) {
+        console.error(e);
+        window.showNotification('Lỗi xóa thẻ', 'error');
+    }
+};
+
     </script>
     <script>
         // --- N8N WEBHOOK LOGIC ---
@@ -4371,6 +4660,47 @@ loadFileManager(true);  } catch (err) { console.error("Drop error", err); } docu
             </div>
         </div>
     </div>
+
+<!-- Tag Management Modal -->
+<div id="tagManagementModal" class="modal opacity-0 pointer-events-none fixed inset-0 z-[160] bg-gray-900/60 backdrop-blur-sm flex items-center justify-center p-4 transition-opacity duration-300">
+    <div class="modal-content bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] transform scale-95 transition-transform duration-300">
+        <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-gray-50">
+            <div>
+                <h3 class="text-lg font-bold text-gray-800">Quản lý Thẻ (Tags)</h3>
+                <p class="text-xs text-gray-500 mt-0.5">Tạo và quản lý các thẻ phân loại</p>
+            </div>
+            <button onclick="window.toggleModal('tagManagementModal', false)" class="w-8 h-8 rounded-full bg-white text-gray-400 hover:text-red-500 hover:bg-red-50 flex items-center justify-center shadow-sm transition-all"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <div class="p-6 flex-1 flex flex-col overflow-hidden">
+            <div class="flex flex-col gap-3 mb-6">
+                <div class="flex gap-2">
+                    <input type="text" id="newTagName" placeholder="Tên thẻ mới..." class="flex-1 px-3 py-2 border rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+                    <button onclick="window.createNewTag()" class="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold hover:bg-blue-700 shadow-sm transition-all"><i class="fa-solid fa-plus"></i></button>
+                </div>
+                <div class="flex gap-2 items-center">
+                    <span class="text-xs text-gray-500 font-bold">Màu sắc:</span>
+                    <div class="flex gap-2 flex-wrap" id="tagColorPalette">
+                        <button onclick="window.selectTagColor(this, '#ef4444')" class="w-6 h-6 rounded-full bg-red-500 ring-2 ring-offset-1 ring-transparent focus:outline-none transition-all hover:scale-110 tag-color-btn"></button>
+                        <button onclick="window.selectTagColor(this, '#f97316')" class="w-6 h-6 rounded-full bg-orange-500 ring-2 ring-offset-1 ring-transparent focus:outline-none transition-all hover:scale-110 tag-color-btn"></button>
+                        <button onclick="window.selectTagColor(this, '#eab308')" class="w-6 h-6 rounded-full bg-yellow-500 ring-2 ring-offset-1 ring-transparent focus:outline-none transition-all hover:scale-110 tag-color-btn"></button>
+                        <button onclick="window.selectTagColor(this, '#22c55e')" class="w-6 h-6 rounded-full bg-green-500 ring-2 ring-offset-1 ring-transparent focus:outline-none transition-all hover:scale-110 tag-color-btn"></button>
+                        <button onclick="window.selectTagColor(this, '#06b6d4')" class="w-6 h-6 rounded-full bg-cyan-500 ring-2 ring-offset-1 ring-transparent focus:outline-none transition-all hover:scale-110 tag-color-btn"></button>
+                        <button onclick="window.selectTagColor(this, '#3b82f6')" class="w-6 h-6 rounded-full bg-blue-500 ring-2 ring-offset-1 ring-gray-800 focus:outline-none transition-all hover:scale-110 tag-color-btn active-color"></button>
+                        <button onclick="window.selectTagColor(this, '#8b5cf6')" class="w-6 h-6 rounded-full bg-violet-500 ring-2 ring-offset-1 ring-transparent focus:outline-none transition-all hover:scale-110 tag-color-btn"></button>
+                        <button onclick="window.selectTagColor(this, '#ec4899')" class="w-6 h-6 rounded-full bg-pink-500 ring-2 ring-offset-1 ring-transparent focus:outline-none transition-all hover:scale-110 tag-color-btn"></button>
+                        <button onclick="window.selectTagColor(this, '#64748b')" class="w-6 h-6 rounded-full bg-slate-500 ring-2 ring-offset-1 ring-transparent focus:outline-none transition-all hover:scale-110 tag-color-btn"></button>
+                        <input type="hidden" id="newTagColor" value="#3b82f6">
+                    </div>
+                </div>
+            </div>
+            <div id="tagListContainer" class="space-y-2 overflow-y-auto custom-scrollbar pr-1 flex-1">
+                <!-- Render tags here -->
+            </div>
+        </div>
+    </div>
+</div>
+
+
 
 <script>
 if ('serviceWorker' in navigator) {

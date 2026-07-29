@@ -424,6 +424,7 @@ function processTabular(text) {
 }
 
 function processLatexLists(text) {
+    if (!text) return "";
     let processed = text;
     const parseItems = (bodyStr) => {
         const rawItems = bodyStr.split(/\\item(?![a-zA-Z])/).filter(s => s.trim().length > 0);
@@ -442,44 +443,58 @@ function processLatexLists(text) {
         });
     };
 
-    processed = processed.replace(/\\begin\{itemchoice\}([\s\S]*?)\\end\{itemchoice\}/g, (match, body) => {
+    processed = processed.replace(/\\begin\{itemchoice\}([\s\S]*?)\\end\{itemchoice\}/gi, (match, body) => {
         const items = body.split('\\itemch').filter(s => s.trim().length > 0);
         const htmlItems = items.map(item => `<li class="flex items-start gap-2 mb-1"><span class="text-blue-600 font-bold shrink-0">•</span><div class="leading-relaxed">${item.trim()}</div></li>`).join('');
         return `<ul class="my-3 pl-2 list-none">${htmlItems}</ul>`;
     });
 
-    const regexCols = /\\begin\{(?:listEX|enumEX)\}([\s\S]*?)\\end\{(?:listEX|enumEX)\}/g;
+    const regexCols = /\\begin\{\s*(?:listEX|enumEX)\s*\}([\s\S]*?)\\end\{\s*(?:listEX|enumEX)\s*\}/gi;
     processed = processed.replace(regexCols, (match, bodyWithHeader) => {
         let cols = 1;
-        const colMatch = match.match(/\\begin\{(?:listEX|enumEX)\}\s*(?:\[[^\]]*\])*\s*\{?(\d+)\}?/);
-        if (colMatch) {
-            cols = parseInt(colMatch[1]) || 1;
+        const firstItemIdx = bodyWithHeader.indexOf('\\item');
+        const headerText = firstItemIdx !== -1 ? bodyWithHeader.substring(0, firstItemIdx) : bodyWithHeader;
+
+        // Trích xuất số cột từ header: tìm số trong {}, [], (), <> hoặc số đứng độc lập ở header
+        const numMatches = [...headerText.matchAll(/[\{\[\(<](\d+)[\}\]\)>]/g)];
+        if (numMatches.length > 0) {
+            cols = parseInt(numMatches[numMatches.length - 1][1]) || 1;
+        } else {
+            const standaloneMatch = headerText.match(/\b(\d+)\b/);
+            if (standaloneMatch) {
+                cols = parseInt(standaloneMatch[1]) || 1;
+            }
         }
 
         let body = bodyWithHeader;
-        const firstItemIdx = body.indexOf('\\item');
         if (firstItemIdx !== -1) {
             body = body.substring(firstItemIdx);
         }
 
         const items = parseItems(body);
-        let gridColsClass = 'grid-cols-1';
-        if (cols === 2) gridColsClass = 'grid-cols-1 sm:grid-cols-2';
-        else if (cols === 3) gridColsClass = 'grid-cols-1 sm:grid-cols-2 md:grid-cols-3';
-        else if (cols === 4) gridColsClass = 'grid-cols-1 sm:grid-cols-2 md:grid-cols-4';
-        else if (cols > 4) gridColsClass = `grid-cols-2 md:grid-cols-${cols}`;
+        
+        let listStyle = "list-decimal";
+        if (headerText.includes("a") || headerText.includes("a)") || headerText.includes("a.")) listStyle = "list-[lower-alpha]";
+        else if (headerText.includes("A") || headerText.includes("A)") || headerText.includes("A.")) listStyle = "list-[upper-alpha]";
+        else if (headerText.includes("i") || headerText.includes("i)") || headerText.includes("i.")) listStyle = "list-[lower-roman]";
+        else if (headerText.includes("I") || headerText.includes("I)") || headerText.includes("I.")) listStyle = "list-[upper-roman]";
+        else if (/enumEX/i.test(match)) listStyle = "list-[lower-alpha]";
 
-        let gridHtml = `<div class="grid ${gridColsClass} gap-3 my-3">`;
-        items.forEach((it, idx) => {
-            let displayLabel = it.label;
-            if (!displayLabel && match.includes('enumEX')) displayLabel = String.fromCharCode(97 + idx) + ')';
-            gridHtml += `<div class="flex items-start gap-1.5">${displayLabel ? `<span class="font-bold text-gray-700 shrink-0 mt-0.5">${displayLabel}</span>` : `<span class="text-gray-400 shrink-0 mt-0.5">•</span>`}<div class="flex-1">${it.content}</div></div>`;
+        let colClass = "";
+        if (cols === 2) colClass = "columns-1 sm:columns-2 gap-8";
+        else if (cols === 3) colClass = "columns-1 sm:columns-3 gap-8";
+        else if (cols === 4) colClass = "columns-2 sm:columns-4 gap-8";
+        else if (cols > 4) colClass = `columns-1 sm:columns-${cols} gap-8`;
+
+        let html = `<ol class="${listStyle} pl-8 my-3 space-y-2 ${colClass}">`;
+        items.forEach((it) => {
+            html += `<li class="pl-1 ${colClass ? 'break-inside-avoid' : ''}">${it.label ? `<span class="font-bold mr-1">${it.label}</span>` : ''}${it.content}</li>`;
         });
-        gridHtml += `</div>`;
-        return gridHtml;
+        html += `</ol>`;
+        return html;
     });
 
-    processed = processed.replace(/\\begin\{enumerate\}([\s\S]*?)\\end\{enumerate\}/g, (match, body) => {
+    processed = processed.replace(/\\begin\{enumerate\}([\s\S]*?)\\end\{enumerate\}/gi, (match, body) => {
         const items = parseItems(body);
         let html = `<ol class="list-decimal pl-8 space-y-1 my-2">`;
         items.forEach(it => { html += `<li class="pl-1">${it.content}</li>`; });
@@ -487,7 +502,7 @@ function processLatexLists(text) {
         return html;
     });
 
-    processed = processed.replace(/\\begin\{itemize\}([\s\S]*?)\\end\{itemize\}/g, (match, body) => {
+    processed = processed.replace(/\\begin\{itemize\}([\s\S]*?)\\end\{itemize\}/gi, (match, body) => {
         const items = parseItems(body);
         let html = `<ul class="list-disc pl-8 space-y-1 my-2">`;
         items.forEach(it => { html += `<li class="pl-1">${it.content}</li>`; });
@@ -522,7 +537,7 @@ export const autoScaleTables = () => {
 };
 
 /**
- * HÀM FORMAT CONTENT (FIX: EQNARRAY, <x, PLACEHOLDERS)
+ * HÀM FORMAT CONTENT (FIX: EQNARRAY, <x, PLACEHOLDERS, ENUMEX)
  */
 export const formatContent = (text) => {
     if (text === null || text === undefined) return "";
@@ -566,15 +581,15 @@ export const formatContent = (text) => {
     processed = processed.replace(/Click đúp để tải file|hoặc Ctrl \+ V để dán ảnh|ẢNH TỪ IMMINI|VỊ TRÍ HÌNH TIKZ/gi, '');
     processed = processed.replace(/^\s*\}\s*$/gm, '').replace(/\}\s*$/g, '').replace(/Ảnh minh họa \(immini\)/g, '').replace(/Ảnh canh giữa/g, '');
 
-    // 4. Regex Bảo Vệ MathJax & HTML
+    // 4. Regex Bảo Vệ MathJax & HTML (Loại trừ enumEX, listEX, enumerate, itemize khỏi MathJax block detection)
     const tagWhitelist = "script|style|div|span|p|br|img|table|tbody|thead|tr|td|th|ul|ol|li|b|i|u|strong|em|mark|label|input|button|a|h1|h2|h3|h4";
-    const regex = new RegExp(`(\\\\begin\\{[a-zA-Z*]+\\}[\\s\\S]*?\\\\end\\{[a-zA-Z*]+\\}|\\$\\$[\\s\\S]*?\\$\\$|\\\\\\[[\\s\\S]*?\\\\\\]|\\\\\\([\\s\\S]*?\\\\\\)|(?:\\$[\\s\\S]*?\\$)|<\\/?(?:${tagWhitelist})[^>]*>)`, 'gi');
+    const regex = new RegExp(`(\\\\begin\\{(?!(?:enumEX|listEX|enumerate|itemize|itemchoice)\\b)[a-zA-Z*]+\\}[\\s\\S]*?\\\\end\\{[a-zA-Z*]+\\}|\\$\\$[\\s\\S]*?\\$\\$|\\\\\\[[\\s\\S]*?\\\\\\]|\\\\\\([\\s\\S]*?\\\\\\)|(?:\\$[\\s\\S]*?\\$)|<\\/?(?:${tagWhitelist})[^>]*>)`, 'gi');
     
     const parts = processed.split(regex);
     
     return parts.map(part => {
         const trimmed = part.trim();
-        const isMath = trimmed.startsWith('$') || trimmed.startsWith('\\(') || trimmed.startsWith('\\[') || trimmed.startsWith('\\begin');
+        const isMath = trimmed.startsWith('$') || trimmed.startsWith('\\(') || trimmed.startsWith('\\[') || (trimmed.startsWith('\\begin') && !trimmed.startsWith('\\begin{div') && !trimmed.startsWith('\\begin{grid'));
         const isTag = part.startsWith('<') && part.endsWith('>');
 
         if (isMath) {

@@ -27,7 +27,11 @@ window.AIGrader = {
         }
 
         if (!studentImages || studentImages.length === 0) {
-            throw new Error("Không có ảnh bài làm nào để chấm.");
+            return {
+                score: 0,
+                feedback: "Học sinh không gửi ảnh bài làm cho phần tự luận này.",
+                mistakes: []
+            };
         }
 
         // 1. Tạo cấu trúc Prompt (Kịch bản) chi tiết
