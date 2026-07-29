@@ -214,9 +214,9 @@ QUAN TRỌNG: BẮT BUỘC trả về chuỗi JSON nguyên gốc, tuân thủ C�
             let resData = await fetchWithRetry(payload, "gemini-3.5-flash", 3);
             
             if (resData.error) {
-                console.warn("Mô hình 3.5 quá tải/lỗi. Chuyển sang mô hình dự phòng (3.1-flash-lite)...");
+                console.warn("Mô hình 3.5-flash quá tải/lỗi. Chuyển sang mô hình dự phòng (3.6-flash)...");
                 if(window.showToast) window.showToast("Mô hình chính đang bận, tự động chuyển sang mô hình dự phòng...", "warning");
-                resData = await fetchWithRetry(payload, "gemini-3.1-flash-lite", 2); // Thử dự phòng 2 lần
+                resData = await fetchWithRetry(payload, "gemini-3.6-flash", 2); // Thử dự phòng 2 lần
                 
                 if (resData.error) {
                     throw new Error(`(${resData.error.code}): ${resData.error.message}`);

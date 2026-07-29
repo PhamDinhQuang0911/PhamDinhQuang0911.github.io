@@ -1071,10 +1071,12 @@
                 snapResults.forEach(d => { 
                     const r = d.data(); 
                     if (!studentResultsMap[r.examId]) {
-                        studentResultsMap[r.examId] = { score: r.score, count: 1 };
+                        studentResultsMap[r.examId] = { score: r.score, count: 1, gradedAt: r.gradedAt, resubmitStatus: r.resubmitStatus };
                     } else {
                         if (r.score > studentResultsMap[r.examId].score) studentResultsMap[r.examId].score = r.score;
                         studentResultsMap[r.examId].count++;
+                        if (r.gradedAt) studentResultsMap[r.examId].gradedAt = r.gradedAt;
+                        if (r.resubmitStatus) studentResultsMap[r.examId].resubmitStatus = r.resubmitStatus;
                     }
                 });
                 
@@ -1160,20 +1162,45 @@
                     let statusBadge = `<span class="text-[10px] font-black bg-gray-100 text-gray-500 px-2.5 py-1 rounded-full uppercase tracking-wider">Chưa làm</span>`;
                     let actionBtn = `<button onclick="window.location.href='exam.html?id=${exam.id}'" class="w-full py-3 bg-brand text-white font-bold rounded-xl shadow-sm hover:bg-teal-700 transition-all flex items-center justify-center gap-2"><i class="fa-solid fa-play"></i> Bắt đầu</button>`;
                     
+                    const isHwOrMixed = (exam.type === 'homework' || exam.type === 'mixed');
+                    const isGraded = res && !!(res.gradedAt || res.resubmitStatus === 'graded');
+
+                    let secondaryBtnText = 'Xem lời giải';
+                    let secondaryBtnIcon = 'fa-eye';
+                    let secondaryBtnUrl = `exam.html?id=${exam.id}&mode=review`;
+
+                    if (isHwOrMixed) {
+                        if (isGraded) {
+                            secondaryBtnText = 'Xem bài đã chấm';
+                            secondaryBtnIcon = 'fa-check-double';
+                            secondaryBtnUrl = `exam.html?id=${exam.id}&mode=review`;
+                        } else {
+                            secondaryBtnText = 'Cập nhật bài làm';
+                            secondaryBtnIcon = 'fa-pen';
+                            secondaryBtnUrl = `exam.html?id=${exam.id}`;
+                        }
+                    }
+
                     if (isDone) {
                         const score = res.score;
-                        let badgeColor = score >= 9 ? 'bg-yellow-100 text-yellow-700' : (score >= 8 ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700');
-                        statusBadge = `<span class="text-[10px] font-black ${badgeColor} px-2.5 py-1 rounded-full uppercase tracking-wider shadow-sm">${score} điểm</span>`;
+                        if (isHwOrMixed && !isGraded) {
+                            statusBadge = `<span class="text-[10px] font-black bg-orange-100 text-orange-700 px-2.5 py-1 rounded-full uppercase tracking-wider shadow-sm">Chờ chấm</span>`;
+                        } else {
+                            let badgeColor = score >= 9 ? 'bg-yellow-100 text-yellow-700' : (score >= 8 ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700');
+                            statusBadge = `<span class="text-[10px] font-black ${badgeColor} px-2.5 py-1 rounded-full uppercase tracking-wider shadow-sm">${score} điểm</span>`;
+                        }
                         
+                        const secBtnHtml = `<button onclick="window.location.href='${secondaryBtnUrl}'" class="flex-1 py-3 bg-teal-100 text-teal-700 font-bold rounded-xl hover:bg-teal-200 text-xs flex items-center justify-center gap-1"><i class="fa-solid ${secondaryBtnIcon}"></i> ${secondaryBtnText}</button>`;
+
                         if (canRetry) {
-                            actionBtn = `<div class="flex gap-2"><button onclick="window.location.href='exam.html?id=${exam.id}'" class="flex-1 py-3 bg-white border-2 border-gray-200 text-gray-600 font-bold rounded-xl hover:bg-gray-50 text-xs">Làm lại (${attemptsUsed}/${maxAttempts})</button><button onclick="window.location.href='exam.html?id=${exam.id}&mode=review'" class="flex-1 py-3 bg-teal-100 text-teal-700 font-bold rounded-xl hover:bg-teal-200 text-xs">Xem lời giải</button></div>`;
+                            actionBtn = `<div class="flex gap-2"><button onclick="window.location.href='exam.html?id=${exam.id}'" class="flex-1 py-3 bg-white border-2 border-gray-200 text-gray-600 font-bold rounded-xl hover:bg-gray-50 text-xs">Làm lại (${attemptsUsed}/${maxAttempts})</button>${secBtnHtml}</div>`;
                         } else {
                             if (hasRetryTicket) {
-                                actionBtn = `<div class="flex gap-2"><button onclick="window.location.href='exam.html?id=${exam.id}'" class="flex-1 py-3 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700 text-xs flex items-center justify-center gap-1 shadow-sm"><i class="fa-solid fa-rotate-right"></i> Làm lại (Đã duyệt)</button><button onclick="window.location.href='exam.html?id=${exam.id}&mode=review'" class="flex-1 py-3 bg-teal-100 text-teal-700 font-bold rounded-xl hover:bg-teal-200 text-xs">Xem lời giải</button></div>`;
+                                actionBtn = `<div class="flex gap-2"><button onclick="window.location.href='exam.html?id=${exam.id}'" class="flex-1 py-3 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700 text-xs flex items-center justify-center gap-1 shadow-sm"><i class="fa-solid fa-rotate-right"></i> Làm lại (Đã duyệt)</button>${secBtnHtml}</div>`;
                             } else if (isPending) {
                                 actionBtn = `<button disabled class="w-full py-3 bg-yellow-100 text-yellow-700 font-bold rounded-xl text-sm cursor-not-allowed"><i class="fa-solid fa-clock"></i> Đang chờ duyệt...</button>`;
                             } else {
-                                actionBtn = `<div class="flex gap-2"><button onclick="requestReattempt('${exam.id}', '${exam.title}')" class="flex-1 py-3 bg-red-50 text-red-600 border border-red-100 font-bold rounded-xl hover:bg-red-100 text-xs flex items-center justify-center gap-1"><i class="fa-solid fa-rotate-right"></i> Xin làm lại</button><button onclick="window.location.href='exam.html?id=${exam.id}&mode=review'" class="flex-1 py-3 bg-teal-100 text-teal-700 font-bold rounded-xl hover:bg-teal-200 text-xs">Xem lời giải</button></div>`;
+                                actionBtn = `<div class="flex gap-2"><button onclick="requestReattempt('${exam.id}', '${exam.title}')" class="flex-1 py-3 bg-red-50 text-red-600 border border-red-100 font-bold rounded-xl hover:bg-red-100 text-xs flex items-center justify-center gap-1"><i class="fa-solid fa-rotate-right"></i> Xin làm lại</button>${secBtnHtml}</div>`;
                             }
                         }
                     }
@@ -1216,18 +1243,43 @@
                     let actionBtn = `<button onclick="window.location.href='exam.html?id=${exam.id}'" class="px-6 py-2 bg-brand text-white font-bold rounded-lg hover:bg-teal-700 text-sm whitespace-nowrap"><i class="fa-solid fa-play mr-1"></i> Làm bài</button>`;
                     let scoreBadge = `<div class="text-right"><div class="text-xs font-bold text-gray-400 bg-gray-100 px-2 py-1 rounded">Chưa làm</div></div>`;
 
+                    const isHwOrMixed = (exam.type === 'homework' || exam.type === 'mixed');
+                    const isGraded = res && !!(res.gradedAt || res.resubmitStatus === 'graded');
+
+                    let secondaryBtnText = 'Xem lời giải';
+                    let secondaryBtnIcon = 'fa-eye';
+                    let secondaryBtnUrl = `exam.html?id=${exam.id}&mode=review`;
+
+                    if (isHwOrMixed) {
+                        if (isGraded) {
+                            secondaryBtnText = 'Xem bài đã chấm';
+                            secondaryBtnIcon = 'fa-check-double';
+                            secondaryBtnUrl = `exam.html?id=${exam.id}&mode=review`;
+                        } else {
+                            secondaryBtnText = 'Cập nhật bài làm';
+                            secondaryBtnIcon = 'fa-pen';
+                            secondaryBtnUrl = `exam.html?id=${exam.id}`;
+                        }
+                    }
+
                     if (isDone) {
-                        scoreBadge = `<div class="text-right"><div class="text-sm font-black text-teal-700">${res.score}đ</div><div class="text-[10px] text-gray-400">Lần ${attemptsUsed}</div></div>`;
+                        if (isHwOrMixed && !isGraded) {
+                            scoreBadge = `<div class="text-right"><div class="text-sm font-black text-orange-600">Chờ chấm</div><div class="text-[10px] text-gray-400">Lần ${attemptsUsed}</div></div>`;
+                        } else {
+                            scoreBadge = `<div class="text-right"><div class="text-sm font-black text-teal-700">${res.score}đ</div><div class="text-[10px] text-gray-400">Lần ${attemptsUsed}</div></div>`;
+                        }
+
+                        const secBtnListHtml = `<button onclick="window.location.href='${secondaryBtnUrl}'" class="px-3 py-2 bg-teal-50 text-teal-700 font-bold rounded-lg hover:bg-teal-100 text-xs whitespace-nowrap flex items-center gap-1"><i class="fa-solid ${secondaryBtnIcon}"></i> ${secondaryBtnText}</button>`;
                         
                         if (canRetry) {
-                            actionBtn = `<div class="flex gap-2"><button onclick="window.location.href='exam.html?id=${exam.id}&mode=review'" class="px-3 py-2 bg-teal-50 text-teal-700 font-bold rounded-lg hover:bg-teal-100 text-xs whitespace-nowrap"><i class="fa-solid fa-eye"></i> Xem</button><button onclick="window.location.href='exam.html?id=${exam.id}'" class="px-3 py-2 bg-gray-50 text-gray-600 font-bold rounded-lg hover:bg-gray-100 text-xs whitespace-nowrap"><i class="fa-solid fa-rotate-right"></i> Lại (${attemptsUsed}/${maxAttempts})</button></div>`;
+                            actionBtn = `<div class="flex gap-2">${secBtnListHtml}<button onclick="window.location.href='exam.html?id=${exam.id}'" class="px-3 py-2 bg-gray-50 text-gray-600 font-bold rounded-lg hover:bg-gray-100 text-xs whitespace-nowrap"><i class="fa-solid fa-rotate-right"></i> Lại (${attemptsUsed}/${maxAttempts})</button></div>`;
                         } else {
                             if (hasRetryTicket) {
-                                actionBtn = `<div class="flex gap-2"><button onclick="window.location.href='exam.html?id=${exam.id}&mode=review'" class="px-3 py-2 bg-teal-50 text-teal-700 font-bold rounded-lg hover:bg-teal-100 text-xs whitespace-nowrap"><i class="fa-solid fa-eye"></i> Xem</button><button onclick="window.location.href='exam.html?id=${exam.id}'" class="px-3 py-2 bg-green-600 text-white font-bold rounded-lg hover:bg-green-700 text-xs whitespace-nowrap shadow-sm"><i class="fa-solid fa-rotate-right"></i> Làm lại (Đã duyệt)</button></div>`;
+                                actionBtn = `<div class="flex gap-2">${secBtnListHtml}<button onclick="window.location.href='exam.html?id=${exam.id}'" class="px-3 py-2 bg-green-600 text-white font-bold rounded-lg hover:bg-green-700 text-xs whitespace-nowrap shadow-sm"><i class="fa-solid fa-rotate-right"></i> Làm lại (Đã duyệt)</button></div>`;
                             } else if (isPending) {
                                 actionBtn = `<button disabled class="px-4 py-2 bg-yellow-100 text-yellow-700 font-bold rounded-lg text-xs cursor-not-allowed whitespace-nowrap"><i class="fa-solid fa-clock"></i> Đang chờ duyệt</button>`;
                             } else {
-                                actionBtn = `<div class="flex gap-2"><button onclick="window.location.href='exam.html?id=${exam.id}&mode=review'" class="px-3 py-2 bg-teal-50 text-teal-700 font-bold rounded-lg hover:bg-teal-100 text-xs whitespace-nowrap"><i class="fa-solid fa-eye"></i> Xem</button><button onclick="requestReattempt('${exam.id}', '${exam.title}')" class="px-3 py-2 bg-red-50 text-red-600 border border-red-200 font-bold rounded-lg hover:bg-red-100 text-xs whitespace-nowrap"><i class="fa-solid fa-rotate-right"></i> Xin làm lại</button></div>`;
+                                actionBtn = `<div class="flex gap-2">${secBtnListHtml}<button onclick="requestReattempt('${exam.id}', '${exam.title}')" class="px-3 py-2 bg-red-50 text-red-600 border border-red-200 font-bold rounded-lg hover:bg-red-100 text-xs whitespace-nowrap"><i class="fa-solid fa-rotate-right"></i> Xin làm lại</button></div>`;
                             }
                         }
                     }
