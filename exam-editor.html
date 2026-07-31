@@ -629,10 +629,10 @@
                     <!-- AI Gemini -->
                     <div class="p-2 border-b border-gray-100 bg-gradient-to-br from-indigo-50 to-purple-50">
                         <div class="flex items-center gap-1.5">
-                            <button title="Chấm & Nhận Xét bằng AI" onclick="window.gradeWithAI('gradeOnly')" id="btnAIGradeOnly" class="flex-1 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded shadow hover:shadow-md flex items-center justify-center transition-all">
+                            <button title="Chấm & Nhận Xét bằng AI" onclick="window.gradeWithAI('gradeAndDraw')" id="btnAIGradeOnly" class="flex-1 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded shadow hover:shadow-md flex items-center justify-center transition-all">
                                 <img src="https://upload.wikimedia.org/wikipedia/commons/8/8a/Google_Gemini_logo.svg" class="w-5 h-5 invert" alt="Gemini">
                             </button>
-                            <button title="Chấm, Nhận xét & Tạo ảnh lỗi bằng AI" onclick="window.gradeWithAI('gradeAndDraw')" id="btnAIGradeDraw" class="flex-1 py-2 bg-gradient-to-r from-purple-600 to-pink-500 text-white rounded shadow hover:shadow-md flex items-center justify-center transition-all">
+                            <button title="Chấm, Nhận xét & Tạo ảnh lỗi bằng AI" onclick="window.gradeWithAI('gradeAndDraw')" style="display:none;" style="display:none;" id="btnAIGradeDraw" class="flex-1 py-2 bg-gradient-to-r from-purple-600 to-pink-500 text-white rounded shadow hover:shadow-md flex items-center justify-center transition-all">
                                 <i class="fa-solid fa-pen-ruler text-lg"></i>
                             </button>
                         </div>
@@ -3904,7 +3904,7 @@
                 else alert("Đã lưu bài chấm thành công!");
                 
                 window.toggleModal('essayGradingModal', false);
-                if(window.loadStats) window.loadStats(); 
+                if(window.loadStats) window.loadStats(true); 
             } catch (e) {
                 console.error("Lỗi ghép ảnh/upload:", e);
                 // Fallback nếu lỗi Tainted Canvas
@@ -3917,7 +3917,7 @@
                 });
                 if(window.showToast) window.showToast("Lưu điểm (không lưu được nét vẽ) thành công!", "success");
                 window.toggleModal('essayGradingModal', false);
-                if(window.loadStats) window.loadStats(); 
+                if(window.loadStats) window.loadStats(true); 
             } finally {
                 btn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> LƯU KẾT QUẢ CHẤM'; btn.disabled = false;
             }
@@ -4047,8 +4047,12 @@
                     if (scoreInput) {
                         const maxPoint = parseFloat(scoreInput.max) || 10;
                         let s = parseFloat(aiResult.score);
-                        // Normalize if AI returned score out of 100 or 10
-                        if (s > maxPoint && maxPoint <= 10 && s <= 10) s = s * (maxPoint / 10);
+                        // Chuẩn hóa điểm số: giả định AI chấm theo thang điểm 10 hoặc 100
+                        if (s > 10 && s <= 100) {
+                            s = (s / 100) * maxPoint;
+                        } else if (s >= 0 && s <= 10) {
+                            s = (s / 10) * maxPoint;
+                        }
                         if (s > maxPoint) s = maxPoint;
                         scoreInput.value = s.toFixed(2);
                         window.updateTotalScore();
@@ -4101,7 +4105,7 @@
                                 if (mistake.note || mistake.correction) {
                                     ctx.save();
                                     ctx.globalCompositeOperation = 'source-over';
-                                    ctx.font = "bold 13px system-ui, sans-serif";
+                                    ctx.font = "bold 11px system-ui, sans-serif";
                                     let text = mistake.note || '';
                                     if (mistake.correction) text += (text ? ' -> ' : '') + mistake.correction;
                                     
@@ -4165,7 +4169,7 @@
                 await Promise.all(chunk.map(item => {
                     let encodedSolution = item.q.solution ? encodeURIComponent(item.q.solution) : '';
                     let encodedContent = item.q.originalContent ? encodeURIComponent(item.q.originalContent) : encodeURIComponent(item.q.content);
-                    return window.gradeSingleEssayWithAI(item.idx, item.q.answerKey, encodedContent, encodedSolution);
+                    return window.gradeSingleEssayWithAI(item.idx, item.q.answerKey, encodedContent, encodedSolution, 'gradeAndDraw');
                 }));
             }
             
@@ -4682,7 +4686,7 @@
                         <div class="p-4 bg-yellow-50 flex flex-col md:flex-row md:items-center justify-between gap-3 border-t border-yellow-100">
                             <div class="flex items-center gap-2 flex-wrap">
                                 <button id="btnAIGrade-${idx}" onclick="window.gradeSingleEssayWithAI(${idx}, '${q.answerKey}', '${encodedContent}', '${encodedSolution}', 'gradeOnly')" class="px-3 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg font-bold shadow-md hover:shadow-lg flex items-center justify-center gap-1.5 text-xs transition-transform active:scale-95 shrink-0" title="Chấm bằng AI"><img src="https://upload.wikimedia.org/wikipedia/commons/8/8a/Google_Gemini_logo.svg" class="w-4 h-4 invert" alt="Gemini"></button>
-                                <button id="btnAIDraw-${idx}" onclick="window.gradeSingleEssayWithAI(${idx}, '${q.answerKey}', '${encodedContent}', '${encodedSolution}', 'gradeAndDraw')" class="px-3 py-2 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-lg font-bold shadow-md hover:shadow-lg flex items-center justify-center gap-1.5 text-xs transition-transform active:scale-95 shrink-0" title="Chấm và vẽ phát hiện lỗi sai trên bài làm"><i class="fa-solid fa-pen-ruler"></i></button>
+                                <button style="display:none;" id="btnAIDraw-${idx}" onclick="window.gradeSingleEssayWithAI(${idx}, '${q.answerKey}', '${encodedContent}', '${encodedSolution}', 'gradeAndDraw')" class="px-3 py-2 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-lg font-bold shadow-md hover:shadow-lg flex items-center justify-center gap-1.5 text-xs transition-transform active:scale-95 shrink-0" title="Chấm và vẽ phát hiện lỗi sai trên bài làm"><i class="fa-solid fa-pen-ruler"></i></button>
                             </div>
                             <div class="flex items-center gap-2 self-end md:self-auto">
                                 <span class="font-bold text-yellow-800 text-sm mr-1"><i class="fa-solid fa-pen-nib mr-1"></i>Điểm:</span>
@@ -4832,7 +4836,9 @@
             if (window.examData.type === 'mixed' || window.examData.type === 'essay') {
                 window.currentGradingCanvases = [];
                 const inlineImgs = essayContainer.querySelectorAll('.grading-essay-content img');
+                const savedUrls = currentGradingAttempt.gradedImageUrls || [];
                 inlineImgs.forEach((img, i) => {
+                    if (savedUrls[i]) img.src = savedUrls[i];
                     const wrapper = document.createElement('div');
                     wrapper.className = "relative inline-block border border-gray-200 rounded my-2 bg-white shadow-sm";
                     img.parentNode.insertBefore(wrapper, img);
@@ -5139,7 +5145,7 @@ YÊU CẦU NỘI DUNG LỜI PHÊ:
                 }
                 
                 window.showToast("Đã lưu kết quả chấm thi!", "success");
-                loadStats(); // Tải lại bảng thống kê
+                loadStats(true); // Tải lại bảng thống kê
                 closeGradingModal();
             } catch (e) {
                 console.error(e);
@@ -5341,7 +5347,7 @@ YÊU CẦU NỘI DUNG LỜI PHÊ:
                     }
 
                     window.showToast(`Đã cấp quyền cho ${studentName}`, "success");
-                    loadStats(); // Tải lại bảng
+                    loadStats(true); // Tải lại bảng
                 } catch (e) {
                     console.error(e);
                     window.customAlert("Lỗi: " + e.message, "error");
@@ -5355,8 +5361,8 @@ YÊU CẦU NỘI DUNG LỜI PHÊ:
                 try {
                     await deleteDoc(doc(db, "access_requests", requestId));
                     window.showToast("Đã từ chối yêu cầu.", "info");
-                    loadStats();
-                } catch (e) {
+                    loadStats(true);
+                  } catch (e) {
                     console.error(e);
                     window.showToast("Lỗi: " + e.message, "error");
                 }
