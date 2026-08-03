@@ -19,7 +19,6 @@ const MIME_TYPES = {
 };
 
 const server = http.createServer((req, res) => {
-    // Extract pathname ignoring query strings
     const parsedUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
     let reqPath = decodeURIComponent(parsedUrl.pathname);
 
@@ -29,14 +28,16 @@ const server = http.createServer((req, res) => {
 
     let filePath = path.join(PUBLIC_DIR, reqPath);
 
-    // If no extension and file doesn't exist, try appending .html
     if (!path.extname(filePath) && !fs.existsSync(filePath) && fs.existsSync(filePath + '.html')) {
         filePath += '.html';
     }
 
     fs.stat(filePath, (err, stats) => {
         if (err || !stats.isFile()) {
-            res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+            res.writeHead(404, { 
+                'Content-Type': 'text/plain; charset=utf-8',
+                'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate'
+            });
             res.end('404 Not Found');
             return;
         }
@@ -44,11 +45,16 @@ const server = http.createServer((req, res) => {
         const ext = path.extname(filePath).toLowerCase();
         const contentType = MIME_TYPES[ext] || 'application/octet-stream';
 
-        res.writeHead(200, { 'Content-Type': contentType });
+        res.writeHead(200, { 
+            'Content-Type': contentType,
+            'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0'
+        });
         fs.createReadStream(filePath).pipe(res);
     });
 });
 
 server.listen(PORT, () => {
-    console.log(`Server running at http://localhost:${PORT}/`);
+    console.log(`Server running at http://localhost:${PORT}/ (Caching Disabled)`);
 });

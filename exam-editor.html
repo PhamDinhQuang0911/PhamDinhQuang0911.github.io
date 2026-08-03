@@ -137,7 +137,7 @@
                 <li><button onclick="switchView('settings'); window.toggleSidebar()" id="menu-settings" class="sidebar-item active w-full text-left px-6 py-3 text-gray-600 hover:bg-gray-50 transition-colors flex items-center gap-3 text-sm"><i class="fa-solid fa-sliders w-5"></i> Cài đặt & Cấu hình</button></li>
                 <li><button onclick="switchView('editor'); window.toggleSidebar()" id="menu-editor" class="sidebar-item w-full text-left px-6 py-3 text-gray-600 hover:bg-gray-50 transition-colors flex items-center gap-3 text-sm"><i class="fa-solid fa-list-check w-5"></i> Nội dung câu hỏi</button></li>
                 <li><button onclick="switchView('stats'); window.toggleSidebar()" id="menu-stats" class="sidebar-item w-full text-left px-6 py-3 text-gray-600 hover:bg-gray-50 transition-colors flex items-center gap-3 text-sm"><i class="fa-solid fa-chart-pie w-5"></i> Thống kê & Báo cáo</button></li>
-                <li><button onclick="switchView('grading'); window.toggleSidebar()" id="menu-grading" class="sidebar-item w-full text-left px-6 py-3 text-gray-600 hover:bg-gray-50 transition-colors flex items-center gap-3 text-sm"><i class="fa-solid fa-pen-nib w-5"></i> Chấm bài Tự luận</button></li>
+                <li><button onclick="switchView('grading'); window.toggleSidebar()" id="menu-grading" class="sidebar-item w-full text-left px-6 py-3 text-gray-600 hover:bg-gray-50 transition-colors flex items-center gap-3 text-sm"><i class="fa-solid fa-pen-nib w-5"></i> Chấm bài</button></li>
             </ul>
         </nav>
         <div class="p-4 border-t border-gray-200 space-y-2">
@@ -544,6 +544,7 @@
                                     <th class="px-4 py-3 w-10 text-center"><input type="checkbox" id="selectAllGrading" onclick="window.toggleSelectAllGrading(this)" class="w-4 h-4 rounded border-gray-300"></th>
                                     <th class="px-6 py-3">Học sinh</th>
                                     <th class="px-6 py-3 text-center">Trạng thái</th>
+                                    <th class="px-6 py-3 text-center">Điểm</th>
                                     <th class="px-6 py-3 text-right">Ngày nộp</th>
                                     <th class="px-6 py-3 text-center">Hành động</th>
                                 </tr>
@@ -2729,6 +2730,7 @@
 
                 // 3. Xử lý thông tin lớp học và tạo bản đồ tên lớp
                 const examData = examRef.data();
+                window.examData = examData;
                 fullStudentList = [];
                 let classNameMap = {}; // Map lưu ID -> Tên lớp để tra cứu ngược
                 
@@ -2858,7 +2860,7 @@
                                 if (u !== undefined && u !== null) { 
                                     qStats[idx].total++; 
                                     let isCorrect = false; 
-                                    if (q.type === 'mc' && u === q.correct) isCorrect = true; 
+                                    if (q.type === 'mc' && String(u) === String(q.correct)) isCorrect = true; 
                                     else if (q.type === 'short' && q.answer && String(u).trim().toLowerCase() === String(q.answer).trim().toLowerCase()) isCorrect = true; 
                                     if (isCorrect) qStats[idx].correct++; 
                                 } 
@@ -2982,8 +2984,9 @@
                 
                 let statusBadge = '';
                 if (r.hasSubmitted) {
-                    if (r.gradedAt) statusBadge = '<span class="text-[10px] bg-green-100 text-green-700 px-1.5 rounded border border-green-200">Đã chấm</span>';
-                    else statusBadge = '<span class="text-[10px] bg-yellow-100 text-yellow-700 px-1.5 rounded border border-yellow-200">Chờ chấm</span>';
+                    const isMC = window.examData && window.examData.type === 'mc';
+                    if (r.gradedAt || isMC) statusBadge = '<span class="text-[10px] bg-green-100 text-green-700 px-1.5 rounded border border-green-200">Đã chấm</span>';
+                    else statusBadge = '<span class="text-[10px] bg-yellow-100 text-yellow-700 px-1.5 rounded border border-yellow-200">Cần chấm</span>';
                 }
 
                 const cheatBadge = (r.hasSubmitted && r.cheatCount > 0) 
@@ -3757,6 +3760,17 @@
             window.currentGradingCanvases = [];
 
             document.getElementById('gradingScore').value = attempt.score || '';
+              if (window.examData && window.examData.type === 'mc') {
+                  document.getElementById('gradingScore').readOnly = true;
+                  document.getElementById('gradingScore').className = "w-16 p-1 bg-transparent border-none text-center font-bold text-red-600 focus:outline-none";
+                  const saveBtn = document.getElementById('btnSaveGrade');
+                  if (saveBtn) saveBtn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> Lưu Nhận Xét';
+              } else {
+                  document.getElementById('gradingScore').readOnly = false;
+                  document.getElementById('gradingScore').className = "w-16 p-1 border border-gray-300 rounded text-center font-bold text-red-600 bg-white";
+                  const saveBtn = document.getElementById('btnSaveGrade');
+                  if (saveBtn) saveBtn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> Lưu kết quả chấm';
+              }
             document.getElementById('gradingFeedback').value = attempt.teacherFeedback || '';
             
             const saveBtn = document.getElementById('btnSaveGrade');
@@ -3795,7 +3809,7 @@
         };
 
         window.clearAllCanvases = () => {
-            if (confirm('Thầy/cô chắc chắn muốn xóa toàn bộ nét vẽ trên tất cả các trang?')) {
+            if (confirm('Thầy chắc chắn muốn xóa toàn bộ nét vẽ trên tất cả các trang?')) {
                 window.currentGradingCanvases.forEach(obj => {
                     obj.ctx.clearRect(0, 0, obj.canvas.width, obj.canvas.height);
                 });
@@ -3955,7 +3969,7 @@
 
         // --- HÀM AI (GEMINI) CHẤM ĐIỂM TỰ ĐỘNG ---
         
-        window.gradeSingleEssayWithAI = async (idx, answerKey, qContent, qSolution = '', mode = 'gradeOnly') => {
+        window.gradeSingleEssayWithAI = async (idx, answerKey, qContent, qSolution = '', mode = 'gradeOnly', customKey = null) => {
             qContent = decodeURIComponent(qContent);
             qSolution = decodeURIComponent(qSolution);
             const btnGrade = document.getElementById('btnAIGrade-' + idx);
@@ -3978,7 +3992,7 @@
             }
             
             // Lấy AI Key
-            let apiKey = window.aiKeys && window.aiKeys.length > 0 ? window.aiKeys[0] : null;
+            let apiKey = customKey || (window.aiKeys && window.aiKeys.length > 0 ? window.aiKeys[0] : null);
             if (!apiKey) {
                 try {
                     const snap = await getDoc(doc(db, "configurations", "ai_keys"));
@@ -4142,11 +4156,10 @@
             }
         };
 
-        window.gradeAllEssaysWithAI = async () => {
+        window.gradeMultipleEssaysWithAI = async () => {
             const essayQuestions = [];
             if (!window.gradingQuestions) return;
             
-            // Lọc tất cả các câu tự luận có ảnh bài làm
             window.gradingQuestions.forEach((q, idx) => {
                 if (q.type === 'essay') {
                     const ans = currentGradingAttempt.answers && currentGradingAttempt.answers[q.answerKey] ? currentGradingAttempt.answers[q.answerKey] : '';
@@ -4160,20 +4173,108 @@
                 return window.customAlert ? window.customAlert("Không có câu tự luận nào có bài làm để chấm!", "info") : alert("Không có bài làm tự luận để chấm!");
             }
 
-            if (window.showToast) window.showToast(`Bắt đầu chấm ${essayQuestions.length} câu tự luận...`, "info");
-
-            // Chấm song song tối đa 6 luồng (chunck = 6)
-            const chunkSize = 6;
-            for (let i = 0; i < essayQuestions.length; i += chunkSize) {
-                const chunk = essayQuestions.slice(i, i + chunkSize);
-                await Promise.all(chunk.map(item => {
-                    let encodedSolution = item.q.solution ? encodeURIComponent(item.q.solution) : '';
-                    let encodedContent = item.q.originalContent ? encodeURIComponent(item.q.originalContent) : encodeURIComponent(item.q.content);
-                    return window.gradeSingleEssayWithAI(item.idx, item.q.answerKey, encodedContent, encodedSolution, 'gradeAndDraw');
-                }));
+            // Fetch API keys if not present
+            if (!window.aiKeys || window.aiKeys.length === 0) {
+                try {
+                    const snap = await getDoc(doc(db, "configurations", "ai_keys"));
+                    if (snap.exists() && snap.data().keys) {
+                        window.aiKeys = snap.data().keys;
+                    }
+                } catch(e){}
             }
+            if (!window.aiKeys || window.aiKeys.length === 0) {
+                return window.customAlert ? window.customAlert("Vui lòng cài đặt API Key Gemini trong hệ thống.", "error") : alert("Vui lòng cài đặt API Key Gemini trong hệ thống.");
+            }
+
+            const progressOverlay = document.createElement('div');
+            progressOverlay.id = 'ai-progress-overlay';
+            progressOverlay.className = 'fixed inset-0 bg-black/60 z-50 flex items-center justify-center backdrop-blur-sm';
+            progressOverlay.innerHTML = `
+                <div class="bg-white p-8 rounded-2xl shadow-2xl max-w-sm w-full text-center">
+                    <i class="fa-solid fa-robot text-5xl text-purple-600 mb-4 animate-bounce"></i>
+                    <h3 class="text-xl font-bold text-gray-800 mb-2">AI Đang Chấm Bài</h3>
+                    <p id="ai-progress-text" class="text-gray-600 font-medium mb-4">Đang chuẩn bị...</p>
+                    <div class="w-full bg-gray-200 rounded-full h-3 mb-2 overflow-hidden">
+                        <div id="ai-progress-bar" class="bg-gradient-to-r from-purple-600 to-indigo-600 h-3 rounded-full transition-all duration-300" style="width: 0%"></div>
+                    </div>
+                    <p id="ai-progress-count" class="text-xs text-gray-500">0 / ${essayQuestions.length} câu</p>
+                </div>
+            `;
+            document.body.appendChild(progressOverlay);
+
+            let successCount = 0;
+            let currentIndex = 0;
+            const maxThreads = Math.min(window.aiKeys.length, 10);
+            const totalItems = essayQuestions.length;
             
-            if (window.showToast) window.showToast("Đã hoàn tất chấm điểm toàn bộ câu tự luận!", "success");
+            const processTask = async (workerId) => {
+                let workerKeyIndex = workerId % window.aiKeys.length;
+                
+                while (currentIndex < totalItems) {
+                    const i = currentIndex++;
+                    const item = essayQuestions[i];
+                    
+                    document.getElementById('ai-progress-text').innerText = `Đang xử lý (${successCount}/${totalItems})...`;
+                    document.getElementById('ai-progress-bar').style.width = `${(successCount / totalItems) * 100}%`;
+                    document.getElementById('ai-progress-count').innerText = `${successCount} / ${totalItems} câu`;
+                    
+                    let encodedSolution = item.q.solution ? encodeURIComponent(item.q.solution).replace(/'/g, "%27") : '';
+                    let encodedContent = (item.q.originalContent ? encodeURIComponent(item.q.originalContent) : encodeURIComponent(item.q.content)).replace(/'/g, "%27");
+                    
+                    // Ghi đè tạm apiKey gốc bằng key của luồng này nếu window.gradeSingleEssayWithAI dùng key mặc định
+                    // Wait, gradeSingleEssayWithAI dùng window.aiKeys[0] hoặc gọi AIGrader.
+                    // Để tối ưu, ta có thể modify gradeSingleEssayWithAI để nhận custom key, nhưng hiện tại AIGrader tự randomize key.
+                    // Tuy nhiên, AIGrader cho phép array keysToUse.
+                    // Để đúng yêu cầu: mội luồng dùng 1 key cố định, xoay vòng khi lỗi.
+                    let currentKey = window.aiKeys[workerKeyIndex];
+                    
+                    let success = false;
+                    for(let retry = 0; retry < window.aiKeys.length; retry++) {
+                        try {
+                            // Gọi gradeSingleEssayWithAI. Hàm này trong bản cập nhật hiện tại dùng apiKey đầu tiên.
+                            // Vì vậy ta nên truyền currentKey vào nếu sửa được.
+                            // Để gọn nhất, ta set window.aiKeys = [currentKey] tạm thời, nhưng đa luồng thì conflict.
+                            // Tốt nhất là tự gọi API trực tiếp ở đây, NHƯNG gradeSingleEssayWithAI còn phải xử lý ảnh (drawImage).
+                            // Nên ta sẽ thiết lập một global map để gradeSingleEssayWithAI đọc.
+                            window.__threadKeys = window.__threadKeys || {};
+                            window.__threadKeys[item.idx] = currentKey;
+                            
+                            await window.gradeSingleEssayWithAI(item.idx, item.q.answerKey, encodedContent, encodedSolution, 'gradeAndDraw', currentKey);
+                            successCount++;
+                            success = true;
+                            break;
+                        } catch(e) {
+                            console.error(`Luồng ${workerId} (Key ${currentKey.substring(0,5)}...) lỗi ở câu ${item.idx}:`, e);
+                            // Xoay key
+                            workerKeyIndex = (workerKeyIndex + 1) % window.aiKeys.length;
+                            currentKey = window.aiKeys[workerKeyIndex];
+                            await new Promise(r => setTimeout(r, 1500));
+                        }
+                    }
+                    if(!success) {
+                        console.error(`Câu ${item.idx} thất bại hoàn toàn sau khi thử tất cả keys.`);
+                    }
+                    
+                    // Nghỉ nhẹ 500ms
+                    await new Promise(r => setTimeout(r, 500));
+                }
+            };
+            
+            const threads = [];
+            for (let i = 0; i < Math.min(totalItems, maxThreads); i++) {
+                threads.push(processTask(i));
+            }
+            await Promise.all(threads);
+            
+            document.getElementById('ai-progress-bar').style.width = '100%';
+            document.getElementById('ai-progress-text').innerText = 'Hoàn tất!';
+            document.getElementById('ai-progress-count').innerText = `${totalItems} / ${totalItems} câu`;
+            
+            setTimeout(() => {
+                const overlay = document.getElementById('ai-progress-overlay');
+                if(overlay) overlay.remove();
+                if (window.showToast) window.showToast(`Đã chấm xong ${successCount}/${totalItems} câu tự luận!`, "success");
+            }, 1000);
         };
 
         window.gradeWithAI = async (mode = 'gradeOnly') => {
@@ -4486,7 +4587,7 @@
                 </details>
                 <div id="essayHeader" class="flex items-center justify-between mb-4 mt-6 hidden flex-wrap gap-2">
                     <h3 class="font-bold text-gray-700 text-lg"><i class="fa-solid fa-pen-nib mr-2 text-purple-600"></i>Phần Tự Luận</h3>
-                    <button onclick="window.gradeAllEssaysWithAI()" class="px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg font-bold shadow-md hover:shadow-lg flex items-center gap-2 text-sm transition-transform active:scale-95"><img src="https://upload.wikimedia.org/wikipedia/commons/8/8a/Google_Gemini_logo.svg" class="w-4 h-4 invert" alt="Gemini"> Chấm tất cả bằng AI</button>
+                    <button onclick="window.gradeMultipleEssaysWithAI()" class="px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg font-bold shadow-md hover:shadow-lg flex items-center gap-2 text-sm transition-transform active:scale-95"><img src="https://upload.wikimedia.org/wikipedia/commons/8/8a/Google_Gemini_logo.svg" class="w-4 h-4 invert" alt="Gemini"> Chấm tất cả bằng AI</button>
                 </div>
                 <div id="essayContainer" class="flex flex-col gap-4"></div>
             `;
@@ -4557,7 +4658,11 @@
                 
                 let u = undefined;
                 if (q.type === 'essay') {
-                    u = answers[q.answerKey]; // Fetch from specific tl_upload_X
+                    u = answers[q.answerKey];
+                    // [FIX] Fallback for legacy submissions where mixed essay images were saved to 'tl_upload'
+                    if (!u && q.answerKey === 'tl_upload_0') u = answers['tl_upload'];
+                    if (!u && q.answerKey === 0) u = answers['tl_upload'] || answers[0];
+                    if (!u && q.answerKey === 'tl_upload') u = answers[0];
                 } else {
                     // [FIX] Đề có ĐẢO THỨ TỰ CÂU: đáp án học sinh được lưu theo vị trí HIỂN THỊ
                     // trên máy học sinh, nên phải tra ngược qua questionOrder mới đúng câu.
@@ -4573,19 +4678,23 @@
                 // chấp nhận dấu phẩy/chấm thập phân, so số nếu cả hai là số (0,5 = 0.5 = .5)
                 const normShort = (v) => String(v ?? '').trim().toLowerCase().replace(/\s+/g, ' ').replace(/,/g, '.');
                 const shortMatch = (a, b) => {
-                    const na = normShort(a), nb = normShort(b);
-                    if (na === '' || nb === '') return false;
-                    if (na === nb) return true;
-                    // Nếu cả hai đều là SỐ thuần (vd 0.5 và .5, hay 2.0 và 2) thì so theo giá trị
-                    const isNum = (t) => /^[-+]?\d*\.?\d+$/.test(t);
-                    if (isNum(na) && isNum(nb)) return Math.abs(parseFloat(na) - parseFloat(nb)) < 1e-9;
-                    return false;
-                };
+    const na = normShort(a), nb = normShort(b);
+    if (na === '' || nb === '') return false;
+    if (na === nb) return true;
+    
+    const numA = na.replace(/\s+/g, '');
+    const numB = nb.replace(/\s+/g, '');
+    const isNum = (t) => /^[-+]?\d*\.?\d+$/.test(t);
+    if (isNum(numA) && isNum(numB)) return Math.abs(parseFloat(numA) - parseFloat(numB)) < 1e-9;
+    if (numA === numB) return true;
+    
+    return false;
+};
 
                 let isCorrect = false; 
                 let maxPoint = parseFloat(q.point) || 0;
                 
-                if (q.type === 'mc' && u === q.correct) isCorrect = true;
+                if (q.type === 'mc' && String(u) === String(q.correct)) isCorrect = true;
                 else if (q.type === 'short' && q.answer && shortMatch(u, q.answer)) isCorrect = true;
                 else if (q.type === 'tf') {
                     if (Array.isArray(u) && q.statements) {
@@ -4677,8 +4786,8 @@
                         studentAnswerHtml = `<div class="p-4 text-gray-400 italic text-sm flex items-center gap-1"><i class="fa-regular fa-folder-open"></i> Học sinh không nộp bài làm bằng ảnh cho câu này.</div>`;
                     }
 
-                    let encodedSolution = q.solution ? encodeURIComponent(q.solution) : '';
-                    let encodedContent = q.originalContent ? encodeURIComponent(q.originalContent) : encodeURIComponent(q.content);
+                    let encodedSolution = q.solution ? encodeURIComponent(q.solution).replace(/'/g, "%27") : '';
+                    let encodedContent = (q.originalContent ? encodeURIComponent(q.originalContent) : encodeURIComponent(q.content)).replace(/'/g, "%27");
                     
                     answerHtml = `
                         ${solutionToggleHtml}
@@ -4697,14 +4806,18 @@
                         <div id="ai-feedback-${idx}" class="p-4 bg-indigo-50/70 border-t border-indigo-100 hidden">
                             <div class="flex items-center justify-between mb-2">
                                 <div class="text-xs font-bold text-indigo-800 uppercase flex items-center gap-1.5">
-                                    <i class="fa-solid fa-comment-dots text-indigo-600"></i> Nhận xét & Đánh giá của Thầy/Cô cho câu này:
+                                    <i class="fa-solid fa-comment-dots text-indigo-600"></i> Nhận xét & Đánh giá của Thầy cho câu này:
                                 </div>
                                 <span class="text-[10px] text-gray-400 font-medium">Có thể chỉnh sửa bên dưới</span>
                             </div>
-                            <textarea id="ai-feedback-input-${idx}" rows="3" 
-                                class="form-textarea w-full text-sm text-gray-800 p-3 rounded-xl border border-indigo-200 focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 bg-white shadow-sm leading-relaxed"
-                                placeholder="Nhập nhận xét chi tiết cho câu này..."
-                                oninput="document.getElementById('save-btn-${idx}').classList.remove('hidden'); document.getElementById('save-btn-${idx}').classList.add('flex'); document.getElementById('save-status-${idx}').classList.add('hidden');"></textarea>
+                            <div class="relative group">
+                                  <textarea id="ai-feedback-input-${idx}" rows="3" 
+                                      class="form-textarea w-full text-sm text-gray-800 p-3 rounded-xl border border-indigo-200 focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 bg-white shadow-sm leading-relaxed"
+                                      placeholder="Nhập nhận xét thủ công của giáo viên tại đây, hoặc bấm nút Chấm bằng AI để máy điền tự động..."
+                                      oninput="document.getElementById('save-btn-${idx}').classList.remove('hidden'); document.getElementById('save-btn-${idx}').classList.add('flex'); document.getElementById('save-status-${idx}').classList.add('hidden');"></textarea>
+                                  <div id="ai-feedback-preview-${idx}" class="hidden w-full min-h-[5rem] text-sm text-gray-800 p-3 rounded-xl border border-indigo-200 bg-white shadow-sm leading-relaxed whitespace-pre-wrap"></div>
+                                  <button type="button" onclick="window.toggleIndividualMathPreview(${idx})" class="absolute top-2 right-2 text-gray-400 hover:text-indigo-600 z-10 bg-white/90 p-1.5 rounded-lg shadow-sm transition-all opacity-0 group-hover:opacity-100" title="Xem trước Công thức Toán (MathJax)"><i class="fa-solid fa-eye" id="icon-preview-${idx}"></i></button>
+                              </div>
                             <div class="mt-2 flex items-center justify-between">
                                 <button type="button" id="save-btn-${idx}" onclick="window.saveSingleEssayFeedback(${idx}, '${q.answerKey || idx}')" 
                                         class="hidden px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-bold hover:bg-indigo-700 transition-all items-center gap-1.5 shadow-sm active:scale-95">
@@ -4914,7 +5027,7 @@
                         rawMaxMcq += pt;
                         const u = answers[q.answerKey !== undefined ? q.answerKey : idx];
                         let isCorrect = false;
-                        if (q.type === 'mc' && u === q.correct) isCorrect = true;
+                        if (q.type === 'mc' && String(u) === String(q.correct)) isCorrect = true;
                         else if (q.type === 'short' && q.answer && String(u).trim().toLowerCase() === String(q.answer).trim().toLowerCase()) isCorrect = true;
                         else if (q.type === 'tf' && Array.isArray(u) && q.statements) {
                             const correctCount = q.statements.reduce((acc, s, i) => acc + (u[i] === s.isTrue ? 1 : 0), 0);
@@ -5008,7 +5121,7 @@
                             if (u !== undefined && u !== null && u !== '') mcqAnswered++;
 
                             let isCorrect = false;
-                            if (q.type === 'mc' && u === q.correct) isCorrect = true;
+                            if (q.type === 'mc' && String(u) === String(q.correct)) isCorrect = true;
                             else if (q.type === 'short' && q.answer && String(u).trim().toLowerCase() === String(q.answer).trim().toLowerCase()) isCorrect = true;
                             else if (q.type === 'tf' && Array.isArray(u) && q.statements) {
                                 const correctCount = q.statements.reduce((acc, s, i) => acc + (u[i] === s.isTrue ? 1 : 0), 0);
@@ -5019,7 +5132,7 @@
                     });
                 }
 
-                const prompt = `Bạn là một giáo viên dạy Toán chuyên nghiệp, chân thành và sâu sắc. Hãy phân tích kết quả bài thi của học sinh "${stName}" dưới đây để viết 1 LỜI PHÊ VÀ NHẬN XÉT TỔNG THỂ CỰC KỲ CHI TIẾT (khoảng 4-6 câu văn tự nhiên, tình cảm, xưng Thầy/Cô, tuyệt đối KHÔNG gạch đầu dòng, KHÔNG chào hỏi rườm rà).
+                const prompt = `Bạn là một giáo viên dạy Toán chuyên nghiệp, chân thành và sâu sắc. Hãy phân tích kết quả bài thi của học sinh "${stName}" dưới đây để viết 1 LỜI PHÊ VÀ NHẬN XÉT TỔNG THỂ CỰC KỲ CHI TIẾT (khoảng 4-6 câu văn tự nhiên, tình cảm, xưng Thầy, tuyệt đối KHÔNG gạch đầu dòng, KHÔNG chào hỏi rườm rà).
 
 THÔNG TIN BÀI LÀM CỦA HỌC SINH:
 - Mức độ hoàn thành Trắc nghiệm: Đã trả lời ${mcqAnswered}/${mcqCount} câu, làm đúng ${mcqCorrect}/${mcqCount} câu.
@@ -5031,17 +5144,40 @@ YÊU CẦU NỘI DUNG LỜI PHÊ:
 2. Nhận xét chi tiết phần bài làm tự luận (làm đúng hay sai, còn vướng mắc/sai sót ở điểm nào dựa trên nhận xét từng bài).
 3. Đưa ra lời khuyên cụ thể và hướng phấn đấu để học sinh cải thiện tốt hơn ở bài tiếp theo.`;
 
-                const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${apiKey}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        contents: [{ parts: [{ text: prompt }] }]
-                    })
-                });
+                let text = '';
+                let success = false;
+                let keysToTry = window.aiKeys && window.aiKeys.length > 0 ? window.aiKeys : [apiKey];
+                
+                for (let k = 0; k < keysToTry.length; k++) {
+                    try {
+                        const currentKey = keysToTry[k];
+                        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${currentKey}`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                contents: [{ parts: [{ text: prompt }] }]
+                            })
+                        });
 
-                if (!res.ok) throw new Error("Lỗi kết nối AI Gemini.");
-                const data = await res.json();
-                const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+                        if (res.status === 429) {
+                            console.warn(`Key ${currentKey} bị lỗi 429. Đang thử key khác...`);
+                            if (k < keysToTry.length - 1) {
+                                await new Promise(r => setTimeout(r, 1000));
+                                continue;
+                            } else {
+                                throw new Error("Tất cả API Key đều bị quá tải (Lỗi 429). Vui lòng thử lại sau.");
+                            }
+                        }
+
+                        if (!res.ok) throw new Error("Lỗi kết nối AI Gemini.");
+                        const data = await res.json();
+                        text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+                        success = true;
+                        break; // Nếu thành công thì thoát vòng lặp
+                    } catch (err) {
+                        if (k === keysToTry.length - 1) throw err;
+                    }
+                }
 
                 if (text.trim()) {
                     const ta = document.getElementById('gradingFeedback');
@@ -5337,13 +5473,18 @@ YÊU CẦU NỘI DUNG LỜI PHÊ:
                         });
                     }
 
-                    // 2. Cố gắng xóa kết quả thi cũ (bước phụ - lỗi cũng không ảnh hưởng quyền làm lại)
-                    try {
-                        const qRes = query(collection(db, "results"), where("examId", "==", currentExamId), where("studentId", "==", studentId));
-                        const snapRes = await getDocs(qRes);
-                        await Promise.all(snapRes.docs.map(d => deleteDoc(d.ref)));
-                    } catch (delErr) {
-                        console.warn("Không xóa được bài cũ (vẫn ổn nhờ vé approved):", delErr);
+                    // 2. Cố gắng xóa kết quả thi cũ (bước phụ)
+                    const isHomeworkOrMixed = window.examData && (window.examData.type === 'homework' || window.examData.type === 'mixed');
+                    if (!isHomeworkOrMixed) {
+                        try {
+                            const qRes = query(collection(db, "results"), where("examId", "==", currentExamId), where("studentId", "==", studentId));
+                            const snapRes = await getDocs(qRes);
+                            await Promise.all(snapRes.docs.map(d => deleteDoc(d.ref)));
+                        } catch (delErr) {
+                            console.warn("Không xóa được bài cũ:", delErr);
+                        }
+                    } else {
+                        console.log("Giữ lại bài cũ cho bài tập/hỗn hợp để học sinh có thể chọn giữ/xóa.");
                     }
 
                     window.showToast(`Đã cấp quyền cho ${studentName}`, "success");
@@ -5748,7 +5889,8 @@ YÊU CẦU NỘI DUNG LỜI PHÊ:
 
             filteredData.forEach(r => {
                 const dateStr = new Date(r.submittedAt).toLocaleString('vi-VN');
-                const statusBadge = r.gradedAt ? '<span class="bg-green-100 text-green-700 px-2 py-1 rounded text-xs font-bold">Đã chấm</span>' : '<span class="bg-yellow-100 text-yellow-700 px-2 py-1 rounded text-xs font-bold animate-pulse">Cần chấm</span>';
+                const isMC = window.examData && window.examData.type === 'mc';
+                  const statusBadge = (r.gradedAt || isMC) ? '<span class="bg-green-100 text-green-700 px-2 py-1 rounded text-xs font-bold">Đã chấm</span>' : '<span class="bg-yellow-100 text-yellow-700 px-2 py-1 rounded text-xs font-bold animate-pulse">Cần chấm</span>';
                 const lastAttempt = r.attempts ? r.attempts[r.attempts.length - 1] : r;
 
                 const realName = r.name || r.displayName || (r.studentName && !r.studentName.includes('@hocsinh.com') ? r.studentName : '') || r.studentName || 'Học sinh';
@@ -5768,10 +5910,11 @@ YÊU CẦU NỘI DUNG LỜI PHÊ:
                             </div>
                         </td>
                         <td class="px-6 py-3 text-center">${statusBadge}</td>
+                          <td class="px-6 py-3 text-center font-bold text-red-600">${r.hasSubmitted && r.score !== undefined ? r.score : '--'}</td>
                         <td class="px-6 py-3 text-right text-xs text-gray-500">${dateStr}</td>
                         <td class="px-6 py-3 text-center">
                             <div class="flex items-center justify-center gap-2">
-                                <button onclick='window.openGrading(${JSON.stringify(lastAttempt).replace(/'/g, "&apos;")})' class="px-3.5 py-1.5 ${r.gradedAt ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-orange-500 hover:bg-orange-600'} text-white rounded-lg text-xs font-bold shadow-sm transition-all flex items-center gap-1.5"><i class="fa-solid ${r.gradedAt ? 'fa-rotate-right' : 'fa-pen-nib'}"></i> ${r.gradedAt ? 'Chấm lại' : 'Chấm bài'}</button>
+                                <button onclick='window.openGrading(${JSON.stringify(lastAttempt).replace(/'/g, "&apos;")})' class="px-3.5 py-1.5 ${window.examData && window.examData.type === 'mc' ? 'bg-blue-600 hover:bg-blue-700' : (r.gradedAt ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-orange-500 hover:bg-orange-600')} text-white rounded-lg text-xs font-bold shadow-sm transition-all flex items-center gap-1.5"><i class="fa-solid ${window.examData && window.examData.type === 'mc' ? 'fa-eye' : (r.gradedAt ? 'fa-rotate-right' : 'fa-pen-nib')}"></i> ${window.examData && window.examData.type === 'mc' ? 'Xem' : (r.gradedAt ? 'Chấm lại' : 'Chấm bài')}</button>
                                 <button onclick="window.approveReattempt('${stId}', ${reqId}, '${escapedName}')" class="px-3 py-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg text-xs font-bold border border-blue-200 shadow-sm transition-all flex items-center gap-1.5" title="Cấp quyền làm lại (Xóa kết quả cũ)"><i class="fa-solid fa-rotate-right"></i> Cho làm lại</button>
                             </div>
                         </td>
@@ -5840,7 +5983,11 @@ YÊU CẦU NỘI DUNG LỜI PHÊ:
 
                     const result = (stId && statsMap[stId]) || Object.values(statsMap).find(r => {
                         const rEmail = (r.email || '').toLowerCase().trim();
-                        return (stEmail && rEmail && stEmail === rEmail) || (stUserEmail && rEmail && stUserEmail === rEmail);
+                        const rName = (r.studentName || r.name || '').toLowerCase().trim();
+                        const stName = (st.name || st.studentName || '').toLowerCase().trim();
+                        return (stEmail && rEmail && stEmail === rEmail) || 
+                               (stUserEmail && rEmail && stUserEmail === rEmail) ||
+                               (stName && rName && stName === rName);
                     });
 
                     if (result) {
@@ -5969,9 +6116,20 @@ YÊU CẦU NỘI DUNG LỜI PHÊ:
         };
 
         window.sendSelectedResultsZalo = async (event) => {
-            const selected = Array.from(document.querySelectorAll('.grading-student-checkbox:checked')).map(cb => JSON.parse(cb.value));
+            let selected = Array.from(document.querySelectorAll('.grading-student-checkbox:checked')).map(cb => JSON.parse(cb.value));
+            
+            // Lọc ra những học sinh đã được chấm (hoặc là đề trắc nghiệm)
+            const isMC = window.examData && window.examData.type === 'mc';
+            const validSelected = selected.filter(att => att.gradedAt || isMC);
+            
+            if (validSelected.length > 0 && validSelected.length < selected.length) {
+                window.showToast("Đã tự động loại bỏ những học sinh chưa được chấm ra khỏi danh sách gửi!", "warning");
+            }
+            
+            selected = validSelected;
+
             if (selected.length === 0) {
-                window.showToast("Vui lòng chọn ít nhất một học sinh!", "error");
+                window.showToast("Vui lòng chọn ít nhất một học sinh đã ĐƯỢC CHẤM để gửi kết quả!", "error");
                 return;
             }
             
@@ -6085,7 +6243,29 @@ YÊU CẦU NỘI DUNG LỜI PHÊ:
                     }
 
                     // 2. Thống kê Tự luận (Essay)
-                    const totalTl = examData.tlQuestions ? examData.tlQuestions.length : 0;
+                    let totalTl = 0;
+                    let tlDoneCount = 0;
+                    if (examData.type === 'mixed' && examData.tlQuestions) {
+                        totalTl = examData.tlQuestions.length;
+                        examData.tlQuestions.forEach((q, i) => {
+                            if (att.answers && att.answers['tl_upload_' + i] && att.answers['tl_upload_' + i].trim() !== '') {
+                                tlDoneCount++;
+                            }
+                        });
+                    } else if (examData.type === 'essay' || examData.type === 'homework') {
+                        totalTl = examData.questions ? examData.questions.length : 0;
+                        if (examData.questions) {
+                            examData.questions.forEach((q, i) => {
+                                const ans = att.answers && att.answers[q.answerKey !== undefined ? q.answerKey : i];
+                                if (ans && String(ans).trim() !== '') {
+                                    tlDoneCount++;
+                                }
+                            });
+                        }
+                    } else if (examData.tlQuestions) {
+                        totalTl = examData.tlQuestions.length;
+                    }
+
                     const maxTlScore = examData.tlScore !== undefined ? Number(examData.tlScore) : 100;
                     let essayScore = 0;
                     if (att.essayScore !== undefined) {
@@ -6116,7 +6296,7 @@ YÊU CẦU NỘI DUNG LỜI PHÊ:
                     if (totalTl > 0) {
                         if (totalMC > 0) contentLines.push(``);
                         contentLines.push(`✍️ PHẦN TỰ LUẬN:`);
-                        contentLines.push(`• Số câu tự luận: ${totalTl} câu`);
+                        contentLines.push(`• Số câu đã làm: ${tlDoneCount}/${totalTl} câu`);
                         contentLines.push(`• Điểm tự luận: ${essayScore}/${maxTlScore} điểm`);
                     }
 

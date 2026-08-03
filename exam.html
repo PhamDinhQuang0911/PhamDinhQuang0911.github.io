@@ -782,6 +782,22 @@
         async function startExam(isResume) {
             // [MỚI] NẾU LÀ HOMEWORK/MIXED, CHUYỂN HƯỚNG SANG GIAO DIỆN LÀM BÀI TẬP (BỎ QUA UI TRẮC NGHIỆM)
             if (examData.type === 'homework' || examData.type === 'mixed') {
+                if (!isResume && window.examHistory && window.examHistory.length > 0) {
+                    const keepOldAnswers = await window.customConfirm("Giáo viên đã cấp quyền làm lại bài.\n\n- Bấm 'OK' nếu em muốn GIỮ LẠI BÀI CŨ để sửa tiếp.\n- Bấm 'Cancel/Hủy' để XÓA TRẮNG làm mới hoàn toàn.");
+                    if (keepOldAnswers) {
+                        userAnswers = window.examHistory[0].answers || {};
+                        window.isEditMode = true;
+                        window.isReviewMode = false;
+                        window.currentResultId = window.examHistory[0].id;
+                    } else {
+                        userAnswers = {};
+                        localStorage.removeItem(`ans_${currentUser.uid}_${examId}`);
+                        // Vẫn dùng chế độ update để đè lên file cũ, tránh tạo file rác mới
+                        window.isEditMode = true;
+                        window.isReviewMode = false;
+                        window.currentResultId = window.examHistory[0].id;
+                    }
+                }
                 renderHomeworkView();
                 return;
             }
@@ -886,6 +902,15 @@
             const attemptRef = doc(db, "exam_attempts", `${currentUser.uid}_${examId}`);
             let startTimeMs;
 
+            
+            let keepOldAnswers = false;
+            const isHomeworkOrMixed = examData.type === 'homework' || examData.type === 'mixed';
+            if (isHomeworkOrMixed && !isResume && window.examHistory && window.examHistory.length > 0) {
+                keepOldAnswers = await window.customConfirm("Giáo viên đã cấp quyền làm lại bài.\n\n- Bấm 'OK' nếu em muốn GIỮ LẠI BÀI CŨ để sửa tiếp.\n- Bấm 'Cancel/Hủy' để XÓA TRẮNG làm mới hoàn toàn.");
+                window.isEditMode = true;
+                window.currentResultId = window.examHistory[0].id;
+            }
+
             if (isResume) {
                 const snap = await getDoc(attemptRef);
                 if(snap.exists()) {
@@ -903,7 +928,12 @@
             
             if (!isResume) {
                 startTimeMs = Date.now();
-                userAnswers = {};
+                if (typeof keepOldAnswers !== 'undefined' && keepOldAnswers) {
+                    userAnswers = window.examHistory[0].answers || {};
+                } else {
+                    userAnswers = {};
+                    localStorage.removeItem(`ans_${currentUser.uid}_${examId}`);
+                }
                 timeLeft = durationMinutes * 60;
                 await setDoc(attemptRef, {
                     examId: examId,
@@ -1311,8 +1341,13 @@ const shortMatch = (a, b) => {
     const na = normShort(a), nb = normShort(b);
     if (na === '' || nb === '') return false;
     if (na === nb) return true;
+    
+    const numA = na.replace(/\s+/g, '');
+    const numB = nb.replace(/\s+/g, '');
     const isNum = (t) => /^[-+]?\d*\.?\d+$/.test(t);
-    if (isNum(na) && isNum(nb)) return Math.abs(parseFloat(na) - parseFloat(nb)) < 1e-9;
+    if (isNum(numA) && isNum(numB)) return Math.abs(parseFloat(numA) - parseFloat(numB)) < 1e-9;
+    if (numA === numB) return true;
+    
     return false;
 };
 
@@ -1725,8 +1760,13 @@ const shortMatch = (a, b) => {
     const na = normShort(a), nb = normShort(b);
     if (na === '' || nb === '') return false;
     if (na === nb) return true;
+    
+    const numA = na.replace(/\s+/g, '');
+    const numB = nb.replace(/\s+/g, '');
     const isNum = (t) => /^[-+]?\d*\.?\d+$/.test(t);
-    if (isNum(na) && isNum(nb)) return Math.abs(parseFloat(na) - parseFloat(nb)) < 1e-9;
+    if (isNum(numA) && isNum(numB)) return Math.abs(parseFloat(numA) - parseFloat(numB)) < 1e-9;
+    if (numA === numB) return true;
+    
     return false;
 };
 

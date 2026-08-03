@@ -696,6 +696,8 @@
                 <div class="flex gap-2 mt-2 border-t pt-4">
                     <input type="text" id="newAiKey" class="flex-1 px-4 py-2 border rounded-xl focus:ring-2 focus:ring-purple-200 outline-none text-sm font-mono" placeholder="Nhập API Key mới...">
                     <button onclick="window.addAiKey()" class="px-4 py-2 bg-purple-600 text-white rounded-xl font-bold shadow hover:bg-purple-700 text-sm"><i class="fa-solid fa-plus"></i> Thêm</button>
+                    <button onclick="document.getElementById('apiFileInput').click()" class="px-4 py-2 bg-indigo-600 text-white rounded-xl font-bold shadow hover:bg-indigo-700 text-sm whitespace-nowrap"><i class="fa-solid fa-upload"></i> Tải file (.txt)</button>
+                    <input type="file" id="apiFileInput" accept=".txt" class="hidden" onchange="window.uploadAiKeyFile(event)">
                 </div>
             </div>
             
@@ -4222,6 +4224,34 @@ function renderTagFilterUI() {
                         <button onclick="window.removeAiKey(${idx})" class="text-red-500 hover:text-red-700 bg-red-50 p-1.5 rounded-lg"><i class="fa-solid fa-trash"></i></button>
                     </div>`;
             });
+        };
+
+        window.uploadAiKeyFile = (event) => {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                const text = e.target.result;
+                const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l !== '');
+                if (lines.length > 0) {
+                    let added = 0;
+                    lines.forEach(key => {
+                        if (!window.aiKeys.includes(key)) {
+                            window.aiKeys.push(key);
+                            added++;
+                        }
+                    });
+                    if (added > 0) {
+                        await setDoc(doc(db, "configurations", "ai_keys"), { keys: window.aiKeys }, { merge: true });
+                        window.renderAiKeys();
+                        window.showNotification(`Đã thêm ${added} API Key từ file!`, "success");
+                    } else {
+                        window.showNotification("Không tìm thấy API Key mới nào trong file.", "info");
+                    }
+                }
+                event.target.value = ''; // reset
+            };
+            reader.readAsText(file);
         };
 
         window.addAiKey = async () => {
