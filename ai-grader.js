@@ -195,14 +195,14 @@ QUAN TRỌNG: BẮT BUỘC trả về chuỗi JSON nguyên gốc, tuân thủ C�
                         console.warn(`Lỗi ${resData.error.code} (Lần ${i + 1}/${maxRetries}): Đang thử lại sau 2 giây với Key khác...`);
                         if (i < maxRetries - 1) {
                             if(window.showToast) window.showToast(`Hệ thống AI đang bận. Đang đổi Key và thử lại lần ${i + 1}...`, "info");
-                            await new Promise(res => setTimeout(res, 2000));
+                            await new Promise(res => setTimeout(res, Math.min(8000, 1000 * (2 ** i)) + Math.random() * 500));
                             continue;
                         }
                     }
                     return resData;
                 } catch (e) {
                     if (i === maxRetries - 1) throw e;
-                    await new Promise(res => setTimeout(res, 2000));
+                    await new Promise(res => setTimeout(res, Math.min(8000, 1000 * (2 ** i)) + Math.random() * 500));
                 }
             }
         };
@@ -215,7 +215,11 @@ QUAN TRỌNG: BẮT BUỘC trả về chuỗi JSON nguyên gốc, tuân thủ C�
         };
 
         try {
-            let resData = await fetchWithRetry(payload, "gemini-3.5-flash", 3);
+            let resData = await fetchWithRetry(payload, "gemini-3.6-flash", 3);
+            if (resData && resData.error) {
+                console.warn('Gemini 3.6 Flash không khả dụng, chuyển sang Gemini 3.5 Flash.');
+                resData = await fetchWithRetry(payload, "gemini-3.5-flash", 3);
+            }
             if (resData.error) {
                 throw new Error(`(${resData.error.code}): ${resData.error.message}`);
             }

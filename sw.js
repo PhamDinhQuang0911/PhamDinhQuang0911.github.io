@@ -14,7 +14,7 @@
  * (network-first) nhưng nên tăng khi đổi styles.css/utils.js để chắc chắn.
  */
 
-const VERSION = 'qmath-v8';
+const VERSION = 'qmath-v9';
 const STATIC_CACHE = `${VERSION}-static`;
 const PAGE_CACHE = `${VERSION}-pages`;
 const CDN_CACHE = `${VERSION}-cdn`;
@@ -66,6 +66,12 @@ self.addEventListener('fetch', (event) => {
   if (req.method !== 'GET') return; // không đụng POST/PUT...
 
   const url = new URL(req.url);
+
+  // Khi phát triển trên localhost luôn lấy trực tiếp từ máy chủ.
+  // Không trả giao diện cũ từ cache nếu server đã dừng.
+  if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') {
+    return;
+  }
 
   // 1. API / dữ liệu động: để trình duyệt tự xử lý, SW không can thiệp
   if (NEVER_CACHE_HOSTS.some((h) => url.hostname === h || url.hostname.endsWith('.' + h) || url.hostname.includes(h))) {

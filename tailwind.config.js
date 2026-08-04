@@ -15,7 +15,7 @@ module.exports = {
   // không nhìn thấy được -> phải khai báo safelist để không bị thiếu khi build.
   safelist: [
     {
-      pattern: /^(bg|text|border)-(gray|green|blue|red|orange)-(50|100|200|500|600)$/,
+      pattern: /^(bg|text|border)-(gray|green|blue|red|orange|primary)-(50|100|200|500|600)$/,
     },
   ],
   theme: {
@@ -28,16 +28,18 @@ module.exports = {
         dark: "#111827",
         darker: "#030712",
         primary: {
-          DEFAULT: "#0F766E",
-          50: "#eff6ff",
-          100: "#dbeafe",
-          500: "#3b82f6",
-          600: "#2563eb",
-          700: "#1d4ed8",
+          50: "rgb(var(--color-primary-50) / <alpha-value>)",
+          100: "rgb(var(--color-primary-100) / <alpha-value>)",
+          200: "rgb(var(--color-primary-200) / <alpha-value>)",
+          500: "rgb(var(--color-primary-500) / <alpha-value>)",
+          600: "rgb(var(--color-primary-600) / <alpha-value>)",
+          700: "rgb(var(--color-primary-700) / <alpha-value>)",
+          800: "rgb(var(--color-primary-800) / <alpha-value>)",
+          DEFAULT: "rgb(var(--color-primary-600) / <alpha-value>)",
         },
       },
       fontFamily: {
-        sans: ["Nunito", "sans-serif"],
+        sans: ["Inter", "sans-serif"],
       },
       animation: {
         float: "float 3s ease-in-out infinite",

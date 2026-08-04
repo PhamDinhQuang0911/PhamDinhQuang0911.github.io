@@ -64,7 +64,7 @@
 
     function addHeroDecor() {
         // Banner học sinh hoặc banner giáo viên
-        const hero = document.querySelector('.from-teal-600.to-blue-600, .from-blue-500.to-pink-500');
+        const hero = document.querySelector('.from-teal-600, .from-blue-500, .from-primary-600, .from-primary-700');
         if (!hero || hero.querySelector('.qm-season-decor')) return;
         const decor = document.createElement('div');
         decor.className = 'qm-season-decor';

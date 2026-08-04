@@ -46,6 +46,34 @@
         return ctx;
     }
 
+    function collectLeafCandidates(tree, defaults = {}) {
+        const leaves = [];
+        const requiredIds = new Set(Object.values(defaults).filter(Boolean));
+        const walk = (nodes, path = []) => {
+            for (const node of nodes || []) {
+                const nextPath = [...path, { id: node.id, name: node.name, level: node.level }];
+                if (node.children?.length) walk(node.children, nextPath);
+                else if ([...requiredIds].every(id => nextPath.some(part => part.id === id))) leaves.push({ id: node.id, path: nextPath });
+            }
+        };
+        walk(tree);
+        if (!leaves.length && requiredIds.size) return collectLeafCandidates(tree, {});
+        return leaves;
+    }
+
+    function buildLeafCandidateContext(candidates) {
+        let context = '--- CÁC ID DẠNG HỢP LỆ (chỉ được chọn đúng một ID trong danh sách này) ---\n';
+        for (const candidate of candidates) {
+            context += `[${candidate.id}] ${candidate.path.map(part => part.name).join(' > ')}\n`;
+        }
+        context += `\n--- Định nghĩa mức độ ---\n`;
+        context += `[N] Nhận biết: nhớ, nhận ra, tính trực tiếp, 1-4 điểm.\n`;
+        context += `[H] Thông hiểu: giải thích, so sánh, áp dụng quen thuộc, 3-7 điểm.\n`;
+        context += `[V] Vận dụng: tình huống mới, phân tích hoặc tính nhiều bước, 7-8.4 điểm.\n`;
+        context += `[C] Vận dụng cao: tổng hợp, sáng tạo, biện luận phức tạp, 8.5-10 điểm.\n`;
+        return context;
+    }
+
     /**
      * Duyệt cây tìm node theo id, trả về full path [{id,name}]
      */
@@ -89,9 +117,10 @@
 
     const delay = ms => new Promise(res => setTimeout(res, ms));
 
-    async function callGeminiApi(prompt, systemPrompt, apiKey, modelId) {
+    async function callGeminiApi(prompt, systemPrompt, apiKeys, modelId, keyState) {
         const model = modelId || 'gemini-3.5-flash';
-        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+        const pool = [...new Set((Array.isArray(apiKeys) ? apiKeys : [apiKeys]).filter(Boolean))];
+        if (!pool.length) throw new Error('Không có API key khả dụng.');
 
         const payload = {
             contents: [{ parts: [{ text: prompt }] }],
@@ -110,18 +139,40 @@
             }
         };
 
-        let retries = 3;
-        let wait = 1000;
+        let retries = Math.max(6, pool.length * 2);
+        let wait = 900;
+        keyState.blocked ||= new Set();
+        keyState.cooldowns ||= new Map();
         while (retries > 0) {
+            let usable = pool.map((_key, index) => index).filter(index => !keyState.blocked.has(index) && (keyState.cooldowns.get(index) || 0) <= Date.now());
+            if (!usable.length) {
+                const remaining = pool.map((_key, index) => index).filter(index => !keyState.blocked.has(index));
+                if (!remaining.length) throw new Error('Tất cả API key đều bị từ chối (403).');
+                const nextReady = Math.min(...remaining.map(index => keyState.cooldowns.get(index) || Date.now()));
+                await delay(Math.max(300, nextReady - Date.now()) + Math.floor(Math.random() * 250));
+                usable = remaining;
+            }
+            const keyIndex = usable[keyState.cursor++ % usable.length];
+            const apiKey = pool[keyIndex];
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
             try {
                 const response = await fetch(apiUrl, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
                     body: JSON.stringify(payload)
                 });
 
-                if (response.status === 429 || response.status >= 500) {
-                    throw new Error(`HTTP error ${response.status}`);
+                if (!response.ok) {
+                    const retryAfter = Number(response.headers.get('retry-after') || 0) * 1000;
+                    let detail = '';
+                    try {
+                        const errorBody = await response.json();
+                        detail = errorBody?.error?.message || '';
+                    } catch (_) { /* response không phải JSON */ }
+                    const error = new Error(`HTTP ${response.status}${detail ? `: ${detail}` : ''}`);
+                    error.status = response.status;
+                    error.retryAfter = retryAfter;
+                    throw error;
                 }
 
                 const result = await response.json();
@@ -132,9 +183,18 @@
                 }
             } catch (e) {
                 retries--;
+                // 404 là lỗi tên model/endpoint, đổi API key cũng không giải quyết được.
+                // Thoát ngay để tầng gọi bên ngoài chuyển sang model dự phòng.
+                if (e.status === 404) throw e;
+                if (e.status === 403) keyState.blocked.add(keyIndex);
+                if (e.status === 429) keyState.cooldowns.set(keyIndex, Date.now() + Math.max(1800, e.retryAfter || wait));
                 if (retries === 0) throw e;
-                await delay(wait);
-                wait *= 2;
+                // 429: đổi key ngay và chờ theo Retry-After; 403: key hiện tại
+                // không dùng được/quá hạn nên chuyển key khác. Có jitter để các
+                // worker không đồng loạt gọi lại cùng một thời điểm.
+                const baseWait = e.status === 403 ? 250 : Math.max(wait, e.retryAfter || 0);
+                await delay(baseWait + Math.floor(Math.random() * 350));
+                if (e.status !== 403) wait = Math.min(wait * 1.8, 12000);
             }
         }
     }
@@ -308,7 +368,8 @@
                                 <div>
                                     <label style="font-size:11px;font-weight:700;color:#64748b;display:block;margin-bottom:3px;">Mô hình AI:</label>
                                     <select id="def-model" style="width:100%;padding:7px 10px;border:1px solid #cbd5e1;border-radius:8px;font-size:12px;font-weight:600;color:#1e293b;background:#fff;">
-                                        <option value="gemini-3.5-flash">Gemini 3.5 Flash (Khuyến nghị)</option>
+                                        <option value="gemini-2.5-flash">Gemini 2.5 Flash (Ổn định, nhanh)</option>
+                                        <option value="gemini-3.5-flash">Gemini 3.5 Flash</option>
                                         <option value="gemini-3.6-flash">Gemini 3.6 Flash</option>
                                     </select>
                                 </div>
@@ -350,7 +411,7 @@
                     if (val) defaults[`level${lv}`] = val;
                 });
                 const defMucdo = modal.querySelector('#def-mucdo')?.value || '';
-                const modelId = modal.querySelector('#def-model')?.value || 'gemini-3.5-flash';
+                const modelId = modal.querySelector('#def-model')?.value || 'gemini-2.5-flash';
                 modal.remove();
                 resolve({ assignMode, defaults, defMucdo, modelId, levels });
             };
@@ -594,22 +655,27 @@
         if (missingQuestions.length === 0) return questions;
 
         // Lấy API Key
-        let apiKey = window.aiKeys && window.aiKeys.length > 0 ? window.aiKeys[0] : null;
-        if (!apiKey && options.db) {
+        let apiKeys = Array.isArray(window.aiKeys) ? window.aiKeys.filter(key => typeof key === 'string' && key.trim()) : [];
+        const sharedDb = options.db || window._examDb;
+        if (!apiKeys.length && sharedDb) {
             try {
                 const { getDoc, doc } = await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js');
-                const snap = await getDoc(doc(options.db, 'configurations', 'ai_keys'));
+                const snap = await getDoc(doc(sharedDb, 'configurations', 'ai_keys'));
                 if (snap.exists() && snap.data().keys) {
-                    window.aiKeys = snap.data().keys;
-                    apiKey = window.aiKeys[0];
+                    window.aiKeys = snap.data().keys.filter(key => typeof key === 'string' && key.trim());
+                    apiKeys = window.aiKeys;
                 }
             } catch (e) { console.warn('Không lấy được AI Key từ Firestore:', e); }
         }
-        if (!apiKey) {
-            const inp = prompt('Nhập API Key Gemini để gán ID bằng AI:');
-            if (!inp) return questions;
-            apiKey = inp.trim();
+        if (!apiKeys.length) {
+            throw new Error('Chưa có API key trong mục Quản lý API AI. Hãy thêm key tại đó rồi thử lại.');
         }
+        const rejectedKeys = apiKeys.filter(key => /^AQ\./i.test(key.trim()));
+        apiKeys = apiKeys.filter(key => !/^AQ\./i.test(key.trim()));
+        if (!apiKeys.length) {
+            throw new Error('Các key đã lưu có dạng token AQ., không phải Gemini API key dùng cho x-goog-api-key. Hãy tạo API key Gemini trong Google AI Studio/Google Cloud.');
+        }
+        if (rejectedKeys.length) console.warn(`[ai-id-assigner] Đã bỏ qua ${rejectedKeys.length} token AQ. không đúng loại API key.`);
 
         // BƯỚC 1: Modal cấu hình
         let config;
@@ -624,8 +690,11 @@
         // Xác định danh sách câu cần xử lý
         const toProcess = assignMode === 'all' ? questions : missingQuestions;
 
-        // Build context map (dùng 1 lần cho toàn bộ)
-        const mapContext = buildMapContextFromTree(tree);
+        // Chỉ gửi các node lá (Dạng) còn hợp lệ sau bộ lọc từng cấp. Cách này
+        // kế thừa bộ ép đủ 6 thành phần của công cụ cũ nhưng vẫn dùng cây động.
+        const leafCandidates = collectLeafCandidates(tree, defaults);
+        const validLeafIds = new Set(leafCandidates.map(candidate => candidate.id));
+        const mapContext = buildLeafCandidateContext(leafCandidates);
 
         // Build "gợi ý mặc định" từ config
         let defaultHint = '';
@@ -642,16 +711,18 @@
 
         // System prompt (giữ nguyên tinh thần từ bản gốc)
         const systemPrompt = `Bạn là trợ lý gán ID câu hỏi Toán THCS cực kỳ chính xác.
-Nhiệm vụ: Đọc nội dung câu hỏi LaTeX và MapID, trả về JSON gồm 3 trường:
-  - topicId: ID của node phù hợp nhất trong cây MapID (phải tồn tại chính xác trong cây)
+Nhiệm vụ: Đọc toàn bộ câu hỏi LaTeX, đáp án và lời giải, rồi trả về JSON gồm 3 trường:
+  - topicId: ID của node DẠNG (node lá sâu nhất) phù hợp nhất
   - mucdo: Một trong N|H|V|C
   - reason: Lý do ngắn (1 câu)
 ${mapContext}${defaultHint}
 Quy tắc bắt buộc:
-1. topicId PHẢI là ID hợp lệ trong cây MapID được cung cấp.
-2. Ưu tiên chọn node lá (sâu nhất) phù hợp với nội dung câu hỏi.
-3. Nếu có gợi ý mặc định, hãy ưu tiên tuân theo trừ khi rõ ràng không phù hợp.
-4. Trả về JSON thuần túy, KHÔNG giải thích thêm.`;
+1. topicId PHẢI được chép nguyên văn từ danh sách ID DẠNG hợp lệ; tuyệt đối không tự tạo ID.
+2. BẮT BUỘC gán đủ đến Dạng/node lá, không được trả ID của Lớp, Phân môn, Chương hoặc Bài.
+3. Phải đọc lời giải để xác định đúng dạng toán và độ khó; không chỉ nhìn từ khóa ở đề bài.
+4. Nếu bộ lọc đã ấn định cấp nào thì bắt buộc giữ cấp đó.
+5. mucdo chỉ được là N, H, V hoặc C theo định nghĩa đã cho.
+6. Trả về JSON thuần túy, không thêm Markdown hay giải thích bên ngoài JSON.`;
 
         // BƯỚC 2: Modal tiến trình + kết quả
         // Ta cần chạy AI song song TRONG KHI modal đang hiển thị
@@ -854,15 +925,24 @@ Quy tắc bắt buộc:
         });
 
         // ── CHẠY AI SONG SONG ──
-        const MAX_CONCURRENT = 8;
+        const MAX_CONCURRENT = Math.min(5, Math.max(1, apiKeys.length));
+        const keyState = { cursor: 0 };
         let successCount = 0, failCount = 0, doneCount = 0;
         const total = toProcess.length;
 
         async function processOne(q, idx) {
             const promptText = getAiPromptContent(q);
             try {
-                const aiRes = await callGeminiApi(promptText, systemPrompt, apiKey, modelId);
+                let aiRes;
+                try {
+                    aiRes = await callGeminiApi(promptText, systemPrompt, apiKeys, modelId, keyState);
+                } catch (primaryError) {
+                    if (modelId !== 'gemini-3.5-flash') {
+                        aiRes = await callGeminiApi(promptText, systemPrompt, apiKeys, 'gemini-3.5-flash', { cursor: keyState.cursor });
+                    } else throw primaryError;
+                }
                 const validated = validateAndBuildId(aiRes, allNodeIds);
+                if (validated && !validLeafIds.has(validated.topicId)) throw new Error('AI trả về ID không thuộc node Dạng hợp lệ.');
                 if (validated) {
                     q._aiTopicId = validated.topicId;
                     q._aiMucdo = validated.mucdo;
@@ -896,6 +976,9 @@ Quy tắc bắt buộc:
             for (let i = 0; i < toProcess.length; i += MAX_CONCURRENT) {
                 const batch = toProcess.slice(i, i + MAX_CONCURRENT);
                 await Promise.all(batch.map((q) => processOne(q, questions.indexOf(q))));
+                if (i + MAX_CONCURRENT < toProcess.length) {
+                    await delay(800 + Math.floor(Math.random() * 500));
+                }
             }
             // Done
             const txt = document.getElementById('aiIdProgressText');
@@ -914,13 +997,15 @@ Quy tắc bắt buộc:
     // ═══════════════════════════════════════════════════════════════
 
     function getAiPromptContent(q) {
-        // Lấy nội dung thô, loại bỏ tag HTML nếu có
-        let text = (q.rawLatex || q.content || '').replace(/<[^>]+>/g, '').trim();
-        if (q.solution) text += '\n\n[Lời giải]: ' + q.solution.replace(/<[^>]+>/g, '').trim();
+        // Giữ riêng đề và lời giải để đề dài không cắt mất dữ kiện phân loại quan trọng.
+        const questionText = (q.rawLatex || q.content || '').replace(/<[^>]+>/g, '').trim();
+        const solutionText = (q.solution || '').replace(/<[^>]+>/g, '').trim();
+        let text = questionText.substring(0, 3800);
         if (q.options && q.options.length > 0) {
             text += '\n[Đáp án]: ' + q.options.map((o, i) => `${['A','B','C','D'][i]}. ${(o||'').replace(/<[^>]+>/g,'')}`).join(' | ');
         }
-        return text.substring(0, 3000); // Giới hạn để tiết kiệm token
+        if (solutionText) text += '\n\n[Lời giải bắt buộc dùng để phân loại]: ' + solutionText.substring(0, 2200);
+        return text.substring(0, 6500);
     }
 
     function applyIdToQuestion(q, tree, levelMapL, levelColorMapL) {
