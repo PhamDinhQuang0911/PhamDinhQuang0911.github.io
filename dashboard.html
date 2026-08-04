@@ -824,13 +824,14 @@
         const functions = getFunctions(app);
 
         // --- KÍCH HOẠT CACHE MULTI-TAB (HỖ TRỢ MỞ NHIỀU TAB SONG SONG) ---
-        enableMultiTabIndexedDbPersistence(db).catch((err) => {
-            if (err.code == 'failed-precondition') {
-                console.warn('Đang mở nhiều tab (Multi-tab mode active).');
-            } else if (err.code == 'unimplemented') {
-                console.warn('Trình duyệt không hỗ trợ cache offline.');
-            }
-        });
+        const isIosInstalledApp = /iPad|iPhone|iPod/.test(navigator.userAgent)
+            && (navigator.standalone === true || window.matchMedia?.('(display-mode: standalone)').matches);
+        if (!isIosInstalledApp) {
+            enableMultiTabIndexedDbPersistence(db).catch((err) => {
+                if (err.code == 'failed-precondition') console.warn('Đang mở nhiều tab (Multi-tab mode active).');
+                else if (err.code == 'unimplemented') console.warn('Trình duyệt không hỗ trợ cache offline.');
+            });
+        }
 
         // 2. BIẾN TOÀN CỤC
         let currentUser = null;
@@ -3366,10 +3367,10 @@ function renderTagFilterUI() {
                             </div>
                             <div class="hidden sm:block shrink-0">${statusBadge}</div>
                             <div class="flex items-center shrink-0 rounded-lg border border-gray-200 bg-white overflow-hidden">
-                                <button onclick="window.showExerciseInfo('${ex.id}')" class="w-8 h-8 text-cyan-600 hover:bg-cyan-50 border-r border-gray-100" title="Thông tin"><i class="fa-solid fa-circle-info text-[11px]"></i></button>
-                                <button onclick="window.openExamEditorFast('${ex.id}', 'settings')" onmouseenter="window.prefetchExamEditor('${ex.id}')" class="w-8 h-8 text-gray-500 hover:text-primary-600 hover:bg-primary-50 border-r border-gray-100" title="Sửa"><i class="fa-solid fa-pen text-[11px]"></i></button>
-                                <button onclick="window.openExamEditorFast('${ex.id}', 'grading')" onmouseenter="window.prefetchExamEditor('${ex.id}')" class="w-8 h-8 text-gray-500 hover:text-primary-600 hover:bg-primary-50 border-r border-gray-100" title="Chấm"><i class="fa-solid fa-pen-nib text-[11px]"></i></button>
-                                <button onclick="window.deleteExam('${ex.id}', '${ex.title.replace(/'/g, "\\'")}')" class="w-8 h-8 text-gray-400 hover:text-red-600 hover:bg-red-50" title="Xóa"><i class="fa-solid fa-trash text-[11px]"></i></button>
+                                <button onclick="window.showExerciseInfo('${ex.id}')" class="w-6 h-6 sm:w-8 sm:h-8 text-cyan-600 hover:bg-cyan-50 border-r border-gray-100" title="Thông tin"><i class="fa-solid fa-circle-info text-[10px] sm:text-[11px]"></i></button>
+                                <button onclick="window.openExamEditorFast('${ex.id}', 'settings')" onmouseenter="window.prefetchExamEditor('${ex.id}')" class="w-6 h-6 sm:w-8 sm:h-8 text-gray-500 hover:text-primary-600 hover:bg-primary-50 border-r border-gray-100" title="Sửa"><i class="fa-solid fa-pen text-[10px] sm:text-[11px]"></i></button>
+                                <button onclick="window.openExamEditorFast('${ex.id}', 'grading')" onmouseenter="window.prefetchExamEditor('${ex.id}')" class="hidden sm:flex w-8 h-8 text-gray-500 hover:text-primary-600 hover:bg-primary-50 border-r border-gray-100 items-center justify-center" title="Chấm"><i class="fa-solid fa-pen-nib text-[11px]"></i></button>
+                                <button onclick="window.deleteExam('${ex.id}', '${ex.title.replace(/'/g, "\\'")}')" class="w-6 h-6 sm:w-8 sm:h-8 text-gray-400 hover:text-red-600 hover:bg-red-50" title="Xóa"><i class="fa-solid fa-trash text-[10px] sm:text-[11px]"></i></button>
                             </div>
                         </div>
                     </div>`;
@@ -3392,11 +3393,29 @@ function renderTagFilterUI() {
         const examEditorPrefetches = new Map();
         window.prefetchExamEditor = (id) => {
             if (!id || examEditorPrefetches.has(id)) return examEditorPrefetches.get(id);
-            const task = getDoc(doc(db, 'exams', id)).catch(() => null);
+            // Nạp trước cả document Firestore lẫn HTML editor. Khi người dùng bấm
+            // chấm bài, editor có thể lấy snapshot từ sessionStorage ngay lập tức.
+            const pagePrefetch = document.createElement('link');
+            pagePrefetch.rel = 'prefetch';
+            pagePrefetch.as = 'document';
+            pagePrefetch.href = `exam-editor.html?id=${id}&view=grading`;
+            pagePrefetch.dataset.examEditorPrefetch = id;
+            document.head.appendChild(pagePrefetch);
+            const task = getDoc(doc(db, 'exams', id)).then((snap) => {
+                if (snap.exists()) {
+                    try { sessionStorage.setItem(`qmath:exam:${id}`, JSON.stringify(snap.data())); } catch (_) {}
+                    return snap.data();
+                }
+                return null;
+            }).catch(() => null);
             examEditorPrefetches.set(id, task);
             return task;
         };
         window.openExamEditorFast = (id, view) => {
+            const inMemoryExam = (window.currentClassExamsData || []).find((exam) => exam.id === id);
+            if (inMemoryExam && (Array.isArray(inMemoryExam.questions) || Array.isArray(inMemoryExam.tlQuestions))) {
+                try { sessionStorage.setItem(`qmath:exam:${id}`, JSON.stringify(inMemoryExam)); } catch (_) {}
+            }
             window.prefetchExamEditor(id);
             window.location.href = `exam-editor.html?id=${id}&view=${view}`;
         };
@@ -4821,7 +4840,7 @@ window.deleteTag = async (id) => {
 
 
 
-<script src="/sw-register.js?v=9"></script>
+<script src="/sw-register.js?v=10"></script>
 <script src="/season-theme.js?v=1"></script>
 </body>
 </html>

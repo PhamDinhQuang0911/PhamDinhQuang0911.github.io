@@ -64,6 +64,23 @@
         .palette-btn { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; border-radius: 4px; border: 1px solid #D1D5DB; color: #4B5563; transition: all 0.2s; background: white; }
         .palette-btn:hover { border-color: #3B82F6; color: #3B82F6; }
         .palette-btn.active { background-color: #3B82F6; color: white; border-color: #3B82F6; }
+
+        /* Modal chấm bài: dùng dynamic viewport của iOS để không bị thanh địa chỉ
+           hoặc vùng tai thỏ che header/nút lưu. */
+        #essayGradingModal .modal-content { min-height: 0; }
+        #essayGradingModal .grading-workspace { min-height: 0; }
+        @media (max-width: 767px) {
+            #essayGradingModal { align-items: stretch; }
+            #essayGradingModal .modal-content { height: 100dvh; max-height: 100dvh; }
+            #essayGradingModal .grading-modal-header { padding-top: max(.75rem, env(safe-area-inset-top)); }
+            #essayGradingModal #gradingSidebar {
+                top: auto; right: 0; bottom: 0; left: 0;
+                height: min(82dvh, 760px); width: 100vw;
+                border-radius: 1.25rem 1.25rem 0 0;
+            }
+            #essayGradingModal .grading-save-footer { padding-bottom: max(.75rem, env(safe-area-inset-bottom)); }
+            #btnToggleSidebarMobile { bottom: max(1rem, env(safe-area-inset-bottom)); }
+        }
         
         /* --- BẢN SỬA LỖI: HIỂN THỊ MATHJAX CHUẨN --- */
         /* 1. Tăng khoảng cách dòng cho văn bản chứa công thức để không bị dính */
@@ -559,8 +576,8 @@
 
     <!-- [MÃ MỚI BỔ SUNG] MODAL CHẤM BÀI TỰ LUẬN -->
     <div id="essayGradingModal" class="modal opacity-0 pointer-events-none fixed inset-0 z-[100] flex items-center justify-center bg-gray-900 bg-opacity-80 transition-opacity duration-300">
-        <div class="modal-content bg-white w-full h-full md:w-[98vw] md:h-[98vh] md:rounded-2xl shadow-2xl flex flex-col transform scale-95 transition-transform duration-300 overflow-hidden">
-            <div class="p-3 border-b flex justify-between items-center bg-primary-50 shrink-0">
+        <div class="modal-content bg-white w-full h-[100dvh] max-h-[100dvh] md:w-[98vw] md:h-[calc(100dvh-1rem)] md:max-h-[calc(100dvh-1rem)] md:rounded-2xl shadow-2xl flex flex-col transform scale-95 transition-transform duration-300 overflow-hidden">
+            <div class="grading-modal-header p-3 border-b flex justify-between items-center bg-primary-50 shrink-0">
                 <h3 class="font-bold text-primary-800 text-lg flex items-center gap-2" id="gradingStudentName">
                     <i class="fa-solid fa-user-graduate"></i> Chấm bài
                 </h3>
@@ -583,7 +600,7 @@
             
             <button onclick="window.toggleLeftNav()" title="Thu gọn/Mở rộng danh sách" class="hidden md:flex fixed top-[45%] left-[224px] lg:left-[256px] z-[110] w-7 h-12 bg-white border-2 border-primary-200 shadow-xl rounded-r-xl items-center justify-center hover:bg-primary-50 transition-all duration-300 text-primary-600 cursor-pointer" id="btnToggleLeftNav"><i id="leftNavIcon" class="fa-solid fa-chevron-left text-xs"></i></button>
             <button onclick="window.toggleRightGrading()" title="Thu gọn/Mở rộng công cụ chấm" class="hidden md:flex fixed top-[45%] right-[384px] z-[110] w-7 h-12 bg-white border-2 border-primary-200 shadow-xl rounded-l-xl items-center justify-center hover:bg-primary-50 transition-all duration-300 text-primary-600 cursor-pointer" id="btnToggleRightNav"><i id="rightGradingIcon" class="fa-solid fa-chevron-right text-xs"></i></button>
-<div class="flex-1 flex flex-col md:flex-row overflow-hidden bg-gray-100 relative">
+<div class="grading-workspace flex-1 min-h-0 flex flex-col md:flex-row overflow-hidden bg-gray-100 relative">
                 <!-- Left Sidebar: Nav List -->
                 <div id="leftNavSidebar" class="w-full md:w-56 lg:w-64 bg-white border-b md:border-b-0 md:border-r border-gray-200 flex flex-col shrink-0 max-h-48 md:max-h-full transition-all duration-300">
                     <div class="p-4 bg-gray-50 flex-1 overflow-y-auto custom-scrollbar flex flex-col">
@@ -702,7 +719,7 @@
                     </div>
 
                     <!-- Footer / Save -->
-                    <div class="p-3 bg-white border-t border-gray-100 shrink-0">
+                    <div class="grading-save-footer p-3 bg-white border-t border-gray-100 shrink-0">
                         <button id="btnSaveGrade" class="w-full py-2.5 bg-green-500 text-white rounded-xl font-black text-sm shadow-lg shadow-green-200 hover:bg-green-600 hover:-translate-y-0.5 transition-all flex items-center justify-center gap-2">
                             <i class="fa-solid fa-floppy-disk"></i> LƯU ĐIỂM
                         </button>
@@ -982,11 +999,15 @@
         const firebaseConfig = { apiKey: "AIzaSyCqAX3x1MbJ3do7m3EaH9JA4kFuVhlAc78", authDomain: "lms-thitracnghiem.firebaseapp.com", projectId: "lms-thitracnghiem", storageBucket: "lms-thitracnghiem.firebasestorage.app", messagingSenderId: "760187217240", appId: "1:760187217240:web:d043cd5808c349f87a712d" };
         const app = initializeApp(firebaseConfig); const auth = getAuth(app); const db = getFirestore(app); const storage = getStorage(app);
         window._examDb = db;
-        enableMultiTabIndexedDbPersistence(db).catch((err) => {
-            if (err.code == 'failed-precondition') {
-                console.warn('Đang mở nhiều tab (Multi-tab mode active).');
-            }
-        });
+        const isIosInstalledApp = /iPad|iPhone|iPod/.test(navigator.userAgent)
+            && (navigator.standalone === true || window.matchMedia?.('(display-mode: standalone)').matches);
+        // iOS standalone dễ giữ IndexedDB/SW cũ rất lâu; dùng memory cache để dữ liệu
+        // luôn đi mạng ngay. Safari/Chrome mở dạng web vẫn giữ cache đa-tab như trước.
+        if (!isIosInstalledApp) {
+            enableMultiTabIndexedDbPersistence(db).catch((err) => {
+                if (err.code == 'failed-precondition') console.warn('Đang mở nhiều tab (Multi-tab mode active).');
+            });
+        }
         
         let currentUser = null, currentExamId = null;
         window.questions = [];
@@ -1604,8 +1625,20 @@
                 // Danh sách đề/bài tập đã nạp document vào IndexedDB. Dùng bản đó
                 // trước để cấu hình hiện ngay; chỉ đợi mạng khi đây là lần mở đầu tiên.
                 let docSnap;
-                try { docSnap = await getDocFromCache(examRef); }
-                catch (_) { docSnap = await getDoc(examRef); }
+                let sessionExam = null;
+                try { sessionExam = JSON.parse(sessionStorage.getItem(`qmath:exam:${id}`) || 'null'); } catch (_) {}
+                if (sessionExam && typeof sessionExam === 'object') {
+                    docSnap = { exists: () => true, data: () => sessionExam };
+                    // Làm mới ngầm cho lần mở tiếp theo, không chặn giao diện chấm bài.
+                    getDoc(examRef).then((fresh) => {
+                        if (fresh.exists()) {
+                            try { sessionStorage.setItem(`qmath:exam:${id}`, JSON.stringify(fresh.data())); } catch (_) {}
+                        }
+                    }).catch(() => {});
+                } else {
+                    try { docSnap = await getDocFromCache(examRef); }
+                    catch (_) { docSnap = await getDoc(examRef); }
+                }
                 if (docSnap.exists()) {
                     const data = docSnap.data();
                     window.examData = data;
@@ -3111,6 +3144,7 @@
             sortedAttempts.forEach((att, idx) => { 
                 const attemptIndex = sortedAttempts.length - idx; // Lần 1, Lần 2...
                 const cheatBadge = att.cheatCount > 0 ? `<span class="text-red-500 font-bold text-xs"><i class="fa-solid fa-triangle-exclamation"></i> ${att.cheatCount}</span>` : `<span class="text-green-500"><i class="fa-solid fa-check"></i></span>`;
+                const gradingHistoryKey = window.registerGradingAttempt(att);
                 
                 // Nút mở Giao diện Chấm thi
                 // Lưu index vào attribute để hàm openGrading truy xuất
@@ -3120,7 +3154,7 @@
                         <td class="p-3 text-center font-black text-primary-600 text-lg">${att.score}</td>
                         <td class="p-3 text-center">${cheatBadge}</td>
                         <td class="p-3 text-right">
-                            <button onclick='window.openGrading(${JSON.stringify(att).replace(/'/g, "&apos;")})' class="px-3 py-1.5 bg-white border border-primary-200 text-primary-600 rounded-lg hover:bg-primary-50 text-xs font-bold shadow-sm transition-all">
+                            <button onclick="window.openGradingByKey('${gradingHistoryKey}')" class="px-3 py-1.5 bg-white border border-primary-200 text-primary-600 rounded-lg hover:bg-primary-50 text-xs font-bold shadow-sm transition-all">
                                 <i class="fa-solid fa-pen-nib mr-1"></i> Chấm / Xem
                             </button>
                         </td>
@@ -3761,6 +3795,22 @@
             }
         };
 
+        // Không đưa object bài làm trực tiếp vào onclick: nội dung TeX/HTML có thể
+        // chứa dấu nháy hoặc URL, làm vỡ cú pháp JavaScript của nút chấm bài.
+        window._gradingAttemptStore = window._gradingAttemptStore || new Map();
+        window.registerGradingAttempt = (attempt) => {
+            const key = `attempt_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+            window._gradingAttemptStore.set(key, attempt);
+            return key;
+        };
+        window.openGradingByKey = (key) => {
+            const attempt = window._gradingAttemptStore.get(key);
+            if (!attempt) {
+                return window.customAlert ? window.customAlert('Không tìm thấy dữ liệu bài làm. Hãy tải lại danh sách rồi thử lại.', 'error') : alert('Không tìm thấy dữ liệu bài làm.');
+            }
+            return window.openGrading(attempt);
+        };
+
         window.openGrading = (attempt) => {
             if (!window.examData) {
                 return window.customAlert ? window.customAlert("Đang tải dữ liệu đề thi hoặc xảy ra lỗi kết nối. Vui lòng tải lại trang và chờ giây lát!", "error") : alert("Đang tải dữ liệu đề thi hoặc xảy ra lỗi kết nối. Vui lòng tải lại trang và chờ giây lát!");
@@ -3809,11 +3859,14 @@
             const saveBtn = document.getElementById('btnSaveGrade');
             if(saveBtn) saveBtn.onclick = () => window.saveAdvancedGrade(attempt.id);
             
-            // Render the Multiple Choice / Essay textual results
-            renderGradingView();
-            
-            // Show the unified essay grading modal
+            // Mở modal trước để thao tác có phản hồi tức thì; các phần dựng nặng
+            // (MathJax/canvas/danh sách câu) được đưa sang lượt vẽ kế tiếp.
+            const quickList = document.getElementById('gradingQuestionList');
+            const quickNav = document.getElementById('gradingNavList');
+            if (quickList) quickList.innerHTML = '<div class="py-12 text-center text-slate-400 text-sm"><i class="fa-solid fa-circle-notch fa-spin text-xl text-primary-500 mb-2"></i><p>Đang chuẩn bị bài làm…</p></div>';
+            if (quickNav) quickNav.innerHTML = '<div class="text-xs text-slate-400 p-2">Đang tải điều hướng…</div>';
             window.toggleModal('essayGradingModal', true);
+            setTimeout(() => renderGradingView(), 0);
         };
 
         // --- CÁC HÀM XỬ LÝ CANVAS (VẼ, TẨY, DẤU TÍCH ĐÚNG/SAI) ---
@@ -6010,6 +6063,7 @@ YÊU CẦU NỘI DUNG LỜI PHÊ:
                 return;
             }
 
+            window._gradingAttemptStore = new Map();
             filteredData.forEach(r => {
                 const dateStr = new Date(r.submittedAt).toLocaleString('vi-VN');
                 const isMC = window.examData && window.examData.type === 'mc';
@@ -6021,6 +6075,7 @@ YÊU CẦU NỘI DUNG LỜI PHÊ:
                 const stId = r.studentId || r.userId || r.uid || '';
                 const reqId = r.requestId ? `'${r.requestId}'` : 'null';
                 const escapedName = realName.replace(/'/g, "\\'");
+                const gradingAttemptKey = window.registerGradingAttempt(lastAttempt);
 
                 tbody.innerHTML += `
                     <tr class="bg-white border-b hover:bg-gray-50 transition-colors">
@@ -6037,7 +6092,7 @@ YÊU CẦU NỘI DUNG LỜI PHÊ:
                         <td class="px-6 py-3 text-right text-xs text-gray-500">${dateStr}</td>
                         <td class="px-6 py-3 text-center">
                             <div class="flex items-center justify-center gap-2">
-                                <button onclick='window.openGrading(${JSON.stringify(lastAttempt).replace(/'/g, "&apos;")})' class="px-3.5 py-1.5 ${window.examData && window.examData.type === 'mc' ? 'bg-primary-600 hover:bg-primary-700' : (r.gradedAt ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-orange-500 hover:bg-orange-600')} text-white rounded-lg text-xs font-bold shadow-sm transition-all flex items-center gap-1.5"><i class="fa-solid ${window.examData && window.examData.type === 'mc' ? 'fa-eye' : (r.gradedAt ? 'fa-rotate-right' : 'fa-pen-nib')}"></i> ${window.examData && window.examData.type === 'mc' ? 'Xem' : (r.gradedAt ? 'Chấm lại' : 'Chấm bài')}</button>
+                                <button onclick="window.openGradingByKey('${gradingAttemptKey}')" class="px-3.5 py-1.5 ${window.examData && window.examData.type === 'mc' ? 'bg-primary-600 hover:bg-primary-700' : (r.gradedAt ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-orange-500 hover:bg-orange-600')} text-white rounded-lg text-xs font-bold shadow-sm transition-all flex items-center gap-1.5"><i class="fa-solid ${window.examData && window.examData.type === 'mc' ? 'fa-eye' : (r.gradedAt ? 'fa-rotate-right' : 'fa-pen-nib')}"></i> ${window.examData && window.examData.type === 'mc' ? 'Xem' : (r.gradedAt ? 'Chấm lại' : 'Chấm bài')}</button>
                                 <button onclick="window.approveReattempt('${stId}', ${reqId}, '${escapedName}')" class="px-3 py-1.5 bg-primary-50 text-primary-600 hover:bg-primary-100 rounded-lg text-xs font-bold border border-primary-200 shadow-sm transition-all flex items-center gap-1.5" title="Cấp quyền làm lại (Xóa kết quả cũ)"><i class="fa-solid fa-rotate-right"></i> Cho làm lại</button>
                             </div>
                         </td>
@@ -7259,7 +7314,7 @@ YÊU CẦU NỘI DUNG LỜI PHÊ:
         if(btnToggleSidebar) btnToggleSidebar.addEventListener('click', toggleSidebar);
         if(overlay) overlay.addEventListener('click', toggleSidebar);
     </script>
-<script src="/sw-register.js?v=9"></script>
+<script src="/sw-register.js?v=10"></script>
 </body>
 </html>
 
