@@ -155,6 +155,11 @@
                 <li><button onclick="switchView('editor'); window.toggleSidebar()" id="menu-editor" class="sidebar-item w-full text-left px-6 py-3 text-gray-600 hover:bg-gray-50 transition-colors flex items-center gap-3 text-sm"><i class="fa-solid fa-list-check w-5"></i> Nội dung câu hỏi</button></li>
                 <li><button onclick="switchView('stats'); window.toggleSidebar()" id="menu-stats" class="sidebar-item w-full text-left px-6 py-3 text-gray-600 hover:bg-gray-50 transition-colors flex items-center gap-3 text-sm"><i class="fa-solid fa-chart-pie w-5"></i> Thống kê & Báo cáo</button></li>
                 <li><button onclick="switchView('grading'); window.toggleSidebar()" id="menu-grading" class="sidebar-item w-full text-left px-6 py-3 text-gray-600 hover:bg-gray-50 transition-colors flex items-center gap-3 text-sm"><i class="fa-solid fa-pen-nib w-5"></i> Chấm bài</button></li>
+                <li>
+                    <button onclick="window.open('exam-print.html?id=' + (new URLSearchParams(window.location.search).get('id') || currentExamId), '_blank'); window.toggleSidebar()" id="menu-print" class="sidebar-item w-full text-left px-6 py-3 text-primary-600 hover:bg-primary-50 transition-colors flex items-center gap-3 text-sm font-bold border-t border-gray-100">
+                        <i class="fa-solid fa-file-pdf w-5"></i> Xem / In PDF
+                    </button>
+                </li>
             </ul>
         </nav>
         <div class="p-4 border-t border-gray-200 space-y-2">
@@ -1702,7 +1707,7 @@
                         if(tlFileUrlEl) tlFileUrlEl.value = data.tlFileUrl || '';
                         if(tlSolUrlEl) tlSolUrlEl.value = data.tlSolutionUrl || '';
                         if(tlScoreEl) tlScoreEl.value = data.tlScore || 100;
-                        if(tnScoreEl) tnScoreEl.value = data.tnScore || 6;
+                        if(tnScoreEl) tnScoreEl.value = data.tnScore !== undefined ? data.tnScore : 100;
                         if(tlDescEl) tlDescEl.value = data.tlDesc || '';
                         if(window.renderMixedTlList) window.renderMixedTlList();
                     }
@@ -2641,7 +2646,7 @@
                     tlFileUrl: document.getElementById('settingTlFileUrl') ? document.getElementById('settingTlFileUrl').value : '',
                     tlSolutionUrl: document.getElementById('settingTlSolutionUrl') ? document.getElementById('settingTlSolutionUrl').value : '',
                     tlScore: parseFloat(document.getElementById('settingTlScore')?.value) || 4,
-                    tnScore: parseFloat(document.getElementById('settingTnScore')?.value) || 6,
+                    tnScore: parseFloat(document.getElementById('settingTnScore')?.value) || 100,
                     tlDesc: document.getElementById('settingTlDesc') ? document.getElementById('settingTlDesc').value : '',
                     tlQuestions: window.mixedTlQuestions || []
                 };
@@ -5077,14 +5082,16 @@
                             ${briefTeacherHtml}
                             ${solutionToggleHtml}
                         `;
-                    } else answerHtml = `
-                        <div class="p-4 bg-gray-50 border-t border-gray-100 grid grid-cols-2 gap-4">
-                            <div><div class="text-[10px] font-bold text-gray-400 uppercase mb-1">Học sinh chọn</div><div class="${isCorrect ? 'text-green-600 font-bold' : 'text-red-500 line-through'}">${userText}</div></div>
-                            <div><div class="text-[10px] font-bold text-gray-400 uppercase mb-1">Đáp án đúng</div><div class="text-primary-600 font-bold">${correctText}</div></div>
-                        </div>
-                        ${briefTeacherHtml}
-                        ${solutionToggleHtml}
-                    `;
+                    } else {
+                        answerHtml = `
+                            <div class="p-4 bg-gray-50 border-t border-gray-100 grid grid-cols-2 gap-4">
+                                <div><div class="text-[10px] font-bold text-gray-400 uppercase mb-1">Học sinh chọn</div><div class="${isCorrect ? 'text-green-600 font-bold' : 'text-red-500 line-through'}">${userText}</div></div>
+                                <div><div class="text-[10px] font-bold text-gray-400 uppercase mb-1">Đáp án đúng</div><div class="text-primary-600 font-bold">${correctText}</div></div>
+                            </div>
+                            ${briefTeacherHtml}
+                            ${solutionToggleHtml}
+                        `;
+                    }
                 }
 
                 card.innerHTML = `
@@ -5164,6 +5171,18 @@
             if (window.updateTotalScore) window.updateTotalScore();
             if(window.MathJax) MathJax.typesetPromise([container]).catch(()=>{});
         };
+        window.shortMatch = window.shortMatch || ((a, b) => {
+            const scalarShort = (v) => Array.isArray(v) ? v[0] : (v && typeof v === 'object' && 'value' in v ? v.value : v);
+            const normShort = (v) => String(scalarShort(v) ?? '').normalize('NFKC').replace(/[\u200B-\u200D\u2060\uFEFF]/g, '').trim().toLowerCase().replace(/\$/g, '').replace(/\\left|\\right/g, '').replace(/\s+/g, '').replace(/,/g, '.');
+            const na = normShort(a), nb = normShort(b);
+            if (na === '' || nb === '') return false;
+            if (na === nb) return true;
+            const numA = na.replace(/\s+/g, ''), numB = nb.replace(/\s+/g, '');
+            const isNum = (t) => /^[-+]?\d*\.?\d+$/.test(t);
+            if (isNum(numA) && isNum(numB)) return Math.abs(parseFloat(numA) - parseFloat(numB)) < 1e-9;
+            if (numA === numB) return true;
+            return false;
+        });
 
         window.updateTotalScore = () => {
             let rawMcqScore = 0;
@@ -5191,7 +5210,7 @@
                         const u = answers[q.answerKey !== undefined ? q.answerKey : idx];
                         let isCorrect = false;
                         if (q.type === 'mc' && String(u) === String(q.correct)) isCorrect = true;
-                        else if (q.type === 'short' && q.answer && String(u).trim().toLowerCase() === String(q.answer).trim().toLowerCase()) isCorrect = true;
+                        else if (q.type === 'short' && q.answer && window.shortMatch(u, q.answer)) isCorrect = true;
                         else if (q.type === 'tf' && q.statements) {
                             const tfValues = window.normalizeTfAnswers(u, q.statements.length);
                             const correctCount = q.statements.reduce((acc, s, i) => acc + (tfValues[i] === window.tfBoolean(s.isTrue) ? 1 : 0), 0);
@@ -5216,9 +5235,9 @@
             let finalMaxEssay = maxEssayScore;
 
             if (window.examData) {
-                // Trắc nghiệm: dùng tnScore từ cài đặt nếu có
-                const cfgTnScore = window.examData.tnScore !== undefined ? parseFloat(window.examData.tnScore) : null;
-                if (cfgTnScore !== null && cfgTnScore > 0 && totalMcqQuestions > 0) {
+                // Trắc nghiệm: dùng tnScore từ cài đặt, mặc định 100
+                const cfgTnScore = window.examData.tnScore !== undefined ? parseFloat(window.examData.tnScore) : 100;
+                if (cfgTnScore > 0 && totalMcqQuestions > 0) {
                     finalMaxMcq = cfgTnScore;
                     finalMcqScore = parseFloat(((mcqCorrectCount / totalMcqQuestions) * cfgTnScore).toFixed(2));
                 }
@@ -5286,7 +5305,7 @@
 
                             let isCorrect = false;
                             if (q.type === 'mc' && String(u) === String(q.correct)) isCorrect = true;
-                            else if (q.type === 'short' && q.answer && String(u).trim().toLowerCase() === String(q.answer).trim().toLowerCase()) isCorrect = true;
+                            else if (q.type === 'short' && q.answer && window.shortMatch(u, q.answer)) isCorrect = true;
                             else if (q.type === 'tf' && q.statements) {
                                 const tfValues = window.normalizeTfAnswers(u, q.statements.length);
                                 const correctCount = q.statements.reduce((acc, s, i) => acc + (tfValues[i] === window.tfBoolean(s.isTrue) ? 1 : 0), 0);
@@ -5425,24 +5444,70 @@ YÊU CẦU NỘI DUNG LỜI PHÊ:
 
                 // Cập nhật điểm mới vào Firestore
                 const overallFb = document.getElementById('gradingFeedback') ? document.getElementById('gradingFeedback').value.trim() : '';
+
+                // Tính lại điểm TN và TL từ updateTotalScore để lưu riêng biệt
+                let savedMcScore = 0, savedMaxTnScore = 100;
+                let savedEssayScore = 0, savedMaxTlScore = 100;
+                let savedMcCorrect = 0, savedTotalMcq = 0;
+                if (window.gradingQuestions) {
+                    let rawMcqScore = 0, rawMaxMcq = 0, mcqCorrectCount = 0, totalMcqQ = 0;
+                    let essayS = 0, maxEssayS = 0;
+                    const answers = currentGradingAttempt ? (currentGradingAttempt.answers || {}) : {};
+                    window.gradingQuestions.forEach((q, qi) => {
+                        const pt = parseFloat(q.point) || 0;
+                        if (q.type === 'essay') {
+                            maxEssayS += pt;
+                            const inp = document.getElementById(`manual-score-${qi}`);
+                            if (inp) essayS += parseFloat(inp.value) || 0;
+                        } else {
+                            totalMcqQ++; rawMaxMcq += pt;
+                            const u = answers[q.answerKey !== undefined ? q.answerKey : qi];
+                            let isCorr = false;
+                            if (q.type === 'mc' && String(u) === String(q.correct)) isCorr = true;
+                            else if (q.type === 'short' && q.answer && window.shortMatch(u, q.answer)) isCorr = true;
+                            else if (q.type === 'tf' && q.statements) {
+                                const tfV = window.normalizeTfAnswers(u, q.statements.length);
+                                const cc = q.statements.reduce((a, s, i) => a + (tfV[i] === window.tfBoolean(s.isTrue) ? 1 : 0), 0);
+                                if (cc === q.statements.length) isCorr = true;
+                            }
+                            if (isCorr) { mcqCorrectCount++; rawMcqScore += pt; }
+                        }
+                    });
+                    savedTotalMcq = totalMcqQ;
+                    savedMcCorrect = mcqCorrectCount;
+                    const cfgTn = window.examData && window.examData.tnScore !== undefined ? parseFloat(window.examData.tnScore) : 100;
+                    const cfgTl = window.examData && window.examData.tlScore !== undefined ? parseFloat(window.examData.tlScore) : null;
+                    savedMaxTnScore = (cfgTn > 0 && totalMcqQ > 0) ? cfgTn : rawMaxMcq;
+                    savedMcScore = (cfgTn > 0 && totalMcqQ > 0) ? parseFloat(((mcqCorrectCount / totalMcqQ) * cfgTn).toFixed(2)) : rawMcqScore;
+                    savedMaxTlScore = (cfgTl !== null && cfgTl > 0 && maxEssayS > 0) ? cfgTl : maxEssayS;
+                    savedEssayScore = (cfgTl !== null && cfgTl > 0 && maxEssayS > 0) ? parseFloat(((essayS / maxEssayS) * cfgTl).toFixed(2)) : essayS;
+                }
+
                 const updateData = {
                     score: newScore,
+                    mcScore: savedMcScore,
+                    essayScore: savedEssayScore,
+                    maxTnScore: savedMaxTnScore,
+                    maxTlScore: savedMaxTlScore,
+                    correctCount: savedMcCorrect,
+                    totalMcqCount: savedTotalMcq,
                     teacherFeedback: overallFb || combinedFeedback.trim(),
                     essayFeedbacks: essayFeedbacks,
                     gradedAt: new Date().toISOString(),
-                    graderId: currentUser.uid // Lưu người chấm
+                    graderId: currentUser.uid
                 };
                 if (finalUrls.length > 0) {
                     updateData.gradedImageUrls = finalUrls;
                     updateData.gradedImageUrl = finalUrls[0];
                 }
-
                 await updateDoc(doc(db, "results", currentGradingAttempt.id), updateData);
-                
-                // Cập nhật lại statsMap cục bộ để không cần reload trang
+
+                // Cập nhật lại statsMap cục bộ
                 if (currentGradingAttempt) {
                     currentGradingAttempt.score = newScore;
-                    if (combinedFeedback.trim() !== "") currentGradingAttempt.teacherFeedback = combinedFeedback.trim();
+                    currentGradingAttempt.mcScore = savedMcScore;
+                    currentGradingAttempt.essayScore = savedEssayScore;
+                    if (combinedFeedback.trim() !== '') currentGradingAttempt.teacherFeedback = combinedFeedback.trim();
                 }
                 
                 window.showToast("Đã lưu kết quả chấm thi!", "success");
@@ -6250,101 +6315,6 @@ YÊU CẦU NỘI DUNG LỜI PHÊ:
                         indivMsg = `🔔 NHẮC NHỞ HỌC TẬP: Em ${st.studentName || st.name} chưa nộp bài tập [${eTitle}].\n⏰ Hạn chót là ${deadlineStr}.\n👉 Thời gian không còn nhiều, em tranh thủ hoàn thành và nộp bài đúng hạn nhé!\n🔗 Link làm bài: ${examLinkStr}`;
                     }
 
-                    });
-
-                    if (result) {
-                        submittedStudents.push({
-                            name: st.studentName || st.name || result.studentName || "Học sinh",
-                            score: result.score || 0
-                        });
-                    } else {
-                        missingStudents.push(st);
-                    }
-                });
-
-                // Bổ sung các bài nộp vãng lai (nếu có) vào danh sách đã nộp
-                Object.values(statsMap).forEach(res => {
-                    const rId = res.studentId || res.userId || '';
-                    const rEmail = (res.email || '').toLowerCase().trim();
-                    const matched = fullStudentList.some(st => {
-                        const stId = st.studentId || st.uid || '';
-                        const stEmail = (st.email || '').toLowerCase().trim();
-                        const stUser = (st.username || '').toLowerCase().trim();
-                        const stUserEmail = stUser ? `${stUser}@hocsinh.com` : '';
-                        return (stId && stId === rId) || (stEmail && rEmail && stEmail === rEmail) || (stUserEmail && rEmail && stUserEmail === rEmail);
-                    });
-                    if (!matched) {
-                        submittedStudents.push({
-                            name: res.studentName || "Học sinh Vãng lai",
-                            score: res.score || 0
-                        });
-                    }
-                });
-                
-                if (missingStudents.length === 0 && !isOverdue) {
-                    window.showToast("Tất cả học sinh đã nộp bài! Không cần nhắc nhở.", "success");
-                    return;
-                }
-
-                let messages = [];
-                const examLinkStr = window.location.origin + window.location.pathname.replace(/exam-editor(\.html)?/i, 'exam.html') + '?id=' + currentExamId;
-
-                // 1. TIN NHẮN NHÓM
-                let missingText = `\n❌ CHƯA NỘP (${missingStudents.length}):\n`;
-                if (missingStudents.length > 0) {
-                    missingStudents.forEach((st, idx) => {
-                        missingText += `${idx+1}. ${st.studentName || st.name}\n`;
-                    });
-                } else {
-                    missingText = "";
-                }
-
-                let groupMsg = "";
-                if (isOverdue) {
-                    let submittedText = `✅ ĐÃ NỘP (${submittedStudents.length}):\n`;
-                    submittedStudents.forEach((st, idx) => {
-                        submittedText += `${idx+1}. ${st.name}\n`;
-                    });
-                    groupMsg = `📊 TỔNG KẾT BÀI TẬP: ${eTitle}\n⏰ Hạn nộp: ${deadlineStr} (ĐÃ HẾT HẠN)\n\n${submittedText}${missingText}`;
-                } else {
-                    groupMsg = `🔔 NHẮC NHỞ BÀI TẬP: ${eTitle}\n⏰ Hạn chót: ${deadlineStr} (SẮP HẾT HẠN)\n${missingText}\n⏳ Các em học sinh có tên chưa nộp bài vui lòng nhanh chóng hoàn thành nhé!`;
-                }
-
-                if (examData.accessType === 'class' && examData.allowedClassIds) {
-                    for (let cid of examData.allowedClassIds) {
-                        const classSnap = await getDoc(doc(db, "classes", cid));
-                        if(classSnap.exists()) {
-                            const cName = classSnap.data().name;
-                            const zUid = classSnap.data().zaloGroupUid;
-                            if(zUid) {
-                                messages.push({
-                                    type: "group",
-                                    targetName: cName,
-                                    targetGroupUid: zUid,
-                                    messageContent: groupMsg
-                                });
-                            }
-                        }
-                    }
-                }
-
-                // 2. TIN NHẮN CÁ NHÂN (chỉ gửi cho người chưa nộp)
-                const formatVNPhone = (phone) => {
-                    if (!phone) return "";
-                    let cleanPhone = String(phone).replace(/\D/g, ''); 
-                    if (cleanPhone.length === 9 && !cleanPhone.startsWith('0')) return '0' + cleanPhone;
-                    if (cleanPhone.startsWith('84') && cleanPhone.length === 11) return '0' + cleanPhone.substring(2);
-                    return cleanPhone;
-                };
-
-                missingStudents.forEach(st => {
-                    let indivMsg = "";
-                    if (isOverdue) {
-                        indivMsg = `🚨 THÔNG BÁO QUÁ HẠN: Em ${st.studentName || st.name} chưa nộp bài tập [${eTitle}].\n⏰ Hạn nộp là ${deadlineStr} đã kết thúc.\n👉 Em vui lòng thu xếp làm bài và nộp bù sớm nhất có thể nhé!\n🔗 Link làm bài: ${examLinkStr}`;
-                    } else {
-                        indivMsg = `🔔 NHẮC NHỞ HỌC TẬP: Em ${st.studentName || st.name} chưa nộp bài tập [${eTitle}].\n⏰ Hạn chót là ${deadlineStr}.\n👉 Thời gian không còn nhiều, em tranh thủ hoàn thành và nộp bài đúng hạn nhé!\n🔗 Link làm bài: ${examLinkStr}`;
-                    }
-
                     messages.push({
                         type: "individual",
                         targetName: st.studentName || st.name || "Học sinh",
@@ -6393,6 +6363,19 @@ YÊU CẦU NỘI DUNG LỜI PHÊ:
             if (selected.length === 0) {
                 window.showToast("Vui lòng chọn ít nhất một học sinh đã ĐƯỢC CHẤM để gửi kết quả!", "error");
                 return;
+            }
+            
+            const btn = event ? (event.currentTarget || event.target || document.activeElement) : document.activeElement;
+            const originalHTML = btn ? btn.innerHTML : '';
+            if (btn) { btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang gửi...'; btn.disabled = true; }
+
+            try {
+                const examSnap = await getDoc(doc(db, "exams", currentExamId));
+                if (!examSnap.exists()) throw new Error("Không tìm thấy đề thi!");
+                const examData = examSnap.data();
+                
+                let webhookUrl = examData.n8nWebhooks?.submit || examData.n8nWebhooks?.assign || examData.n8nWebhooks?.remind || examData.n8nWebhooks?.publish;
+                if (!webhookUrl) {
                     const globalWebhookSnap = await getDoc(doc(db, "configurations", "n8n_webhooks"));
                     if (globalWebhookSnap.exists()) {
                         const gw = globalWebhookSnap.data();
@@ -6479,12 +6462,44 @@ YÊU CẦU NỘI DUNG LỜI PHÊ:
                         } catch (e) {}
                     }
 
-                    // 1. Thống kê Trắc nghiệm (MC)
-                    const totalMC = examData.questions ? examData.questions.length : (att.totalQuestions || 0);
+                    // 1. Dựng cấu trúc đề để đếm chính xác số câu TN / TL (Dự phòng khi chưa Lưu kết quả chấm mới)
+                    let fbTotalMc = 0, fbTotalTl = 0, fbTlDone = 0;
+                    if (window.gradingQuestions && window.gradingQuestions.length > 0) {
+                        window.gradingQuestions.forEach((q, i) => {
+                            if (q.type === 'essay') {
+                                fbTotalTl++;
+                                const aKey = q.answerKey !== undefined ? q.answerKey : i;
+                                const ans = att.answers && att.answers[aKey];
+                                if (ans && String(ans).trim() !== '') fbTlDone++;
+                            } else {
+                                fbTotalMc++;
+                            }
+                        });
+                    } else if (examData.questions) {
+                        examData.questions.forEach((q, i) => {
+                            if (q.type === 'essay') {
+                                fbTotalTl++;
+                                const ans = att.answers && att.answers[q.answerKey !== undefined ? q.answerKey : i];
+                                if (ans && String(ans).trim() !== '') fbTlDone++;
+                            } else {
+                                fbTotalMc++;
+                            }
+                        });
+                        if (examData.type === 'mixed' && examData.tlQuestions) {
+                            fbTotalTl += examData.tlQuestions.length;
+                            examData.tlQuestions.forEach((q, i) => {
+                                if (att.answers && att.answers['tl_upload_' + i] && att.answers['tl_upload_' + i].trim() !== '') fbTlDone++;
+                            });
+                        }
+                    } else {
+                        fbTotalMc = att.totalQuestions || 0;
+                    }
+
+                    // Thống kê Trắc nghiệm (MC)
+                    const totalMC = att.totalMcqCount !== undefined ? att.totalMcqCount : fbTotalMc;
                     const mcCorrect = att.correctCount !== undefined ? att.correctCount : (att.correctMC || 0);
                     const mcWrong = Math.max(0, totalMC - mcCorrect);
-                    const rawTnConfig = (examData.tnScore !== undefined && examData.tnScore !== null) ? Number(examData.tnScore) : null;
-                    const maxTnScore = (rawTnConfig !== null && rawTnConfig > 10) ? rawTnConfig : 100;
+                    const maxTnScore = att.maxTnScore !== undefined ? att.maxTnScore : ((examData.tnScore !== undefined && examData.tnScore !== null && Number(examData.tnScore) > 10) ? Number(examData.tnScore) : 100);
                     let mcScore = 0;
                     if (att.mcScore !== undefined && att.mcScore !== null) {
                         mcScore = parseFloat(att.mcScore);
@@ -6492,32 +6507,11 @@ YÊU CẦU NỘI DUNG LỜI PHÊ:
                         mcScore = parseFloat(((mcCorrect / totalMC) * maxTnScore).toFixed(2));
                     }
 
-                    // 2. Thống kê Tự luận (Essay)
-                    let totalTl = 0;
-                    let tlDoneCount = 0;
-                    if (examData.type === 'mixed' && examData.tlQuestions) {
-                        totalTl = examData.tlQuestions.length;
-                        examData.tlQuestions.forEach((q, i) => {
-                            if (att.answers && att.answers['tl_upload_' + i] && att.answers['tl_upload_' + i].trim() !== '') {
-                                tlDoneCount++;
-                            }
-                        });
-                    } else if (examData.type === 'essay' || examData.type === 'homework') {
-                        totalTl = examData.questions ? examData.questions.length : 0;
-                        if (examData.questions) {
-                            examData.questions.forEach((q, i) => {
-                                const ans = att.answers && att.answers[q.answerKey !== undefined ? q.answerKey : i];
-                                if (ans && String(ans).trim() !== '') {
-                                    tlDoneCount++;
-                                }
-                            });
-                        }
-                    } else if (examData.tlQuestions) {
-                        totalTl = examData.tlQuestions.length;
-                    }
-
-                    const rawTlConfig = (examData.tlScore !== undefined && examData.tlScore !== null) ? Number(examData.tlScore) : null;
-                    const maxTlScore = (rawTlConfig !== null && rawTlConfig > 10) ? rawTlConfig : 100;
+                    // Thống kê Tự luận (Essay)
+                    const totalTl = fbTotalTl;
+                    const tlDoneCount = fbTlDone;
+                    const rawTlConfig = att.maxTlScore !== undefined ? att.maxTlScore : ((examData.tlScore !== undefined && examData.tlScore !== null) ? Number(examData.tlScore) : null);
+                    const maxTlScore = (rawTlConfig !== null && rawTlConfig > 0) ? rawTlConfig : 100;
                     let essayScore = 0;
                     if (att.essayScore !== undefined && att.essayScore !== null) {
                         essayScore = parseFloat(att.essayScore);

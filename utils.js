@@ -405,10 +405,10 @@ function processTabular(text) {
     // Cũng cleanup ngoài table environment
     processed = processed.replace(/\\caption\s*\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/g, '');
     processed = processed.replace(/\\renewcommand\s*\{?\s*\\arraystretch\s*\}?\s*\{[^}]+\}/g, '');
-    const regex = /\\begin\{tabular\}(\{|\[).*?(\}|\])([\s\S]*?)\\end\{tabular\}/g;
+    const regex = /(?:<br>\s*)*\\begin\{tabular\}\s*(\{|\[).*?(\}|\])([\s\S]*?)\\end\{tabular\}(?:\s*<br>)*/g;
     return processed.replace(regex, (match, open, close, body) => {
         const rows = body.split('\\\\').filter(r => r.trim().length > 0);
-        let html = '<div class="my-3 w-full js-scale-wrapper" style="position: relative; width: 100%;">';
+        let html = '<div class="my-0 w-full js-scale-wrapper" style="position: relative; width: 100%; margin: 2px 0;">';
         html += '<table class="js-scale-table border-collapse border border-gray-300 bg-white text-sm origin-top-left" style="min-width: max-content;">';
         rows.forEach((row, rIdx) => {
             let cleanRow = row.replace(/\\hline/g, '').trim();
@@ -509,6 +509,13 @@ function processLatexLists(text) {
         html += `</ul>`;
         return html;
     });
+
+    // Xóa <br> thừa xung quanh block elements (bảng, danh sách)
+    processed = processed.replace(/(<br\s*\/?>)+\s*(<div class="(?:my-0|my-1|my-2|my-3)[^"]*js-scale-wrapper)/gi, '$2');
+    processed = processed.replace(/(<\/div>)\s*(<br\s*\/?>)+/gi, '$1');
+    processed = processed.replace(/(<br\s*\/?>)+\s*(<(?:ul|ol|table)[^>]*>)/gi, '<br>$2');
+    processed = processed.replace(/(<\/(?:ul|ol|table)>)\s*(<br\s*\/?>)+/gi, '$1');
+    
     return processed;
 }
 
@@ -516,10 +523,12 @@ function processLatexLists(text) {
 
 export const convertArrayToMatrix = (content) => {
   if (!content) return "";
-  let processed = content.replace(/\\begin\{array\}\s*\{[^{}]*?\}/g, '\\begin{matrix}');
-  processed = processed.replace(/\\begin\{array\}/g, '\\begin{matrix}');
-  processed = processed.replace(/\\end\{array\}/g, '\\end{matrix}');
-  return processed;
+  // DISABLED: MathJax natively supports \begin{array} with lines, converting to matrix destroys |c| borders.
+  // let processed = content.replace(/\\begin\{array\}\s*\{[^{}]*?\}/g, '\\begin{matrix}');
+  // processed = processed.replace(/\\begin\{array\}/g, '\\begin{matrix}');
+  // processed = processed.replace(/\\end\{array\}/g, '\\end{matrix}');
+  // return processed;
+  return content;
 };
 
 export const autoScaleTables = () => {
@@ -604,6 +613,15 @@ export const formatContent = (text) => {
         }
     }).join('');
 };
+
+export function stripBrAroundBlocks(html) {
+    // Xóa <br> thừa trước và sau các block elements
+    return html
+        .replace(/(<br\s*\/?>[\s]*){1,}<div class="[^"]*js-scale-wrapper/gi, '<div class="js-scale-wrapper')
+        .replace(/js-scale-wrapper([^>]*)>/gi, (m) => m) // keep
+        .replace(/<\/div>([\s]*<br\s*\/?>[\s]*){1,}(?=<div class="[^"]*js-scale-wrapper)/gi, '</div>')
+        .replace(/(<br\s*\/?>\s*){3,}/gi, '<br><br>'); // Max 2 br consecutive
+}
 
 // ============================================================================
 // 5. CÁC HÀM BỔ SUNG CHO EXAM (RENDER TIKZ, XỬ LÝ ẢNH, WATERMARK)
