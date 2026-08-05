@@ -576,10 +576,11 @@ export const formatContent = (text) => {
     processed = processLatexLists(processed); 
 
     // 3. Placeholder & Clean Rác
-    processed = processed.replace(/<div[^>]*class="[^"]*image-placeholder[^"]*"[^>]*>[\s\S]*?<\/div>/g, '');
-    processed = processed.replace(/<div[^>]*class="[^"]*group relative[^"]*"[^>]*>(?!<img)([\s\S]*?)<\/div>/gi, ''); 
     processed = processed.replace(/Click đúp để tải file|hoặc Ctrl \+ V để dán ảnh|ẢNH TỪ IMMINI|VỊ TRÍ HÌNH TIKZ/gi, '');
-    processed = processed.replace(/^\s*\}\s*$/gm, '').replace(/\}\s*$/g, '').replace(/Ảnh minh họa \(immini\)/g, '').replace(/Ảnh canh giữa/g, '');
+    processed = processed.replace(/^\s*\}\s*$/gm, '').replace(/Ảnh minh họa \(immini\)/g, '').replace(/Ảnh canh giữa/g, '');
+    
+    // Xóa cặp ngoặc nhọn {} nếu nó bao bọc toàn bộ chuỗi (thường gặp trong parse mệnh đề Đúng/Sai)
+    processed = processed.trim().replace(/^\{([\s\S]*)\}$/, '$1');
 
     // 4. Regex Bảo Vệ MathJax & HTML (Loại trừ enumEX, listEX, enumerate, itemize khỏi MathJax block detection)
     const tagWhitelist = "script|style|div|span|p|br|img|table|tbody|thead|tr|td|th|ul|ol|li|b|i|u|strong|em|mark|label|input|button|a|h1|h2|h3|h4";
@@ -598,7 +599,7 @@ export const formatContent = (text) => {
             return part; // Giữ nguyên tag HTML
         } else {
             let cleanPart = part.replace(/</g, '&lt;'); // Mã hóa text thường
-            cleanPart = cleanPart.replace(/\}/g, '');
+            // BỎ cleanPart = cleanPart.replace(/\}/g, ''); vì nó làm mất dấu ngoặc nhọn của TF
             return cleanPart.replace(/\\\\/g, '<br>').replace(/\n/g, '<br>');
         }
     }).join('');

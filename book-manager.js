@@ -964,45 +964,70 @@ window.replaceSection = async function(sectionType, subIdx) {
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = '.tex,.txt';
+    input.style.display = 'none';
+    document.body.appendChild(input);
+    
     input.onchange = async (e) => {
-        if (!e.target.files || e.target.files.length === 0) return;
-        const file = e.target.files[0];
-        const text = await file.text();
-        const parsedSections = parseTreeStructure(text);
-        if(!parsedSections || parsedSections.length === 0) {
-            showToast("Không tìm thấy dữ liệu hợp lệ trong file", "error");
-            return;
+        try {
+            if (!e.target.files || e.target.files.length === 0) {
+                document.body.removeChild(input);
+                return;
+            }
+            const file = e.target.files[0];
+            const text = await file.text();
+            const parsedSections = parseTreeStructure(text);
+            if(!parsedSections || parsedSections.length === 0) {
+                showToast("Không tìm thấy dữ liệu hợp lệ trong file", "error");
+                document.body.removeChild(input);
+                return;
+            }
+            
+            const newLesson = parsedSections[0];
+            const { cIdx, lIdx } = window.currentNodeIndex;
+            let targetLesson = window.currentBookData.chapters[cIdx].lessons[lIdx];
+            
+            if(!targetLesson.subsections) targetLesson.subsections = [];
+            if(!targetLesson.subsections[subIdx]) targetLesson.subsections[subIdx] = {};
+            const newSub = (newLesson.subsections && newLesson.subsections[0]) ? newLesson.subsections[0] : {};
+            
+            if (sectionType === 'theory') {
+                targetLesson.subsections[subIdx].theory = newSub.theory || [];
+            } else if (sectionType === 'TL') {
+                targetLesson.subsections[subIdx].exercises_TL = newSub.exercises_TL || [];
+            } else if (sectionType === 'TN') {
+                targetLesson.subsections[subIdx].exercises_TN_Modules = newSub.exercises_TN_Modules || [];
+            }
+            
+            if (!targetLesson.pendingImages) targetLesson.pendingImages = [];
+            if (newLesson.pendingImages) {
+                targetLesson.pendingImages.push(...newLesson.pendingImages);
+            }
+            if(window.currentPendingImages && window.currentPendingImages.length > 0) {
+                targetLesson.pendingImages = targetLesson.pendingImages.concat(window.currentPendingImages);
+                window.currentPendingImages = [];
+            }
+            
+            showToast("Đã thay thế mục " + (sectionType === 'theory' ? 'Lý thuyết' : (sectionType === 'TL' ? 'Tự luận' : 'Trắc nghiệm')), "success");
+            window.refreshCurrentPane();
+        } catch (error) {
+            console.error("Lỗi khi thay thế:", error);
+            showToast("Lỗi khi xử lý file: " + error.message, "error");
+        } finally {
+            if (document.body.contains(input)) {
+                document.body.removeChild(input);
+            }
         }
-        
-        const newLesson = parsedSections[0];
-        const { cIdx, lIdx } = window.currentNodeIndex;
-        let targetLesson = window.currentBookData.chapters[cIdx].lessons[lIdx];
-        
-        if(!targetLesson.subsections) targetLesson.subsections = [];
-        if(!targetLesson.subsections[subIdx]) targetLesson.subsections[subIdx] = {};
-        const newSub = (newLesson.subsections && newLesson.subsections[0]) ? newLesson.subsections[0] : {};
-        
-        if (sectionType === 'theory') {
-            targetLesson.subsections[subIdx].theory = newSub.theory || [];
-        } else if (sectionType === 'TL') {
-            targetLesson.subsections[subIdx].exercises_TL = newSub.exercises_TL || [];
-        } else if (sectionType === 'TN') {
-            targetLesson.subsections[subIdx].exercises_TN_Modules = newSub.exercises_TN_Modules || [];
-        }
-        
-        if (!targetLesson.pendingImages) targetLesson.pendingImages = [];
-        if (newLesson.pendingImages) {
-            targetLesson.pendingImages.push(...newLesson.pendingImages);
-        }
-        if(window.currentPendingImages && window.currentPendingImages.length > 0) {
-            targetLesson.pendingImages = targetLesson.pendingImages.concat(window.currentPendingImages);
-            window.currentPendingImages = [];
-        }
-        
-        showToast("Đã thay thế mục " + (sectionType === 'theory' ? 'Lý thuyết' : (sectionType === 'TL' ? 'Tự luận' : 'Trắc nghiệm')), "success");
-        // Gọi refreshCurrentPane() thay vì selectNode() để buộc render lại ngay cả khi đang ở cùng node
-        window.refreshCurrentPane();
     };
+    
+    // Fallback for canceling file dialog (some browsers)
+    window.addEventListener('focus', () => {
+        setTimeout(() => {
+            if (document.body.contains(input)) {
+                document.body.removeChild(input);
+            }
+        }, 1000);
+    }, { once: true });
+
     input.click();
 };
 

@@ -4015,12 +4015,44 @@
                     graderId: currentUser.uid,
                     resubmitStatus: 'graded'
                 });
-                if(window.showToast) window.showToast("Lưu điểm (không lưu được nét vẽ) thành công!", "success");
+                if(window.showToast) window.showToast("Lưu điểm thành công!", "success");
                 window.toggleModal('essayGradingModal', false);
                 if(window.loadStats) window.loadStats(true); 
             } finally {
-                btn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> LƯU KẾT QUẢ CHẤM'; btn.disabled = false;
+                const btn = document.getElementById('btnSaveGrade');
+                if (btn) { btn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> LƯU KẾT QUẢ CHẤM'; btn.disabled = false; }
             }
+        };
+        window.latexToUnicode = function(text) {
+            if(!text) return '';
+            return text
+                .replace(/\\approx/g, '≈')
+                .replace(/\\circ/g, '°')
+                .replace(/\\widehat\{([A-Za-z]+)\}/g, '$1\u0302')
+                .replace(/\\Delta/g, 'Δ')
+                .replace(/\\Rightarrow/g, '⇒')
+                .replace(/\\Leftrightarrow/g, '⇔')
+                .replace(/\\rightarrow/g, '→')
+                .replace(/\\le(q)?/g, '≤')
+                .replace(/\\ge(q)?/g, '≥')
+                .replace(/\\neq/g, '≠')
+                .replace(/\\cdot/g, '·')
+                .replace(/\\times/g, '×')
+                .replace(/\\div/g, '÷')
+                .replace(/\\infty/g, '∞')
+                .replace(/\\pi/g, 'π')
+                .replace(/\\alpha/g, 'α')
+                .replace(/\\beta/g, 'β')
+                .replace(/\\gamma/g, 'γ')
+                .replace(/\\angle/g, '∠')
+                .replace(/\\perp/g, '⊥')
+                .replace(/\\parallel/g, '∥')
+                .replace(/\\sqrt\{([^}]+)\}/g, '√($1)')
+                .replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, '($1)/($2)')
+                .replace(/\\text\{([^}]+)\}/g, '$1')
+                .replace(/\^\{([^}]+)\}/g, '^$1')
+                .replace(/_\{([^}]+)\}/g, '_$1')
+                .replace(/\$/g, '');
         };
 
         window.renderMathFeedbackInto = (source, target) => {
@@ -4104,7 +4136,7 @@
 
         // --- HÀM AI (GEMINI) CHẤM ĐIỂM TỰ ĐỘNG ---
         
-        window.gradeSingleEssayWithAI = async (idx, answerKey, qContent, qSolution = '', mode = 'gradeOnly', customKey = null) => {
+        window.gradeSingleEssayWithAI = async (idx, answerKey, qContent, qSolution = '', mode = 'gradeOnly', customKey = null, suppressToast = false) => {
             qContent = decodeURIComponent(qContent);
             qSolution = decodeURIComponent(qSolution);
             const btnGrade = document.getElementById('btnAIGrade-' + idx);
@@ -4262,6 +4294,8 @@
                                     let text = mistake.note || '';
                                     if (mistake.correction) text += (text ? ' -> ' : '') + mistake.correction;
                                     
+                                    text = window.latexToUnicode(text);
+                                    
                                     const textWidth = ctx.measureText(text).width;
                                     const rectX = xmin;
                                     const rectY = Math.max(0, ymin - 22);
@@ -4278,7 +4312,7 @@
                     }
                 }
 
-                if (window.showToast) window.showToast("Đã xử lý xong!", "success");
+                if (!suppressToast && window.showToast) window.showToast("Đã xử lý xong!", "success");
             } catch (e) {
                 console.error(e);
                 if (!customKey) {
@@ -4371,25 +4405,15 @@
                     let encodedSolution = item.q.solution ? encodeURIComponent(item.q.solution).replace(/'/g, "%27") : '';
                     let encodedContent = (item.q.originalContent ? encodeURIComponent(item.q.originalContent) : encodeURIComponent(item.q.content)).replace(/'/g, "%27");
                     
-                    // Ghi đè tạm apiKey gốc bằng key của luồng này nếu window.gradeSingleEssayWithAI dùng key mặc định
-                    // Wait, gradeSingleEssayWithAI dùng window.aiKeys[0] hoặc gọi AIGrader.
-                    // Để tối ưu, ta có thể modify gradeSingleEssayWithAI để nhận custom key, nhưng hiện tại AIGrader tự randomize key.
-                    // Tuy nhiên, AIGrader cho phép array keysToUse.
-                    // Để đúng yêu cầu: mội luồng dùng 1 key cố định, xoay vòng khi lỗi.
                     let currentKey = window.aiKeys[workerKeyIndex];
                     
                     let success = false;
                     for(let retry = 0; retry < window.aiKeys.length; retry++) {
                         try {
-                            // Gọi gradeSingleEssayWithAI. Hàm này trong bản cập nhật hiện tại dùng apiKey đầu tiên.
-                            // Vì vậy ta nên truyền currentKey vào nếu sửa được.
-                            // Để gọn nhất, ta set window.aiKeys = [currentKey] tạm thời, nhưng đa luồng thì conflict.
-                            // Tốt nhất là tự gọi API trực tiếp ở đây, NHƯNG gradeSingleEssayWithAI còn phải xử lý ảnh (drawImage).
-                            // Nên ta sẽ thiết lập một global map để gradeSingleEssayWithAI đọc.
                             window.__threadKeys = window.__threadKeys || {};
                             window.__threadKeys[item.idx] = currentKey;
                             
-                            await window.gradeSingleEssayWithAI(item.idx, item.q.answerKey, encodedContent, encodedSolution, 'gradeAndDraw', currentKey);
+                            await window.gradeSingleEssayWithAI(item.idx, item.q.answerKey, encodedContent, encodedSolution, 'gradeAndDraw', currentKey, true);
                             successCount++;
                             if (inlineBar) inlineBar.style.width = `${(successCount / totalItems) * 100}%`;
                             if (inlineCount) inlineCount.textContent = `${successCount}/${totalItems} câu`;
@@ -4397,7 +4421,6 @@
                             break;
                         } catch(e) {
                             console.error(`Luồng ${workerId} (Key ${currentKey.substring(0,5)}...) lỗi ở câu ${item.idx}:`, e);
-                            // Xoay key
                             workerKeyIndex = (workerKeyIndex + 1) % window.aiKeys.length;
                             currentKey = window.aiKeys[workerKeyIndex];
                             await new Promise(r => setTimeout(r, Math.min(8000, 1000 * (2 ** retry)) + Math.random() * 500));
@@ -4407,7 +4430,6 @@
                         console.error(`Câu ${item.idx} thất bại hoàn toàn sau khi thử tất cả keys.`);
                     }
                     
-                    // Nghỉ nhẹ 500ms
                     await new Promise(r => setTimeout(r, 750 + Math.random() * 500));
                 }
             };
@@ -4429,6 +4451,9 @@
                 if(overlay) overlay.remove();
                 if (inlineProgress) { inlineProgress.classList.add('hidden'); inlineProgress.classList.remove('flex'); }
                 if (window.showToast) window.showToast(`Đã chấm xong ${successCount}/${totalItems} câu tự luận!`, "success");
+                
+                const statusBadge = document.getElementById('ai-grade-status-tl');
+                if (statusBadge) statusBadge.classList.remove('hidden');
             }, 1000);
         };
 
@@ -4578,96 +4603,60 @@
                     window.renderOverallFeedbackMath?.();
                     window.scheduleOverallFeedbackSave?.();
                 }
-                
-                // Lưu lại kết quả lỗi để có thể vẽ sau
-                if (mode !== 'gradeOnly') {
-                    window.lastAiMistakes = aiResult.mistakes || [];
-                }
-                
-                // 4. Xử lý tùy chọn vẽ ảnh
-                if (mode === 'gradeAndDraw' || mode === 'drawOnly') {
-                    window.drawLastAiMistakes();
-                } else if (mode === 'gradeOnly') {
-                    // Hiện nút phụ "Chỉ lỗi"
-                    if (btnAIDrawOnly) {
-                        btnAIDrawOnly.classList.remove('hidden');
-                        btnAIDrawOnly.innerHTML = oldHtmlDrawOnly || '<i class="fa-solid fa-highlighter text-yellow-400"></i> Tạo ảnh chỉ lỗi sai';
-                    }
-                    if (window.showToast) window.showToast("AI đã chấm xong! Có thể bấm 'Tạo ảnh chỉ lỗi sai' để xem vị trí lỗi trên ảnh.", "success");
-                }
 
-            } catch (error) {
-                console.error(error);
-                alert("Lỗi gọi Gemini AI: " + error.message);
-            } finally {
-                if (btnAIGradeOnly) {
-                    btnAIGradeOnly.innerHTML = oldHtmlOnly;
-                    btnAIGradeOnly.disabled = false;
-                }
-                if (btnAIGradeDraw) {
-                    btnAIGradeDraw.innerHTML = oldHtmlDraw;
-                    btnAIGradeDraw.disabled = false;
-                }
-                if (btnAIDrawOnly) {
-                    btnAIDrawOnly.innerHTML = oldHtmlDrawOnly || '<i class="fa-solid fa-highlighter text-yellow-400"></i> Tạo ảnh chỉ lỗi sai';
-                    btnAIDrawOnly.disabled = false;
-                }
-            }
-        };
+                // Vẽ lỗi sai lên canvas (chỉ khi mode là gradeAndDraw hoặc drawOnly)
+                if ((mode === 'gradeAndDraw' || mode === 'drawOnly') && aiResult.mistakes && aiResult.mistakes.length > 0) {
+                    let drawCount = 0;
+                    aiResult.mistakes.forEach(mistake => {
+                        const pageIdx = mistake.pageIndex || 0;
+                        const obj = window.currentGradingCanvases[pageIdx] || window.currentGradingCanvases[0];
+                        if (!obj) return;
+                        const ctx = obj.canvas.getContext('2d');
+                        const cw = obj.canvas.width;
+                        const ch = obj.canvas.height;
+                        const xmin = (mistake.xmin / 1000) * cw;
+                        const ymin = (mistake.ymin / 1000) * ch;
+                        const xmax = (mistake.xmax / 1000) * cw;
+                        const ymax = (mistake.ymax / 1000) * ch;
 
-        // Hàm hỗ trợ vẽ lỗi sai lưu trong bộ nhớ tạm lên Canvas
-        window.drawLastAiMistakes = () => {
-            if (!window.lastAiMistakes || window.lastAiMistakes.length === 0) {
-                return alert("Không tìm thấy lỗi sai nào do AI phát hiện, hoặc bạn cần bấm 'Chấm bài' trước.");
-            }
-            
-            let drawCount = 0;
-            window.lastAiMistakes.forEach(mistake => {
-                const pageIdx = mistake.pageIndex;
-                if (pageIdx >= 0 && pageIdx < window.currentGradingCanvases.length) {
-                    const canvasObj = window.currentGradingCanvases[pageIdx];
-                    const ctx = canvasObj.ctx;
-                    const cw = canvasObj.canvas.width;
-                    const ch = canvasObj.canvas.height;
-                    
-                    // Chuyển tọa độ chuẩn hóa (0-1000) sang pixel thực tế của canvas
-                    const xmin = (mistake.xmin * cw) / 1000;
-                    const ymin = (mistake.ymin * ch) / 1000;
-                    const xmax = (mistake.xmax * cw) / 1000;
-                    const ymax = (mistake.ymax * ch) / 1000;
-                    
-                    // Vẽ đường gạch chân màu đỏ dưới lỗi sai
-                    ctx.beginPath();
-                    ctx.strokeStyle = '#ef4444'; // Tailwind red-500
-                    ctx.lineWidth = 4;
-                    ctx.moveTo(xmin, ymax + 5);
-                    ctx.lineTo(xmax, ymax + 5);
-                    ctx.stroke();
+                        ctx.save();
+                        ctx.globalCompositeOperation = 'source-over';
+                        ctx.strokeStyle = '#ef4444';
+                        ctx.lineWidth = 3;
+                        ctx.setLineDash([6, 3]);
+                        ctx.strokeRect(xmin, ymin, xmax - xmin, ymax - ymin);
+                        ctx.restore();
 
-                    // Vẽ mũi tên và chú thích lỗi
-                    if (mistake.note) {
-                        ctx.fillStyle = '#ef4444';
-                        ctx.font = 'bold 12px "Inter", sans-serif'; 
-                        const noteText = "→ Sai";
-                        ctx.fillText(noteText, xmax + 5, ymax + 5);
-                        
-                        // Vẽ cách sửa màu xanh lá (nếu có)
-                        if (mistake.correction) {
-                            const noteWidth = ctx.measureText(noteText).width;
-                            ctx.fillStyle = '#16a34a'; // Tailwind green-600
-                            ctx.fillText(` (Sửa: ${mistake.correction})`, xmax + 5 + noteWidth, ymax + 5);
+                        if (mistake.note || mistake.correction) {
+                            ctx.save();
+                            ctx.globalCompositeOperation = 'source-over';
+                            ctx.font = 'bold 11px system-ui, sans-serif';
+                            let text = mistake.note || '';
+                            if (mistake.correction) text += (text ? ' -> ' : '') + mistake.correction;
+                            text = window.latexToUnicode ? window.latexToUnicode(text) : text;
+                            const textWidth = ctx.measureText(text).width;
+                            const rectX = xmin;
+                            const rectY = Math.max(0, ymin - 22);
+                            ctx.fillStyle = 'rgba(220, 38, 38, 0.9)';
+                            ctx.fillRect(rectX, rectY, textWidth + 10, 20);
+                            ctx.fillStyle = '#ffffff';
+                            ctx.fillText(text, rectX + 5, rectY + 14);
+                            ctx.restore();
                         }
+                        drawCount++;
+                    });
+                    if (window.showToast) {
+                        if (drawCount > 0) window.showToast('Đã vẽ ' + drawCount + ' lỗi lên bài làm!', 'success');
                     }
-                    drawCount++;
                 }
-            });
-            
-            const btnAIDrawOnly = document.getElementById('btnAIDrawOnly');
-            if (btnAIDrawOnly) btnAIDrawOnly.classList.add('hidden'); // Ẩn nút sau khi vẽ
-            
-            if (window.showToast) {
-                if (drawCount > 0) window.showToast(`Đã vẽ ${drawCount} lỗi lên bài làm. Đừng quên bấm Lưu kết quả chấm để lưu cả ảnh!`, "success");
-                else window.showToast("Không có lỗi sai nào trên hình.", "info");
+
+            } catch(e) {
+                console.error('gradeWithAI error:', e);
+                if (window.showToast) window.showToast('Lỗi AI: ' + e.message, 'error');
+            } finally {
+                if (btnAIGradeOnly) { btnAIGradeOnly.innerHTML = oldHtmlOnly; btnAIGradeOnly.disabled = false; }
+                if (btnAIGradeDraw) { btnAIGradeDraw.innerHTML = oldHtmlDraw; btnAIGradeDraw.disabled = false; }
+                if (btnAIDrawOnly) { btnAIDrawOnly.innerHTML = oldHtmlDrawOnly; btnAIDrawOnly.disabled = false; }
             }
         };
 
@@ -6261,6 +6250,101 @@ YÊU CẦU NỘI DUNG LỜI PHÊ:
                         indivMsg = `🔔 NHẮC NHỞ HỌC TẬP: Em ${st.studentName || st.name} chưa nộp bài tập [${eTitle}].\n⏰ Hạn chót là ${deadlineStr}.\n👉 Thời gian không còn nhiều, em tranh thủ hoàn thành và nộp bài đúng hạn nhé!\n🔗 Link làm bài: ${examLinkStr}`;
                     }
 
+                    });
+
+                    if (result) {
+                        submittedStudents.push({
+                            name: st.studentName || st.name || result.studentName || "Học sinh",
+                            score: result.score || 0
+                        });
+                    } else {
+                        missingStudents.push(st);
+                    }
+                });
+
+                // Bổ sung các bài nộp vãng lai (nếu có) vào danh sách đã nộp
+                Object.values(statsMap).forEach(res => {
+                    const rId = res.studentId || res.userId || '';
+                    const rEmail = (res.email || '').toLowerCase().trim();
+                    const matched = fullStudentList.some(st => {
+                        const stId = st.studentId || st.uid || '';
+                        const stEmail = (st.email || '').toLowerCase().trim();
+                        const stUser = (st.username || '').toLowerCase().trim();
+                        const stUserEmail = stUser ? `${stUser}@hocsinh.com` : '';
+                        return (stId && stId === rId) || (stEmail && rEmail && stEmail === rEmail) || (stUserEmail && rEmail && stUserEmail === rEmail);
+                    });
+                    if (!matched) {
+                        submittedStudents.push({
+                            name: res.studentName || "Học sinh Vãng lai",
+                            score: res.score || 0
+                        });
+                    }
+                });
+                
+                if (missingStudents.length === 0 && !isOverdue) {
+                    window.showToast("Tất cả học sinh đã nộp bài! Không cần nhắc nhở.", "success");
+                    return;
+                }
+
+                let messages = [];
+                const examLinkStr = window.location.origin + window.location.pathname.replace(/exam-editor(\.html)?/i, 'exam.html') + '?id=' + currentExamId;
+
+                // 1. TIN NHẮN NHÓM
+                let missingText = `\n❌ CHƯA NỘP (${missingStudents.length}):\n`;
+                if (missingStudents.length > 0) {
+                    missingStudents.forEach((st, idx) => {
+                        missingText += `${idx+1}. ${st.studentName || st.name}\n`;
+                    });
+                } else {
+                    missingText = "";
+                }
+
+                let groupMsg = "";
+                if (isOverdue) {
+                    let submittedText = `✅ ĐÃ NỘP (${submittedStudents.length}):\n`;
+                    submittedStudents.forEach((st, idx) => {
+                        submittedText += `${idx+1}. ${st.name}\n`;
+                    });
+                    groupMsg = `📊 TỔNG KẾT BÀI TẬP: ${eTitle}\n⏰ Hạn nộp: ${deadlineStr} (ĐÃ HẾT HẠN)\n\n${submittedText}${missingText}`;
+                } else {
+                    groupMsg = `🔔 NHẮC NHỞ BÀI TẬP: ${eTitle}\n⏰ Hạn chót: ${deadlineStr} (SẮP HẾT HẠN)\n${missingText}\n⏳ Các em học sinh có tên chưa nộp bài vui lòng nhanh chóng hoàn thành nhé!`;
+                }
+
+                if (examData.accessType === 'class' && examData.allowedClassIds) {
+                    for (let cid of examData.allowedClassIds) {
+                        const classSnap = await getDoc(doc(db, "classes", cid));
+                        if(classSnap.exists()) {
+                            const cName = classSnap.data().name;
+                            const zUid = classSnap.data().zaloGroupUid;
+                            if(zUid) {
+                                messages.push({
+                                    type: "group",
+                                    targetName: cName,
+                                    targetGroupUid: zUid,
+                                    messageContent: groupMsg
+                                });
+                            }
+                        }
+                    }
+                }
+
+                // 2. TIN NHẮN CÁ NHÂN (chỉ gửi cho người chưa nộp)
+                const formatVNPhone = (phone) => {
+                    if (!phone) return "";
+                    let cleanPhone = String(phone).replace(/\D/g, ''); 
+                    if (cleanPhone.length === 9 && !cleanPhone.startsWith('0')) return '0' + cleanPhone;
+                    if (cleanPhone.startsWith('84') && cleanPhone.length === 11) return '0' + cleanPhone.substring(2);
+                    return cleanPhone;
+                };
+
+                missingStudents.forEach(st => {
+                    let indivMsg = "";
+                    if (isOverdue) {
+                        indivMsg = `🚨 THÔNG BÁO QUÁ HẠN: Em ${st.studentName || st.name} chưa nộp bài tập [${eTitle}].\n⏰ Hạn nộp là ${deadlineStr} đã kết thúc.\n👉 Em vui lòng thu xếp làm bài và nộp bù sớm nhất có thể nhé!\n🔗 Link làm bài: ${examLinkStr}`;
+                    } else {
+                        indivMsg = `🔔 NHẮC NHỞ HỌC TẬP: Em ${st.studentName || st.name} chưa nộp bài tập [${eTitle}].\n⏰ Hạn chót là ${deadlineStr}.\n👉 Thời gian không còn nhiều, em tranh thủ hoàn thành và nộp bài đúng hạn nhé!\n🔗 Link làm bài: ${examLinkStr}`;
+                    }
+
                     messages.push({
                         type: "individual",
                         targetName: st.studentName || st.name || "Học sinh",
@@ -6309,19 +6393,6 @@ YÊU CẦU NỘI DUNG LỜI PHÊ:
             if (selected.length === 0) {
                 window.showToast("Vui lòng chọn ít nhất một học sinh đã ĐƯỢC CHẤM để gửi kết quả!", "error");
                 return;
-            }
-            
-            const btn = event ? (event.currentTarget || event.target || document.activeElement) : document.activeElement;
-            const originalHTML = btn ? btn.innerHTML : '';
-            if (btn) { btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang gửi...'; btn.disabled = true; }
-
-            try {
-                const examSnap = await getDoc(doc(db, "exams", currentExamId));
-                if (!examSnap.exists()) throw new Error("Không tìm thấy đề thi!");
-                const examData = examSnap.data();
-                
-                let webhookUrl = examData.n8nWebhooks?.submit || examData.n8nWebhooks?.assign || examData.n8nWebhooks?.remind || examData.n8nWebhooks?.publish;
-                if (!webhookUrl) {
                     const globalWebhookSnap = await getDoc(doc(db, "configurations", "n8n_webhooks"));
                     if (globalWebhookSnap.exists()) {
                         const gw = globalWebhookSnap.data();
@@ -6412,10 +6483,11 @@ YÊU CẦU NỘI DUNG LỜI PHÊ:
                     const totalMC = examData.questions ? examData.questions.length : (att.totalQuestions || 0);
                     const mcCorrect = att.correctCount !== undefined ? att.correctCount : (att.correctMC || 0);
                     const mcWrong = Math.max(0, totalMC - mcCorrect);
-                    const maxTnScore = examData.tnScore !== undefined ? Number(examData.tnScore) : 100;
+                    const rawTnConfig = (examData.tnScore !== undefined && examData.tnScore !== null) ? Number(examData.tnScore) : null;
+                    const maxTnScore = (rawTnConfig !== null && rawTnConfig > 10) ? rawTnConfig : 100;
                     let mcScore = 0;
-                    if (att.mcScore !== undefined) {
-                        mcScore = att.mcScore;
+                    if (att.mcScore !== undefined && att.mcScore !== null) {
+                        mcScore = parseFloat(att.mcScore);
                     } else if (totalMC > 0) {
                         mcScore = parseFloat(((mcCorrect / totalMC) * maxTnScore).toFixed(2));
                     }
@@ -6444,10 +6516,11 @@ YÊU CẦU NỘI DUNG LỜI PHÊ:
                         totalTl = examData.tlQuestions.length;
                     }
 
-                    const maxTlScore = examData.tlScore !== undefined ? Number(examData.tlScore) : 100;
+                    const rawTlConfig = (examData.tlScore !== undefined && examData.tlScore !== null) ? Number(examData.tlScore) : null;
+                    const maxTlScore = (rawTlConfig !== null && rawTlConfig > 10) ? rawTlConfig : 100;
                     let essayScore = 0;
-                    if (att.essayScore !== undefined) {
-                        essayScore = att.essayScore;
+                    if (att.essayScore !== undefined && att.essayScore !== null) {
+                        essayScore = parseFloat(att.essayScore);
                     } else if (totalTl > 0) {
                         essayScore = Math.max(0, parseFloat((totalScore - mcScore).toFixed(2)));
                     }
