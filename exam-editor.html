@@ -1683,12 +1683,15 @@
                         window.togglePrivasySettings(data.accessType);
                     }
                     
-                    setTimeout(async () => { 
-                        let selectedIds = [];
-                        if (data.allowedClassIds && Array.isArray(data.allowedClassIds)) selectedIds = data.allowedClassIds;
-                        else if (data.allowedClassId) selectedIds = [data.allowedClassId]; 
-                        selectedIds.forEach(id => { const cb = document.querySelector(`.class-checkbox[value="${id}"]`); if(cb) cb.checked = true; });
-                    }, 800); 
+                    // Lớp và đề được tải song song. Lưu trạng thái chờ rồi áp dụng
+                    // ngay khi loadTeacherClasses đã render checkbox; không dùng
+                    // setTimeout vì mạng chậm sẽ làm mất dấu tích sau F5.
+                    window.pendingAllowedClassIds = Array.isArray(data.allowedClassIds)
+                        ? data.allowedClassIds
+                        : (data.allowedClassId ? [data.allowedClassId] : []);
+                    if (typeof window.applyPendingClassSelection === 'function') {
+                        window.applyPendingClassSelection();
+                    }
 
                     window.questions = data.questions || [];
                     window.originalQuestionsData = JSON.parse(JSON.stringify(window.questions));
@@ -2603,7 +2606,11 @@
                 // Lấy danh sách lớp được chọn (Chỉ lấy nếu chọn chế độ "Lớp học")
                 let selectedClassIds = [];
                 if (accessType === 'class') {
-                    selectedClassIds = Array.from(document.querySelectorAll('.class-checkbox:checked')).map(cb => cb.value);
+                    const classCheckboxes = Array.from(document.querySelectorAll('.class-checkbox'));
+                    if (classCheckboxes.length === 0) {
+                        throw new Error("Danh sách lớp chưa tải xong. Vui lòng chờ vài giây rồi lưu lại.");
+                    }
+                    selectedClassIds = classCheckboxes.filter(cb => cb.checked).map(cb => cb.value);
                     if (status === 'published' && selectedClassIds.length === 0) {
                         throw new Error("Vui lòng chọn ít nhất một lớp học để giao bài!");
                     }
@@ -3349,6 +3356,14 @@
         };
         window.showToast = (message, type='success') => { const c = document.getElementById('toastContainer'); const d = document.createElement('div'); d.className = `bg-white border-l-4 border-green-500 shadow-xl rounded-lg p-4 flex items-center gap-3 min-w-[300px] transform translate-x-full transition-transform duration-300`; d.innerHTML = `<div><h4 class="font-bold text-gray-800 text-sm">THÔNG BÁO</h4><p class="text-sm text-gray-600">${message}</p></div>`; c.appendChild(d); requestAnimationFrame(()=>d.classList.remove('translate-x-full')); setTimeout(()=>{d.classList.add('translate-x-full'); setTimeout(()=>d.remove(), 500);}, 3000); };
         window.togglePrivasySettings = (type) => { document.getElementById('classSelectionArea').className = type === 'class' ? 'pl-6 block mt-2' : 'hidden'; };
+
+        window.applyPendingClassSelection = () => {
+            const selectedIds = Array.isArray(window.pendingAllowedClassIds) ? window.pendingAllowedClassIds : [];
+            if (!selectedIds.length) return;
+            document.querySelectorAll('.class-checkbox').forEach(cb => {
+                cb.checked = selectedIds.includes(cb.value);
+            });
+        };
         
         async function loadTeacherClasses() { 
             const container = document.getElementById('classCheckboxList'); 
@@ -3372,6 +3387,11 @@
                 `;
                 container.appendChild(div);
             }); 
+
+            // Áp dụng lại lớp của đề đang mở sau khi checkbox đã tồn tại trong DOM.
+            if (typeof window.applyPendingClassSelection === 'function') {
+                window.applyPendingClassSelection();
+            }
 
             // [MỚI] Giao bài TỪ TRONG LỚP: tự tick sẵn lớp đó (giáo viên vẫn tick thêm/bỏ được)
             try {
@@ -6120,7 +6140,9 @@ YÊU CẦU NỘI DUNG LỜI PHÊ:
             window._gradingAttemptStore = new Map();
             filteredData.forEach(r => {
                 const dateStr = new Date(r.submittedAt).toLocaleString('vi-VN');
-                const isMC = window.examData && window.examData.type === 'mc';
+                // Kiểu đề tự chấm hiện hành được lưu là "exam". Giữ "mc" để
+                // tương thích các đề cũ từng dùng tên kiểu này.
+                const isMC = window.examData && ['exam', 'mc'].includes(window.examData.type);
                   const statusBadge = (r.gradedAt || isMC) ? '<span class="bg-green-100 text-green-700 px-2 py-1 rounded text-xs font-bold">Đã chấm</span>' : '<span class="bg-yellow-100 text-yellow-700 px-2 py-1 rounded text-xs font-bold animate-pulse">Cần chấm</span>';
                 const lastAttempt = r.attempts ? r.attempts[r.attempts.length - 1] : r;
 

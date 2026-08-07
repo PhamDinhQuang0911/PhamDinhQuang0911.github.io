@@ -200,7 +200,13 @@
     
     <!-- KHU BÀI TẬP VỀ NHÀ -->
     <div>
-        <h3 class="font-bold text-gray-800 text-xl mb-6 flex items-center gap-3"><span class="w-10 h-10 rounded-xl bg-orange-100 text-orange-600 flex items-center justify-center shadow-sm"><i class="fa-solid fa-bell"></i></span><span id="pendingTitle">Đang kiểm tra bài tập...</span></h3>
+        <div class="mb-6 rounded-3xl bg-white border border-orange-100 shadow-sm p-5 md:p-7 flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div class="flex items-center gap-4">
+                <span class="w-14 h-14 rounded-2xl bg-orange-100 text-orange-600 flex items-center justify-center shadow-sm text-2xl"><i class="fa-solid fa-bell"></i></span>
+                <div><p class="text-xs font-black uppercase tracking-wider text-gray-400">Bài tập cần xử lý</p><h3 id="pendingTitle" class="font-black text-gray-800 text-xl md:text-2xl">Đang kiểm tra bài tập...</h3></div>
+            </div>
+            <button id="showOverdueTasksBtn" onclick="window.showDashboardOverdueTasks()" class="hidden px-4 py-2.5 rounded-xl bg-red-50 border border-red-100 text-red-600 font-bold text-sm hover:bg-red-100 transition-colors"><i class="fa-solid fa-clock mr-1"></i> Xem bài quá hạn</button>
+        </div>
         <div id="pendingTasksList" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 md:gap-4">
             <div class="col-span-full py-12 text-center bg-white rounded-2xl border border-dashed border-primary-200"><i class="fa-solid fa-circle-notch fa-spin text-primary-500 text-3xl mb-4"></i><p class="text-gray-500 font-medium">Đang tải dữ liệu...</p></div>
         </div>
@@ -334,10 +340,15 @@
                         <div><h2 class="text-xl md:text-2xl font-black text-gray-800 leading-none mb-1" id="detailClassName">...</h2><p class="text-sm text-gray-500 font-medium">Danh sách bài tập</p></div>
                     </div>
                     
-                    <div class="flex items-center gap-3">
+                    <div class="flex flex-wrap items-center gap-3">
                         <div class="bg-gray-100 p-1 rounded-xl flex shrink-0">
                             <button onclick="window.changeLayout('grid')" id="btn-layout-grid" class="p-2.5 rounded-lg text-primary-600 bg-white shadow-sm transition-all"><i class="fa-solid fa-border-all"></i></button>
                             <button onclick="window.changeLayout('list')" id="btn-layout-list" class="p-2.5 rounded-lg text-gray-400 hover:text-primary-600 transition-all"><i class="fa-solid fa-list-ul"></i></button>
+                        </div>
+                        <div class="bg-white p-1 rounded-xl border border-gray-200 shadow-sm flex gap-1">
+                            <button onclick="window.filterClassExams('unfinished')" id="classFilterUnfinished" class="px-3 py-2 rounded-lg text-xs font-bold text-gray-600 hover:bg-primary-50 hover:text-primary-700">Chưa hoàn thành</button>
+                            <button onclick="window.filterClassExams('overdue')" id="classFilterOverdue" class="px-3 py-2 rounded-lg text-xs font-bold text-red-600 hover:bg-red-50">Quá hạn</button>
+                            <button onclick="window.filterClassExams('all')" id="classFilterAll" class="px-3 py-2 rounded-lg text-xs font-bold bg-primary-50 text-primary-700">Tất cả</button>
                         </div>
                         
                         <select onchange="window.renderClassExams(this.value)" class="bg-gray-50 border border-gray-200 text-gray-700 text-sm font-bold rounded-xl focus:ring-primary-500 focus:border-primary-500 block w-full md:w-auto p-3 outline-none cursor-pointer">
@@ -536,6 +547,8 @@
 
         const ADMIN_EMAILS = ["phamngockhanh.942001@gmail.com", "phamngockhanh.942002@gmail.com", "admin@gmail.com", "phamdinhquang0911@gmail.com"];
         let currentClassExams = [];
+        let currentClassFilter = 'all';
+        window.pendingTaskMode = 'active';
         let studentResultsMap = {};
         let purchasedCourseIds = new Set(); // Lưu danh sách ID khóa học đã mua để kiểm tra nhanh
         let processingListener = null; // Biến lưu trình lắng nghe sự kiện thanh toán
@@ -961,6 +974,7 @@
                 }
 
                 const qResults = query(collection(db, "results"), where("studentId", "==", user.uid));
+                const qApprovedRetries = query(collection(db, "access_requests"), where("studentId", "==", user.uid), where("status", "==", "approved"));
                 // Chỉ đọc đề được gán cho các lớp của học sinh, không tải toàn bộ kho đề đã xuất bản.
                 const chunks = [];
                 for (let i = 0; i < myClassIds.length; i += 10) chunks.push(myClassIds.slice(i, i + 10));
@@ -968,16 +982,20 @@
                     getDocs(query(collection(db, "exams"), where("allowedClassIds", "array-contains-any", ids))),
                     getDocs(query(collection(db, "exams"), where("allowedClassId", "in", ids)))
                 ]);
-                const [snapResults, ...examSnaps] = await Promise.all([getDocs(qResults), ...examReads]);
+                const [snapResults, approvedRetriesSnap, ...examSnaps] = await Promise.all([getDocs(qResults), getDocs(qApprovedRetries).catch(() => null), ...examReads]);
                 const submittedExamIds = new Set();
                 snapResults.forEach(d => submittedExamIds.add(d.data().examId));
+                const approvedRetryExamIds = new Set();
+                if (approvedRetriesSnap) approvedRetriesSnap.forEach(d => approvedRetryExamIds.add(d.data().examId));
 
-                let pendingExams = [];
+                let activeExams = [];
+                let overdueExams = [];
                 const assignedDocs = new Map();
                 examSnaps.forEach((snap) => snap.forEach((d) => assignedDocs.set(d.id, d)));
                 assignedDocs.forEach(d => {
                     const ex = d.data();
-                    if (submittedExamIds.has(d.id) || ex.status !== 'published' || ex.accessType !== 'class') return;
+                    const hasRetryTicket = approvedRetryExamIds.has(d.id);
+                    if ((submittedExamIds.has(d.id) && !hasRetryTicket) || ex.status !== 'published' || ex.accessType !== 'class') return;
 
                     let isAssignedToMe = false;
                     if (ex.allowedClassIds && Array.isArray(ex.allowedClassIds)) {
@@ -985,22 +1003,43 @@
                     } else if (ex.allowedClassId) {
                         if (myClassIds.includes(ex.allowedClassId)) isAssignedToMe = true;
                     }
-                    if (isAssignedToMe) pendingExams.push({id: d.id, ...ex});
+                    if (!isAssignedToMe) return;
+                    const isOverdue = ex.endTime && new Date(ex.endTime) < new Date();
+                    const item = { id: d.id, ...ex, hasRetryTicket };
+                    // Bài được duyệt làm lại vẫn cần hiển thị để học sinh bắt đầu lượt mới.
+                    if (isOverdue && !hasRetryTicket) overdueExams.push(item);
+                    else activeExams.push(item);
                 });
                 
-                pendingExams.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
-                pendingExams = pendingExams.slice(0, 10);
-
-                titleEl.innerHTML = `Em có <span class="text-red-500 font-black text-2xl mx-1">${pendingExams.length}</span> bài tập cần hoàn thành`;
+                const showOverdue = window.pendingTaskMode === 'overdue';
+                let pendingExams = (showOverdue ? overdueExams : activeExams)
+                    .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
+                    .slice(0, 10);
+                
+                titleEl.innerHTML = showOverdue
+                    ? `Em có <span class="text-red-500 mx-1">${overdueExams.length}</span> bài tập quá hạn`
+                    : `Em có <span class="text-red-500 mx-1">${activeExams.length}</span> bài tập cần hoàn thành`;
+                const overdueBtn = document.getElementById('showOverdueTasksBtn');
+                if (overdueBtn) {
+                    overdueBtn.classList.toggle('hidden', overdueExams.length === 0);
+                    overdueBtn.innerHTML = showOverdue
+                        ? '<i class="fa-solid fa-arrow-left mr-1"></i> Quay lại bài cần làm'
+                        : `<i class="fa-solid fa-clock mr-1"></i> Xem ${overdueExams.length} bài quá hạn`;
+                    overdueBtn.onclick = () => { window.pendingTaskMode = showOverdue ? 'active' : 'overdue'; loadPendingTasks(auth.currentUser); };
+                }
 
                 if (pendingExams.length === 0) { 
-                    container.innerHTML = '<div class="col-span-full py-8 text-center bg-white rounded-2xl border border-dashed border-primary-200 shadow-sm"><i class="fa-solid fa-circle-check text-primary-500 text-4xl mb-3"></i><p class="text-gray-800 font-bold mb-1">Tuyệt vời! Bạn đã hoàn thành hết bài tập.</p></div>'; 
+                    container.innerHTML = showOverdue
+                        ? '<div class="col-span-full py-8 text-center bg-white rounded-2xl border border-dashed border-green-200 shadow-sm"><i class="fa-solid fa-circle-check text-green-500 text-4xl mb-3"></i><p class="text-gray-800 font-bold mb-1">Không có bài tập quá hạn.</p></div>'
+                        : '<div class="col-span-full py-8 text-center bg-white rounded-2xl border border-dashed border-primary-200 shadow-sm"><i class="fa-solid fa-circle-check text-primary-500 text-4xl mb-3"></i><p class="text-gray-800 font-bold mb-1">Tuyệt vời! Bạn đã hoàn thành hết bài tập còn hạn.</p></div>'; 
                     return; 
                 }
 
                 let html = '';
                 pendingExams.forEach(ex => {
-                    html += `<div class="bg-white p-2 md:p-4 rounded-2xl shadow-sm border border-primary-50 flex items-center gap-4 cursor-pointer hover:shadow-md transition-all hover:border-primary-200 group" onclick="window.location.href='exam.html?id=${ex.id}'"><div class="w-14 h-14 rounded-xl bg-orange-100 text-orange-600 flex items-center justify-center font-bold shrink-0 relative"><i class="fa-solid fa-file-pen text-xl"></i><span class="absolute top-0 right-0 w-3 h-3 bg-red-500 border-2 border-white rounded-full animate-pulse"></span></div><div class="flex-1 min-w-0"><div class="flex justify-between items-center mb-1"><span class="text-[10px] font-black text-gray-400 uppercase tracking-wider">Bài tập mới</span><span class="text-[10px] font-bold text-orange-600 bg-orange-50 px-2 py-0.5 rounded-full">Chưa làm</span></div><h4 class="font-bold text-gray-800 text-base line-clamp-1 group-hover:text-brand transition-colors">${ex.title}</h4><p class="text-xs text-gray-500 font-medium mt-1 flex items-center gap-3"><span><i class="fa-regular fa-clock text-primary-500"></i> ${ex.duration}p</span><span><i class="fa-solid fa-list-ol text-primary-500"></i> ${ex.questionCount||0} câu</span></p></div><button class="text-sm bg-brand text-white w-10 h-10 rounded-full font-bold flex items-center justify-center hover:bg-primary-700 transition-all hover:scale-110 shadow-sm"><i class="fa-solid fa-play ml-0.5"></i></button></div>`;
+                    const status = ex.hasRetryTicket ? 'Xin làm lại' : (showOverdue ? 'Quá hạn' : 'Chưa làm');
+                    const statusStyle = ex.hasRetryTicket ? 'text-green-700 bg-green-50' : (showOverdue ? 'text-red-600 bg-red-50' : 'text-orange-600 bg-orange-50');
+                    html += `<div class="bg-white p-2 md:p-4 rounded-2xl shadow-sm border border-primary-50 flex items-center gap-4 cursor-pointer hover:shadow-md transition-all hover:border-primary-200 group" onclick="window.location.href='exam.html?id=${ex.id}'"><div class="w-14 h-14 rounded-xl bg-orange-100 text-orange-600 flex items-center justify-center font-bold shrink-0 relative"><i class="fa-solid fa-file-pen text-xl"></i><span class="absolute top-0 right-0 w-3 h-3 bg-red-500 border-2 border-white rounded-full animate-pulse"></span></div><div class="flex-1 min-w-0"><div class="flex justify-between items-center mb-1"><span class="text-[10px] font-black text-gray-400 uppercase tracking-wider">${ex.hasRetryTicket ? 'Đã duyệt' : 'Bài tập'}</span><span class="text-[10px] font-bold ${statusStyle} px-2 py-0.5 rounded-full">${status}</span></div><h4 class="font-bold text-gray-800 text-base line-clamp-1 group-hover:text-brand transition-colors">${ex.title}</h4><p class="text-xs text-gray-500 font-medium mt-1 flex items-center gap-3"><span><i class="fa-regular fa-clock text-primary-500"></i> ${ex.duration}p</span><span><i class="fa-solid fa-list-ol text-primary-500"></i> ${ex.questionCount||0} câu</span></p></div><button class="text-sm bg-brand text-white w-10 h-10 rounded-full font-bold flex items-center justify-center hover:bg-primary-700 transition-all hover:scale-110 shadow-sm"><i class="fa-solid ${ex.hasRetryTicket ? 'fa-rotate-right' : 'fa-play'} ml-0.5"></i></button></div>`;
                 });
                 container.innerHTML = html;
             } catch(e) { console.error(e); }
@@ -1063,6 +1102,7 @@
         // --- HÀM XEM CHI TIẾT LỚP (Phiên bản "An toàn" - Không bị lỗi Permission) ---
         window.openClassDetail = async (classId, className) => {
             window.switchTab('class-detail');
+            currentClassFilter = 'all';
             document.getElementById('detailClassName').textContent = className;
             const container = document.getElementById('classExamList');
             container.innerHTML = '<div class="col-span-full text-center py-16"><i class="fa-solid fa-circle-notch fa-spin text-3xl text-primary-500"></i></div>';
@@ -1133,16 +1173,31 @@
         window.renderClassExams = (sortType) => {
             currentSortMode = sortType;
             const container = document.getElementById('classExamList');
+            const now = new Date();
+            const isOverdue = (exam) => !!exam.endTime && new Date(exam.endTime) < now;
+            const hasRetry = (exam) => window.myApprovedRetries && window.myApprovedRetries.has(exam.id);
+            const isUnfinished = (exam) => !studentResultsMap[exam.id] || hasRetry(exam);
+            const visibleExams = currentClassExams.filter(exam => {
+                if (currentClassFilter === 'unfinished') return isUnfinished(exam) && !isOverdue(exam);
+                if (currentClassFilter === 'overdue') return isUnfinished(exam) && isOverdue(exam) && !hasRetry(exam);
+                return true;
+            });
+            ['all', 'unfinished', 'overdue'].forEach(filter => {
+                const btn = document.getElementById(`classFilter${filter.charAt(0).toUpperCase()}${filter.slice(1)}`);
+                if (!btn) return;
+                btn.className = `px-3 py-2 rounded-lg text-xs font-bold ${currentClassFilter === filter ? 'bg-primary-50 text-primary-700' : (filter === 'overdue' ? 'text-red-600 hover:bg-red-50' : 'text-gray-600 hover:bg-primary-50 hover:text-primary-700')}`;
+            });
             
             // Xử lý khi không có dữ liệu
-            if(currentClassExams.length === 0) { 
-                container.innerHTML = '<div class="col-span-full text-center py-12 text-gray-400">Chưa có bài tập nào.</div>'; 
+            if(visibleExams.length === 0) { 
+                const emptyText = currentClassFilter === 'overdue' ? 'Không có bài tập quá hạn.' : (currentClassFilter === 'unfinished' ? 'Không có bài tập chưa hoàn thành.' : 'Chưa có bài tập nào.');
+                container.innerHTML = `<div class="col-span-full text-center py-12 text-gray-400">${emptyText}</div>`; 
                 container.className=""; 
                 return; 
             }
             
             // Sắp xếp
-            currentClassExams.sort((a, b) => { 
+            visibleExams.sort((a, b) => { 
                 const dA = new Date(a.createdAt||0); 
                 const dB = new Date(b.createdAt||0); 
                 return sortType === 'newest' ? dB - dA : dA - dB; 
@@ -1154,7 +1209,7 @@
             if (currentViewMode === 'grid') {
                 container.className = "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-6 pb-2 md:pb-6";
                 
-                currentClassExams.forEach(exam => {
+                visibleExams.forEach(exam => {
                     const res = studentResultsMap[exam.id]; 
                     const isDone = !!res;
                     const attemptsUsed = res ? res.count : 0;
@@ -1186,7 +1241,10 @@
                         }
                     }
 
-                    if (isDone) {
+                    if (hasRetryTicket) {
+                        statusBadge = `<span class="text-[10px] font-black bg-green-100 text-green-700 px-2.5 py-1 rounded-full uppercase tracking-wider shadow-sm">Xin làm lại</span>`;
+                        actionBtn = `<button onclick="window.location.href='exam.html?id=${exam.id}'" class="w-full py-3 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700 text-xs flex items-center justify-center gap-1 shadow-sm"><i class="fa-solid fa-rotate-right"></i> Làm lại (Đã duyệt)</button>`;
+                    } else if (isDone) {
                         const score = res.score;
                         if (isHwOrMixed && !isGraded) {
                             statusBadge = `<span class="text-[10px] font-black bg-orange-100 text-orange-700 px-2.5 py-1 rounded-full uppercase tracking-wider shadow-sm">Chờ chấm</span>`;
@@ -1235,7 +1293,7 @@
             else {
                 container.className = "space-y-3 pb-2 md:pb-6";
                 
-                currentClassExams.forEach(exam => {
+                visibleExams.forEach(exam => {
                     const res = studentResultsMap[exam.id]; 
                     const isDone = !!res;
                     const attemptsUsed = res ? res.count : 0;
@@ -1267,7 +1325,10 @@
                         }
                     }
 
-                    if (isDone) {
+                    if (hasRetryTicket) {
+                        scoreBadge = `<div class="text-right"><div class="text-sm font-black text-green-700">Xin làm lại</div><div class="text-[10px] text-gray-400">Đã được duyệt</div></div>`;
+                        actionBtn = `<button onclick="window.location.href='exam.html?id=${exam.id}'" class="px-3 py-2 bg-green-600 text-white font-bold rounded-lg hover:bg-green-700 text-xs whitespace-nowrap shadow-sm"><i class="fa-solid fa-rotate-right"></i> Làm lại (Đã duyệt)</button>`;
+                    } else if (isDone) {
                         if (isHwOrMixed && !isGraded) {
                             scoreBadge = `<div class="text-right"><div class="text-sm font-black text-orange-600">Chờ chấm</div><div class="text-[10px] text-gray-400">Lần ${attemptsUsed}</div></div>`;
                         } else {
@@ -1313,6 +1374,16 @@
             }
             
             container.innerHTML = html;
+        };
+
+        window.filterClassExams = (filter) => {
+            currentClassFilter = filter;
+            window.renderClassExams(currentSortMode || 'newest');
+        };
+
+        window.showDashboardOverdueTasks = () => {
+            window.pendingTaskMode = window.pendingTaskMode === 'overdue' ? 'active' : 'overdue';
+            if (auth.currentUser) loadPendingTasks(auth.currentUser);
         };
 
         window.changeLayout = (mode) => {

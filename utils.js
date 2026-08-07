@@ -567,12 +567,9 @@ export const formatContent = (text) => {
     processed = processed.replace(/\\end\{(?:ex|bt|vd|cau|question)\}/g, '');
     processed = processed.replace(/\\immini(?:\[.*?\])?\s*\{/g, '{'); // Strip \immini but keep the group
 
-    // 1. Clean Text
+    // 1. Clean Text (Math-safe replacements)
     processed = processed.replace(/\\centering/g, "");
     processed = processed.replace(/\\%/g, "%");
-    processed = processed.replace(/\\textbf\{([^}]+)\}/g, '<b class="font-bold">$1</b>');
-    processed = processed.replace(/\\textit\{([^}]+)\}/g, '<i class="italic">$1</i>');
-    processed = processed.replace(/\\hfill/g, '<span style="display:inline-block; width: 2rem;"></span>');
     processed = processed.replace(/\\allowdisplaybreaks(\[.*?\])?/g, "");
     processed = processed.replace(/\\lq\\lq/g, '"').replace(/\\rq\\rq/g, '"').replace(/\\lq/g, '"').replace(/\\rq/g, '"');
     processed = processed.replace(/\\wideparen\{([^}]+)\}/g, '\\overset{\\frown}{$1}');
@@ -603,12 +600,22 @@ export const formatContent = (text) => {
         const isTag = part.startsWith('<') && part.endsWith('>');
 
         if (isMath) {
-            return part.replace(/</g, ' < '); // Fix lỗi <x
+            let mathType = trimmed.substring(0, 2);
+            if (trimmed.startsWith('$') && !trimmed.startsWith('$$')) mathType = '$';
+            let cleanedMath = part;
+            if (mathType === '$' || mathType === '$$') {
+                cleanedMath = cleanedMath.replace(/<br\s*\/?>/gi, ` ${mathType} <br> ${mathType} `);
+            } else {
+                cleanedMath = cleanedMath.replace(/<br\s*\/?>/gi, ' \\\\ ');
+            }
+            return cleanedMath.replace(/</g, ' &lt; ');
         } else if (isTag) {
             return part; // Giữ nguyên tag HTML
         } else {
-            let cleanPart = part.replace(/</g, '&lt;'); // Mã hóa text thường
-            // BỎ cleanPart = cleanPart.replace(/\}/g, ''); vì nó làm mất dấu ngoặc nhọn của TF
+            let cleanPart = part.replace(/</g, '&lt;'); // Mã hóa text thường trước
+            cleanPart = cleanPart.replace(/\\textbf\{([^}]+)\}/g, '<b class="font-bold">$1</b>');
+            cleanPart = cleanPart.replace(/\\textit\{([^}]+)\}/g, '<i class="italic">$1</i>');
+            cleanPart = cleanPart.replace(/\\hfill/g, '<span style="display:inline-block; width: 2rem;"></span>');
             return cleanPart.replace(/\\\\/g, '<br>').replace(/\n/g, '<br>');
         }
     }).join('');
