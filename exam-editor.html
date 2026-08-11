@@ -49,6 +49,8 @@
     <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
     <link rel="stylesheet" type="text/css" href="https://tikzjax.com/v1/fonts.css">
     <script src="https://tikzjax.com/v1/tikzjax.js"></script>
+    <!-- Đọc nội dung .docx ngay trên trình duyệt sau khi MathType API đã chuyển công thức sang LaTeX. -->
+    <script src="https://unpkg.com/mammoth@1.12.1/mammoth.browser.min.js"></script>
     <script src="ai-grader.js"></script>
     <script src="ai-id-assigner.js?v=20260804-404fix"></script>
     <style>
@@ -88,6 +90,19 @@
             line-height: 1.6 !important; 
             font-size: 15px;
             color: #1f2937;
+        }
+
+        /* Bảng từ Word và LaTeX: luôn giữ đường kẻ để không biến thành các dòng văn bản rời. */
+        .math-content table, .latex-container table, #contentLivePreview table, #solLivePreview table {
+            border-collapse: collapse !important;
+            border: 1px solid #64748b !important;
+            margin: .75rem 0 !important;
+        }
+        .math-content th, .math-content td, .latex-container th, .latex-container td,
+        #contentLivePreview th, #contentLivePreview td, #solLivePreview th, #solLivePreview td {
+            border: 1px solid #64748b !important;
+            padding: .35rem .55rem !important;
+            vertical-align: top;
         }
 
         /* 2. Xử lý MathJax Inline (Công thức cùng dòng) */
@@ -156,7 +171,7 @@
                 <li><button onclick="switchView('stats'); window.toggleSidebar()" id="menu-stats" class="sidebar-item w-full text-left px-6 py-3 text-gray-600 hover:bg-gray-50 transition-colors flex items-center gap-3 text-sm"><i class="fa-solid fa-chart-pie w-5"></i> Thống kê & Báo cáo</button></li>
                 <li><button onclick="switchView('grading'); window.toggleSidebar()" id="menu-grading" class="sidebar-item w-full text-left px-6 py-3 text-gray-600 hover:bg-gray-50 transition-colors flex items-center gap-3 text-sm"><i class="fa-solid fa-pen-nib w-5"></i> Chấm bài</button></li>
                 <li>
-                    <button onclick="window.open('exam-print.html?id=' + (new URLSearchParams(window.location.search).get('id') || currentExamId), '_blank'); window.toggleSidebar()" id="menu-print" class="sidebar-item w-full text-left px-6 py-3 text-primary-600 hover:bg-primary-50 transition-colors flex items-center gap-3 text-sm font-bold border-t border-gray-100">
+                    <button onclick="window.open('exam-print.html?id=' + (new URLSearchParams(window.location.search).get('id') || window.currentExamId), '_blank'); window.toggleSidebar()" id="menu-print" class="sidebar-item w-full text-left px-6 py-3 text-primary-600 hover:bg-primary-50 transition-colors flex items-center gap-3 text-sm font-bold border-t border-gray-100">
                         <i class="fa-solid fa-file-pdf w-5"></i> Xem / In PDF
                     </button>
                 </li>
@@ -423,6 +438,8 @@
                         <button onclick="openBookBankModal()" class="px-3 py-1.5 bg-purple-100 text-purple-700 rounded text-xs font-bold hover:bg-purple-200"><i class="fa-solid fa-book-open mr-1"></i> Sách Số Hóa</button>
                         <button onclick="document.getElementById('texInput').click()" class="px-3 py-1.5 bg-green-100 text-green-700 rounded text-xs font-bold hover:bg-green-200"><i class="fa-solid fa-file-import mr-1"></i> LaTeX</button>
                         <input type="file" id="texInput" accept=".tex,.txt" class="hidden" onchange="handleTexUpload(this)">
+                        <button onclick="document.getElementById('wordInput').click()" class="px-3 py-1.5 bg-blue-100 text-blue-700 rounded text-xs font-bold hover:bg-blue-200"><i class="fa-solid fa-file-word mr-1"></i> Word</button>
+                        <input type="file" id="wordInput" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" class="hidden" onchange="handleWordUpload(this)">
                     </div>
                 </div>
                 
@@ -2536,8 +2553,6 @@
                     count++;
                 }
 
-                input.value = "";
-
                 // Hàm tiếp tục xử lý TikZ
                 const continueProcessTikZ = () => {
                     const tikzCount = pendingImageUploads.filter(i => i.type === 'tikz').length;
@@ -2580,6 +2595,203 @@
             
             reader.readAsText(file);
         }
+
+        // --- IMPORT WORD (.DOCX) ---
+        // Word thường không chứa cấu trúc \begin{ex}; vì vậy sau khi Mammoth đọc file,
+        // ta nhận diện các nhãn Câu/A/B/C/D/Lời giải và chuyển thành question object chuẩn.
+        function wordHtmlToImportText(html) {
+            const source = new DOMParser().parseFromString(html || '', 'text/html');
+            const wordTables = [];
+
+            // Mammoth giữ định dạng gạch chân thành thẻ <u>. Đổi riêng nhãn A./a)
+            // thành marker để dùng làm đáp án, rồi bỏ marker khỏi nội dung hiển thị.
+            source.querySelectorAll('u').forEach(underlined => {
+                const label = (underlined.textContent || '').trim().match(/^([A-Da-d])\s*[\.\)]?$/);
+                if (label) {
+                    underlined.before(document.createTextNode(` [[WORD_UNDERLINE_${label[1].toUpperCase()}]] `));
+                }
+            });
+
+            // Mammoth biểu diễn đánh số tự động của Word bằng <ol><li>, không đưa số vào textContent.
+            // Khôi phục nhãn "Câu n." để parser phía dưới có thể tách từng câu.
+            source.querySelectorAll('ol').forEach(ol => {
+                const start = Number.parseInt(ol.getAttribute('start') || '1', 10) || 1;
+                [...ol.children].filter(child => child.tagName === 'LI').forEach((item, itemIndex) => {
+                    const itemText = (item.textContent || '').trim();
+                    if (!/^\s*(?:Câu|Bài)\s*\d+\s*[\.:]/i.test(itemText)) {
+                        item.insertBefore(document.createTextNode(`Câu ${start + itemIndex}. `), item.firstChild);
+                    }
+                });
+            });
+
+            // Không ép bảng thành text: thay bằng token tạm để trả lại HTML table nguyên vẹn sau khi lấy nội dung.
+            source.querySelectorAll('table').forEach(table => {
+                table.classList.add('word-import-table');
+                table.setAttribute('border', '1');
+                table.querySelectorAll('td, th').forEach(cell => cell.setAttribute('style', 'border:1px solid #64748b;padding:6px;vertical-align:top;'));
+                const token = `[[WORD_TABLE_${wordTables.length}]]`;
+                wordTables.push(table.outerHTML);
+                table.replaceWith(document.createTextNode(` ${token} `));
+            });
+            source.querySelectorAll('br').forEach(el => el.replaceWith('\n'));
+            source.querySelectorAll('p, div, li, tr, h1, h2, h3, h4').forEach(el => el.append('\n'));
+            source.querySelectorAll('img').forEach(img => {
+                const src = img.getAttribute('src') || '';
+                if (/^(data:image\/|https?:\/\/)/i.test(src)) img.replaceWith(` <img src="${src}" alt="Hình minh họa"> `);
+                else img.remove();
+            });
+            let text = (source.body.textContent || '')
+                .replace(/\u00a0/g, ' ')
+                .replace(/\r/g, '')
+                .replace(/[ \t]+\n/g, '\n')
+                .replace(/\n{3,}/g, '\n\n')
+                .trim();
+            wordTables.forEach((tableHtml, index) => {
+                text = text.replace(`[[WORD_TABLE_${index}]]`, tableHtml);
+            });
+            return text;
+        }
+
+        function parseWordQuestions(text) {
+            const questionStarts = [...text.matchAll(/(?:^|\n)\s*(?:Câu|Bài)\s*(\d+)\s*[\.:]/gi)];
+            if (!questionStarts.length) return [];
+
+            return questionStarts.map((match, index) => {
+                const start = match.index + match[0].length;
+                const end = index + 1 < questionStarts.length ? questionStarts[index + 1].index : text.length;
+                let body = text.slice(start, end).trim();
+                const underlinedLabels = [...body.matchAll(/\[\[WORD_UNDERLINE_([A-D])\]\]/g)].map(match => match[1]);
+                body = body.replace(/\[\[WORD_UNDERLINE_[A-D]\]\]/g, '');
+                let solution = '';
+                const solutionMatch = /(?:^|\n)\s*(?:Lời\s*giải|Hướng\s*dẫn\s*giải)\s*[:.]?/im.exec(body);
+                if (solutionMatch) {
+                    solution = body.slice(solutionMatch.index + solutionMatch[0].length).trim();
+                    body = body.slice(0, solutionMatch.index).trim();
+                }
+
+                // Chỉ coi là Đúng/Sai khi giáo viên đặt nhãn rõ ràng [ĐS] hoặc (Đúng/Sai).
+                // Điều này tránh nhầm câu tự luận có các dòng a), b), c), d) thành dạng Đúng/Sai.
+                const isTrueFalse = /(?:\[\s*(?:ĐS|Đ\/S|Đúng\s*\/\s*Sai)\s*\]|\(\s*Đúng\s*[-/]\s*Sai\s*\))/i.test(body);
+                const tfMatches = isTrueFalse ? [...body.matchAll(/(?:^|\n)\s*([a-d])\s*[\.\)]\s*/gi)] : [];
+                // Nhãn đáp án Word có thể nằm cùng một dòng hoặc trên các đoạn riêng.
+                const optionMatches = [...body.matchAll(/(?:^|\n|\s)([ABCD])\s*[\.\)\:]\s*/g)];
+                const question = {
+                    type: 'essay', content: body, solution, options: [], statements: [],
+                    answer: '', point: 0, correct: -1, mapId: '', source: 'word'
+                };
+                if (tfMatches.length >= 4) {
+                    question.type = 'tf';
+                    question.content = body.slice(0, tfMatches[0].index)
+                        .replace(/\[\s*(?:ĐS|Đ\/S|Đúng\s*\/\s*Sai)\s*\]|\(\s*Đúng\s*[-/]\s*Sai\s*\)/ig, '')
+                        .trim();
+                    question.statements = tfMatches.slice(0, 4).map((statement, statementIndex) => {
+                        const statementStart = statement.index + statement[0].length;
+                        const statementEnd = statementIndex < 3 ? tfMatches[statementIndex + 1].index : body.length;
+                        const rawText = body.slice(statementStart, statementEnd).trim();
+                        const answerMatch = /(?:\[\s*(Đúng|Sai)\s*\]|\(\s*(Đúng|Sai)\s*\)|[-–—]\s*(Đúng|Sai))\s*$/i.exec(rawText);
+                        const statementLabel = statement[1].toUpperCase();
+                        return {
+                            text: rawText.replace(/(?:\[\s*(?:Đúng|Sai)\s*\]|\(\s*(?:Đúng|Sai)\s*\)|[-–—]\s*(?:Đúng|Sai))\s*$/i, '').trim(),
+                            isTrue: underlinedLabels.includes(statementLabel) || Boolean(answerMatch && (answerMatch[1] || answerMatch[2] || answerMatch[3]).toLowerCase() === 'đúng')
+                        };
+                    });
+                } else if (optionMatches.length >= 4) {
+                    const options = optionMatches.slice(0, 4).map((option, optionIndex) => {
+                        const optionStart = option.index + option[0].length;
+                        const optionEnd = optionIndex < 3 ? optionMatches[optionIndex + 1].index : body.length;
+                        return body.slice(optionStart, optionEnd).trim();
+                    });
+                    question.type = 'mc';
+                    question.content = body.slice(0, optionMatches[0].index).trim();
+                    question.options = options;
+                }
+                const correctMatch = /(?:chọn|đáp\s*án)\s*[:\-]?\s*([ABCD])\b/i.exec(solution);
+                if (question.type === 'mc' && underlinedLabels.length) {
+                    question.correct = underlinedLabels[0].charCodeAt(0) - 65;
+                } else if (correctMatch && question.type === 'mc') {
+                    question.correct = correctMatch[1].toUpperCase().charCodeAt(0) - 65;
+                }
+                return question;
+            }).filter(q => q.content || q.options.some(Boolean));
+        }
+
+        async function getMathTypeApiUrl() {
+            try {
+                const snap = await getDoc(doc(db, 'configurations', 'mathtype_api'));
+                return snap.exists() ? String(snap.data().url || '').trim() : '';
+            } catch (error) {
+                console.warn('[Word import] Không đọc được cấu hình MathType:', error);
+                return '';
+            }
+        }
+
+        window.handleWordUpload = async (input) => {
+            const file = input.files && input.files[0];
+            input.value = '';
+            if (!file) return;
+            if (!/\.docx$/i.test(file.name)) {
+                window.customAlert('Chỉ hỗ trợ tệp Word định dạng .docx.', 'warning');
+                return;
+            }
+            if (!window.mammoth) {
+                window.customAlert('Không tải được thư viện đọc Word. Vui lòng kiểm tra kết nối Internet rồi tải lại trang.', 'error');
+                return;
+            }
+
+            window.showToast('Đang đọc file Word...', 'info');
+            try {
+                let arrayBuffer = await file.arrayBuffer();
+                const mathTypeApiUrl = await getMathTypeApiUrl();
+                if (mathTypeApiUrl) {
+                    try {
+                        window.showToast('Đang chuyển công thức MathType sang LaTeX...', 'info');
+                        const formData = new FormData();
+                        formData.append('file', file);
+                        const response = await fetch(mathTypeApiUrl, { method: 'POST', body: formData });
+                        if (!response.ok) {
+                            let message = `HTTP ${response.status}`;
+                            try { message = (await response.json()).error || message; } catch (_) {}
+                            throw new Error(message);
+                        }
+                        arrayBuffer = await response.arrayBuffer();
+                    } catch (conversionError) {
+                        console.warn('[Word import] MathType API lỗi, dùng nội dung Word gốc:', conversionError);
+                        window.showToast(`Không chuyển được MathType (${conversionError.message}). Vẫn tiếp tục nạp văn bản Word gốc.`, 'warning');
+                    }
+                } else {
+                    window.showToast('Chưa cấu hình API MathType; các công thức MathType có thể không hiển thị. Văn bản Word vẫn được nạp.', 'warning');
+                }
+
+                // Mammoth mặc định bỏ qua gạch chân. Ép xuất <u> để parser nhận được
+                // A./a) được giáo viên gạch chân làm đáp án đúng.
+                const result = await window.mammoth.convertToHtml({ arrayBuffer }, { styleMap: ['u => u'] });
+                const parsedQuestions = parseWordQuestions(wordHtmlToImportText(result.value));
+                if (!parsedQuestions.length) {
+                    throw new Error('Không tìm thấy câu hỏi. File Word cần có nhãn dạng “Câu 1.” hoặc “Bài 1.”.');
+                }
+                if (window.currentQIndex !== -1) saveCurrentQuestionToMemory();
+                pendingImageUploads = [];
+                const isMixed = document.getElementById('settingType')?.value === 'mixed';
+                parsedQuestions.forEach(question => {
+                    if (isMixed && question.type === 'essay') {
+                        if (!window.mixedTlQuestions) window.mixedTlQuestions = [];
+                        window.mixedTlQuestions.push(question);
+                    } else {
+                        window.questions.push(question);
+                    }
+                });
+
+                const allQuestions = [...(window.questions || []), ...(window.mixedTlQuestions || [])];
+                if (typeof window.checkAndAssignMissingIds === 'function' && (window.globalIdTree || []).length) {
+                    await window.checkAndAssignMissingIds(allQuestions, { db: window._examDb }).catch(error => console.warn('[Word import] Bỏ qua gán MapID:', error));
+                }
+                window.finishImportProcess();
+                window.showToast(`Đã nạp ${parsedQuestions.length} câu từ Word. Hãy kiểm tra và chọn đáp án đúng trước khi lưu đề.`, 'success');
+            } catch (error) {
+                console.error('[Word import] Lỗi:', error);
+                window.customAlert(`Không thể nạp file Word: ${error.message}`, 'error');
+            }
+        };
 
         function getAllImageUrls(dataObj) {
             const str = JSON.stringify(dataObj);
@@ -2698,7 +2910,7 @@
                     ...(currentExamId ? {} : { createdAt: new Date().toISOString() }) 
                 }, { merge: true });
 
-                currentExamId = examRef.id; 
+                currentExamId = examRef.id; window.currentExamId = currentExamId; window.currentExamId = currentExamId; 
                 document.getElementById('sidebarExamTitle').textContent = title;
 
                 // 4. Hoàn tất

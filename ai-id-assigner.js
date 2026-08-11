@@ -118,7 +118,7 @@
     const delay = ms => new Promise(res => setTimeout(res, ms));
 
     async function callGeminiApi(prompt, systemPrompt, apiKeys, modelId, keyState) {
-        const model = modelId || 'gemini-3.5-flash';
+        const model = modelId || 'gemini-3.5-flash-lite';
         const pool = [...new Set((Array.isArray(apiKeys) ? apiKeys : [apiKeys]).filter(Boolean))];
         if (!pool.length) throw new Error('Không có API key khả dụng.');
 
@@ -187,14 +187,16 @@
                 // Thoát ngay để tầng gọi bên ngoài chuyển sang model dự phòng.
                 if (e.status === 404) throw e;
                 if (e.status === 403) keyState.blocked.add(keyIndex);
-                if (e.status === 429) keyState.cooldowns.set(keyIndex, Date.now() + Math.max(1800, e.retryAfter || wait));
+                if (e.status === 429 || e.status >= 500) {
+                    keyState.cooldowns.set(keyIndex, Date.now() + Math.max(5000, e.retryAfter || wait));
+                }
                 if (retries === 0) throw e;
                 // 429: đổi key ngay và chờ theo Retry-After; 403: key hiện tại
                 // không dùng được/quá hạn nên chuyển key khác. Có jitter để các
                 // worker không đồng loạt gọi lại cùng một thời điểm.
-                const baseWait = e.status === 403 ? 250 : Math.max(wait, e.retryAfter || 0);
+                const baseWait = e.status === 403 ? 500 : Math.max(wait, e.retryAfter || 0);
                 await delay(baseWait + Math.floor(Math.random() * 350));
-                if (e.status !== 403) wait = Math.min(wait * 1.8, 12000);
+                if (e.status !== 403) wait = Math.min(wait * 2, 30000);
             }
         }
     }
@@ -368,9 +370,10 @@
                                 <div>
                                     <label style="font-size:11px;font-weight:700;color:#64748b;display:block;margin-bottom:3px;">Mô hình AI:</label>
                                     <select id="def-model" style="width:100%;padding:7px 10px;border:1px solid #cbd5e1;border-radius:8px;font-size:12px;font-weight:600;color:#1e293b;background:#fff;">
-                                        <option value="gemini-2.5-flash">Gemini 2.5 Flash (Ổn định, nhanh)</option>
-                                        <option value="gemini-3.5-flash">Gemini 3.5 Flash</option>
+                                        <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash-Lite (khuyến nghị: nhanh, tải cao)</option>
+                                        <option value="gemini-3.5-flash">Gemini 3.5 Flash (chính xác hơn)</option>
                                         <option value="gemini-3.6-flash">Gemini 3.6 Flash</option>
+                                        <option value="gemini-3-flash-preview">Gemini 3 Flash Preview</option>
                                     </select>
                                 </div>
                             </div>
@@ -411,7 +414,7 @@
                     if (val) defaults[`level${lv}`] = val;
                 });
                 const defMucdo = modal.querySelector('#def-mucdo')?.value || '';
-                const modelId = modal.querySelector('#def-model')?.value || 'gemini-2.5-flash';
+                const modelId = modal.querySelector('#def-model')?.value || 'gemini-3.5-flash-lite';
                 modal.remove();
                 resolve({ assignMode, defaults, defMucdo, modelId, levels });
             };
@@ -670,12 +673,12 @@
         if (!apiKeys.length) {
             throw new Error('Chưa có API key trong mục Quản lý API AI. Hãy thêm key tại đó rồi thử lại.');
         }
-        const rejectedKeys = apiKeys.filter(key => /^AQ\./i.test(key.trim()));
-        apiKeys = apiKeys.filter(key => !/^AQ\./i.test(key.trim()));
+        const rejectedKeys = apiKeys.filter(key => !/^AIza[0-9A-Za-z_-]{20,}$/i.test(key.trim()));
+        apiKeys = apiKeys.filter(key => /^AIza[0-9A-Za-z_-]{20,}$/i.test(key.trim()));
         if (!apiKeys.length) {
-            throw new Error('Các key đã lưu có dạng token AQ., không phải Gemini API key dùng cho x-goog-api-key. Hãy tạo API key Gemini trong Google AI Studio/Google Cloud.');
+            throw new Error('Không có Gemini API key hợp lệ. AI gán ID chỉ dùng key dạng AIza... tạo trong Google AI Studio/Google Cloud; token AQ., OpenAI key hoặc token đăng nhập không dùng được.');
         }
-        if (rejectedKeys.length) console.warn(`[ai-id-assigner] Đã bỏ qua ${rejectedKeys.length} token AQ. không đúng loại API key.`);
+        if (rejectedKeys.length) console.warn(`[ai-id-assigner] Đã bỏ qua ${rejectedKeys.length} key/token không phải Gemini API key (AIza...).`);
 
         // BƯỚC 1: Modal cấu hình
         let config;
@@ -693,6 +696,9 @@
         // Chỉ gửi các node lá (Dạng) còn hợp lệ sau bộ lọc từng cấp. Cách này
         // kế thừa bộ ép đủ 6 thành phần của công cụ cũ nhưng vẫn dùng cây động.
         const leafCandidates = collectLeafCandidates(tree, defaults);
+        if (!leafCandidates.length) {
+            throw new Error('Cây MapID chưa có node lá hợp lệ để AI chọn. Hãy kiểm tra các node Dạng/chuyên đề trong Cây kiến thức.');
+        }
         const validLeafIds = new Set(leafCandidates.map(candidate => candidate.id));
         const mapContext = buildLeafCandidateContext(leafCandidates);
 
@@ -757,6 +763,7 @@ Quy tắc bắt buộc:
             const preview = (q.content || '').replace(/<[^>]+>/g, '').substring(0, 80) + '...';
             const hasId = q._aiTopicId && q._aiMucdo;
             let descHtml = '';
+            const errorText = String(q._aiError || 'AI không trả về MapID hợp lệ.').replace(/[&<>"']/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' })[char]);
             if (hasId) {
                 const d = describeId(q._aiTopicId, q._aiMucdo, tree);
                 descHtml = `<div class="ai-id-desc-bar" id="ai-desc-${idx}">
@@ -766,7 +773,7 @@ Quy tắc bắt buộc:
                 </div>`;
             } else if (q._aiStatus === 'error') {
                 descHtml = `<div class="ai-id-desc-bar has-error" id="ai-desc-${idx}" style="color:#dc2626;font-size:12px;font-weight:600;">
-                    Gán thất bại. Hãy chỉnh sửa thủ công.
+                    ${errorText} Hãy chỉnh sửa thủ công.
                     <button class="ai-id-edit-btn" style="border-color:#fca5a5;color:#dc2626;background:#fff5f5;" onclick="document.getElementById('ai-manual-${idx}').classList.add('open')">✏ Sửa</button>
                 </div>`;
             } else {
@@ -924,8 +931,10 @@ Quy tắc bắt buộc:
             };
         });
 
-        // ── CHẠY AI SONG SONG ──
-        const MAX_CONCURRENT = Math.min(5, Math.max(1, apiKeys.length));
+        // ── HÀNG ĐỢI CÓ KIỂM SOÁT TẢI ──
+        // Chỉ gửi một câu mỗi lượt để tránh dồn nhiều request lên cùng key/model.
+        // Khi 429/5xx, callGeminiApi tự cooldown và backoff theo Retry-After.
+        const MAX_CONCURRENT = 1;
         const keyState = { cursor: 0 };
         let successCount = 0, failCount = 0, doneCount = 0;
         const total = toProcess.length;
@@ -934,12 +943,26 @@ Quy tắc bắt buộc:
             const promptText = getAiPromptContent(q);
             try {
                 let aiRes;
+                const fallbackModels = ['gemini-3.5-flash-lite', 'gemini-3.5-flash', 'gemini-3.6-flash', 'gemini-3-flash-preview']
+                    .filter(model => model !== modelId);
                 try {
                     aiRes = await callGeminiApi(promptText, systemPrompt, apiKeys, modelId, keyState);
                 } catch (primaryError) {
-                    if (modelId !== 'gemini-3.5-flash') {
-                        aiRes = await callGeminiApi(promptText, systemPrompt, apiKeys, 'gemini-3.5-flash', { cursor: keyState.cursor });
-                    } else throw primaryError;
+                    // Chỉ đổi model khi endpoint báo không tồn tại. Không đổi model khi 429/5xx,
+                    // vì điều đó biến một lần quá tải thành nhiều request đồng thời hơn.
+                    if (primaryError.status !== 404) throw primaryError;
+                    let lastError = primaryError;
+                    for (const fallbackModel of fallbackModels) {
+                        try {
+                            aiRes = await callGeminiApi(promptText, systemPrompt, apiKeys, fallbackModel, keyState);
+                            lastError = null;
+                            break;
+                        } catch (fallbackError) {
+                            lastError = fallbackError;
+                            if (fallbackError.status !== 404) throw fallbackError;
+                        }
+                    }
+                    if (!aiRes) throw lastError;
                 }
                 const validated = validateAndBuildId(aiRes, allNodeIds);
                 if (validated && !validLeafIds.has(validated.topicId)) throw new Error('AI trả về ID không thuộc node Dạng hợp lệ.');
@@ -951,11 +974,13 @@ Quy tắc bắt buộc:
                     successCount++;
                 } else {
                     q._aiStatus = 'error';
+                    q._aiError = 'AI trả về ID hoặc mức độ không có trong Cây kiến thức.';
                     failCount++;
                 }
             } catch (e) {
                 console.error(`[ai-id-assigner] Lỗi câu ${idx + 1}:`, e);
                 q._aiStatus = 'error';
+                q._aiError = e?.message || 'Không thể gọi Gemini API.';
                 failCount++;
             }
             doneCount++;
@@ -977,7 +1002,7 @@ Quy tắc bắt buộc:
                 const batch = toProcess.slice(i, i + MAX_CONCURRENT);
                 await Promise.all(batch.map((q) => processOne(q, questions.indexOf(q))));
                 if (i + MAX_CONCURRENT < toProcess.length) {
-                    await delay(800 + Math.floor(Math.random() * 500));
+                    await delay(1500 + Math.floor(Math.random() * 900));
                 }
             }
             // Done
