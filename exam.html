@@ -3051,29 +3051,42 @@ window.requestResubmit = async () => {
                     if (unconfiguredCount > 0) { const remainingScore = Math.max(0, maxTnScore - configuredPoints); defaultPointPerQuestion = remainingScore / unconfiguredCount; } else if (configuredPoints === 0) { defaultPointPerQuestion = maxTnScore / currentQuestions.length; }
 
                     currentQuestions.forEach((q, i) => {
-                        const u = userAnswers[i]; let isCorrect = false;
+                        const u = userAnswers[i]; let isCorrect = false; let earnedPointFraction = 0;
                         if (u !== undefined && u !== null && u !== "") {
                             if (q.type === 'mc') { 
-                                if (Number(u) === Number(q.correct)) isCorrect = true; 
+                                if (Number(u) === Number(q.correct)) { isCorrect = true; earnedPointFraction = 1; }
                             }
                             else if (q.type === 'short') { 
-                                if (q.answer && shortMatch(u, q.answer)) isCorrect = true; 
+                                if (q.answer && shortMatch(u, q.answer)) { isCorrect = true; earnedPointFraction = 1; }
                             }
                             else if (q.type === 'tf') { 
                                 if (typeof u === 'object' && Object.keys(u).length > 0 && q.statements) {
-                                    let isAllCorrect = true; 
+                                    let isAllCorrect = true;
+                                    let stmtCorrectCount = 0;
                                     q.statements.forEach((s, si) => { 
-                                        if (u[si] === undefined || u[si] !== s.isTrue) {
+                                        if (u[si] !== undefined && u[si] === s.isTrue) {
+                                            stmtCorrectCount++;
+                                        } else {
                                             isAllCorrect = false;
                                         }
                                     }); 
-                                    if (isAllCorrect) isCorrect = true; 
+                                    if (isAllCorrect) isCorrect = true;
+                                    
+                                    if (q.statements.length === 4) {
+                                        if (stmtCorrectCount === 1) earnedPointFraction = 0.1;
+                                        else if (stmtCorrectCount === 2) earnedPointFraction = 0.25;
+                                        else if (stmtCorrectCount === 3) earnedPointFraction = 0.5;
+                                        else if (stmtCorrectCount === 4) earnedPointFraction = 1.0;
+                                    } else {
+                                        earnedPointFraction = isAllCorrect ? 1.0 : 0;
+                                    }
                                 }
                             }
                         }
-                        if (isCorrect) { 
-                            correctCount++; 
-                            totalScore += (q.point && parseFloat(q.point) > 0) ? parseFloat(q.point) : defaultPointPerQuestion; 
+                        if (earnedPointFraction > 0) {
+                            if (isCorrect) correctCount++; 
+                            let qPt = (q.point && parseFloat(q.point) > 0) ? parseFloat(q.point) : defaultPointPerQuestion; 
+                            totalScore += qPt * earnedPointFraction;
                         }
                     });
                 }
@@ -3089,7 +3102,7 @@ window.requestResubmit = async () => {
                 const resultData = { 
                     examId, classId: detectedClassId, studentId: currentUser.uid, studentName: currentUser.displayName || currentUser.email,
                     email: currentUser.email || "", 
-                    score: score, answers: resultAnswers, briefNotes: window.briefNotes || {},
+                    score: score, mcScore: score, answers: resultAnswers, briefNotes: window.briefNotes || {},
                     cheatCount: 0, correctCount: correctCount, totalQuestions: totalQuestions, 
                     isPassed: false, passScoreSnapshot: 5, duration: 0, submittedAt: new Date().toISOString(),
                     submitCount: currentSubmitCount
@@ -3101,6 +3114,7 @@ window.requestResubmit = async () => {
                         answers: resultAnswers,
                         briefNotes: window.briefNotes || {},
                         score: score,
+                        mcScore: score,
                         correctCount: correctCount,
                         submittedAt: new Date().toISOString(), // Cập nhật giờ nộp mới
                         submitCount: currentSubmitCount + 1,

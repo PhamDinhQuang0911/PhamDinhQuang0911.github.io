@@ -2987,19 +2987,93 @@
                     examRefPromise
                 ]);
 
+                const examData = examRef.data();
+                window.examData = examData;
+
+                // Cung cấp hàm phụ trợ
+                window.tfBoolean = window.tfBoolean || ((value) => value === true || value === 'true' || value === 1 || value === '1');
+                window.shortMatch = window.shortMatch || ((a, b) => {
+                    const scalarShort = (v) => Array.isArray(v) ? v[0] : (v && typeof v === 'object' && 'value' in v ? v.value : v);
+                    const normShort = (v) => String(scalarShort(v) ?? '').normalize('NFKC').replace(/[\u200B-\u200D\u2060\uFEFF]/g, '').trim().toLowerCase().replace(/\$/g, '').replace(/\\left|\\right/g, '').replace(/\s+/g, '').replace(/,/g, '.');
+                    const na = normShort(a), nb = normShort(b);
+                    if (na === '' || nb === '') return false;
+                    if (na === nb) return true;
+                    const numA = na.replace(/\s+/g, ''), numB = nb.replace(/\s+/g, '');
+                    const isNum = (t) => /^[-+]?\d*\.?\d+$/.test(t);
+                    if (isNum(numA) && isNum(numB)) return Math.abs(parseFloat(numA) - parseFloat(numB)) < 1e-9;
+                    if (numA === numB) return true;
+                    return false;
+                });
+
+                // Hàm tính toán lại điểm (migration)
+                const autoMigrateScore = (attemptData) => {
+                    if (attemptData.mcScore !== undefined || !attemptData.answers || !examData.questions) return attemptData;
+                    
+                    let mcqCorrect = 0;
+                    let configuredPoints = 0; let unconfiguredCount = 0;
+                    examData.questions.forEach(q => { if (q.point && parseFloat(q.point) > 0) configuredPoints += parseFloat(q.point); else unconfiguredCount++; });
+                    const maxTnScore = examData.tnScore !== undefined ? Number(examData.tnScore) : 10;
+                    let defaultPt = 0; 
+                    if (unconfiguredCount > 0) { const rem = Math.max(0, maxTnScore - configuredPoints); defaultPt = rem / unconfiguredCount; } else if (configuredPoints === 0) { defaultPt = maxTnScore / (examData.questions.length || 1); }
+
+                    let newScore = 0;
+                    examData.questions.forEach((q, i) => {
+                        const u = attemptData.answers[i]; let isCorrect = false; let frac = 0;
+                        if (u !== undefined && u !== null && u !== "") {
+                            if (q.type === 'mc') { if (Number(u) === Number(q.correct)) { isCorrect = true; frac = 1; } }
+                            else if (q.type === 'short') { if (q.answer && window.shortMatch && window.shortMatch(u, q.answer)) { isCorrect = true; frac = 1; } }
+                            else if (q.type === 'tf' && q.statements) {
+                                let cc = 0; let isAll = true;
+                                q.statements.forEach((s, si) => { if (u[si] !== undefined && u[si] === window.tfBoolean(s.isTrue)) cc++; else isAll = false; });
+                                if (isAll) isCorrect = true;
+                                if (q.statements.length === 4) {
+                                    if (cc === 1) frac = 0.1; else if (cc === 2) frac = 0.25; else if (cc === 3) frac = 0.5; else if (cc === 4) frac = 1.0;
+                                } else frac = isAll ? 1.0 : 0;
+                            }
+                        }
+                        if (frac > 0) {
+                            if (isCorrect) mcqCorrect++;
+                            let pt = (q.point && parseFloat(q.point) > 0) ? parseFloat(q.point) : defaultPt;
+                            newScore += pt * frac;
+                        }
+                    });
+                    newScore = parseFloat(newScore.toFixed(2));
+                    
+                    let finalTotal = newScore;
+                    if (attemptData.essayScore !== undefined && attemptData.essayScore !== null) {
+                        finalTotal += parseFloat(attemptData.essayScore);
+                    } else if (attemptData.score > newScore && attemptData.score - newScore > 1) { // Heuristic
+                        finalTotal = attemptData.score; 
+                    }
+
+                    try {
+                        updateDoc(doc(db, "results", attemptData.id), {
+                            mcScore: newScore,
+                            score: parseFloat(finalTotal.toFixed(2)),
+                            correctCount: mcqCorrect
+                        });
+                    } catch(e) {}
+                    
+                    attemptData.mcScore = newScore;
+                    attemptData.score = parseFloat(finalTotal.toFixed(2));
+                    attemptData.correctCount = mcqCorrect;
+                    return attemptData;
+                };
+
                 // 1. Xử lý Kết quả thi
                 statsMap = {}; 
                 snapRes.forEach(d => { 
                     const r = d.data();
-                    const attemptData = { ...r, id: d.id };
+                    let attemptData = { ...r, id: d.id };
+                    attemptData = autoMigrateScore(attemptData);
                     const key = r.studentId || r.studentName; 
                     if (!statsMap[key]) { 
-                        statsMap[key] = { ...attemptData, attempts: [attemptData], bestScore: r.score }; 
+                        statsMap[key] = { ...attemptData, attempts: [attemptData], bestScore: attemptData.score }; 
                     } else { 
                         statsMap[key].attempts.push(attemptData); 
-                        if (r.score > statsMap[key].bestScore) { 
-                            statsMap[key].bestScore = r.score; 
-                            statsMap[key].score = r.score; 
+                        if (attemptData.score > statsMap[key].bestScore) { 
+                            statsMap[key].bestScore = attemptData.score; 
+                            statsMap[key].score = attemptData.score; 
                         } 
                     } 
                 });
@@ -3012,8 +3086,7 @@
                 });
 
                 // 3. Xử lý thông tin lớp học và tạo bản đồ tên lớp
-                const examData = examRef.data();
-                window.examData = examData;
+
                 fullStudentList = [];
                 let classNameMap = {}; // Map lưu ID -> Tên lớp để tra cứu ngược
                 
@@ -5440,17 +5513,25 @@
                         totalMcqQuestions++;
                         rawMaxMcq += pt;
                         const u = answers[q.answerKey !== undefined ? q.answerKey : idx];
-                        let isCorrect = false;
-                        if (q.type === 'mc' && String(u) === String(q.correct)) isCorrect = true;
-                        else if (q.type === 'short' && q.answer && window.shortMatch(u, q.answer)) isCorrect = true;
+                        let isCorrect = false; let earnedFraction = 0;
+                        if (q.type === 'mc' && String(u) === String(q.correct)) { isCorrect = true; earnedFraction = 1; }
+                        else if (q.type === 'short' && q.answer && window.shortMatch(u, q.answer)) { isCorrect = true; earnedFraction = 1; }
                         else if (q.type === 'tf' && q.statements) {
                             const tfValues = window.normalizeTfAnswers(u, q.statements.length);
                             const correctCount = q.statements.reduce((acc, s, i) => acc + (tfValues[i] === window.tfBoolean(s.isTrue) ? 1 : 0), 0);
                             if (correctCount === q.statements.length) isCorrect = true;
+                            if (q.statements.length === 4) {
+                                if (correctCount === 1) earnedFraction = 0.1;
+                                else if (correctCount === 2) earnedFraction = 0.25;
+                                else if (correctCount === 3) earnedFraction = 0.5;
+                                else if (correctCount === 4) earnedFraction = 1.0;
+                            } else {
+                                earnedFraction = isCorrect ? 1.0 : 0;
+                            }
                         }
-                        if (isCorrect) {
-                            mcqCorrectCount++;
-                            rawMcqScore += pt;
+                        if (earnedFraction > 0) {
+                            if (isCorrect) mcqCorrectCount++;
+                            rawMcqScore += pt * earnedFraction;
                         }
                     }
                 });
@@ -5481,7 +5562,14 @@
                 }
             }
 
-            const totalScore = parseFloat((finalMcqScore + finalEssayScore).toFixed(2));
+            let totalScore = parseFloat((finalMcqScore + finalEssayScore).toFixed(2));
+
+            // [FIX] Đối với bài full trắc nghiệm, giữ nguyên điểm hệ thống đã tự chấm
+            if (totalEssayQuestions === 0 && currentGradingAttempt && currentGradingAttempt.score !== undefined) {
+                totalScore = parseFloat(currentGradingAttempt.score);
+                finalMcqScore = totalScore;
+                finalMaxMcq = window.examData?.maxScore || 10; // Giả định thang điểm 10 nếu không rõ
+            }
 
             const totalDisplay = document.getElementById('gradingTotalScore');
             if (totalDisplay) totalDisplay.textContent = totalScore;
@@ -5694,15 +5782,26 @@ YÊU CẦU NỘI DUNG LỜI PHÊ:
                         } else {
                             totalMcqQ++; rawMaxMcq += pt;
                             const u = answers[q.answerKey !== undefined ? q.answerKey : qi];
-                            let isCorr = false;
-                            if (q.type === 'mc' && String(u) === String(q.correct)) isCorr = true;
-                            else if (q.type === 'short' && q.answer && window.shortMatch(u, q.answer)) isCorr = true;
+                            let isCorr = false; let earnedFrac = 0;
+                            if (q.type === 'mc' && String(u) === String(q.correct)) { isCorr = true; earnedFrac = 1; }
+                            else if (q.type === 'short' && q.answer && window.shortMatch(u, q.answer)) { isCorr = true; earnedFrac = 1; }
                             else if (q.type === 'tf' && q.statements) {
                                 const tfV = window.normalizeTfAnswers(u, q.statements.length);
                                 const cc = q.statements.reduce((a, s, i) => a + (tfV[i] === window.tfBoolean(s.isTrue) ? 1 : 0), 0);
                                 if (cc === q.statements.length) isCorr = true;
+                                if (q.statements.length === 4) {
+                                    if (cc === 1) earnedFrac = 0.1;
+                                    else if (cc === 2) earnedFrac = 0.25;
+                                    else if (cc === 3) earnedFrac = 0.5;
+                                    else if (cc === 4) earnedFrac = 1.0;
+                                } else {
+                                    earnedFrac = isCorr ? 1.0 : 0;
+                                }
                             }
-                            if (isCorr) { mcqCorrectCount++; rawMcqScore += pt; }
+                            if (earnedFrac > 0) {
+                                if (isCorr) mcqCorrectCount++;
+                                rawMcqScore += pt * earnedFrac;
+                            }
                         }
                     });
                     savedTotalMcq = totalMcqQ;
@@ -6733,7 +6832,8 @@ YÊU CẦU NỘI DUNG LỜI PHÊ:
                     const totalMC = att.totalMcqCount !== undefined ? att.totalMcqCount : fbTotalMc;
                     const mcCorrect = att.correctCount !== undefined ? att.correctCount : (att.correctMC || 0);
                     const mcWrong = Math.max(0, totalMC - mcCorrect);
-                    const maxTnScore = att.maxTnScore !== undefined ? att.maxTnScore : ((examData.tnScore !== undefined && examData.tnScore !== null && Number(examData.tnScore) > 10) ? Number(examData.tnScore) : 100);
+                    const rawTn = Number(examData.tnScore);
+                    const maxTnScore = att.maxTnScore !== undefined ? att.maxTnScore : ((examData.tnScore && !isNaN(rawTn) && rawTn > 0) ? rawTn : 10);
                     let mcScore = 0;
                     if (att.mcScore !== undefined && att.mcScore !== null) {
                         mcScore = parseFloat(att.mcScore);
