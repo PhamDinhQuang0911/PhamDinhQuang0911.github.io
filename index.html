@@ -12,6 +12,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Toán thầy Choang Choang - Luyện thi tư duy</title>
     <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+    <link rel="icon" type="image/png" href="/apple-touch-icon.png">
     <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Pacifico&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
@@ -598,13 +599,13 @@
 
                             <!-- QR Code thu nhỏ gọn gàng & Đồng hồ đếm ngược 5 phút -->
                             <div id="payQrBox" class="bg-gray-50 rounded-xl p-3 text-center border border-dashed border-blue-200 mb-3 relative overflow-hidden">
-                                <!-- Overlay khi mã hết hạn sau 5 phút -->
+                                <!-- Overlay khi mã hết hạn sau 10 phút -->
                                 <div id="qrExpiredOverlay" class="hidden absolute inset-0 bg-white/95 backdrop-blur-xs rounded-xl flex flex-col items-center justify-center p-3 text-center z-30 transition-all">
                                     <div class="w-11 h-11 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center text-lg mb-2 shadow-xs">
                                         <i class="fa-solid fa-clock-rotate-left"></i>
                                     </div>
-                                    <h5 class="font-bold text-gray-800 text-xs sm:text-sm">Mã thanh toán đã hết hạn</h5>
-                                    <p class="text-[11px] text-gray-500 mt-1 mb-2.5 max-w-[220px] leading-tight">Mã QR cũ đã tự động hủy sau 5 phút để bảo đảm an toàn giao dịch.</p>
+                                    <h5 class="font-bold text-gray-800 text-xs sm:text-sm">Mã thanh toán đã hết hạn 10 phút</h5>
+                                    <p class="text-[11px] text-gray-500 mt-1 mb-2.5 max-w-[230px] leading-tight">Nếu bạn đã chuyển khoản, hệ thống vẫn sẽ ghi nhận đơn trong vòng 30 phút. Nếu chưa, vui lòng bấm lấy mã mới!</p>
                                     <button type="button" onclick="window.refreshPaymentCode()" class="px-4 py-2 bg-brand text-white font-bold text-xs rounded-xl shadow hover:bg-teal-800 transition-all flex items-center gap-1.5 cursor-pointer">
                                         <i class="fa-solid fa-rotate-right"></i> Lấy mã thanh toán mới
                                     </button>
@@ -613,7 +614,7 @@
                                 <div class="flex items-center justify-between mb-1.5 text-[10px] font-bold text-gray-500 uppercase">
                                     <span>Quét mã QR thanh toán</span>
                                     <span id="qrTimerBadge" class="inline-flex items-center gap-1 text-orange-600 bg-orange-50 px-2 py-0.5 rounded border border-orange-200 font-mono text-[11px]">
-                                        <i class="fa-regular fa-clock"></i> <span id="qrCountdownText">05:00</span>
+                                        <i class="fa-regular fa-clock"></i> <span id="qrCountdownText">10:00</span>
                                     </span>
                                 </div>
 
@@ -625,6 +626,13 @@
                                     </div>
                                 </div>
                                 <p class="text-[9px] text-gray-400 mt-1 italic">Mở app ngân hàng > Quét QR</p>
+
+                                <!-- Nút tải mã QR về máy dành cho điện thoại / mobile -->
+                                <div class="mt-2 flex justify-center">
+                                    <button type="button" id="btnDownloadQr" onclick="window.downloadQrCode()" class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-300 rounded-lg text-[11px] font-bold shadow-2xs active:scale-95 transition-all cursor-pointer" title="Lưu mã QR vào thư viện ảnh để quét trực tiếp trong App ngân hàng">
+                                        <i class="fa-solid fa-download text-xs"></i> Tải mã QR về máy
+                                    </button>
+                                </div>
 
                                 <!-- Khối Nội dung chuyển khoản bắt buộc -->
                                 <div class="mt-2.5 p-2 bg-blue-50/90 border border-blue-200 rounded-xl text-left">
@@ -717,7 +725,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, GoogleAuthProvider, signInWithPopup, updateProfile, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
-        import { getFirestore, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, collection, getDocs, query, where, orderBy, enableMultiTabIndexedDbPersistence, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, collection, getDocs, query, where, orderBy, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
         // --- LOGIC TỰ ĐỘNG ĐỔI GIAO DIỆN THEO MÙA & SỰ KIỆN ---
         // --- LOGIC TỰ ĐỘNG ĐỔI GIAO DIỆN & TRANG TRÍ LOGO (NÂNG CẤP) ---
         (function autoApplyTheme() {
@@ -812,22 +820,15 @@
             appId: "1:760187217240:web:d043cd5808c349f87a712d"
         };
         
-        // Khởi tạo Firebase (Đã kích hoạt Cache Offline)
+        // Khởi tạo Firebase (Cấu hình Firestore chuẩn v10 tự động chống timeout 10s và tối ưu đa tab)
         let app, auth, db;
         try {
              app = initializeApp(firebaseConfig);
              auth = getAuth(app);
-             db = getFirestore(app);
-
-             // --- KÍCH HOẠT CACHE: GIÚP LOAD TRANG NGAY LẬP TỨC ---
-             const isIosInstalledApp = /iPad|iPhone|iPod/.test(navigator.userAgent)
-                 && (navigator.standalone === true || window.matchMedia?.('(display-mode: standalone)').matches);
-             if (!isIosInstalledApp) {
-                 enableMultiTabIndexedDbPersistence(db).catch((err) => {
-                     if (err.code == 'failed-precondition') console.warn('Đang mở nhiều tab (Multi-tab mode active).');
-                     else if (err.code == 'unimplemented') console.warn('Trình duyệt không hỗ trợ cache.');
-                 });
-             }
+             db = initializeFirestore(app, {
+                 localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+                 experimentalAutoDetectLongPolling: true
+             });
         } catch(e) { console.error("Lỗi khởi tạo Firebase:", e); }
 
         const googleProvider = new GoogleAuthProvider();
@@ -1677,13 +1678,82 @@
             window.showNotification("Đã hủy áp dụng voucher.", "info");
         };
 
-        // Bắt đầu đếm ngược 5 phút (300 giây) ở Bước 2
+        // Tải ảnh mã VietQR về thiết bị để quét trực tiếp từ thư viện ảnh ngân hàng
+        window.downloadQrCode = async () => {
+            const qrImg = document.getElementById('vietQrImage');
+            if (!qrImg || !qrImg.src) {
+                window.showNotification("Chưa có mã QR để tải!", "warning");
+                return;
+            }
+            const btn = document.getElementById('btnDownloadQr');
+            const originalHtml = btn ? btn.innerHTML : '';
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang tải...';
+            }
+
+            try {
+                const res = await fetch(qrImg.src, { mode: 'cors' });
+                if (!res.ok) throw new Error("Fetch response not ok");
+                const blob = await res.blob();
+                const blobUrl = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = blobUrl;
+                a.download = `VietQR_QMath_${Date.now()}.png`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                setTimeout(() => URL.revokeObjectURL(blobUrl), 1500);
+                window.showNotification("Đã tải mã QR về máy thành công! Bạn hãy mở app ngân hàng để quét ảnh này.", "success");
+            } catch (err) {
+                console.warn("Không thể fetch trực tiếp QR, thử qua canvas/link mở mới:", err);
+                try {
+                    const canvas = document.createElement('canvas');
+                    const ctx = canvas.getContext('2d');
+                    const img = new Image();
+                    img.crossOrigin = 'anonymous';
+                    img.onload = () => {
+                        canvas.width = img.naturalWidth || 400;
+                        canvas.height = img.naturalHeight || 400;
+                        ctx.drawImage(img, 0, 0);
+                        canvas.toBlob((blob) => {
+                            if (blob) {
+                                const blobUrl = URL.createObjectURL(blob);
+                                const a = document.createElement('a');
+                                a.href = blobUrl;
+                                a.download = `VietQR_QMath_${Date.now()}.png`;
+                                document.body.appendChild(a);
+                                a.click();
+                                document.body.removeChild(a);
+                                setTimeout(() => URL.revokeObjectURL(blobUrl), 1500);
+                                window.showNotification("Đã tải mã QR về máy thành công!", "success");
+                            } else {
+                                window.open(qrImg.src, '_blank');
+                            }
+                        }, 'image/png');
+                    };
+                    img.onerror = () => {
+                        window.open(qrImg.src, '_blank');
+                    };
+                    img.src = qrImg.src;
+                } catch(e2) {
+                    window.open(qrImg.src, '_blank');
+                }
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = originalHtml;
+                }
+            }
+        };
+
+        // Bắt đầu đếm ngược 10 phút (600 giây) ở Bước 2
         window.startQrCountdown = () => {
             if (_qrCountdownInterval) {
                 clearInterval(_qrCountdownInterval);
                 _qrCountdownInterval = null;
             }
-            _qrSecondsRemaining = 300;
+            _qrSecondsRemaining = 600;
 
             const overlay = document.getElementById('qrExpiredOverlay');
             if (overlay) {
@@ -1722,7 +1792,7 @@
             }, 1000);
         };
 
-        // Xử lý khi mã QR hết hạn 5 phút
+        // Xử lý khi mã QR hết hạn 10 phút
         window.handleQrExpired = async () => {
             const isWaitingPayment = !document.getElementById('paymentStatusBox')?.classList.contains('hidden');
             if (isWaitingPayment) {
@@ -1738,29 +1808,11 @@
 
             if (paymentListener) { paymentListener(); paymentListener = null; }
 
-            // Tự động xóa đơn pending trên Firestore khi hết hạn
-            if (window._currentOrderId) {
-                const expiredOrderId = window._currentOrderId;
-                window._currentOrderId = null;
-                try { localStorage.removeItem('pendingCheckoutOrderId'); } catch(e) {}
-                try {
-                    const snap = await getDoc(doc(db, "orders", expiredOrderId));
-                    if (snap.exists() && snap.data().status === 'pending') {
-                        try {
-                            await deleteDoc(doc(db, "orders", expiredOrderId));
-                            console.log("Đã tự động xóa đơn pending sau 5 phút hết hạn:", expiredOrderId);
-                        } catch(delErr) {
-                            await updateDoc(doc(db, "orders", expiredOrderId), {
-                                status: 'cancelled',
-                                cancelledReason: 'qr_expired',
-                                updatedAt: new Date().toISOString()
-                            });
-                        }
-                    }
-                } catch(e) { console.warn("Lỗi auto clean đơn hết hạn:", e); }
-            }
+            // LƯU Ý BẢO VỆ ĐƠN HÀNG: KHÔNG xóa đơn và KHÔNG đánh dấu cancelled vội!
+            // Đơn vẫn giữ nguyên trạng thái 'pending' trên Firestore để nếu khách chuyển muộn hoặc script cron chạy theo chu kỳ 5p vẫn đối soát và kích hoạt thành công (thời hạn 30 phút).
+            console.log("Mã QR hết hạn hiển thị 10 phút, duy trì đơn pending trong 30 phút:", window._currentOrderId);
 
-            window.showNotification("Mã thanh toán đã hết hạn sau 5 phút. Vui lòng bấm 'Lấy mã mới'!", "warning");
+            window.showNotification("Mã thanh toán đã hết hạn hiển thị (10 phút). Nếu bạn đã chuyển khoản, hệ thống vẫn sẽ ghi nhận đơn trong vòng 30 phút!", "warning");
         };
 
         // Lấy mã thanh toán mới (Tạo đơn mới với toàn bộ thông tin & số lượng đã giữ nguyên)
@@ -1770,8 +1822,9 @@
                 overlay.classList.add('hidden');
                 overlay.classList.remove('flex');
             }
+            window._currentOrderId = null; // Đặt lại để tạo mã đơn mới
             await window.proceedToPaymentStep(true);
-            window.showNotification("Đã lấy mã thanh toán mới thành công! Thời hạn 5 phút bắt đầu.", "success");
+            window.showNotification("Đã lấy mã thanh toán mới thành công! Thời hạn 10 phút bắt đầu.", "success");
         };
 
         // Quay lại Bước 1: Cho phép sửa lại thông tin nhận hàng hoặc số lượng
@@ -2360,27 +2413,12 @@
                 overlay.classList.remove('flex');
             }
 
-            // Nếu đang ở Bước 2 và có đơn pending chưa thanh toán -> Tự động dọn dẹp đơn
+            // BẢO VỆ ĐƠN HÀNG: Khi đóng modal, KHÔNG xóa đơn và KHÔNG đánh dấu hủy vội
+            // Giữ đơn pending trên Firestore trong 30 phút để nếu khách đã chuyển tiền từ app ngân hàng, script đối soát vẫn kích hoạt đơn được.
             if (window._currentOrderId) {
-                const orderIdToClean = window._currentOrderId;
+                console.log("Đóng modal thanh toán, bảo lưu đơn pending trong 30 phút để đối soát:", window._currentOrderId);
                 window._currentOrderId = null;
                 try { localStorage.removeItem('pendingCheckoutOrderId'); } catch(e) {}
-                try {
-                    const snap = await getDoc(doc(db, "orders", orderIdToClean));
-                    if (snap.exists() && snap.data().status === 'pending') {
-                        try {
-                            await deleteDoc(doc(db, "orders", orderIdToClean));
-                            console.log("Đã tự động xóa đơn pending khi đóng modal:", orderIdToClean);
-                        } catch(delErr) {
-                            await updateDoc(doc(db, "orders", orderIdToClean), {
-                                status: 'cancelled',
-                                cancelledReason: 'modal_closed',
-                                updatedAt: new Date().toISOString()
-                            });
-                            console.log("Đã cập nhật trạng thái đơn thành cancelled để chờ dọn dẹp:", orderIdToClean);
-                        }
-                    }
-                } catch(e) { console.warn("Lỗi dọn đơn khi đóng modal:", e); }
             }
             _currentCheckoutStep = 1;
         };
@@ -2562,44 +2600,16 @@
             }
         });
 
-        // ── TỰ ĐỘNG DỌN DẸP ĐƠN BỎ DỞ KHI TẮT TRÌNH DUYỆT (BẢO VỆ QUOTA FIREBASE) ──
+        // ── BẢO TOÀN TRẠNG THÁI ĐƠN KHI RỜI TRANG HOẶC ĐỔI APP ──
         window.addEventListener('pagehide', () => {
-            if (window._currentOrderId && _currentCheckoutStep === 2) {
-                const orderIdToClean = window._currentOrderId;
-                window._currentOrderId = null;
-                const apiKey = "AIzaSyCqAX3x1MbJ3do7m3EaH9JA4kFuVhlAc78";
-                const url = `https://firestore.googleapis.com/v1/projects/lms-thitracnghiem/databases/(default)/documents/orders/${orderIdToClean}?updateMask.fieldPaths=status&key=${apiKey}`;
-                try {
-                    fetch(url, { 
-                        method: 'PATCH', 
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ fields: { status: { stringValue: 'cancelled' } } }),
-                        keepalive: true 
-                    }).catch(() => {});
-                } catch(e) {}
-            }
+            // Không hủy hoặc xóa đơn khi người dùng chuyển tab/app sang app ngân hàng để quét mã QR
+            // Đơn sẽ giữ nguyên status 'pending' trong 30 phút để n8n / script ngân hàng đối soát.
         });
 
-        // Kiểm tra dọn đơn pending bị bỏ quên từ phiên trước trên chính thiết bị này (Tối đa 1 read nếu có)
+        // Xóa ID đơn lưu tạm trong localStorage nếu có
         (async function checkAbandonedSessionOrder() {
             try {
-                const abandonedId = localStorage.getItem('pendingCheckoutOrderId');
-                if (abandonedId) {
-                    localStorage.removeItem('pendingCheckoutOrderId');
-                    const snap = await getDoc(doc(db, "orders", abandonedId));
-                    if (snap.exists() && snap.data().status === 'pending') {
-                        try {
-                            await deleteDoc(doc(db, "orders", abandonedId));
-                            console.log("Đã tự động xóa đơn pending bị bỏ dở từ phiên trước:", abandonedId);
-                        } catch(delErr) {
-                            await updateDoc(doc(db, "orders", abandonedId), {
-                                status: 'cancelled',
-                                cancelledReason: 'abandoned_session',
-                                updatedAt: new Date().toISOString()
-                            });
-                        }
-                    }
-                }
+                localStorage.removeItem('pendingCheckoutOrderId');
             } catch(e) {}
         })();
 
