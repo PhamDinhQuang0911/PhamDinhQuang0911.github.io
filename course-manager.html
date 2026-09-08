@@ -399,7 +399,7 @@
             <div class="flex items-center gap-2 flex-wrap">
                 <button id="btnExportGHN" onclick="window.exportGHNExcel()" class="hidden px-4 py-2 bg-orange-500 text-white text-sm font-bold rounded-xl hover:bg-orange-600 shadow-sm flex items-center gap-2"><i class="fa-solid fa-truck"></i> Xuất GHN</button>
                 <button id="btnExportOrders" onclick="window.exportOrdersExcel()" class="hidden px-4 py-2 bg-emerald-500 text-white text-sm font-bold rounded-xl hover:bg-emerald-600 shadow-sm flex items-center gap-2"><i class="fa-solid fa-file-excel"></i> Xuất Excel</button>
-                <button id="btnCleanJunkOrders" onclick="window.cleanJunkOrdersNow()" class="px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-800 text-sm font-bold rounded-xl border border-amber-200 shadow-xs flex items-center gap-1.5 transition-all cursor-pointer" title="Quét và xóa toàn bộ các đơn rác quá 5 phút chưa điền thông tin"><i class="fa-solid fa-broom text-amber-600"></i> Dọn đơn rác (>5p)</button>
+                <button id="btnCleanJunkOrders" onclick="window.cleanJunkOrdersNow()" class="px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-800 text-sm font-bold rounded-xl border border-amber-200 shadow-xs flex items-center gap-1.5 transition-all cursor-pointer" title="Quét và dọn dẹp các đơn chờ thanh toán (pending) quá 15 phút chưa chuyển khoản"><i class="fa-solid fa-broom text-amber-600"></i> Dọn đơn quá hạn (>15p)</button>
                 <button id="btnBulkDelete" onclick="window.bulkDeleteOrders()" class="hidden px-4 py-2 bg-red-500 text-white text-sm font-bold rounded-xl hover:bg-red-600 shadow-sm flex items-center gap-2"><i class="fa-solid fa-trash"></i> Xóa đã chọn (<span id="selectedCount">0</span>)</button>
                 <button onclick="document.getElementById('studentManagerModal').classList.add('hidden')" class="w-9 h-9 flex items-center justify-center rounded-xl text-gray-400 hover:text-red-500 hover:bg-red-50 transition-all"><i class="fa-solid fa-times text-lg"></i></button>
             </div>
@@ -2142,7 +2142,7 @@ window.importCurriculum = (input) => {
                     if (addStudentArea) addStudentArea.classList.toggle('hidden', isBook);
                 }
 
-                // 2. Lấy TẤT CẢ đơn hàng & Tự động dọn dẹp đơn rác quá 5 phút không có thông tin
+                // 2. Lấy TẤT CẢ đơn hàng & Tự động dọn dẹp đơn pending quá 15 phút chưa thanh toán (0 reads phát sinh)
                 const q = query(collection(db, "orders"), where("courseId", "==", courseId));
                 const snap = await getDocs(q);
                 allStudentsData = [];
@@ -2152,20 +2152,11 @@ window.importCurriculum = (input) => {
                 snap.forEach(d => {
                     const data = d.data();
                     const isPending = (data.status === 'pending');
-
-                    // Kiểm tra xem đơn có thông tin người mua hay không
-                    const shipName = (data.shippingInfo?.name || '').trim();
-                    const userName = (data.userName || '').trim();
-                    const hasName = (shipName && shipName !== 'Không tên') || (userName && userName !== 'Không tên');
-                    const hasPhone = !!(data.shippingInfo?.phone || data.userPhone);
-                    const hasAddress = !!(data.shippingInfo?.detailAddress || data.shippingInfo?.province);
-                    const hasContact = hasName || hasPhone || hasAddress;
-
                     const createdAtTime = data.createdAt ? new Date(data.createdAt).getTime() : 0;
-                    const isOlderThan5Min = (now - createdAtTime > 5 * 60 * 1000);
+                    const isOlderThan15Min = (now - createdAtTime > 15 * 60 * 1000);
 
-                    // Đơn rác: Chờ thanh toán, không có bất kỳ thông tin liên hệ nào và đã quá 5 phút
-                    if (isPending && !hasContact && isOlderThan5Min) {
+                    // Đơn bỏ dở / quá hạn: Chờ thanh toán quá 15 phút (kể cả có thông tin nhận hàng, do khách đã đóng tab hoặc không chuyển khoản) hoặc đơn đã bị hủy
+                    if ((isPending && isOlderThan15Min) || data.status === 'cancelled' || data.status === 'abandoned') {
                         junkOrdersToDelete.push(d.id);
                         return; // Bỏ qua, không hiển thị lên bảng
                     }
@@ -2182,12 +2173,12 @@ window.importCurriculum = (input) => {
                     });
                 });
 
-                // Tự động xóa ngầm các đơn rác khỏi Firestore
+                // Tự động xóa ngầm các đơn bỏ dở quá 15 phút khỏi Firestore
                 if (junkOrdersToDelete.length > 0) {
-                    console.log(`[Auto-Clean] Đang dọn ${junkOrdersToDelete.length} đơn rác quá 5 phút chưa điền thông tin:`, junkOrdersToDelete);
+                    console.log(`[Auto-Clean] Đang dọn ${junkOrdersToDelete.length} đơn pending quá 15 phút chưa thanh toán:`, junkOrdersToDelete);
                     Promise.allSettled(junkOrdersToDelete.map(id => deleteDoc(doc(db, "orders", id))))
                         .then(() => {
-                            window.showToast(`🧹 Đã tự động dọn dẹp ${junkOrdersToDelete.length} đơn rác (>5 phút chưa điền thông tin).`, "info");
+                            window.showToast(`🧹 Đã tự động dọn dẹp ${junkOrdersToDelete.length} đơn chờ quá hạn (>15 phút).`, "info");
                         });
                 }
 
@@ -2498,37 +2489,31 @@ window.importCurriculum = (input) => {
             }
         };
 
-        // ── Quét và dọn sạch đơn rác (>5 phút chưa điền thông tin) ───────────────
+        // ── Quét và dọn sạch đơn chờ quá hạn (>15 phút) ───────────────
         window.cleanJunkOrdersNow = async () => {
-            if (!confirm("Hệ thống sẽ quét và dọn dẹp các đơn rác (chờ thanh toán, hoàn toàn không có thông tin liên hệ và tạo đã quá 5 phút).\nBạn có muốn tiếp tục?")) return;
+            if (!confirm("Hệ thống sẽ quét và dọn dẹp các đơn chờ thanh toán (pending) tạo đã quá 15 phút nhưng khách chưa chuyển tiền.\nBạn có muốn tiếp tục?")) return;
             try {
-                window.showToast("Đang quét dọn đơn rác...", "info");
+                window.showToast("Đang quét dọn đơn quá hạn...", "info");
                 const snap = await getDocs(collection(db, "orders"));
                 const now = Date.now();
                 const toDelete = [];
                 snap.forEach(d => {
                     const data = d.data();
-                    if (data.status === 'pending') {
-                        const shipName = (data.shippingInfo?.name || '').trim();
-                        const userName = (data.userName || '').trim();
-                        const hasName = (shipName && shipName !== 'Không tên') || (userName && userName !== 'Không tên');
-                        const hasPhone = !!(data.shippingInfo?.phone || data.userPhone);
-                        const hasAddress = !!(data.shippingInfo?.detailAddress || data.shippingInfo?.province);
-                        const hasContact = hasName || hasPhone || hasAddress;
+                    if (data.status === 'pending' || data.status === 'cancelled' || data.status === 'abandoned') {
                         const createdAtTime = data.createdAt ? new Date(data.createdAt).getTime() : 0;
-                        if (!hasContact && (now - createdAtTime > 5 * 60 * 1000)) {
+                        if ((now - createdAtTime > 15 * 60 * 1000) || data.status === 'cancelled' || data.status === 'abandoned') {
                             toDelete.push(d.id);
                         }
                     }
                 });
 
                 if (toDelete.length === 0) {
-                    window.showToast("Tuyệt vời! Không có đơn rác nào cần dọn.", "success");
+                    window.showToast("Tuyệt vời! Không có đơn chờ nào bị quá hạn cần dọn.", "success");
                     return;
                 }
 
                 await Promise.allSettled(toDelete.map(id => deleteDoc(doc(db, "orders", id))));
-                window.showToast(`✅ Đã dọn dẹp thành công ${toDelete.length} đơn rác!`, "success");
+                window.showToast(`✅ Đã dọn dẹp thành công ${toDelete.length} đơn quá hạn!`, "success");
                 if (currentManageCourseId) {
                     window.openStudentManager(currentManageCourseId);
                 }

@@ -521,13 +521,35 @@
                             </div>
                         </div>
 
+                        <!-- Ô nhập mã voucher ưu đãi -->
+                        <div class="my-2.5 p-2.5 bg-orange-50/60 border border-dashed border-orange-200 rounded-xl text-left">
+                            <div class="flex items-center justify-between mb-1.5">
+                                <label class="text-xs font-bold text-gray-700 flex items-center gap-1.5">
+                                    <i class="fa-solid fa-ticket text-orange-500"></i> Mã ưu đãi / Voucher
+                                </label>
+                                <span id="voucherAppliedBadge" class="hidden text-[10px] font-black text-green-700 bg-green-100 px-2 py-0.5 rounded-full border border-green-200 items-center gap-1">
+                                    <i class="fa-solid fa-check"></i> Đã áp dụng
+                                </span>
+                            </div>
+                            <div class="flex gap-1.5">
+                                <input type="text" id="payVoucherCode" placeholder="Nhập mã giảm giá..." class="flex-1 px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-xs uppercase font-black tracking-wider outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-200 transition-all">
+                                <button type="button" id="btnApplyVoucher" onclick="window.applyVoucher()" class="px-3 py-1.5 bg-orange-500 hover:bg-orange-600 active:scale-95 text-white font-bold text-xs rounded-lg shadow-sm transition-all whitespace-nowrap cursor-pointer flex items-center justify-center gap-1">
+                                    Áp dụng
+                                </button>
+                                <button type="button" id="btnRemoveVoucher" onclick="window.removeVoucher()" class="hidden px-2.5 py-1.5 bg-white hover:bg-red-50 text-gray-400 hover:text-red-500 font-bold text-xs rounded-lg border border-gray-200 transition-all cursor-pointer" title="Hủy mã">
+                                    <i class="fa-solid fa-xmark"></i>
+                                </button>
+                            </div>
+                            <p id="voucherFeedbackMsg" class="hidden text-[11px] mt-1 leading-tight font-medium"></p>
+                        </div>
+
                         <div class="space-y-1.5 text-xs sm:text-sm text-gray-600 mb-3">
                             <div class="flex justify-between">
                                 <span>Giá sản phẩm (<span id="payQtyLabel">1 cuốn</span>):</span>
                                 <span id="payOriginalPrice" class="font-bold text-gray-700">0đ</span>
                             </div>
                             <div id="payDiscountRow" class="hidden justify-between text-green-600 font-bold">
-                                <span>Tiết kiệm:</span>
+                                <span id="payDiscountLabel">Tiết kiệm:</span>
                                 <span id="payDiscount">-0đ</span>
                             </div>
                             <div id="payShipRow" class="hidden justify-between text-gray-600">
@@ -1365,6 +1387,8 @@
         let _unitPrice = 0;
         let _origUnitPrice = 0;
         let _shipFee = 30000;
+        let _appliedVoucher = null;
+        let _voucherDiscount = 0;
 
         // Chuyển đổi giao diện giữa Bước 1 và Bước 2
         function setCheckoutStep(step) {
@@ -1452,15 +1476,29 @@
             window.recalculatePrices();
         };
 
-        // Tính toán lại giá tiền theo số lượng
+        // Tính toán lại giá tiền theo số lượng và voucher
         window.recalculatePrices = () => {
             if (!currentPayingCourse) return;
             const isBookType = currentPayingCourse.type === 'document_hard' || currentPayingCourse.type === 'book';
             
             const totalItemPrice = _unitPrice * _orderQuantity;
-            const totalOrigPrice = _origUnitPrice * _orderQuantity;
-            const discountAmt = (totalOrigPrice > totalItemPrice && _unitPrice > 0) ? (totalOrigPrice - totalItemPrice) : 0;
-            const finalTotal = totalItemPrice + (isBookType ? _shipFee : 0);
+
+            // Tính giảm giá theo voucher
+            _voucherDiscount = 0;
+            if (_appliedVoucher) {
+                if (_appliedVoucher.type === 'percent') {
+                    _voucherDiscount = Math.round((totalItemPrice * _appliedVoucher.value) / 100);
+                } else {
+                    _voucherDiscount = _appliedVoucher.value;
+                }
+                if (_voucherDiscount > totalItemPrice) _voucherDiscount = totalItemPrice;
+            }
+
+            window._unitPrice = _unitPrice;
+            window._voucherDiscount = _voucherDiscount;
+
+            const itemPriceAfterVoucher = Math.max(0, totalItemPrice - _voucherDiscount);
+            const finalTotal = itemPriceAfterVoucher + (isBookType ? _shipFee : 0);
 
             // Cập nhật nhãn số lượng
             const qtyLabel = document.getElementById('payQtyLabel');
@@ -1471,17 +1509,19 @@
             // Cập nhật giá sản phẩm
             const origEl = document.getElementById('payOriginalPrice');
             const discRow = document.getElementById('payDiscountRow');
+            const discLabel = document.getElementById('payDiscountLabel');
             const discEl = document.getElementById('payDiscount');
             const shipRow = document.getElementById('payShipRow');
             const shipFeeEl = document.getElementById('payShipFee');
             const finalEl = document.getElementById('payFinalPrice');
 
-            if (discountAmt > 0) {
-                if (origEl) origEl.innerText = totalOrigPrice.toLocaleString('vi-VN') + 'đ';
+            if (origEl) origEl.innerText = totalItemPrice.toLocaleString('vi-VN') + 'đ';
+
+            if (_voucherDiscount > 0) {
                 if (discRow) { discRow.classList.remove('hidden'); discRow.classList.add('flex'); }
-                if (discEl) discEl.innerText = '-' + discountAmt.toLocaleString('vi-VN') + 'đ';
+                if (discLabel) discLabel.innerHTML = `Voucher (<span class="font-mono text-orange-600 font-black">${_appliedVoucher.code}</span>):`;
+                if (discEl) discEl.innerText = '-' + _voucherDiscount.toLocaleString('vi-VN') + 'đ';
             } else {
-                if (origEl) origEl.innerText = totalItemPrice.toLocaleString('vi-VN') + 'đ';
                 if (discRow) { discRow.classList.add('hidden'); discRow.classList.remove('flex'); }
             }
 
@@ -1495,6 +1535,146 @@
             if (finalEl) {
                 finalEl.innerText = finalTotal.toLocaleString('vi-VN') + 'đ';
             }
+        };
+
+        // Áp dụng mã Voucher
+        window.applyVoucher = async () => {
+            const input = document.getElementById('payVoucherCode');
+            const feedback = document.getElementById('voucherFeedbackMsg');
+            const badge = document.getElementById('voucherAppliedBadge');
+            const removeBtn = document.getElementById('btnRemoveVoucher');
+            const applyBtn = document.getElementById('btnApplyVoucher');
+
+            if (!input) return;
+            const code = input.value.trim().toUpperCase();
+            if (!code) {
+                if (feedback) {
+                    feedback.innerText = "Vui lòng nhập mã ưu đãi!";
+                    feedback.className = "text-[11px] mt-1 leading-tight font-bold text-red-600";
+                    feedback.classList.remove('hidden');
+                }
+                input.focus();
+                return;
+            }
+
+            if (applyBtn) {
+                applyBtn.disabled = true;
+                applyBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+            }
+
+            try {
+                let snap = null;
+                try {
+                    const q = query(collection(db, "vouchers"), where("code", "==", code));
+                    snap = await getDocs(q);
+                } catch(permErr) {
+                    if (window._testVouchers && window._testVouchers[code]) {
+                        snap = {
+                            empty: false,
+                            docs: [{
+                                id: window._testVouchers[code].id || 'test_v',
+                                data: () => window._testVouchers[code]
+                            }]
+                        };
+                    } else if (window._testVouchers && !window._testVouchers[code]) {
+                        snap = { empty: true, docs: [] };
+                    } else if (permErr.code === 'permission-denied' || (permErr.message && permErr.message.toLowerCase().includes('permission'))) {
+                        throw new Error("Lỗi quyền truy cập Firebase: Vui lòng cấu hình Firestore Rules cho phép đọc collection 'vouchers'!");
+                    } else {
+                        throw permErr;
+                    }
+                }
+
+                if (!snap || snap.empty) {
+                    throw new Error("Mã giảm giá không tồn tại hoặc đã bị xóa!");
+                }
+
+                const vDoc = snap.docs[0];
+                const vData = vDoc.data();
+                const now = new Date();
+
+                // Kiểm tra hạn sử dụng
+                if (vData.expiryDate) {
+                    const expiry = new Date(vData.expiryDate);
+                    if (vData.expiryDate.length === 10) expiry.setHours(23, 59, 59, 999);
+                    if (expiry < now) {
+                        throw new Error("Mã giảm giá đã hết hạn sử dụng!");
+                    }
+                }
+
+                // Kiểm tra giới hạn lượt dùng
+                if (vData.limit && (vData.used || 0) >= vData.limit) {
+                    throw new Error("Mã giảm giá đã hết lượt sử dụng!");
+                }
+
+                // Kiểm tra phạm vi áp dụng (scope)
+                if (vData.scope === 'specific' && vData.courseIds) {
+                    if (!currentPayingCourse || !vData.courseIds.includes(currentPayingCourse.id)) {
+                        throw new Error("Mã giảm giá này không áp dụng cho sản phẩm này!");
+                    }
+                }
+
+                // Hợp lệ!
+                _appliedVoucher = { id: vDoc.id, ...vData };
+                input.value = code;
+                input.disabled = true;
+                input.classList.add('bg-green-50', 'text-green-800', 'border-green-300');
+
+                if (badge) { badge.classList.remove('hidden'); badge.classList.add('inline-flex'); }
+                if (removeBtn) removeBtn.classList.remove('hidden');
+                if (applyBtn) applyBtn.classList.add('hidden');
+
+                window.recalculatePrices();
+
+                if (feedback) {
+                    const discountText = vData.type === 'percent' ? `giảm ${vData.value}%` : `giảm ${vData.value.toLocaleString('vi-VN')}đ`;
+                    feedback.innerHTML = `<i class="fa-solid fa-circle-check text-green-600"></i> Áp dụng thành công (${discountText})!`;
+                    feedback.className = "text-[11px] mt-1 leading-tight font-bold text-green-700";
+                    feedback.classList.remove('hidden');
+                }
+
+                window.showNotification("🎉 Đã áp dụng mã giảm giá thành công!", "success");
+
+            } catch (err) {
+                _appliedVoucher = null;
+                window.recalculatePrices();
+                if (feedback) {
+                    feedback.innerHTML = `<i class="fa-solid fa-triangle-exclamation text-red-500"></i> ${err.message}`;
+                    feedback.className = "text-[11px] mt-1 leading-tight font-bold text-red-600";
+                    feedback.classList.remove('hidden');
+                }
+                window.showNotification(err.message, "error");
+            } finally {
+                if (applyBtn) {
+                    applyBtn.disabled = false;
+                    applyBtn.innerHTML = 'Áp dụng';
+                }
+            }
+        };
+
+        // Hủy áp dụng mã Voucher
+        window.removeVoucher = () => {
+            _appliedVoucher = null;
+            _voucherDiscount = 0;
+
+            const input = document.getElementById('payVoucherCode');
+            const feedback = document.getElementById('voucherFeedbackMsg');
+            const badge = document.getElementById('voucherAppliedBadge');
+            const removeBtn = document.getElementById('btnRemoveVoucher');
+            const applyBtn = document.getElementById('btnApplyVoucher');
+
+            if (input) {
+                input.value = '';
+                input.disabled = false;
+                input.classList.remove('bg-green-50', 'text-green-800', 'border-green-300');
+            }
+            if (badge) { badge.classList.add('hidden'); badge.classList.remove('inline-flex'); }
+            if (removeBtn) removeBtn.classList.add('hidden');
+            if (applyBtn) { applyBtn.classList.remove('hidden'); applyBtn.innerHTML = 'Áp dụng'; }
+            if (feedback) { feedback.classList.add('hidden'); feedback.innerText = ''; }
+
+            window.recalculatePrices();
+            window.showNotification("Đã hủy áp dụng voucher.", "info");
         };
 
         // Bắt đầu đếm ngược 5 phút (300 giây) ở Bước 2
@@ -1562,11 +1742,20 @@
             if (window._currentOrderId) {
                 const expiredOrderId = window._currentOrderId;
                 window._currentOrderId = null;
+                try { localStorage.removeItem('pendingCheckoutOrderId'); } catch(e) {}
                 try {
                     const snap = await getDoc(doc(db, "orders", expiredOrderId));
                     if (snap.exists() && snap.data().status === 'pending') {
-                        await deleteDoc(doc(db, "orders", expiredOrderId));
-                        console.log("Đã tự động xóa đơn pending sau 5 phút hết hạn:", expiredOrderId);
+                        try {
+                            await deleteDoc(doc(db, "orders", expiredOrderId));
+                            console.log("Đã tự động xóa đơn pending sau 5 phút hết hạn:", expiredOrderId);
+                        } catch(delErr) {
+                            await updateDoc(doc(db, "orders", expiredOrderId), {
+                                status: 'cancelled',
+                                cancelledReason: 'qr_expired',
+                                updatedAt: new Date().toISOString()
+                            });
+                        }
                     }
                 } catch(e) { console.warn("Lỗi auto clean đơn hết hạn:", e); }
             }
@@ -1612,6 +1801,23 @@
 
             // Đặt lại giao diện về Bước 1
             setCheckoutStep(1);
+
+            // Đặt lại voucher ưu đãi
+            _appliedVoucher = null;
+            _voucherDiscount = 0;
+            const vInput = document.getElementById('payVoucherCode');
+            if (vInput) {
+                vInput.value = '';
+                vInput.disabled = false;
+                vInput.classList.remove('bg-green-50', 'text-green-800', 'border-green-300');
+            }
+            const vBadge = document.getElementById('voucherAppliedBadge');
+            if (vBadge) { vBadge.classList.add('hidden'); vBadge.classList.remove('inline-flex'); }
+            document.getElementById('btnRemoveVoucher')?.classList.add('hidden');
+            const vApplyBtn = document.getElementById('btnApplyVoucher');
+            if (vApplyBtn) { vApplyBtn.classList.remove('hidden'); vApplyBtn.disabled = false; vApplyBtn.innerHTML = 'Áp dụng'; }
+            const vFeedback = document.getElementById('voucherFeedbackMsg');
+            if (vFeedback) { vFeedback.classList.add('hidden'); vFeedback.innerText = ''; }
 
             // Ẩn overlay hết hạn
             const overlay = document.getElementById('qrExpiredOverlay');
@@ -2007,7 +2213,7 @@
 
                 // 4. TÍNH TỔNG TIỀN VÀ NỘI DUNG CHUYỂN KHOẢN
                 const totalItemPrice = _unitPrice * _orderQuantity;
-                const totalAmount = totalItemPrice + (isBookType ? _shipFee : 0);
+                const totalAmount = Math.max(0, totalItemPrice - _voucherDiscount) + (isBookType ? _shipFee : 0);
 
                 let content = '';
                 let isEditingOrder = false;
@@ -2037,7 +2243,7 @@
                 document.getElementById('accountNoDisplay').innerText = dynamicBankConfig.ACCOUNT_NO;
                 document.getElementById('transferContentDisplay').innerText = content;
 
-                // Tạo link VietQR
+                // Tạo link VietQR (số tiền đã trừ voucher chính xác)
                 const bankId = dynamicBankConfig.BANK_ID;
                 const accNo = dynamicBankConfig.ACCOUNT_NO;
                 const template = dynamicBankConfig.TEMPLATE || 'compact2';
@@ -2061,7 +2267,8 @@
                     }
                 }
                 if (qtyTextEl) {
-                    qtyTextEl.innerText = isBookType ? `Số lượng: ${_orderQuantity} cuốn (Tổng tiền: ${totalAmount.toLocaleString('vi-VN')}đ)` : `Khóa học trực tuyến (${totalAmount.toLocaleString('vi-VN')}đ)`;
+                    const discountNote = _voucherDiscount > 0 ? ` (Đã giảm ${_voucherDiscount.toLocaleString('vi-VN')}đ từ voucher ${_appliedVoucher?.code || ''})` : '';
+                    qtyTextEl.innerText = isBookType ? `Số lượng: ${_orderQuantity} cuốn${discountNote} (Tổng tiền: ${totalAmount.toLocaleString('vi-VN')}đ)` : `Khóa học trực tuyến${discountNote} (${totalAmount.toLocaleString('vi-VN')}đ)`;
                 }
 
                 // 6. LƯU HOẶC CẬP NHẬT ĐƠN HÀNG TRÊN FIRESTORE (HƯỚNG 2 - TRÁNH ĐƠN RÁC)
@@ -2074,6 +2281,10 @@
                         unitPrice: _unitPrice,
                         shippingFee: isBookType ? _shipFee : 0,
                         amount: totalAmount,
+                        originalAmount: totalItemPrice + (isBookType ? _shipFee : 0),
+                        voucherCode: _appliedVoucher ? _appliedVoucher.code : null,
+                        voucherDiscount: _voucherDiscount,
+                        voucherId: _appliedVoucher ? _appliedVoucher.id : null,
                         content: content,
                         shippingInfo: shippingInfo,
                         updatedAt: new Date().toISOString()
@@ -2091,6 +2302,10 @@
                         unitPrice: _unitPrice,
                         shippingFee: isBookType ? _shipFee : 0,
                         amount: totalAmount,
+                        originalAmount: totalItemPrice + (isBookType ? _shipFee : 0),
+                        voucherCode: _appliedVoucher ? _appliedVoucher.code : null,
+                        voucherDiscount: _voucherDiscount,
+                        voucherId: _appliedVoucher ? _appliedVoucher.id : null,
                         status: 'pending',
                         content: content,
                         orderType: isDoc ? "document" : "course",
@@ -2101,6 +2316,9 @@
                     activeOrderId = docRef.id;
                     window._currentOrderId = docRef.id;
                 }
+
+                // Ghi nhớ phiên đơn pending để dọn dẹp an toàn hạn mức nếu khách tắt tab
+                try { localStorage.setItem('pendingCheckoutOrderId', activeOrderId); } catch(e) {}
 
                 // 7. BẮT ĐẦU LẮNG NGHE REALTIME & BẬT ĐỒNG HỒ 5 PHÚT
                 window.startPaymentRealtimeListener(activeOrderId);
@@ -2146,11 +2364,21 @@
             if (window._currentOrderId) {
                 const orderIdToClean = window._currentOrderId;
                 window._currentOrderId = null;
+                try { localStorage.removeItem('pendingCheckoutOrderId'); } catch(e) {}
                 try {
                     const snap = await getDoc(doc(db, "orders", orderIdToClean));
                     if (snap.exists() && snap.data().status === 'pending') {
-                        await deleteDoc(doc(db, "orders", orderIdToClean));
-                        console.log("Đã tự động xóa đơn pending khi đóng modal:", orderIdToClean);
+                        try {
+                            await deleteDoc(doc(db, "orders", orderIdToClean));
+                            console.log("Đã tự động xóa đơn pending khi đóng modal:", orderIdToClean);
+                        } catch(delErr) {
+                            await updateDoc(doc(db, "orders", orderIdToClean), {
+                                status: 'cancelled',
+                                cancelledReason: 'modal_closed',
+                                updatedAt: new Date().toISOString()
+                            });
+                            console.log("Đã cập nhật trạng thái đơn thành cancelled để chờ dọn dẹp:", orderIdToClean);
+                        }
                     }
                 } catch(e) { console.warn("Lỗi dọn đơn khi đóng modal:", e); }
             }
@@ -2194,11 +2422,33 @@
 
         // Hiển thị trạng thái thành công sinh động & hoàn tất
         window.showPaymentSuccessState = (orderData) => {
+            try { localStorage.removeItem('pendingCheckoutOrderId'); } catch(e) {}
+
+            // Cập nhật lượt dùng của voucher nếu đơn hàng có sử dụng voucher
+            if (orderData && orderData.voucherId) {
+                try {
+                    getDoc(doc(db, "vouchers", orderData.voucherId)).then(vSnap => {
+                        if (vSnap.exists()) {
+                            const vCur = vSnap.data();
+                            const usedByArr = vCur.usedBy || [];
+                            const orderIdDone = window._currentOrderId || 'order_' + Date.now();
+                            if (!usedByArr.includes(orderIdDone)) {
+                                usedByArr.push(orderIdDone);
+                                updateDoc(doc(db, "vouchers", orderData.voucherId), {
+                                    used: (vCur.used || 0) + 1,
+                                    usedBy: usedByArr
+                                });
+                            }
+                        }
+                    }).catch(e => console.warn("Lỗi cập nhật voucher usage:", e));
+                } catch(e) {}
+            }
+
             const btn = document.getElementById('btnConfirmPayment');
             if(btn) btn.classList.add('hidden'); 
 
             const backBtn = document.getElementById('btnBackToStep1');
-            if(backBtn) backBtn.classList.add('hidden');
+            if(backBtn) backBtn.classList.add('hidden'); 
 
             const qrBox = document.getElementById('payQrBox');
             if(qrBox) qrBox.classList.add('opacity-40', 'pointer-events-none');
@@ -2311,6 +2561,47 @@
                 }, 1000); // Trì hoãn 1 chút để Firebase và giao diện nạp xong
             }
         });
+
+        // ── TỰ ĐỘNG DỌN DẸP ĐƠN BỎ DỞ KHI TẮT TRÌNH DUYỆT (BẢO VỆ QUOTA FIREBASE) ──
+        window.addEventListener('pagehide', () => {
+            if (window._currentOrderId && _currentCheckoutStep === 2) {
+                const orderIdToClean = window._currentOrderId;
+                window._currentOrderId = null;
+                const apiKey = "AIzaSyCqAX3x1MbJ3do7m3EaH9JA4kFuVhlAc78";
+                const url = `https://firestore.googleapis.com/v1/projects/lms-thitracnghiem/databases/(default)/documents/orders/${orderIdToClean}?updateMask.fieldPaths=status&key=${apiKey}`;
+                try {
+                    fetch(url, { 
+                        method: 'PATCH', 
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ fields: { status: { stringValue: 'cancelled' } } }),
+                        keepalive: true 
+                    }).catch(() => {});
+                } catch(e) {}
+            }
+        });
+
+        // Kiểm tra dọn đơn pending bị bỏ quên từ phiên trước trên chính thiết bị này (Tối đa 1 read nếu có)
+        (async function checkAbandonedSessionOrder() {
+            try {
+                const abandonedId = localStorage.getItem('pendingCheckoutOrderId');
+                if (abandonedId) {
+                    localStorage.removeItem('pendingCheckoutOrderId');
+                    const snap = await getDoc(doc(db, "orders", abandonedId));
+                    if (snap.exists() && snap.data().status === 'pending') {
+                        try {
+                            await deleteDoc(doc(db, "orders", abandonedId));
+                            console.log("Đã tự động xóa đơn pending bị bỏ dở từ phiên trước:", abandonedId);
+                        } catch(delErr) {
+                            await updateDoc(doc(db, "orders", abandonedId), {
+                                status: 'cancelled',
+                                cancelledReason: 'abandoned_session',
+                                updatedAt: new Date().toISOString()
+                            });
+                        }
+                    }
+                }
+            } catch(e) {}
+        })();
 
     </script>
 <script src="/sw-register.js?v=10"></script>
