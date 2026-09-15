@@ -290,11 +290,20 @@
                     <p class="text-gray-500 text-sm mt-1">Chào mừng trở lại lớp học!</p>
                 </div>
                 <form id="loginForm" class="space-y-4">
-                    <div><label class="block text-xs font-bold text-gray-700 mb-1 uppercase">Tên đăng nhập hoặc SĐT</label><input type="text" id="emailInput" placeholder="VD: phamdinhquang hoặc 0912..." required class="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 focus:ring-2 focus:ring-teal-200 focus:border-brand outline-none transition-all"></div>
-                    <div><label class="block text-xs font-bold text-gray-700 mb-1 uppercase">Mật khẩu</label><input type="password" id="passwordInput" placeholder="Nhập mật khẩu" required class="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 focus:ring-2 focus:ring-teal-200 focus:border-brand outline-none transition-all"></div>
-                    <button type="submit" id="submitBtn" class="w-full bg-accent hover-bg-accent text-white font-bold py-3.5 rounded-xl shadow-lg transition-all">Đăng nhập ngay</button>
+                    <div>
+                        <label class="block text-xs font-bold text-gray-700 mb-1 uppercase">Tên đăng nhập, Email hoặc SĐT</label>
+                        <input type="text" id="emailInput" placeholder="VD: phamdinhquang0911@gmail.com hoặc 0912..." required class="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 focus:ring-2 focus:ring-teal-200 focus:border-brand outline-none transition-all">
+                    </div>
+                    <div>
+                        <div class="flex justify-between items-center mb-1">
+                            <label class="block text-xs font-bold text-gray-700 uppercase">Mật khẩu</label>
+                            <button type="button" onclick="window.handleForgotPassword()" class="text-xs text-teal-700 hover:text-orange-600 font-bold hover:underline cursor-pointer">Quên mật khẩu?</button>
+                        </div>
+                        <input type="password" id="passwordInput" placeholder="Nhập mật khẩu" required class="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 focus:ring-2 focus:ring-teal-200 focus:border-brand outline-none transition-all">
+                    </div>
+                    <button type="submit" id="submitBtn" class="w-full bg-accent hover-bg-accent text-white font-bold py-3.5 rounded-xl shadow-lg transition-all cursor-pointer">Đăng nhập ngay</button>
                     <div class="relative text-center my-4"><span class="bg-white px-4 text-xs text-gray-400 font-bold">HOẶC</span></div>
-                    <button type="button" id="googleLoginBtn" class="w-full bg-white border border-gray-300 text-gray-700 font-bold py-3 rounded-xl hover:bg-gray-50 transition-all flex justify-center items-center gap-2"><i class="fa-brands fa-google text-red-500"></i> Google</button>
+                    <button type="button" id="googleLoginBtn" class="w-full bg-white border border-gray-300 hover:border-gray-400 text-gray-700 font-bold py-3 rounded-xl hover:bg-gray-50 transition-all flex justify-center items-center gap-2 cursor-pointer shadow-xs"><i class="fa-brands fa-google text-red-500 text-lg"></i> Đăng nhập với tài khoản Google</button>
                 </form>
                 <div id="messageArea" class="mt-4 text-center text-sm font-bold hidden p-3 rounded-lg bg-gray-50"></div>
             </div>
@@ -775,7 +784,7 @@
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-        import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, GoogleAuthProvider, signInWithPopup, updateProfile, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+        import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, GoogleAuthProvider, signInWithPopup, updateProfile, onAuthStateChanged, sendPasswordResetEmail } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
         import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, collection, getDocs, query, where, orderBy, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
         // --- LOGIC TỰ ĐỘNG ĐỔI GIAO DIỆN THEO MÙA & SỰ KIỆN ---
         // --- LOGIC TỰ ĐỘNG ĐỔI GIAO DIỆN & TRANG TRÍ LOGO (NÂNG CẤP) ---
@@ -887,7 +896,7 @@
         onAuthStateChanged(auth, async (user) => { // Thêm từ khóa async
             if (user) {
                 // --- TRƯỜNG HỢP 1: ĐÃ ĐĂNG NHẬP -> CHUYỂN HƯỚNG NGAY (KHÔNG TẢI GIAO DIỆN INDEX) ---
-                const ADMIN_EMAILS = ["phamngockhanh.942001@gmail.com", "phamngockhanh.942002@gmail.com", "admin@gmail.com", "phamdinhquang0911@gmail.com"];
+                const ADMIN_EMAILS = ["phamdinhquang0911@gmail.com", "phamngockhanh.942001@gmail.com", "phamngockhanh.942002@gmail.com"];
                 
                 // Ưu tiên: Chuyển đến đề thi đang chờ (nếu có)
                 const pendingUrl = sessionStorage.getItem('pendingExamUrl');
@@ -1322,6 +1331,71 @@
                 submitBtn.disabled = false; submitBtn.innerHTML = 'Đăng nhập ngay';
             }
         });
+
+        // ĐĂNG NHẬP VỚI GOOGLE (1 CHẠM CHO SUPER ADMIN & HỌC SINH)
+        const googleLoginBtn = document.getElementById('googleLoginBtn');
+        if (googleLoginBtn) {
+            googleLoginBtn.addEventListener('click', async () => {
+                const originalContent = googleLoginBtn.innerHTML;
+                try {
+                    googleLoginBtn.disabled = true;
+                    googleLoginBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang kết nối Google...';
+                    const result = await signInWithPopup(auth, googleProvider);
+                    showMessage("Đăng nhập Google thành công!", "success");
+                    await saveUserData(result.user, "google");
+                } catch (error) {
+                    console.error("Lỗi Google Login:", error);
+                    let errText = "Đăng nhập Google thất bại!";
+                    if (error.code === 'auth/popup-closed-by-user') {
+                        errText = "Bạn đã đóng cửa sổ đăng nhập Google.";
+                    } else if (error.code === 'auth/cancelled-popup-request') {
+                        errText = "Yêu cầu đăng nhập đã bị hủy.";
+                    } else if (error.message) {
+                        errText = error.message;
+                    }
+                    showMessage(errText, "error");
+                } finally {
+                    googleLoginBtn.disabled = false;
+                    googleLoginBtn.innerHTML = originalContent;
+                }
+            });
+        }
+
+        // QUÊN MẬT KHẨU / ĐẶT LẠI MẬT KHẨU QUA EMAIL
+        window.handleForgotPassword = async () => {
+            const currentVal = (emailInput.value || '').trim();
+            let resetEmail = currentVal;
+            
+            if (!resetEmail || !resetEmail.includes('@')) {
+                const promptVal = prompt("Vui lòng nhập địa chỉ Email của bạn để nhận liên kết đặt lại mật khẩu:\n(VD: phamdinhquang0911@gmail.com)", resetEmail && resetEmail.includes('@') ? resetEmail : "");
+                if (!promptVal) return;
+                resetEmail = promptVal.trim();
+            }
+
+            if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(resetEmail)) {
+                alert("❌ Định dạng email không hợp lệ. Vui lòng nhập đúng email (VD: phamdinhquang0911@gmail.com)!");
+                return;
+            }
+
+            try {
+                showMessage("Đang gửi email đặt lại mật khẩu...", "success");
+                await sendPasswordResetEmail(auth, resetEmail);
+                alert(`✅ Google đã gửi email đặt lại mật khẩu tới:\n👉 ${resetEmail}\n\nBạn vui lòng kiểm tra hộp thư đến (hoặc thư mục Spam/Rác) và bấm vào liên kết để tạo mật khẩu mới nhé!`);
+                showMessage(`Đã gửi liên kết đổi mật khẩu tới ${resetEmail}`, "success");
+            } catch (error) {
+                console.error("Lỗi sendPasswordResetEmail:", error);
+                let errText = "Không thể gửi email đặt lại mật khẩu!";
+                if (error.code === 'auth/user-not-found') {
+                    errText = "Tài khoản email này chưa được đăng ký trong hệ thống!";
+                } else if (error.code === 'auth/invalid-email') {
+                    errText = "Email không hợp lệ!";
+                } else if (error.code === 'auth/too-many-requests') {
+                    errText = "Bạn đã gửi yêu cầu quá nhiều lần. Vui lòng đợi vài phút rồi thử lại!";
+                }
+                alert("❌ " + errText);
+                showMessage(errText, "error");
+            }
+        };
 
         // ĐĂNG KÝ
         const registerForm = document.getElementById('registerForm');
