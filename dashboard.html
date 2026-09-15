@@ -183,7 +183,7 @@
         <div class="p-4 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
             <div class="flex items-center gap-3 cursor-pointer flex-1 overflow-hidden" onclick="window.openMyProfile()">
                 <img id="sidebarAvatar" src="https://placehold.co/150" class="w-10 h-10 rounded-full border-2 border-white shadow-sm object-cover shrink-0">
-                <div class="overflow-hidden"><p id="sidebarName" class="text-sm font-bold text-gray-800 truncate">Đang tải...</p><p id="sidebarRole" class="text-xs text-gray-500 truncate">Quản trị viên</p></div>
+                <div class="overflow-hidden"><p id="sidebarName" class="text-sm font-bold text-gray-800 truncate">Đang tải...</p><p id="sidebarRole" class="text-xs text-gray-500 truncate">Quản trị viên</p><p id="sidebarEmail" class="text-[10px] text-gray-400 font-mono truncate hidden"></p></div>
             </div>
             <button onclick="window.toggleTheme()" class="w-9 h-9 rounded-full bg-white border border-gray-200 text-gray-500 hover:text-indigo-500 hover:bg-indigo-50 flex items-center justify-center transition-all shadow-sm ml-2 shrink-0"><i class="fa-solid fa-moon dark-icon"></i></button>
             <button onclick="toggleNotificationPanel()" class="w-9 h-9 rounded-full bg-white border border-gray-200 text-gray-500 hover:text-primary-600 hover:bg-primary-50 flex items-center justify-center transition-all shadow-sm relative ml-2 shrink-0">
@@ -1408,7 +1408,9 @@
         // ================= RBAC & SYSTEM ROLES =================
         const ROOT_SUPER_ADMINS = [
             "phamdinhquang0911@gmail.com",
-            "phamngockhanh.942001@gmail.com"
+            "admin@gmail.com",
+            "phamngockhanh.942001@gmail.com",
+            "phamngockhanh.942002@gmail.com"
         ];
         const LEGACY_ADMIN_EMAILS = [
             "phamngockhanh.942001@gmail.com",
@@ -1507,28 +1509,17 @@
             if (navBooks) navBooks.style.display = window.hasPermission('courses.view') ? '' : 'none';
         };
 
-        // Hàm xác thực và nạp hồ sơ quyền hạn
+        // Hàm xác thực và nạp hồ sơ quyền hạn (Hỗ trợ cấu hình Firestore configurations & fallback an toàn)
         async function loadAdminProfile(user) {
             const userEmail = (user.email || '').toLowerCase().trim();
             const isRootSuper = ROOT_SUPER_ADMINS.map(e => e.toLowerCase()).includes(userEmail);
 
-            let adminDocSnap = null;
-            try {
-                const q = query(collection(db, "admin_accounts"), where("email", "==", userEmail));
-                const qSnap = await getDocs(q);
-                if (!qSnap.empty) {
-                    adminDocSnap = qSnap.docs[0];
-                }
-            } catch (err) {
-                console.warn("Lỗi truy vấn admin_accounts:", err);
-            }
-
             if (isRootSuper) {
                 window.currentAdminProfile = {
-                    id: adminDocSnap ? adminDocSnap.id : user.uid,
+                    id: user.uid,
                     uid: user.uid,
                     email: userEmail,
-                    displayName: user.displayName || 'Root Super Admin',
+                    displayName: user.displayName || (userEmail.includes('@') ? userEmail.split('@')[0].toUpperCase() : 'SUPER ADMIN'),
                     role: 'super_admin',
                     status: 'active',
                     permissions: [...ALL_PERMISSIONS],
@@ -1536,68 +1527,90 @@
                     isRoot: true
                 };
 
+                // Tự động đồng bộ lên configurations/admin_roles
                 try {
-                    const docRef = adminDocSnap ? doc(db, "admin_accounts", adminDocSnap.id) : doc(db, "admin_accounts", user.uid);
-                    await setDoc(docRef, {
+                    const cfgRef = doc(db, "configurations", "admin_roles");
+                    const cfgSnap = await getDoc(cfgRef);
+                    let accounts = cfgSnap.exists() ? (cfgSnap.data().accounts || []) : [];
+                    const idx = accounts.findIndex(a => (a.email || '').toLowerCase() === userEmail);
+                    const accData = {
+                        id: user.uid,
                         email: userEmail,
-                        displayName: user.displayName || 'Root Super Admin',
+                        displayName: window.currentAdminProfile.displayName,
                         role: 'super_admin',
                         status: 'active',
                         permissions: [...ALL_PERMISSIONS],
-                        note: 'Root Super Admin tối cao (Bảo vệ vĩnh viễn)',
+                        note: 'Root Super Admin tối cao',
                         isRoot: true,
                         lastLoginAt: new Date().toISOString()
-                    }, { merge: true });
-                } catch (e) {
-                    console.warn("Lỗi đồng bộ Root Super Admin:", e);
-                }
-                return true;
-            }
-
-            if (adminDocSnap) {
-                const data = adminDocSnap.data();
-                if (data.status === 'locked') {
-                    alert('⛔ Tài khoản quản trị của bạn đã bị khóa bởi Super Admin. Vui lòng liên hệ quản trị viên tối cao!');
-                    await signOut(auth);
-                    window.location.href = "index.html";
-                    return false;
-                }
-
-                window.currentAdminProfile = {
-                    id: adminDocSnap.id,
-                    ...data,
-                    isRoot: false
-                };
-
-                try {
-                    await updateDoc(doc(db, "admin_accounts", adminDocSnap.id), {
-                        lastLoginAt: new Date().toISOString()
-                    });
+                    };
+                    if (idx >= 0) accounts[idx] = { ...accounts[idx], ...accData };
+                    else accounts.push(accData);
+                    await setDoc(cfgRef, { accounts, updatedAt: new Date().toISOString() }, { merge: true });
                 } catch (e) {}
-
                 return true;
             }
 
-            // Fallback danh sách LEGACY_ADMIN_EMAILS cũ
+            // 1. Kiểm tra trong configurations/admin_roles
+            try {
+                const cfgRef = doc(db, "configurations", "admin_roles");
+                const cfgSnap = await getDoc(cfgRef);
+                if (cfgSnap.exists()) {
+                    const accounts = cfgSnap.data().accounts || [];
+                    const found = accounts.find(a => (a.email || '').toLowerCase() === userEmail);
+                    if (found) {
+                        if (found.status === 'locked') {
+                            alert('⛔ Tài khoản quản trị của bạn đã bị khóa bởi Super Admin. Vui lòng liên hệ quản trị viên tối cao!');
+                            await signOut(auth);
+                            window.location.href = "index.html";
+                            return false;
+                        }
+                        window.currentAdminProfile = {
+                            id: found.id || user.uid,
+                            ...found,
+                            isRoot: false
+                        };
+                        return true;
+                    }
+                }
+            } catch (err) {
+                console.warn("Lỗi kiểm tra configurations/admin_roles:", err);
+            }
+
+            // 2. Kiểm tra trong collection admin_accounts
+            try {
+                const q = query(collection(db, "admin_accounts"), where("email", "==", userEmail));
+                const qSnap = await getDocs(q);
+                if (!qSnap.empty) {
+                    const data = qSnap.docs[0].data();
+                    if (data.status === 'locked') {
+                        alert('⛔ Tài khoản quản trị của bạn đã bị khóa bởi Super Admin. Vui lòng liên hệ quản trị viên tối cao!');
+                        await signOut(auth);
+                        window.location.href = "index.html";
+                        return false;
+                    }
+                    window.currentAdminProfile = {
+                        id: qSnap.docs[0].id,
+                        ...data,
+                        isRoot: false
+                    };
+                    return true;
+                }
+            } catch (err) {}
+
+            // 3. Fallback danh sách LEGACY_ADMIN_EMAILS cũ: Mặc định cấp toàn quyền Super Admin để tránh bị khóa nhầm
             if (LEGACY_ADMIN_EMAILS.map(e => e.toLowerCase()).includes(userEmail)) {
                 window.currentAdminProfile = {
                     id: user.uid,
                     uid: user.uid,
                     email: userEmail,
-                    displayName: user.displayName || 'Admin Hệ thống',
-                    role: 'admin',
+                    displayName: user.displayName || userEmail.split('@')[0].toUpperCase(),
+                    role: 'super_admin',
                     status: 'active',
-                    permissions: ['classes.view', 'classes.manage', 'students.manage', 'exams.view', 'exams.manage', 'questions.manage', 'courses.view', 'orders.view', 'orders.process'],
-                    note: 'Admin chuyển giao từ danh sách cũ',
-                    isRoot: false
+                    permissions: [...ALL_PERMISSIONS],
+                    note: 'Legacy Super Admin tự động kích hoạt',
+                    isRoot: true
                 };
-                try {
-                    await setDoc(doc(db, "admin_accounts", user.uid), {
-                        ...window.currentAdminProfile,
-                        createdAt: new Date().toISOString(),
-                        lastLoginAt: new Date().toISOString()
-                    }, { merge: true });
-                } catch (e) {}
                 return true;
             }
 
@@ -1625,26 +1638,46 @@
             }
 
             try {
-                const snap = await getDocs(collection(db, "admin_accounts"));
-                const accounts = [];
-                snap.forEach(d => {
-                    accounts.push({ id: d.id, ...d.data() });
-                });
+                let accounts = [];
 
-                // Đảm bảo các Root Super Admin luôn xuất hiện trong danh sách
+                // 1. Đọc từ configurations/admin_roles
+                try {
+                    const cfgSnap = await getDoc(doc(db, "configurations", "admin_roles"));
+                    if (cfgSnap.exists()) {
+                        accounts = cfgSnap.data().accounts || [];
+                    }
+                } catch (e) {
+                    console.warn("Chưa đọc được configurations/admin_roles:", e);
+                }
+
+                // 2. Đọc từ admin_accounts (nếu có)
+                try {
+                    const snap = await getDocs(collection(db, "admin_accounts"));
+                    snap.forEach(d => {
+                        const accData = { id: d.id, ...d.data() };
+                        const exists = accounts.some(a => (a.email || '').toLowerCase() === (accData.email || '').toLowerCase());
+                        if (!exists) accounts.push(accData);
+                    });
+                } catch (e) {}
+
+                // 3. Đảm bảo tất cả ROOT_SUPER_ADMINS luôn hiện diện đầy đủ
                 ROOT_SUPER_ADMINS.forEach(rootEmail => {
-                    const exists = accounts.some(a => (a.email || '').toLowerCase() === rootEmail.toLowerCase());
-                    if (!exists) {
+                    const idx = accounts.findIndex(a => (a.email || '').toLowerCase() === rootEmail.toLowerCase());
+                    if (idx < 0) {
                         accounts.unshift({
                             id: 'root_' + rootEmail.replace(/[@.]/g, '_'),
                             email: rootEmail,
-                            displayName: 'Root Super Admin',
+                            displayName: rootEmail.split('@')[0].toUpperCase(),
                             role: 'super_admin',
                             status: 'active',
                             permissions: [...ALL_PERMISSIONS],
                             note: 'Root Super Admin tối cao (Bảo vệ vĩnh viễn)',
                             isRoot: true
                         });
+                    } else {
+                        accounts[idx].role = 'super_admin';
+                        accounts[idx].isRoot = true;
+                        accounts[idx].permissions = [...ALL_PERMISSIONS];
                     }
                 });
 
@@ -1753,22 +1786,22 @@
                 } else {
                     actionsHtml = `
                         <div class="flex items-center justify-end gap-1.5">
-                            <button onclick="window.openAdminEditModal('${acc.id}')" title="Chỉnh sửa phân quyền" class="p-1.5 sm:px-2.5 sm:py-1 bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer">
+                            <button onclick="window.openAdminEditModal('${acc.id || acc.email}')" title="Chỉnh sửa phân quyền" class="p-1.5 sm:px-2.5 sm:py-1 bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer">
                                 <i class="fa-solid fa-sliders"></i>
                                 <span class="hidden sm:inline">Phân quyền</span>
                             </button>
                             ${isLocked ? `
-                                <button onclick="window.toggleAdminStatus('${acc.id}', '${acc.email}', 'locked')" title="Mở khóa tài khoản" class="p-1.5 sm:px-2 sm:py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer">
+                                <button onclick="window.toggleAdminStatus('${acc.id || acc.email}', '${acc.email}', 'locked')" title="Mở khóa tài khoản" class="p-1.5 sm:px-2 sm:py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer">
                                     <i class="fa-solid fa-lock-open"></i>
                                     <span class="hidden sm:inline">Mở</span>
                                 </button>
                             ` : `
-                                <button onclick="window.toggleAdminStatus('${acc.id}', '${acc.email}', 'active')" title="Khóa tài khoản tạm thời" class="p-1.5 sm:px-2 sm:py-1 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer">
+                                <button onclick="window.toggleAdminStatus('${acc.id || acc.email}', '${acc.email}', 'active')" title="Khóa tài khoản tạm thời" class="p-1.5 sm:px-2 sm:py-1 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer">
                                     <i class="fa-solid fa-lock"></i>
                                     <span class="hidden sm:inline">Khóa</span>
                                 </button>
                             `}
-                            <button onclick="window.deleteAdminAccount('${acc.id}', '${acc.email}')" title="Gỡ bỏ quyền quản trị" class="p-1.5 sm:px-2 sm:py-1 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer">
+                            <button onclick="window.deleteAdminAccount('${acc.id || acc.email}', '${acc.email}')" title="Gỡ bỏ quyền quản trị" class="p-1.5 sm:px-2 sm:py-1 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer">
                                 <i class="fa-solid fa-trash-can"></i>
                                 <span class="hidden sm:inline">Xóa</span>
                             </button>
@@ -1823,7 +1856,7 @@
             window.renderAdminAccountsTable(filtered);
         };
 
-        window.openAdminEditModal = (adminDocId) => {
+        window.openAdminEditModal = (adminIdOrEmail) => {
             const docIdInput = document.getElementById('adminEditDocId');
             const emailInput = document.getElementById('adminEditEmail');
             const nameInput = document.getElementById('adminEditDisplayName');
@@ -1832,8 +1865,8 @@
 
             if (!docIdInput || !emailInput || !nameInput || !noteInput) return;
 
-            if (adminDocId) {
-                const acc = (window.allAdminAccounts || []).find(a => a.id === adminDocId);
+            if (adminIdOrEmail) {
+                const acc = (window.allAdminAccounts || []).find(a => a.id === adminIdOrEmail || a.email === adminIdOrEmail);
                 if (!acc) return;
 
                 const isRoot = ROOT_SUPER_ADMINS.map(e => e.toLowerCase()).includes((acc.email || '').toLowerCase());
@@ -1842,7 +1875,7 @@
                     return;
                 }
 
-                docIdInput.value = acc.id;
+                docIdInput.value = acc.id || acc.email;
                 emailInput.value = acc.email || '';
                 emailInput.disabled = true;
                 emailInput.classList.add('bg-gray-100', 'text-gray-500', 'cursor-not-allowed');
@@ -1941,36 +1974,42 @@
             }
 
             try {
-                if (docId) {
-                    await updateDoc(doc(db, "admin_accounts", docId), {
-                        displayName,
-                        note,
-                        role,
-                        permissions,
-                        updatedAt: new Date().toISOString(),
-                        updatedBy: window.currentAdminProfile?.email || 'system'
-                    });
-                    window.showNotification('Đã cập nhật phân quyền quản trị thành công!', 'success');
-                } else {
-                    const exists = (window.allAdminAccounts || []).some(a => (a.email || '').toLowerCase() === email);
-                    if (exists) {
-                        throw new Error('Email này đã tồn tại trong danh sách quản trị viên!');
-                    }
+                // 1. Lưu vào configurations/admin_roles (Bảo đảm 100% quyền truy cập Firebase)
+                const cfgRef = doc(db, "configurations", "admin_roles");
+                let accounts = [];
+                try {
+                    const snap = await getDoc(cfgRef);
+                    if (snap.exists()) accounts = snap.data().accounts || [];
+                } catch(e) {}
 
-                    await addDoc(collection(db, "admin_accounts"), {
-                        email,
-                        displayName: displayName || email.split('@')[0],
-                        note,
-                        role,
-                        status: 'active',
-                        permissions,
-                        createdBy: window.currentAdminProfile?.email || 'system',
-                        createdAt: new Date().toISOString(),
-                        lastLoginAt: null
-                    });
-                    window.showNotification(`Đã thêm quản trị viên ${email} thành công!`, 'success');
+                const accRecord = {
+                    id: docId || ('admin_' + Date.now()),
+                    email,
+                    displayName: displayName || email.split('@')[0],
+                    note,
+                    role,
+                    status: 'active',
+                    permissions,
+                    updatedAt: new Date().toISOString(),
+                    updatedBy: window.currentAdminProfile?.email || 'system'
+                };
+
+                const existingIdx = accounts.findIndex(a => (a.email || '').toLowerCase() === email || a.id === docId);
+                if (existingIdx >= 0) {
+                    accounts[existingIdx] = { ...accounts[existingIdx], ...accRecord };
+                } else {
+                    accounts.push(accRecord);
                 }
 
+                await setDoc(cfgRef, { accounts, updatedAt: new Date().toISOString() }, { merge: true });
+
+                // 2. Thử lưu thêm vào collection admin_accounts
+                try {
+                    const cleanDocId = email.replace(/[@.]/g, '_');
+                    await setDoc(doc(db, "admin_accounts", cleanDocId), accRecord, { merge: true });
+                } catch (e) {}
+
+                window.showNotification(`Đã lưu tài khoản ${email} thành công!`, 'success');
                 window.closeAdminEditModal();
                 await window.loadAdminAccountsList();
             } catch (err) {
@@ -1984,7 +2023,7 @@
             }
         };
 
-        window.toggleAdminStatus = async (adminDocId, email, currentStatus) => {
+        window.toggleAdminStatus = async (adminIdOrEmail, email, currentStatus) => {
             if (ROOT_SUPER_ADMINS.map(e => e.toLowerCase()).includes((email || '').toLowerCase())) {
                 window.showNotification('Không thể khóa tài khoản Root Super Admin!', 'warning');
                 return;
@@ -1997,11 +2036,25 @@
             if (!ok) return;
 
             try {
-                await updateDoc(doc(db, "admin_accounts", adminDocId), {
-                    status: targetStatus,
-                    updatedAt: new Date().toISOString(),
-                    updatedBy: window.currentAdminProfile?.email || 'system'
-                });
+                // Cập nhật configurations/admin_roles
+                const cfgRef = doc(db, "configurations", "admin_roles");
+                const snap = await getDoc(cfgRef);
+                if (snap.exists()) {
+                    const accounts = snap.data().accounts || [];
+                    const found = accounts.find(a => (a.email || '').toLowerCase() === email.toLowerCase() || a.id === adminIdOrEmail);
+                    if (found) {
+                        found.status = targetStatus;
+                        found.updatedAt = new Date().toISOString();
+                        await setDoc(cfgRef, { accounts, updatedAt: new Date().toISOString() }, { merge: true });
+                    }
+                }
+
+                // Cập nhật collection admin_accounts nếu có
+                try {
+                    const cleanDocId = email.replace(/[@.]/g, '_');
+                    await updateDoc(doc(db, "admin_accounts", cleanDocId), { status: targetStatus, updatedAt: new Date().toISOString() });
+                } catch (e) {}
+
                 window.showNotification(`Đã ${actionText} tài khoản ${email} thành công!`, 'success');
                 await window.loadAdminAccountsList();
             } catch (err) {
@@ -2010,7 +2063,7 @@
             }
         };
 
-        window.deleteAdminAccount = async (adminDocId, email) => {
+        window.deleteAdminAccount = async (adminIdOrEmail, email) => {
             if (ROOT_SUPER_ADMINS.map(e => e.toLowerCase()).includes((email || '').toLowerCase())) {
                 window.showNotification('Không thể xóa tài khoản Root Super Admin!', 'warning');
                 return;
@@ -2020,7 +2073,21 @@
             if (!ok) return;
 
             try {
-                await deleteDoc(doc(db, "admin_accounts", adminDocId));
+                // Xóa khỏi configurations/admin_roles
+                const cfgRef = doc(db, "configurations", "admin_roles");
+                const snap = await getDoc(cfgRef);
+                if (snap.exists()) {
+                    let accounts = snap.data().accounts || [];
+                    accounts = accounts.filter(a => (a.email || '').toLowerCase() !== email.toLowerCase() && a.id !== adminIdOrEmail);
+                    await setDoc(cfgRef, { accounts, updatedAt: new Date().toISOString() }, { merge: true });
+                }
+
+                // Xóa khỏi admin_accounts
+                try {
+                    const cleanDocId = email.replace(/[@.]/g, '_');
+                    await deleteDoc(doc(db, "admin_accounts", cleanDocId));
+                } catch (e) {}
+
                 window.showNotification(`Đã xóa quyền quản trị của ${email}!`, 'success');
                 await window.loadAdminAccountsList();
             } catch (err) {
@@ -2055,7 +2122,12 @@
                 currentUserUid = user.uid;
 
                 const isSuper = window.currentAdminProfile?.role === 'super_admin';
-                document.getElementById('sidebarName').textContent = window.currentAdminProfile?.displayName || user.displayName || user.email;
+                document.getElementById('sidebarName').textContent = window.currentAdminProfile?.displayName || user.displayName || user.email.split('@')[0];
+                const emailEl = document.getElementById('sidebarEmail');
+                if (emailEl) {
+                    emailEl.textContent = user.email;
+                    emailEl.classList.remove('hidden');
+                }
                 const roleEl = document.getElementById('sidebarRole');
                 if (roleEl) {
                     if (isSuper) {
