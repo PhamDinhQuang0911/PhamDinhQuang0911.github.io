@@ -70,10 +70,10 @@
                     <button onclick="window.switchCourseView('grid')" id="btn-view-grid" class="p-2.5 rounded-lg text-gray-400 hover:text-brand transition-all w-10 h-10 flex items-center justify-center"><i class="fa-solid fa-border-all"></i></button>
                 </div>
 
-                <button onclick="window.openVoucherManager()" class="flex-1 md:flex-none bg-white text-orange-600 border border-orange-100 px-4 py-2.5 rounded-xl hover:bg-orange-50 shadow-sm font-bold text-sm flex items-center justify-center gap-2 whitespace-nowrap">
+                <button id="btnOpenVoucher" onclick="window.openVoucherManager()" class="flex-1 md:flex-none bg-white text-orange-600 border border-orange-100 px-4 py-2.5 rounded-xl hover:bg-orange-50 shadow-sm font-bold text-sm flex items-center justify-center gap-2 whitespace-nowrap">
                     <i class="fa-solid fa-ticket"></i> <span class="hidden sm:inline">Voucher</span>
                 </button>
-                <button onclick="document.getElementById('courseId').value=''; document.getElementById('cType').value='course'; if(window.toggleProductFields) window.toggleProductFields(); document.getElementById('cTitle').value=''; document.getElementById('cDocFileUrl').value=''; document.getElementById('cBookWeight').value=''; document.getElementById('cThumb').value=''; document.getElementById('thumbPreviewBox').classList.add('hidden'); document.getElementById('thumbEmptyState').classList.remove('hidden'); window.toggleModal('courseModal', true);" class="flex-1 md:flex-none bg-brand text-white px-4 py-2.5 rounded-xl hover:bg-teal-800 shadow-lg shadow-teal-700/20 font-bold text-sm flex items-center justify-center gap-2 whitespace-nowrap">
+                <button id="btnCreateCourse" onclick="document.getElementById('courseId').value=''; document.getElementById('cType').value='course'; if(window.toggleProductFields) window.toggleProductFields(); document.getElementById('cTitle').value=''; document.getElementById('cDocFileUrl').value=''; document.getElementById('cBookWeight').value=''; document.getElementById('cThumb').value=''; document.getElementById('thumbPreviewBox').classList.add('hidden'); document.getElementById('thumbEmptyState').classList.remove('hidden'); window.toggleModal('courseModal', true);" class="flex-1 md:flex-none bg-brand text-white px-4 py-2.5 rounded-xl hover:bg-teal-800 shadow-lg shadow-teal-700/20 font-bold text-sm flex items-center justify-center gap-2 whitespace-nowrap">
                     <i class="fa-solid fa-plus"></i> Thêm mới
                 </button>
             </div>
@@ -730,20 +730,82 @@
         };
         window.closeConfirm = () => document.getElementById('confirmModal').classList.add('hidden');
 
+        // ================= RBAC & SYSTEM ROLES =================
+        const ROOT_SUPER_ADMINS = [
+            "phamdinhquang0911@gmail.com",
+            "phamquang09112001@gmail.com",
+            "phamngockhanh.942001@gmail.com",
+            "phamngockhanh.942002@gmail.com"
+        ];
+        let canManageCourses = false;
+        let canDeleteCourses = false;
+        let canViewCourses = false;
+
+        async function checkCoursePermissions(user) {
+            const userEmail = (user.email || '').toLowerCase().trim();
+            if (ROOT_SUPER_ADMINS.map(e => e.toLowerCase()).includes(userEmail)) {
+                canManageCourses = true;
+                canDeleteCourses = true;
+                canViewCourses = true;
+                return true;
+            }
+            try {
+                const cfgRef = doc(db, "configurations", "admin_roles");
+                const cfgSnap = await getDoc(cfgRef);
+                let acc = null;
+                if (cfgSnap.exists()) {
+                    const accounts = cfgSnap.data().accounts || [];
+                    acc = accounts.find(a => (a.email || '').toLowerCase() === userEmail);
+                }
+                if (!acc) {
+                    const q = query(collection(db, "admin_accounts"), where("email", "==", userEmail));
+                    const qSnap = await getDocs(q);
+                    if (!qSnap.empty) acc = qSnap.docs[0].data();
+                }
+                if (acc) {
+                    if (acc.status === 'locked') {
+                        alert('⛔ Tài khoản của bạn đã bị khóa bởi Super Admin!');
+                        window.location.href = "index.html";
+                        return false;
+                    }
+                    if (acc.role === 'super_admin') {
+                        canManageCourses = true;
+                        canDeleteCourses = true;
+                        canViewCourses = true;
+                        return true;
+                    }
+                    const perms = Array.isArray(acc.permissions) ? acc.permissions : [];
+                    canManageCourses = perms.includes('courses.manage');
+                    canDeleteCourses = perms.includes('courses.delete') || canManageCourses;
+                    canViewCourses = canManageCourses || perms.includes('courses.use') || perms.includes('courses.view');
+                    return canViewCourses;
+                }
+            } catch (err) {
+                console.warn("Lỗi kiểm tra quyền khóa học:", err);
+            }
+            return false;
+        }
+
         // --- MAIN LOAD ---
-        // --- MAIN LOAD (TỐI ƯU TỐC ĐỘ - PARALLEL LOADING) ---
         onAuthStateChanged(auth, async (user) => { 
             if(!user) {
                 window.location.href='index.html'; 
-            } else {
-                // Sử dụng Promise.all để tải song song
-                // Hiện tại chỉ có loadCourses, nhưng sau này bạn thêm loadStats(), loadVouchers()... vào đây thì nó vẫn chạy nhanh vù vù
-                const p1 = loadCourses();
-                
-                // Ví dụ sau này thêm: const p2 = loadRevenueStats();
-                
-                await Promise.all([p1]); 
+                return;
             }
+            const allowed = await checkCoursePermissions(user);
+            if (!allowed) {
+                alert("⛔ Bạn không có quyền truy cập Quản lý Khóa học!");
+                window.location.href = "dashboard.html";
+                return;
+            }
+
+            // Áp dụng quyền ẩn/hiện các nút trên thanh công cụ
+            const btnVoucher = document.getElementById('btnOpenVoucher');
+            if (btnVoucher) btnVoucher.style.display = canManageCourses ? '' : 'none';
+            const btnCreate = document.getElementById('btnCreateCourse');
+            if (btnCreate) btnCreate.style.display = canManageCourses ? '' : 'none';
+
+            await loadCourses();
         });
 
         let courseViewMode = 'list'; // Mặc định
@@ -837,10 +899,10 @@
                     <td class="p-4 text-right">
                         <div class="flex justify-end gap-2">
                             <button onclick="window.openStudentManager('${c.id}')" class="p-2 bg-green-50 text-green-600 rounded-lg hover:bg-green-600 hover:text-white transition-all shadow-sm" title="Quản lý KH/Học viên"><i class="fa-solid fa-user-plus"></i></button>
-                            <button onclick="window.openCurriculumEditor('${c.id}')" class="p-2 bg-purple-50 text-purple-600 rounded-lg hover:bg-purple-600 hover:text-white transition-all shadow-sm ${c.type !== 'course' ? 'hidden' : ''}" title="Soạn giáo án"><i class="fa-solid fa-book-open"></i></button>
+                            ${canManageCourses ? `<button onclick="window.openCurriculumEditor('${c.id}')" class="p-2 bg-purple-50 text-purple-600 rounded-lg hover:bg-purple-600 hover:text-white transition-all shadow-sm ${c.type !== 'course' ? 'hidden' : ''}" title="Soạn giáo án"><i class="fa-solid fa-book-open"></i></button>` : ''}
                             <button onclick="window.copyProductLinkAdmin('${c.id}')" class="p-2 bg-teal-50 text-teal-600 rounded-lg hover:bg-teal-600 hover:text-white transition-all shadow-sm" title="Copy link mua hàng"><i class="fa-solid fa-share-nodes"></i></button>
-                            <button onclick="window.editCourse('${c.id}')" class="p-2 bg-gray-100 text-gray-600 rounded-lg hover:bg-primary-50 hover:text-primary-600 transition-all"><i class="fa-solid fa-pen"></i></button>
-                            <button onclick="window.deleteCourse('${c.id}')" class="p-2 bg-gray-100 text-gray-600 rounded-lg hover:bg-red-50 hover:text-red-600 transition-all"><i class="fa-solid fa-trash"></i></button>
+                            ${canManageCourses ? `<button onclick="window.editCourse('${c.id}')" class="p-2 bg-gray-100 text-gray-600 rounded-lg hover:bg-primary-50 hover:text-primary-600 transition-all" title="Chỉnh sửa"><i class="fa-solid fa-pen"></i></button>` : ''}
+                            ${(canManageCourses || canDeleteCourses) ? `<button onclick="window.deleteCourse('${c.id}')" class="p-2 bg-gray-100 text-gray-600 rounded-lg hover:bg-red-50 hover:text-red-600 transition-all" title="Xóa"><i class="fa-solid fa-trash"></i></button>` : ''}
                         </div>
                     </td>
                 </tr>`;
@@ -857,12 +919,12 @@
                         <div>${typeBadge}</div>
                         <p class="text-xs text-gray-500 font-bold mt-3 mb-4 flex items-center gap-2"><i class="fa-solid ${iconClass}"></i> ${strucText}</p>
                         
-                        <div class="mt-auto grid grid-cols-5 gap-2 pt-4 border-t border-gray-100">
+                        <div class="mt-auto grid grid-cols-${canManageCourses ? '5' : '2'} gap-2 pt-4 border-t border-gray-100">
                             <button onclick="window.openStudentManager('${c.id}')" class="col-span-1 py-2 bg-green-50 text-green-600 rounded-lg hover:bg-green-600 hover:text-white transition-colors" title="Học viên/Đơn hàng"><i class="fa-solid fa-user-plus"></i></button>
-                            <button onclick="window.openCurriculumEditor('${c.id}')" class="col-span-1 py-2 bg-purple-50 text-purple-600 rounded-lg hover:bg-purple-600 hover:text-white transition-colors" title="Giáo án"><i class="fa-solid fa-book-open"></i></button>
+                            ${canManageCourses ? `<button onclick="window.openCurriculumEditor('${c.id}')" class="col-span-1 py-2 bg-purple-50 text-purple-600 rounded-lg hover:bg-purple-600 hover:text-white transition-colors" title="Giáo án"><i class="fa-solid fa-book-open"></i></button>` : ''}
                             <button onclick="window.copyProductLinkAdmin('${c.id}')" class="col-span-1 py-2 bg-teal-50 text-teal-600 rounded-lg hover:bg-teal-600 hover:text-white transition-colors" title="Copy link mua hàng"><i class="fa-solid fa-share-nodes"></i></button>
-                            <button onclick="window.editCourse('${c.id}')" class="col-span-1 py-2 bg-gray-50 text-gray-600 rounded-lg hover:bg-primary-50 hover:text-primary-600 transition-colors"><i class="fa-solid fa-pen"></i></button>
-                            <button onclick="window.deleteCourse('${c.id}')" class="col-span-1 py-2 bg-gray-50 text-gray-600 rounded-lg hover:bg-red-50 hover:text-red-600 transition-colors"><i class="fa-solid fa-trash"></i></button>
+                            ${canManageCourses ? `<button onclick="window.editCourse('${c.id}')" class="col-span-1 py-2 bg-gray-50 text-gray-600 rounded-lg hover:bg-primary-50 hover:text-primary-600 transition-colors" title="Chỉnh sửa"><i class="fa-solid fa-pen"></i></button>` : ''}
+                            ${(canManageCourses || canDeleteCourses) ? `<button onclick="window.deleteCourse('${c.id}')" class="col-span-1 py-2 bg-gray-50 text-gray-600 rounded-lg hover:bg-red-50 hover:text-red-600 transition-colors" title="Xóa"><i class="fa-solid fa-trash"></i></button>` : ''}
                         </div>
                     </div>
                 </div>`;
@@ -1130,6 +1192,10 @@ window.toggleProductFields = () => {
 
 // Hàm tải dữ liệu lên form sửa
 window.editCourse = async (id) => {
+    if (!canManageCourses) {
+        window.showToast("⛔ Bạn không có quyền chỉnh sửa khóa học!", "error");
+        return;
+    }
     const d = await getDoc(doc(db, "public_courses", id));
     if(d.exists()) {
         const dt = d.data();
@@ -1167,6 +1233,10 @@ window.editCourse = async (id) => {
 
 // Hàm lưu dữ liệu
 window.saveCourseBasic = async () => {
+    if (!canManageCourses) {
+        window.showToast("⛔ Bạn không có quyền lưu thay đổi khóa học!", "error");
+        return;
+    }
     const id = document.getElementById('courseId').value;
     const type = document.getElementById('cType').value; // Lấy type từ Dropdown
     
@@ -1676,6 +1746,10 @@ function renderCurriculumTree() {
         };
 
         window.saveCurriculum = async () => {
+            if (!canManageCourses) {
+                window.showToast("⛔ Bạn không có quyền chỉnh sửa giáo án!", "error");
+                return;
+            }
             const btn = document.querySelector('button[onclick="saveCurriculum()"]');
             btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang lưu...';
             try {
@@ -1710,7 +1784,12 @@ function renderCurriculumTree() {
             }
         };
         window.closeCurriculumModal = () => window.customConfirm("Đóng mà không lưu?", () => document.getElementById('curriculumModal').classList.add('hidden'));
-       window.deleteCourse = (id) => window.customConfirm("Hành động này sẽ xóa vĩnh viễn khóa học và ảnh banner trên R2. Bạn có chắc chắn không?", async () => {
+       window.deleteCourse = (id) => {
+            if (!canManageCourses && !canDeleteCourses) {
+                window.showToast("⛔ Bạn không có quyền xóa khóa học!", "error");
+                return;
+            }
+            window.customConfirm("Hành động này sẽ xóa vĩnh viễn khóa học và ảnh banner trên R2. Bạn có chắc chắn không?", async () => {
             const btn = document.querySelector(`button[onclick="window.deleteCourse('${id}')"]`);
             const originalContent = btn ? btn.innerHTML : '';
             if(btn) btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
@@ -1754,6 +1833,7 @@ function renderCurriculumTree() {
                 if(btn) btn.innerHTML = originalContent;
             }
         });
+    };
         // Hàm phụ trợ: Xóa file trên Storage dựa vào URL
         async function deleteFileByUrl(url) {
             if (!url) return;

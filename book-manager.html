@@ -234,6 +234,69 @@
         </div>
     </div>
 
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+        import { getFirestore, doc, getDoc, collection, query, where, getDocs } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyCqAX3x1MbJ3do7m3EaH9JA4kFuVhlAc78",
+            authDomain: "lms-thitracnghiem.firebaseapp.com",
+            projectId: "lms-thitracnghiem",
+            storageBucket: "lms-thitracnghiem.firebasestorage.app",
+            messagingSenderId: "760187217240",
+            appId: "1:760187217240:web:d043cd5808c349f87a712d"
+        };
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        const ROOT_SUPER_ADMINS = [
+            "phamdinhquang0911@gmail.com",
+            "phamquang09112001@gmail.com",
+            "phamngockhanh.942001@gmail.com",
+            "phamngockhanh.942002@gmail.com"
+        ];
+
+        onAuthStateChanged(auth, async (user) => {
+            if (!user) {
+                window.location.href = "index.html";
+                return;
+            }
+            const email = (user.email || '').toLowerCase().trim();
+            if (ROOT_SUPER_ADMINS.map(e => e.toLowerCase()).includes(email)) {
+                return;
+            }
+            try {
+                const cfgRef = doc(db, "configurations", "admin_roles");
+                const cfgSnap = await getDoc(cfgRef);
+                let acc = null;
+                if (cfgSnap.exists()) {
+                    const accounts = cfgSnap.data().accounts || [];
+                    acc = accounts.find(a => (a.email || '').toLowerCase() === email);
+                }
+                if (!acc) {
+                    const qSnap = await getDocs(query(collection(db, "admin_accounts"), where("email", "==", email)));
+                    if (!qSnap.empty) acc = qSnap.docs[0].data();
+                }
+                if (acc) {
+                    if (acc.status === 'locked') {
+                        alert('⛔ Tài khoản của bạn đã bị khóa!');
+                        window.location.href = "index.html";
+                        return;
+                    }
+                    if (acc.role === 'super_admin') return;
+                    const perms = Array.isArray(acc.permissions) ? acc.permissions : [];
+                    if (perms.includes('books.create')) return;
+                }
+            } catch (err) {
+                console.error("Lỗi kiểm tra quyền Sách:", err);
+            }
+            alert('⛔ Bạn không có quyền truy cập module Sách Số Hóa!');
+            window.location.href = "dashboard.html";
+        });
+    </script>
+
     <script type="module" src="./book-manager.js"></script>
 <script>
 if ('serviceWorker' in navigator) {
