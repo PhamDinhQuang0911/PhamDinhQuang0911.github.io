@@ -1498,6 +1498,36 @@
                     }
                 });
 
+                // Lấy thêm các khóa học được phân bổ / gán từ các lớp học mà học sinh đang tham gia
+                try {
+                    const qClasses = query(collection(db, "classes"), where("studentIds", "array-contains", user.uid));
+                    const sClasses = await getDocs(qClasses);
+                    sClasses.forEach(cd => {
+                        const classData = cd.data();
+                        const assignedCourses = classData.assignedCourses || [];
+                        assignedCourses.forEach(ac => {
+                            if (ac && ac.courseId) {
+                                const alreadyInPaid = paidItems.some(item => item.courseId === ac.courseId);
+                                if (!alreadyInPaid) {
+                                    paidItems.push({
+                                        orderId: 'class_' + cd.id + '_' + ac.courseId,
+                                        courseId: ac.courseId,
+                                        courseTitle: ac.courseTitle || 'Khóa học từ lớp',
+                                        bannerUrl: ac.bannerUrl || '',
+                                        status: 'approved',
+                                        fromClass: true,
+                                        className: classData.name || 'Lớp học',
+                                        classId: cd.id,
+                                        assignedAt: ac.assignedAt || ''
+                                    });
+                                }
+                            }
+                        });
+                    });
+                } catch(errClasses) {
+                    console.warn("Lỗi kiểm tra khóa học theo lớp của học sinh:", errClasses);
+                }
+
                 // 2. [QUAN TRỌNG] Lọc bỏ các khóa học đã bị xóa (Check tồn tại trong public_courses)
                 const validPaidItems = await Promise.all(paidItems.map(async (o) => {
                     try {
@@ -1558,6 +1588,10 @@
                 // Tạm thời để 0% (chưa học). Sau này khi làm course-player xong, ta sẽ lưu tiến độ vào biến o.progress
                 const percent = o.progress || 0; 
                 
+                const statusBadgeHtml = o.fromClass 
+                    ? `<span class="text-[10px] font-bold text-purple-700 bg-purple-50 border border-purple-200 px-2 py-0.5 rounded-full inline-flex items-center gap-1"><i class="fa-solid fa-school text-purple-500"></i> ${o.className || 'Lớp học'}</span>` 
+                    : `<span class="text-[10px] text-gray-400 flex items-center gap-1"><i class="fa-solid fa-calendar-check text-green-500"></i> Đã kích hoạt</span>`;
+                
                 if (mode === 'grid') {
                     html += `
                     <div class="bg-white p-3 md:p-5 rounded-2xl border border-primary-50 shadow-sm hover:border-primary-300 hover:shadow-md transition-all cursor-pointer group flex flex-col h-full relative overflow-hidden" onclick="window.location.href='course-player.html?id=${o.courseId}'">
@@ -1566,7 +1600,7 @@
                             <div class="w-12 h-12 bg-primary-100 text-primary-600 rounded-xl flex items-center justify-center font-bold shrink-0 shadow-inner"><i class="fa-solid fa-graduation-cap text-xl"></i></div>
                             <div class="flex-1 min-w-0">
                                 <h4 class="font-bold text-gray-800 text-sm line-clamp-2 mb-1 group-hover:text-brand transition-colors" title="${o.courseTitle}">${o.courseTitle}</h4>
-                                <p class="text-[10px] text-gray-400 flex items-center gap-1"><i class="fa-solid fa-calendar-check"></i> Đã kích hoạt</p>
+                                <div class="mt-1">${statusBadgeHtml}</div>
                             </div>
                         </div>
                         <div class="mt-auto pt-3 border-t border-dashed border-gray-100 relative z-10">
@@ -1580,7 +1614,10 @@
                     <div class="bg-white p-2 md:p-4 rounded-xl border border-primary-50 shadow-sm hover:border-primary-300 transition-all cursor-pointer group flex items-center gap-4 relative overflow-hidden" onclick="window.location.href='course-player.html?id=${o.courseId}'">
                         <div class="w-16 h-16 bg-primary-100 text-primary-600 rounded-xl flex items-center justify-center font-bold text-2xl shrink-0"><i class="fa-solid fa-graduation-cap"></i></div>
                         <div class="flex-1 min-w-0 z-10">
-                            <h4 class="font-bold text-gray-800 text-sm md:text-base mb-1 group-hover:text-brand transition-colors truncate">${o.courseTitle}</h4>
+                            <div class="flex items-center gap-2 mb-1">
+                                <h4 class="font-bold text-gray-800 text-sm md:text-base group-hover:text-brand transition-colors truncate">${o.courseTitle}</h4>
+                                <div>${statusBadgeHtml}</div>
+                            </div>
                             <div class="flex items-center gap-4 w-full md:w-1/2">
                                 <div class="flex-1 bg-gray-100 rounded-full h-1.5 overflow-hidden"><div class="bg-primary-500 h-full rounded-full" style="width: ${percent}%"></div></div>
                                 <span class="text-xs font-bold text-primary-600">${percent}%</span>
