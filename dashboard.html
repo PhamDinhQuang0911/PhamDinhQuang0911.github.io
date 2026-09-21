@@ -1741,9 +1741,9 @@
                 history.pushState({ view: viewName }, '', url);
             }
 
-            // [TỐI ƯU] Chỉ gọi tải Ngân hàng đề khi bấm vào tab này
+            // [TỐI ƯU] Tải Ngân hàng đề ngay khi bấm vào tab này (Cache-First)
             if (viewName === 'exambank') {
-                setTimeout(() => loadFileManager(), 300);
+                loadFileManager();
             }
 
             // [TỐI ƯU] Tải Kho câu hỏi (Dùng setTimeout để không làm giật animation chuyển tab)
@@ -4358,7 +4358,25 @@ window.filterBankByTeacher = (val) => {
     loadFileManager(true);
 };
 
-// Cập nhật lại hàm với cờ forceRefresh
+let _bankLoadingPromise = null;
+
+function saveBankCache() {
+    try {
+        const isSuper = window.currentAdminProfile?.role === 'super_admin' || ROOT_SUPER_ADMINS.map(e => e.toLowerCase()).includes(((window.currentAdminProfile?.email || (auth.currentUser ? auth.currentUser.email : '')) || '').toLowerCase());
+        const canUseShared = isSuper || window.hasPermission('bank.use_shared');
+        const bankFilter = window.selectedSuperAdminBankTeacher || (document.getElementById('superAdminBankTeacherSelect')?.value) || 'all';
+        const cacheKeyF = `bank_folders_${currentUserUid}_${isSuper ? bankFilter : (canUseShared ? 'shared' : 'own')}`;
+        const cacheKeyE = `bank_exams_${currentUserUid}_${isSuper ? bankFilter : (canUseShared ? 'shared' : 'own')}`;
+        const cacheKeyT = `bank_tags_${currentUserUid}`;
+        localStorage.setItem(cacheKeyF, JSON.stringify(folderData));
+        localStorage.setItem(cacheKeyE, JSON.stringify(examData));
+        localStorage.setItem(cacheKeyT, JSON.stringify(tagData));
+    } catch(e) {
+        console.warn("Lưu cache ngân hàng thất bại:", e);
+    }
+}
+
+// Cập nhật lại hàm với cờ forceRefresh & Tối ưu Cache-First
 async function loadFileManager(forceRefresh = false) { 
     const container = document.getElementById('explorerGrid');
 
@@ -4371,123 +4389,151 @@ async function loadFileManager(forceRefresh = false) {
     const cacheKeyE = `bank_exams_${currentUserUid}_${isSuper ? bankFilter : (canUseShared ? 'shared' : 'own')}`;
     const cacheKeyT = `bank_tags_${currentUserUid}`;
 
+    let hasValidCache = false;
     const cachedF = localStorage.getItem(cacheKeyF);
     const cachedE = localStorage.getItem(cacheKeyE);
     const cachedT = localStorage.getItem(cacheKeyT);
 
-    if (cachedF && cachedE && cachedT && !forceRefresh) {
+    if (cachedF && cachedE && !forceRefresh) {
         try {
-            folderData = JSON.parse(cachedF);
-            examData = JSON.parse(cachedE);
-            tagData = JSON.parse(cachedT);
+            folderData = JSON.parse(cachedF) || [];
+            examData = JSON.parse(cachedE) || [];
+            tagData = cachedT ? (JSON.parse(cachedT) || []) : [];
+            hasValidCache = true;
             if (container) {
                 renderTagFilterUI();
-                renderExplorer(); // Vẽ ngay lập tức trong 0s
+                renderExplorer(); // Hiển thị tức thì trong 0s từ Cache!
             }
-        } catch(e) {}
-    } else if (container && container.innerHTML === '') {
+        } catch(e) {
+            console.warn("Lỗi đọc cache ngân hàng:", e);
+        }
+    }
+
+    if (!hasValidCache && container && container.innerHTML === '') {
         container.innerHTML = `<div class="col-span-full grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 animate-pulse">${'<div class="bg-gray-200 rounded-xl aspect-square"></div>'.repeat(6)}</div>`;
     }
 
-    if (isBankLoaded && !forceRefresh && cachedF && cachedE && cachedT) return;
+    if (isBankLoaded && !forceRefresh && hasValidCache) return;
 
-    // 2. TẢI TỪ FIREBASE
-    try { 
-        let qFolders, qExams, qTags;
-        qTags = query(collection(db, "tags"), where("teacherId", "==", currentUserUid), limit(100));
+    if (_bankLoadingPromise && !forceRefresh) return _bankLoadingPromise;
 
-        if (!isSuper) {
-            qFolders = query(collection(db, "folders"), where("teacherId", "==", currentUserUid), limit(150));
-            qExams = query(collection(db, "exams"), where("teacherId", "==", currentUserUid), limit(150));
-        } else {
-            if (bankFilter === 'me') {
-                qFolders = query(collection(db, "folders"), where("teacherId", "==", currentUserUid), limit(150));
-                qExams = query(collection(db, "exams"), where("teacherId", "==", currentUserUid), limit(150));
-            } else if (bankFilter === 'system') {
-                qFolders = query(collection(db, "folders"), where("isSystem", "==", true), limit(150));
-                qExams = query(collection(db, "exams"), where("isSystem", "==", true), limit(150));
-            } else if (bankFilter !== 'all') {
-                qFolders = query(collection(db, "folders"), where("teacherId", "==", bankFilter), limit(150));
-                qExams = query(collection(db, "exams"), where("teacherId", "==", bankFilter), limit(150));
+    // 2. TẢI TỪ FIREBASE BẰNG PROMISE.ALL SONG SONG
+    _bankLoadingPromise = (async () => {
+        try { 
+            let qFolders, qExams, qTags;
+            qTags = query(collection(db, "tags"), where("teacherId", "==", currentUserUid), limit(100));
+
+            if (!isSuper) {
+                qFolders = query(collection(db, "folders"), where("teacherId", "==", currentUserUid), limit(200));
+                qExams = query(collection(db, "exams"), where("teacherId", "==", currentUserUid), limit(200));
             } else {
-                qFolders = query(collection(db, "folders"), limit(300));
-                qExams = query(collection(db, "exams"), limit(300));
+                if (bankFilter === 'me') {
+                    qFolders = query(collection(db, "folders"), where("teacherId", "==", currentUserUid), limit(200));
+                    qExams = query(collection(db, "exams"), where("teacherId", "==", currentUserUid), limit(200));
+                } else if (bankFilter === 'system') {
+                    qFolders = query(collection(db, "folders"), where("isSystem", "==", true), limit(200));
+                    qExams = query(collection(db, "exams"), where("isSystem", "==", true), limit(200));
+                } else if (bankFilter !== 'all') {
+                    qFolders = query(collection(db, "folders"), where("teacherId", "==", bankFilter), limit(200));
+                    qExams = query(collection(db, "exams"), where("teacherId", "==", bankFilter), limit(200));
+                } else {
+                    qFolders = query(collection(db, "folders"), limit(300));
+                    qExams = query(collection(db, "exams"), limit(300));
+                }
             }
-        }
-        
-        const newFolderData = [];
-        try {
-            const snapFolders = await getDocs(qFolders);
-            snapFolders.forEach(d => newFolderData.push({id: d.id, ...d.data()}));
-        } catch(errF) {
-            console.warn("Lỗi tải folders theo bộ lọc, fallback:", errF);
-            try {
-                const snapF2 = await getDocs(query(collection(db, "folders"), where("teacherId", "==", currentUserUid), limit(100)));
-                snapF2.forEach(d => newFolderData.push({id: d.id, ...d.data()}));
-            } catch(e) {}
-        }
-        
-        const newExamData = [];
-        try {
-            const snapExams = await getDocs(qExams);
-            snapExams.forEach(d => newExamData.push({id: d.id, ...d.data()}));
-        } catch(errE) {
-            console.warn("Lỗi tải exams theo bộ lọc, fallback:", errE);
-            try {
-                const snapE2 = await getDocs(query(collection(db, "exams"), where("teacherId", "==", currentUserUid), limit(100)));
-                snapE2.forEach(d => newExamData.push({id: d.id, ...d.data()}));
-            } catch(e) {}
-        }
 
-        const newTagData = [];
-        try {
-            const snapTags = await getDocs(qTags);
-            snapTags.forEach(d => newTagData.push({id: d.id, ...d.data()}));
-        } catch(errT) {
-            console.warn("Lỗi tải tags:", errT);
-        }
-
-        // Tải thêm ngân hàng hệ thống dùng chung cho giáo viên thường
-        if (!isSuper && canUseShared) {
-            try {
-                const [sysFoldersSnap, sysExamsSnap] = await Promise.all([
-                    getDocs(query(collection(db, "folders"), where("isSystem", "==", true), limit(100))),
-                    getDocs(query(collection(db, "exams"), where("isSystem", "==", true), limit(100)))
-                ]);
-                sysFoldersSnap.forEach(d => {
-                    if (!newFolderData.some(f => f.id === d.id)) {
-                        newFolderData.push({ id: d.id, isSystem: true, ...d.data() });
-                    }
-                });
-                sysExamsSnap.forEach(d => {
-                    if (!newExamData.some(e => e.id === d.id)) {
-                        newExamData.push({ id: d.id, isSystem: true, ...d.data() });
-                    }
-                });
-            } catch(errSys) {
-                console.warn("Lỗi tải ngân hàng dùng chung hệ thống:", errSys);
+            // Tải song song tất cả 3 luồng dữ liệu (Nhanh gấp 3 lần tuần tự)
+            const [snapFoldersRes, snapExamsRes, snapTagsRes] = await Promise.allSettled([
+                getDocs(qFolders),
+                getDocs(qExams),
+                getDocs(qTags)
+            ]);
+            
+            const newFolderData = [];
+            if (snapFoldersRes.status === 'fulfilled') {
+                snapFoldersRes.value.forEach(d => newFolderData.push({ id: d.id, ...d.data() }));
+            } else {
+                console.warn("Lỗi tải folders theo bộ lọc, fallback:", snapFoldersRes.reason);
+                try {
+                    const snapF2 = await getDocs(query(collection(db, "folders"), where("teacherId", "==", currentUserUid), limit(100)));
+                    snapF2.forEach(d => newFolderData.push({ id: d.id, ...d.data() }));
+                } catch(e) {}
             }
-        }
-        
-        // Cập nhật lại mảng và Cache
-        folderData = newFolderData; 
-        examData = newExamData;
-        tagData = newTagData;
-        localStorage.setItem(cacheKeyF, JSON.stringify(folderData));
-        localStorage.setItem(cacheKeyE, JSON.stringify(examData));
-        localStorage.setItem(cacheKeyT, JSON.stringify(tagData));
-        
-        isBankLoaded = true;
+            
+            const newExamData = [];
+            if (snapExamsRes.status === 'fulfilled') {
+                snapExamsRes.value.forEach(d => {
+                    const data = d.data();
+                    // [TỐI ƯU CỰC MẠNH] Loại bỏ questions nặng hàng chục MB để chống tràn localStorage
+                    const qCount = Array.isArray(data.questions) ? data.questions.length : (data.questionCount || 0);
+                    delete data.questions;
+                    newExamData.push({ id: d.id, ...data, questionCount: qCount });
+                });
+            } else {
+                console.warn("Lỗi tải exams theo bộ lọc, fallback:", snapExamsRes.reason);
+                try {
+                    const snapE2 = await getDocs(query(collection(db, "exams"), where("teacherId", "==", currentUserUid), limit(100)));
+                    snapE2.forEach(d => {
+                        const data = d.data();
+                        const qCount = Array.isArray(data.questions) ? data.questions.length : (data.questionCount || 0);
+                        delete data.questions;
+                        newExamData.push({ id: d.id, ...data, questionCount: qCount });
+                    });
+                } catch(e) {}
+            }
 
-        // Vẽ lại giao diện nếu đang ở tab Ngân hàng
-        const bankView = document.getElementById('view-exambank');
-        if (bankView && !bankView.classList.contains('hidden')) {
-            renderTagFilterUI();
-            renderExplorer(); 
+            const newTagData = [];
+            if (snapTagsRes.status === 'fulfilled') {
+                snapTagsRes.value.forEach(d => newTagData.push({ id: d.id, ...d.data() }));
+            }
+
+            // Tải thêm ngân hàng hệ thống dùng chung cho giáo viên thường
+            if (!isSuper && canUseShared) {
+                try {
+                    const [sysFoldersSnap, sysExamsSnap] = await Promise.all([
+                        getDocs(query(collection(db, "folders"), where("isSystem", "==", true), limit(100))),
+                        getDocs(query(collection(db, "exams"), where("isSystem", "==", true), limit(100)))
+                    ]);
+                    sysFoldersSnap.forEach(d => {
+                        if (!newFolderData.some(f => f.id === d.id)) {
+                            newFolderData.push({ id: d.id, isSystem: true, ...d.data() });
+                        }
+                    });
+                    sysExamsSnap.forEach(d => {
+                        if (!newExamData.some(e => e.id === d.id)) {
+                            const data = d.data();
+                            const qCount = Array.isArray(data.questions) ? data.questions.length : (data.questionCount || 0);
+                            delete data.questions;
+                            newExamData.push({ id: d.id, isSystem: true, ...data, questionCount: qCount });
+                        }
+                    });
+                } catch(errSys) {
+                    console.warn("Lỗi tải ngân hàng dùng chung hệ thống:", errSys);
+                }
+            }
+            
+            // Cập nhật lại mảng và Cache gọn nhẹ
+            folderData = newFolderData; 
+            examData = newExamData;
+            tagData = newTagData;
+            saveBankCache();
+            
+            isBankLoaded = true;
+
+            // Vẽ lại giao diện nếu đang ở tab Ngân hàng
+            const bankView = document.getElementById('view-exambank');
+            if (bankView && !bankView.classList.contains('hidden')) {
+                renderTagFilterUI();
+                renderExplorer(); 
+            }
+        } catch(e) { 
+            console.error("Lỗi tải ngân hàng:", e);
+        } finally {
+            _bankLoadingPromise = null;
         }
-    } catch(e) { 
-        console.error("Lỗi tải ngân hàng:", e);
-    } 
+    })();
+
+    return _bankLoadingPromise;
 } 
 
 function renderTagFilterUI() {
@@ -4809,13 +4855,16 @@ function renderTagFilterUI() {
                     folderData.push({ id: docRef.id, ...newDoc });
                     localStorage.setItem('bank_folders', JSON.stringify(folderData));
                 } else if (cb.type === 'exam') {
-                    const originalExam = examData.find(e => e.id === cb.item);
-                    if (!originalExam) return;
-                    const newDoc = { ...originalExam, title: originalExam.title + ' (Bản sao)', folderId: currentFolderId, createdAt: new Date().toISOString() };
+                    const snapExamFull = await getDoc(doc(db, "exams", cb.item));
+                    if (!snapExamFull.exists()) return;
+                    const fullData = snapExamFull.data();
+                    const newDoc = { ...fullData, title: (fullData.title || 'Đề thi') + ' (Bản sao)', folderId: currentFolderId, teacherId: currentUserUid, createdAt: new Date().toISOString() };
                     delete newDoc.id;
                     const docRef = await addDoc(collection(db, "exams"), newDoc);
-                    examData.push({ id: docRef.id, ...newDoc });
-                    localStorage.setItem('bank_exams', JSON.stringify(examData));
+                    const qCount = Array.isArray(newDoc.questions) ? newDoc.questions.length : (newDoc.questionCount || 0);
+                    delete newDoc.questions;
+                    examData.push({ id: docRef.id, ...newDoc, questionCount: qCount });
+                    saveBankCache();
                 }
                 window.showNotification("Dán thành công!");
                 renderExplorer();
@@ -4998,9 +5047,11 @@ function renderTagFilterUI() {
                         examData = examData.filter(e => !e.folderId || !idsToDelete.has(e.folderId));
                         localStorage.setItem('bank_folders', JSON.stringify(folderData));
                         localStorage.setItem('bank_exams', JSON.stringify(examData));
+                        saveBankCache();
                     } else {
                         examData = examData.filter(e => e.id !== currentActionItem.id);
                         localStorage.setItem('bank_exams', JSON.stringify(examData));
+                        saveBankCache();
                     }
                     renderExplorer();
                     window.showNotification("Đã xóa hoàn toàn đề thi và các dữ liệu liên quan!", "success");
@@ -5043,6 +5094,7 @@ function renderTagFilterUI() {
                     if (e) e.tagIds = selectedTagIds;
                     localStorage.setItem('bank_exams', JSON.stringify(examData));
                 }
+                saveBankCache();
                 
                 window.showNotification("Đã lưu thẻ thành công", "success");
                 window.toggleModal('actionModal', false);
@@ -5066,6 +5118,7 @@ function renderTagFilterUI() {
                 if (e) { e.name = newName; e.title = newName; } 
                 localStorage.setItem('bank_exams', JSON.stringify(examData)); 
             } 
+            saveBankCache();
             renderExplorer(); 
             window.showNotification("Đã đổi tên"); 
             window.toggleModal('actionModal', false); 
@@ -5084,6 +5137,7 @@ function renderTagFilterUI() {
                 if (e) e.folderId = targetFolderId; 
                 localStorage.setItem('bank_exams', JSON.stringify(examData)); 
             } 
+            saveBankCache(); 
             renderExplorer(); 
             window.toggleModal('actionModal', false); 
             window.showNotification("Đã di chuyển"); 

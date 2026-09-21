@@ -73,7 +73,7 @@
                 <button id="btnOpenVoucher" onclick="window.openVoucherManager()" class="flex-1 md:flex-none bg-white text-orange-600 border border-orange-100 px-4 py-2.5 rounded-xl hover:bg-orange-50 shadow-sm font-bold text-sm flex items-center justify-center gap-2 whitespace-nowrap">
                     <i class="fa-solid fa-ticket"></i> <span class="hidden sm:inline">Voucher</span>
                 </button>
-                <button id="btnCreateCourse" onclick="document.getElementById('courseId').value=''; document.getElementById('cType').value='course'; if(window.toggleProductFields) window.toggleProductFields(); document.getElementById('cTitle').value=''; document.getElementById('cDocFileUrl').value=''; document.getElementById('cBookWeight').value=''; document.getElementById('cThumb').value=''; document.getElementById('thumbPreviewBox').classList.add('hidden'); document.getElementById('thumbEmptyState').classList.remove('hidden'); window.toggleModal('courseModal', true);" class="flex-1 md:flex-none bg-brand text-white px-4 py-2.5 rounded-xl hover:bg-teal-800 shadow-lg shadow-teal-700/20 font-bold text-sm flex items-center justify-center gap-2 whitespace-nowrap">
+                <button id="btnCreateCourse" onclick="document.getElementById('courseId').value=''; document.getElementById('cType').value='course'; if(document.getElementById('cStatus')) document.getElementById('cStatus').value='active'; if(window.toggleProductFields) window.toggleProductFields(); document.getElementById('cTitle').value=''; document.getElementById('cDocFileUrl').value=''; document.getElementById('cBookWeight').value=''; document.getElementById('cThumb').value=''; document.getElementById('thumbPreviewBox').classList.add('hidden'); document.getElementById('thumbEmptyState').classList.remove('hidden'); window.toggleModal('courseModal', true);" class="flex-1 md:flex-none bg-brand text-white px-4 py-2.5 rounded-xl hover:bg-teal-800 shadow-lg shadow-teal-700/20 font-bold text-sm flex items-center justify-center gap-2 whitespace-nowrap">
                     <i class="fa-solid fa-plus"></i> Thêm mới
                 </button>
             </div>
@@ -118,12 +118,20 @@
                 <input type="hidden" id="courseId">
                 
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-    <div class="col-span-1 md:col-span-3">
+    <div class="col-span-1 md:col-span-2">
         <label class="block text-xs font-black text-gray-500 uppercase mb-2 ml-1">Loại Sản Phẩm Đăng Bán</label>
         <select id="cType" onchange="window.toggleProductFields()" class="w-full px-5 py-3 border border-gray-200 rounded-xl bg-gray-50 focus:border-brand focus:ring-4 focus:ring-brand/10 outline-none transition-all font-bold text-brand">
             <option value="course">🎬 Khóa học trực tuyến (Có giáo án cấu trúc)</option>
             <option value="document_soft">📄 Tài liệu bản mềm (Hệ thống tự động gửi File qua Email)</option>
             <option value="document_hard">📚 Sách bản cứng (Yêu cầu HS điền địa chỉ giao hàng)</option>
+        </select>
+    </div>
+
+    <div class="col-span-1 md:col-span-1">
+        <label class="block text-xs font-black text-gray-500 uppercase mb-2 ml-1">Trạng Thái Bán Hàng</label>
+        <select id="cStatus" class="w-full px-4 py-3 border border-gray-200 rounded-xl bg-gray-50 focus:border-brand focus:ring-4 focus:ring-brand/10 outline-none transition-all font-bold text-gray-700">
+            <option value="active">🟢 Đang mở bán</option>
+            <option value="sold_out">🔴 Bán hết (Hết hàng)</option>
         </select>
     </div>
 
@@ -647,7 +655,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
-        import { getFirestore, collection, getDocs, doc, setDoc, updateDoc, deleteDoc, query, orderBy, getDoc, where, writeBatch } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { getFirestore, collection, getDocs, doc, setDoc, updateDoc, deleteDoc, query, orderBy, getDoc, where, writeBatch, increment } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
         // [MỚI] Import thêm Storage để xóa file
         import { getStorage, ref, deleteObject } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js";
 
@@ -889,11 +897,14 @@
                     iconClass = "fa-truck-fast text-amber-500";
                 }
 
+                const isSoldOut = (c.status === 'sold_out' || c.isSoldOut === true);
+                const soldOutBadge = isSoldOut ? '<span class="bg-red-100 text-red-700 px-2 py-0.5 rounded text-[10px] font-bold inline-block mt-1 ml-1 border border-red-200"><i class="fa-solid fa-ban mr-0.5"></i> BÁN HẾT</span>' : '';
+
                 // --- RENDER LIST ROW ---
                 listTable.innerHTML += `
-                <tr class="hover:bg-gray-50 border-b border-gray-100 group transition-colors">
+                <tr class="hover:bg-gray-50 border-b border-gray-100 group transition-colors ${isSoldOut ? 'bg-red-50/20' : ''}">
                     <td class="p-4"><img src="${thumb}" class="w-12 h-12 rounded-lg object-cover border border-gray-200 shadow-sm"></td>
-                    <td class="p-4"><div class="font-bold text-gray-800 group-hover:text-brand transition-colors">${c.title}</div>${typeBadge}</td>
+                    <td class="p-4"><div class="font-bold text-gray-800 group-hover:text-brand transition-colors">${c.title}</div>${typeBadge}${soldOutBadge}</td>
                     <td class="p-4 text-xs text-gray-500 font-bold">${strucText}</td>
                     <td class="p-4 text-center"><span class="bg-primary-50 text-primary-700 px-2.5 py-1 rounded-full text-xs font-bold border border-primary-100">${c.students || 0} lượt</span></td>
                     <td class="p-4 text-right">
@@ -909,14 +920,15 @@
 
                 // --- RENDER GRID CARD ---
                 gridContainer.innerHTML += `
-                <div class="bg-white rounded-2xl border border-gray-200 shadow-sm hover:shadow-lg hover:border-brand/30 transition-all overflow-hidden flex flex-col group h-full">
+                <div class="bg-white rounded-2xl border ${isSoldOut ? 'border-red-200' : 'border-gray-200'} shadow-sm hover:shadow-lg hover:border-brand/30 transition-all overflow-hidden flex flex-col group h-full">
                     <div class="h-40 bg-gray-100 relative overflow-hidden">
                         <img src="${thumb}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500">
+                        ${isSoldOut ? '<div class="absolute top-2 left-2 bg-red-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-lg shadow"><i class="fa-solid fa-ban mr-0.5"></i> BÁN HẾT</div>' : ''}
                         <div class="absolute top-2 right-2 bg-black/50 text-white text-xs px-2 py-1 rounded-lg backdrop-blur-sm"><i class="fa-solid fa-shopping-cart"></i> ${c.students||0}</div>
                     </div>
                     <div class="p-5 flex flex-col flex-1">
                         <h3 class="font-bold text-gray-800 text-lg mb-1 line-clamp-2 group-hover:text-brand transition-colors">${c.title}</h3>
-                        <div>${typeBadge}</div>
+                        <div>${typeBadge}${soldOutBadge}</div>
                         <p class="text-xs text-gray-500 font-bold mt-3 mb-4 flex items-center gap-2"><i class="fa-solid ${iconClass}"></i> ${strucText}</p>
                         
                         <div class="mt-auto grid grid-cols-${canManageCourses ? '5' : '2'} gap-2 pt-4 border-t border-gray-100">
@@ -1201,6 +1213,7 @@ window.editCourse = async (id) => {
         const dt = d.data();
         document.getElementById('courseId').value = id;
         document.getElementById('cType').value = dt.type || 'course';
+        if(document.getElementById('cStatus')) document.getElementById('cStatus').value = (dt.status === 'sold_out' || dt.isSoldOut === true) ? 'sold_out' : 'active';
         document.getElementById('cTitle').value = dt.title || '';
         
         document.getElementById('cOriginalPrice').value = dt.originalPrice || '';
@@ -1239,9 +1252,13 @@ window.saveCourseBasic = async () => {
     }
     const id = document.getElementById('courseId').value;
     const type = document.getElementById('cType').value; // Lấy type từ Dropdown
+    const statusVal = document.getElementById('cStatus')?.value || 'active';
+    const isSoldOutVal = (statusVal === 'sold_out');
     
     const data = {
         type: type, // <-- BẮT BUỘC PHẢI LƯU TRƯỜNG NÀY ĐỂ INDEX.HTML HIỂU ĐƯỢC
+        status: statusVal,
+        isSoldOut: isSoldOutVal,
         title: document.getElementById('cTitle').value,
         originalPrice: parseInt(document.getElementById('cOriginalPrice').value) || 0,
         price: parseInt(document.getElementById('cPrice').value) || 0,
@@ -2346,6 +2363,22 @@ window.importCurriculum = (input) => {
                     });
                 });
 
+                // Tự động đối soát & bù lượt mua ảo cho các đơn đã thanh toán thành công nhưng chưa được cộng
+                const uncountedPaidOrders = [];
+                snap.forEach(d => {
+                    const data = d.data();
+                    if ((data.status === 'paid' || data.status === 'approved') && data.studentCountIncremented !== true) {
+                        uncountedPaidOrders.push(d.id);
+                    }
+                });
+                if (uncountedPaidOrders.length > 0) {
+                    updateDoc(doc(db, "public_courses", courseId), {
+                        students: increment(uncountedPaidOrders.length)
+                    }).catch(e => console.warn("Lỗi cập nhật lượt mua đối soát:", e));
+                    Promise.allSettled(uncountedPaidOrders.map(id => updateDoc(doc(db, "orders", id), { studentCountIncremented: true })))
+                        .catch(e => console.warn("Lỗi đánh dấu đơn đối soát:", e));
+                }
+
                 // Tự động xóa ngầm các đơn bỏ dở quá 30 phút khỏi Firestore
                 if (junkOrdersToDelete.length > 0) {
                     console.log(`[Auto-Clean] Đang dọn ${junkOrdersToDelete.length} đơn quá 30 phút chưa thanh toán:`, junkOrdersToDelete);
@@ -3043,10 +3076,13 @@ window.importCurriculum = (input) => {
         };
 
         window.approveOrder = async (orderId) => {
-            if (!confirm("Xác nhận đơn hàng này đã thanh toán?\nThao tác này sẽ đổi trạng thái sang 'paid'.")) return;
+            if (!confirm("Xác nhận đơn hàng này đã thanh toán?\nThao tác này sẽ đổi trạng thái sang 'paid' và cộng +1 vào lượt mua ảo của sản phẩm.")) return;
             try {
-                await updateDoc(doc(db, "orders", orderId), { status: 'paid' });
-                window.showToast("✅ Đã xác nhận thanh toán!", "success");
+                await updateDoc(doc(db, "orders", orderId), { status: 'paid', studentCountIncremented: true });
+                if (currentManageCourseId) {
+                    await updateDoc(doc(db, "public_courses", currentManageCourseId), { students: increment(1) });
+                }
+                window.showToast("✅ Đã xác nhận thanh toán & tăng số lượt mua!", "success");
                 window.openStudentManager(currentManageCourseId);
             } catch(e) {
                 window.showToast("Lỗi: " + e.message, "error");

@@ -550,7 +550,7 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getAuth, onAuthStateChanged, signOut, updateProfile, updatePassword, EmailAuthProvider, reauthenticateWithCredential } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
         // Thêm enableIndexedDbPersistence vào dòng import này
-        import { getFirestore, doc, getDoc, updateDoc, collection, getDocs, query, where, addDoc, limit, orderBy, deleteDoc, setDoc, onSnapshot, enableMultiTabIndexedDbPersistence } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { getFirestore, doc, getDoc, updateDoc, collection, getDocs, query, where, addDoc, limit, orderBy, deleteDoc, setDoc, onSnapshot, enableMultiTabIndexedDbPersistence, increment } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
         import { readCache, writeCache } from "./perf-cache.js";
 
         // CẤU HÌNH FIREBASE
@@ -942,17 +942,23 @@
                     priceHtmlList = `<span class="text-accent font-black text-sm md:text-lg">${priceDisplay}</span>`;
                 }
 
-                // --- KIỂM TRA TRẠNG THÁI SỞ HỮU ĐỂ HIỂN THỊ NÚT ---
+                // --- KIỂM TRA TRẠNG THÁI SỞ HỮU & BÁN HẾT ĐỂ HIỂN THỊ NÚT ---
+                const isSoldOut = (x.status === 'sold_out' || x.isSoldOut === true);
                 let actionBtn = '';
                 if (purchasedCourseIds.has(x.id)) {
                     actionBtn = `<button onclick="window.location.href='course-player.html?id=${x.id}'" class="bg-green-600 text-white text-xs px-4 py-2 rounded-lg font-bold hover:bg-green-700 transition-colors shadow-green-200 shadow-md whitespace-nowrap flex items-center gap-1"><i class="fa-solid fa-circle-check"></i> Đã đăng ký</button>`;
+                } else if (isSoldOut) {
+                    actionBtn = `<button disabled class="bg-gray-200 text-gray-500 text-xs px-4 py-2 rounded-lg font-bold cursor-not-allowed whitespace-nowrap shadow-none"><i class="fa-solid fa-ban mr-1"></i> Bán hết</button>`;
                 } else {
                     actionBtn = `<button onclick="window.openPaymentModal('${x.id}')" class="bg-brand text-white text-xs px-4 py-2 rounded-lg font-bold hover:bg-primary-700 transition-colors whitespace-nowrap shadow-md">Đăng ký ngay</button>`;
                 }
 
+                const soldBadgeHtml = isSoldOut ? `<span class="absolute top-3 right-3 bg-red-600 text-white text-[10px] font-black px-2 py-0.5 rounded shadow-sm uppercase z-20 flex items-center gap-1"><i class="fa-solid fa-ban"></i> Bán hết</span>` : '';
+
                 const isBookType = (x.type === 'document_hard' || x.type === 'book');
                 const thumbContainerGrid = isBookType ? `
                     <div class="h-40 bg-slate-900 relative overflow-hidden shrink-0 flex items-center justify-center p-2 select-none">
+                        ${soldBadgeHtml}
                         <!-- Nền mờ nghệ thuật chuẩn theo tỉ lệ cài đặt khóa học (Ảnh 2) -->
                         <div class="absolute inset-0 overflow-hidden pointer-events-none select-none">
                             <img src="${thumb}" alt="" aria-hidden="true" class="w-full h-full object-cover pointer-events-none select-none" style="filter: blur(8px) brightness(0.85); transform: scale(1.15);">
@@ -962,6 +968,7 @@
                     </div>
                 ` : `
                     <div class="h-40 bg-gray-100 relative overflow-hidden shrink-0">
+                        ${soldBadgeHtml}
                         <img src="${thumb}" loading="lazy" decoding="async" class="h-full w-full object-cover group-hover:scale-110 transition-transform duration-500">
                         <span class="absolute top-3 left-3 bg-accent text-white text-[10px] font-black px-2.5 py-1 rounded shadow-sm uppercase z-20">${x.tag||'Khóa học'}</span>
                     </div>
@@ -1802,6 +1809,12 @@
                     const c = snap.data();
                     currentPayingCourse = { id: snap.id, ...c };
                     
+                    if (c.status === 'sold_out' || c.isSoldOut === true) {
+                        document.getElementById('paymentModal').classList.add('hidden');
+                        window.showNotification("⛔ Khóa học/Tài liệu này hiện đã BÁN HẾT (Hết hàng)!", "warning");
+                        return;
+                    }
+                    
                     document.getElementById('payCourseTitle').innerText = c.title;
                     document.getElementById('payCourseImg').src = c.thumbnail || 'https://placehold.co/150';
                     document.getElementById('payOrderId').innerText = `#${Date.now().toString().slice(-6)}`;
@@ -2334,6 +2347,14 @@
                             }
                             document.getElementById('recheckPaymentBox')?.classList.add('hidden');
 
+                            // Tự động cộng dồn đơn mua vào số lượt mua ảo của khóa học
+                            if (data.courseId && data.studentCountIncremented !== true) {
+                                try {
+                                    updateDoc(doc(db, "public_courses", data.courseId), { students: increment(1) }).catch(()=>{});
+                                    updateDoc(doc(db, "orders", docRef.id), { studentCountIncremented: true }).catch(()=>{});
+                                } catch(e){}
+                            }
+
                             // a. Hiện thông báo thành công
                             document.getElementById('processingState').classList.add('hidden');
                             document.getElementById('successState').classList.remove('hidden');
@@ -2804,6 +2825,15 @@
                             window._studentRecheckTimer = null;
                         }
                         document.getElementById('recheckPaymentBox')?.classList.add('hidden');
+
+                        // Tự động cộng dồn đơn mua vào số lượt mua ảo của khóa học
+                        if (data.courseId && data.studentCountIncremented !== true) {
+                            try {
+                                updateDoc(doc(db, "public_courses", data.courseId), { students: increment(1) }).catch(()=>{});
+                                updateDoc(doc(db, "orders", orderId), { studentCountIncremented: true }).catch(()=>{});
+                            } catch(e){}
+                        }
+
                         document.getElementById('processingState').classList.add('hidden');
                         document.getElementById('successState').classList.remove('hidden');
                         await loadMyPurchased(auth.currentUser); 
