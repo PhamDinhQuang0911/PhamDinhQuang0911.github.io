@@ -233,7 +233,8 @@
                 <img id="lobbyLogoImg" src="" class="hidden absolute inset-0 w-full h-full object-contain bg-white rounded-2xl p-2">
             </div>
             
-            <h1 id="lobbyTitle" class="text-3xl font-black text-slate-800 mb-3 tracking-tight relative z-10">Đang tải...</h1>
+            <h1 id="lobbyTitle" class="text-3xl font-black text-slate-800 mb-2 tracking-tight relative z-10">Đang tải...</h1>
+            <div id="lobbyBookOrderBadge" class="hidden relative z-10 inline-flex items-center gap-1.5 px-3 py-1 bg-amber-50 text-amber-800 border border-amber-200 rounded-full text-xs font-bold mb-3 shadow-xs"><i class="fa-solid fa-book-open text-amber-600"></i> Đề thi theo thứ tự sách in (Không đảo câu & đáp án)</div>
             <div id="accessDeniedMsg" class="hidden relative z-10 bg-red-50 text-red-600 p-4 rounded-xl border border-red-200 mb-4 text-sm font-bold animate-pulse text-left"><i class="fa-solid fa-ban mr-2"></i> Bạn không thuộc lớp được giao đề này!</div>
             
             <div class="relative z-10 bg-gradient-to-br from-blue-50 to-indigo-50/50 p-5 rounded-2xl text-left text-sm text-primary-900 mb-6 space-y-3 border border-primary-100/50 shadow-inner">
@@ -279,7 +280,10 @@
             </div>
             <div>
                 <h1 id="examTitle" class="text-sm md:text-lg font-bold text-gray-800 leading-tight truncate max-w-[150px] md:max-w-xs">Bài thi</h1>
-                <p class="text-[10px] md:text-xs text-gray-500">Mã đề: <span id="examIdDisplay">---</span></p>
+                <p class="text-[10px] md:text-xs text-gray-500 flex items-center gap-1.5">
+                    <span>Mã đề: <span id="examIdDisplay">---</span></span>
+                    <span id="headerBookOrderBadge" class="hidden bg-amber-100 text-amber-800 text-[9px] px-1.5 py-0.5 rounded font-bold border border-amber-200"><i class="fa-solid fa-book-open mr-0.5"></i> Sách in</span>
+                </p>
             </div>
         </div>
         <div class="flex items-center gap-3 md:gap-6">
@@ -667,6 +671,9 @@
                 const docSnap = await getDoc(doc(db, "exams", id));
                 if (!docSnap.exists()) { document.getElementById('lobbyTitle').innerText = "Đề thi không tồn tại!"; return; }
                 examData = { id: docSnap.id, ...docSnap.data() }; 
+                if (examData.keepOriginalOrder === true || examData.keepOriginalOrder === 'true') {
+                    examData.shuffle = false;
+                } 
                 
                 const urlParamsCheck = new URLSearchParams(window.location.search);
                 const courseIdOverride = urlParamsCheck.get('courseId');
@@ -802,6 +809,12 @@
                 }
 
                 document.getElementById('lobbyTitle').innerText = examData.title || "Bài thi";
+                const isKeepOrderExam = examData.keepOriginalOrder === true || examData.keepOriginalOrder === 'true';
+                const lobbyBadge = document.getElementById('lobbyBookOrderBadge');
+                if (lobbyBadge) {
+                    if (isKeepOrderExam) lobbyBadge.classList.remove('hidden');
+                    else lobbyBadge.classList.add('hidden');
+                }
                 if(document.getElementById('lobbyDuration')) document.getElementById('lobbyDuration').innerText = examData.duration || '--';
                 if(document.getElementById('lobbyAttempts')) document.getElementById('lobbyAttempts').innerText = att;
                 if(document.getElementById('lobbyMaxAttempts')) document.getElementById('lobbyMaxAttempts').innerText = examData.attempts || '∞';
@@ -956,6 +969,16 @@
 
             dom.lobby.classList.add('hidden'); dom.header.classList.remove('hidden'); dom.main.classList.remove('hidden');
             
+            const isKeepOrderExam = examData.keepOriginalOrder === true || examData.keepOriginalOrder === 'true';
+            if (isKeepOrderExam) {
+                examData.shuffle = false;
+            }
+            const headerBookBadge = document.getElementById('headerBookOrderBadge');
+            if (headerBookBadge) {
+                if (isKeepOrderExam) headerBookBadge.classList.remove('hidden');
+                else headerBookBadge.classList.add('hidden');
+            }
+
             let rawQuestions = JSON.parse(JSON.stringify(examData.questions || []));
             const shuffleConfigKey = `examConfig_${currentUser.uid}_${examId}`;
             // Lượt làm mới phải tạo một cấu hình mới, nhưng không được xóa nó sau
