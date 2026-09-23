@@ -23,15 +23,20 @@
           processEscapes: true,
           packages: {'[+]': ['noerrors', 'noundefined']},
           macros: {
-            heva: ["\left\{\begin{aligned}#1\end{aligned}\right.", 1],
-            hoac: ["\left[\begin{aligned}#1\end{aligned}\right.", 1],
-            tich: "\cdot",
-            deg: "^\circ",
-            R: "\mathbb{R}",
-            N: "\mathbb{N}",
-            Z: "\mathbb{Z}",
-            vectors: ["\overrightarrow{#1}", 1],
-            mtx: ["\left[\begin{matrix}#1\end{matrix}\right]", 1]
+            wideparen: ["\\overset{\\frown}{#1}", 1],
+            widearc: ["\\overset{\\frown}{#1}", 1],
+            cung: ["\\overset{\\frown}{#1}", 1],
+            heva: ["\\left\\{\\begin{aligned}#1\\end{aligned}\\right.", 1],
+            hoac: ["\\left[\\begin{aligned}#1\\end{aligned}\\right.", 1],
+            tich: "\\cdot",
+            deg: "^\\circ",
+            R: "\\mathbb{R}",
+            N: "\\mathbb{N}",
+            Z: "\\mathbb{Z}",
+            Q: "\\mathbb{Q}",
+            vectors: ["\\overrightarrow{#1}", 1],
+            vec: ["\\overrightarrow{#1}", 1],
+            mtx: ["\\left[\\begin{matrix}#1\\end{matrix}\\right]", 1]
           }
         },
         options: { ignoreHtmlClass: 'tex2jax_ignore', processHtmlClass: 'tex2jax_process' },
@@ -1823,8 +1828,21 @@
                 else if (lvText.includes('Vận dụng cao') || lvText === 'VDC') { levelColor = 'red'; lvText = 'Vận dụng cao'; }
                 else if (lvText.includes('Vận dụng') || lvText === 'VD') { levelColor = 'orange'; lvText = 'Vận dụng'; }
 
-                const qType = q.type || (q.statements?.length ? 'tf' : (q.options?.length ? 'mc' : (q.answer ? 'short' : 'essay')));
-                const typeLabel = (qType === 'mc' || qType === 'TRAC_NGHIEM') ? 'Trắc nghiệm' : ((qType === 'tf' || qType === 'DUNG_SAI') ? 'Đúng / Sai' : ((qType === 'short' || qType === 'TRA_LOI_NGAN') ? 'Trả lời ngắn' : 'Tự luận'));
+                const detectQType = (item) => {
+                    if (!item) return 'mc';
+                    if (Array.isArray(item.statements) && item.statements.length > 0) return 'tf';
+                    const t = String(item.type || '').toLowerCase().trim();
+                    if (t === 'tf' || t === 'dung_sai' || t === 'true_false' || t === 'dungsai') return 'tf';
+                    if (t === 'short' || t === 'dien_khuyet' || t === 'tra_loi_ngan' || t === 'shortans' || t === 'dienkhuyet') return 'short';
+                    if (t === 'mc' || t === 'trac_nghiem' || t === 'multiple_choice' || t === 'tracnghiem') return 'mc';
+                    if (t === 'essay' || t === 'tu_luan' || t === 'tuluan') return 'essay';
+                    if ((item.answer !== undefined && item.answer !== null && String(item.answer).trim() !== '') && (!item.options || item.options.length === 0)) return 'short';
+                    if (Array.isArray(item.options) && item.options.length > 0) return 'mc';
+                    return 'essay';
+                };
+
+                const qType = detectQType(q);
+                const typeLabel = qType === 'mc' ? 'Trắc nghiệm (4 lựa chọn)' : (qType === 'tf' ? 'Đúng / Sai' : (qType === 'short' ? 'Trả lời ngắn' : 'Tự luận'));
 
                 const badgesContainer = document.getElementById('lookupBadgesContainer');
                 if (badgesContainer) {
@@ -1854,59 +1872,73 @@
                 const answerEl = document.getElementById('lookupAnswerSection');
                 if (answerEl) {
                     let ansHtml = '';
-                    if ((qType === 'mc' || qType === 'TRAC_NGHIEM') && q.options && q.options.length > 0) {
+                    if (qType === 'mc' && q.options && q.options.length > 0) {
                         ansHtml = `<div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">`;
                         const correctIdx = typeof q.correct === 'number' ? q.correct : (q.correctAnswer ? ['A','B','C','D'].indexOf(q.correctAnswer) : -1);
                         q.options.forEach((opt, idx) => {
                             const isTrue = idx === correctIdx;
                             ansHtml += `
                                 <div class="p-3.5 border rounded-2xl relative ${isTrue ? 'bg-green-50 border-green-300 ring-2 ring-green-200' : 'bg-gray-50/60 border-gray-200'}">
-                                    <span class="absolute top-3.5 left-3.5 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${isTrue ? 'bg-green-500 text-white shadow-sm' : 'bg-white border border-gray-300 text-gray-500'}">
+                                    <span class="absolute top-3.5 left-3.5 w-7 h-7 rounded-xl flex items-center justify-center text-xs font-bold ${isTrue ? 'bg-green-600 text-white shadow-sm' : 'bg-white border border-gray-300 text-gray-500'}">
                                         ${String.fromCharCode(65 + idx)}
                                     </span>
-                                    <div class="pl-9 text-sm math-content ${isTrue ? 'text-green-950 font-bold' : 'text-gray-700'}">${window.formatContent ? window.formatContent(opt) : opt}</div>
-                                    ${isTrue ? `<span class="absolute top-3 right-3 text-green-600 text-xs font-bold flex items-center gap-1"><i class="fa-solid fa-check"></i> Đáp án đúng</span>` : ''}
+                                    <div class="pl-10 text-sm md:text-base math-content leading-relaxed ${isTrue ? 'text-green-950 font-bold' : 'text-gray-700'}">${window.formatContent ? window.formatContent(opt) : opt}</div>
+                                    ${isTrue ? `<span class="absolute top-3 right-3 text-green-600 text-xs font-bold flex items-center gap-1"><i class="fa-solid fa-circle-check"></i> Đáp án đúng</span>` : ''}
                                 </div>
                             `;
                         });
                         ansHtml += `</div>`;
-                    } else if ((qType === 'tf' || qType === 'DUNG_SAI') && (q.statements || q.options)) {
-                        const stmts = q.statements && q.statements.length > 0 ? q.statements : (q.options || []).map((t, i) => {
+                    } else if (qType === 'tf') {
+                        const stmts = (Array.isArray(q.statements) && q.statements.length > 0) ? q.statements : (q.options || []).map((t, i) => {
                             const ansArr = (q.correctAnswer || '').split(',');
-                            return { text: t, isTrue: ansArr[i] === 'D' };
+                            return { text: t, isTrue: ansArr[i] === 'D' || ansArr[i] === 'Đ' };
                         });
                         ansHtml = `
-                            <div class="mt-4 border border-gray-200 rounded-2xl overflow-hidden bg-white shadow-sm">
-                                <table class="w-full text-sm text-left">
-                                    <thead class="bg-gray-50 text-gray-500 font-bold border-b border-gray-200 text-xs uppercase tracking-wider">
-                                        <tr>
-                                            <th class="p-3 w-12 text-center">Ý</th>
-                                            <th class="p-3">Mệnh đề khẳng định</th>
-                                            <th class="p-3 w-28 text-center">Đáp án đúng</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody class="divide-y divide-gray-100">
+                            <div class="mt-4 space-y-3">
+                                <div class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                                    <i class="fa-solid fa-list-check text-indigo-500"></i> Các mệnh đề khẳng định (Đúng / Sai):
+                                </div>
                         `;
                         stmts.forEach((stmt, sIdx) => {
-                            const isTrue = stmt.isTrue;
+                            const isTrue = stmt.isTrue === true || stmt.correct === true || stmt.isCorrect === true || stmt.isTrue === 'true';
+                            const letter = String.fromCharCode(97 + sIdx); // a, b, c, d
                             ansHtml += `
-                                <tr class="hover:bg-gray-50">
-                                    <td class="p-3 text-center font-bold text-gray-500">${String.fromCharCode(97 + sIdx)})</td>
-                                    <td class="p-3 text-gray-800 math-content">${window.formatContent ? window.formatContent(stmt.text || '') : (stmt.text || '')}</td>
-                                    <td class="p-3 text-center">
-                                        <span class="px-3 py-1 rounded-full text-xs font-bold ${isTrue ? 'bg-green-100 text-green-700 border border-green-200' : 'bg-red-100 text-red-700 border border-red-200'}">
-                                            ${isTrue ? '<i class="fa-solid fa-check mr-1"></i>ĐÚNG' : '<i class="fa-solid fa-xmark mr-1"></i>SAI'}
+                                <div class="p-3.5 md:p-4 rounded-2xl bg-white border ${isTrue ? 'border-green-200 ring-1 ring-green-100 bg-green-50/20' : 'border-gray-200'} shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                                    <div class="flex items-start gap-3 flex-1 min-w-0">
+                                        <span class="w-7 h-7 rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-700 font-black text-xs flex items-center justify-center shrink-0 shadow-2xs">
+                                            ${letter}
                                         </span>
-                                    </td>
-                                </tr>
+                                        <div class="text-gray-800 text-sm md:text-base leading-relaxed math-content font-medium flex-1">
+                                            ${window.formatContent ? window.formatContent(stmt.text || '') : (stmt.text || '')}
+                                        </div>
+                                    </div>
+                                    <div class="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                                        <span class="px-3.5 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-1.5 shadow-2xs ${isTrue ? 'bg-green-500 text-white shadow-green-200' : 'bg-gray-100 text-gray-400 opacity-60'}">
+                                            <i class="fa-solid fa-check text-[11px]"></i> Đúng
+                                        </span>
+                                        <span class="px-3.5 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-1.5 shadow-2xs ${!isTrue ? 'bg-red-500 text-white shadow-red-200' : 'bg-gray-100 text-gray-400 opacity-60'}">
+                                            <i class="fa-solid fa-xmark text-[11px]"></i> Sai
+                                        </span>
+                                    </div>
+                                </div>
                             `;
                         });
-                        ansHtml += `</tbody></table></div>`;
-                    } else if (qType === 'short' || qType === 'TRA_LOI_NGAN' || q.answer) {
+                        ansHtml += `</div>`;
+                    } else if (qType === 'short' || q.answer) {
                         ansHtml = `
-                            <div class="mt-4 p-4 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center justify-between">
-                                <span class="font-bold text-emerald-800 text-sm flex items-center gap-2"><i class="fa-solid fa-key text-emerald-600"></i> Đáp án chính xác:</span>
-                                <span class="text-emerald-900 font-mono font-black text-lg bg-white px-4 py-1.5 rounded-xl border border-emerald-200 shadow-2xs">${q.answer || q.correctAnswer || 'Chưa thiết lập'}</span>
+                            <div class="mt-4 p-4 rounded-2xl bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
+                                <div class="flex items-center gap-2.5">
+                                    <div class="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center text-sm shadow-sm">
+                                        <i class="fa-solid fa-key"></i>
+                                    </div>
+                                    <div>
+                                        <div class="text-xs font-black uppercase tracking-wider text-blue-700">Đáp án chính xác</div>
+                                        <div class="text-xs text-gray-500 font-medium">Câu hỏi trả lời ngắn / điền khuyết</div>
+                                    </div>
+                                </div>
+                                <div class="px-5 py-2 rounded-xl bg-white border border-blue-200 font-mono font-black text-lg text-blue-900 shadow-sm math-content self-start sm:self-center">
+                                    ${window.formatContent ? window.formatContent(String(q.answer || q.correctAnswer || '')) : (q.answer || q.correctAnswer || 'Chưa thiết lập')}
+                                </div>
                             </div>
                         `;
                     }
@@ -1937,12 +1969,14 @@
                     }
                 }
 
-                // Typeset MathJax
-                if (window.MathJax) {
-                    MathJax.typesetPromise([resultEl]).catch(() => {});
-                }
-                if (window.renderTikz) {
-                    window.renderTikz();
+                if (window.MathJax && window.MathJax.typesetPromise) {
+                    MathJax.typesetPromise([resultEl]).then(() => {
+                        if (window.renderTikz) window.renderTikz();
+                        if (window.autoScaleTables) window.autoScaleTables();
+                    }).catch(() => {});
+                } else {
+                    if (window.renderTikz) window.renderTikz();
+                    if (window.autoScaleTables) window.autoScaleTables();
                 }
             } catch(err) {
                 console.error("Lỗi tra cứu:", err);

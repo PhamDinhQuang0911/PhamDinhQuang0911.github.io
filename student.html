@@ -15,15 +15,34 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script>
         window.MathJax = {
+            loader: { load: ['[tex]/noerrors', '[tex]/noundefined'] },
             tex: {
                 inlineMath: [['$', '$'], ['\\(', '\\)']],
                 displayMath: [['$$', '$$'], ['\\[', '\\]']],
-                processEscapes: true
+                processEscapes: true,
+                packages: {'[+]': ['noerrors', 'noundefined']},
+                macros: {
+                    wideparen: ["\\overset{\\frown}{#1}", 1],
+                    widearc: ["\\overset{\\frown}{#1}", 1],
+                    cung: ["\\overset{\\frown}{#1}", 1],
+                    heva: ["\\left\\{\\begin{aligned}#1\\end{aligned}\\right.", 1],
+                    hoac: ["\\left[\\begin{aligned}#1\\end{aligned}\\right.", 1],
+                    tich: "\\cdot",
+                    deg: "^\\circ",
+                    R: "\\mathbb{R}",
+                    N: "\\mathbb{N}",
+                    Z: "\\mathbb{Z}",
+                    Q: "\\mathbb{Q}",
+                    vectors: ["\\overrightarrow{#1}", 1],
+                    vec: ["\\overrightarrow{#1}", 1],
+                    mtx: ["\\left[\\begin{matrix}#1\\end{matrix}\\right]", 1]
+                }
             },
             options: {
                 ignoreHtmlClass: 'tex2jax_ignore',
                 processHtmlClass: 'tex2jax_process'
-            }
+            },
+            startup: { typeset: false }
         };
     </script>
     <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
@@ -715,6 +734,11 @@
     <div id="notificationContainer" class="fixed top-5 right-5 z-[120] flex flex-col gap-3 pointer-events-none"></div>
 
     <script type="module">
+        import { formatContent, renderTikz, autoScaleTables } from "./utils.js";
+        window.formatContent = formatContent;
+        window.renderTikz = renderTikz;
+        window.autoScaleTables = autoScaleTables;
+
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getAuth, onAuthStateChanged, signOut, updateProfile, updatePassword, EmailAuthProvider, reauthenticateWithCredential } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
         // Thêm enableIndexedDbPersistence vào dòng import này
@@ -3391,9 +3415,21 @@
                 // 2. Format content helper
                 const formatMathContent = (str) => {
                     if (!str) return '';
+                    if (typeof window.formatContent === 'function') {
+                        return window.formatContent(str);
+                    }
                     let res = str;
-                    res = res.replace(/\\\\(?![a-zA-Z])/g, '<br>');
-                    res = res.replace(/\\begin\{center\}/g, '<div class="text-center my-2">').replace(/\\end\{center\}/g, '</div>');
+                    res = res.replace(/\\wideparen\{([^}]+)\}/g, '\\overset{\\frown}{$1}');
+                    res = res.replace(/\\widearc\{([^}]+)\}/g, '\\overset{\\frown}{$1}');
+                    res = res.replace(/\\cung\{([^}]+)\}/g, '\\overset{\\frown}{$1}');
+                    res = res.replace(/\\begin\{itemchoice\}([\s\S]*?)\\end\{itemchoice\}/gi, (match, body) => {
+                        const items = body.split(/\\itemch\b/g).filter(s => s.trim().length > 0);
+                        return '<ul class="my-3 pl-0 list-none space-y-2">' + items.map((it, idx) => `<li class="flex items-start gap-2.5 mb-2.5 p-3 rounded-xl bg-amber-50/70 border border-amber-200/80"><span class="w-6 h-6 rounded-lg bg-amber-500 text-white font-bold text-xs flex items-center justify-center shrink-0 shadow-2xs">${String.fromCharCode(97 + idx)}</span><div class="leading-relaxed flex-1 text-gray-800 text-sm font-medium">${it.trim()}</div></li>`).join('') + '</ul>';
+                    });
+                    res = res.replace(/\\itemch\b/g, '<span class="font-bold text-amber-600">❖ Ý: </span>');
+                    res = res.replace(/\\\\(?=\s*(?:<br|\n|$))/g, '<br>');
+                    res = res.replace(/\\\\/g, '<br>');
+                    res = res.replace(/\n/g, '<br>');
                     return res;
                 };
 
@@ -3406,48 +3442,62 @@
                 // 4. Render Answer / Options Section
                 const answerSec = document.getElementById('lookupAnswerSection');
                 if (answerSec) {
-                    const isTf = q.type === 'tf' || (q.statements && q.statements.length > 0);
-                    const isShort = q.type === 'short' || (q.answer !== undefined && q.answer !== null && q.answer !== '');
-                    const isEssay = q.type === 'essay';
+                    const isTf = q.type === 'tf' || q.type === 'dung_sai' || (Array.isArray(q.statements) && q.statements.length > 0);
+                    const isShort = !isTf && (q.type === 'short' || q.type === 'dien_khuyet' || (q.answer !== undefined && q.answer !== null && String(q.answer).trim() !== '' && (!q.options || q.options.length === 0)));
+                    const isEssay = !isTf && !isShort && (q.type === 'essay' || (!q.options || q.options.length === 0));
 
-                    if (isTf && q.statements && q.statements.length > 0) {
+                    if (isTf) {
+                        const stmts = (Array.isArray(q.statements) && q.statements.length > 0) ? q.statements : (q.options || []).map((t, i) => {
+                            const ansArr = (q.correctAnswer || '').split(',');
+                            return { text: t, isTrue: ansArr[i] === 'D' || ansArr[i] === 'Đ' };
+                        });
                         let tfHtml = `
-                            <div class="mt-4 border border-gray-200 dark:border-slate-700 rounded-2xl overflow-hidden bg-white dark:bg-slate-800 shadow-sm">
-                                <table class="w-full text-sm text-left border-collapse">
-                                    <thead class="bg-gray-50 dark:bg-slate-900 text-gray-600 dark:text-gray-300 font-bold border-b border-gray-200 dark:border-slate-700">
-                                        <tr>
-                                            <th class="p-3 w-12 text-center">Ý</th>
-                                            <th class="p-3">Mệnh đề</th>
-                                            <th class="p-3 w-28 text-center">Đáp án chuẩn</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody class="divide-y divide-gray-100 dark:divide-slate-700">
+                            <div class="mt-4 space-y-3">
+                                <div class="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                                    <i class="fa-solid fa-list-check text-indigo-500"></i> Các mệnh đề khẳng định (Đúng / Sai):
+                                </div>
                         `;
-                        q.statements.forEach((st, idx) => {
+                        stmts.forEach((st, idx) => {
                             const label = String.fromCharCode(97 + idx); // a, b, c, d
                             const isCorrectVal = st.correct === true || String(st.correct).toLowerCase() === 'true' || String(st.isTrue).toLowerCase() === 'true' || st.isTrue === true;
-                            const badge = isCorrectVal 
-                                ? `<span class="px-2.5 py-1 rounded-lg bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300 font-bold text-xs border border-green-200 dark:border-green-700">Đúng</span>`
-                                : `<span class="px-2.5 py-1 rounded-lg bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300 font-bold text-xs border border-red-200 dark:border-red-700">Sai</span>`;
                             tfHtml += `
-                                <tr class="hover:bg-gray-50/50 dark:hover:bg-slate-700/50 transition-colors">
-                                    <td class="p-3 text-center font-bold text-gray-400 dark:text-gray-500">${label})</td>
-                                    <td class="p-3 text-gray-800 dark:text-gray-200 math-content">${formatMathContent(st.text || '')}</td>
-                                    <td class="p-3 text-center">${badge}</td>
-                                </tr>
+                                <div class="p-3.5 md:p-4 rounded-2xl bg-white dark:bg-slate-800 border ${isCorrectVal ? 'border-green-200 dark:border-green-800 ring-1 ring-green-100 dark:ring-green-950/40 bg-green-50/20' : 'border-gray-200 dark:border-slate-700'} shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                                    <div class="flex items-start gap-3 flex-1 min-w-0">
+                                        <span class="w-7 h-7 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 font-black text-xs flex items-center justify-center shrink-0 shadow-2xs">
+                                            ${label}
+                                        </span>
+                                        <div class="text-gray-800 dark:text-gray-200 text-sm md:text-base leading-relaxed math-content font-medium flex-1">
+                                            ${formatMathContent(st.text || '')}
+                                        </div>
+                                    </div>
+                                    <div class="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                                        <span class="px-3.5 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-1.5 shadow-2xs ${isCorrectVal ? 'bg-green-500 text-white shadow-green-200 dark:shadow-none' : 'bg-gray-100 dark:bg-slate-700 text-gray-400 dark:text-slate-400 opacity-60'}">
+                                            <i class="fa-solid fa-check text-[11px]"></i> Đúng
+                                        </span>
+                                        <span class="px-3.5 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-1.5 shadow-2xs ${!isCorrectVal ? 'bg-red-500 text-white shadow-red-200 dark:shadow-none' : 'bg-gray-100 dark:bg-slate-700 text-gray-400 dark:text-slate-400 opacity-60'}">
+                                            <i class="fa-solid fa-xmark text-[11px]"></i> Sai
+                                        </span>
+                                    </div>
+                                </div>
                             `;
                         });
-                        tfHtml += `</tbody></table></div>`;
+                        tfHtml += `</div>`;
                         answerSec.innerHTML = tfHtml;
                     } else if (isShort) {
                         answerSec.innerHTML = `
-                            <div class="mt-4 p-4 rounded-2xl bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800 flex items-center justify-between">
-                                <span class="text-xs font-bold text-green-800 dark:text-green-300 uppercase tracking-wider flex items-center gap-1.5">
-                                    <i class="fa-solid fa-circle-check text-green-600 dark:text-green-400"></i> Đáp án chuẩn (Điền số / Ngắn):
-                                </span>
-                                <span class="font-mono font-black text-green-900 dark:text-green-100 text-base md:text-lg bg-white dark:bg-slate-800 px-3 py-1 rounded-xl shadow-xs border border-green-200 dark:border-green-700">
-                                    ${q.answer || '—'}
-                                </span>
+                            <div class="mt-4 p-4 rounded-2xl bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-slate-800 dark:to-slate-800 border border-blue-200 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
+                                <div class="flex items-center gap-2.5">
+                                    <div class="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center text-sm shadow-sm">
+                                        <i class="fa-solid fa-key"></i>
+                                    </div>
+                                    <div>
+                                        <div class="text-xs font-black uppercase tracking-wider text-blue-700 dark:text-blue-300">Đáp án chính xác</div>
+                                        <div class="text-xs text-gray-500 dark:text-slate-400 font-medium">Câu hỏi trả lời ngắn / điền số</div>
+                                    </div>
+                                </div>
+                                <div class="px-5 py-2 rounded-xl bg-white dark:bg-slate-900 border border-blue-200 dark:border-blue-900 font-mono font-black text-lg text-blue-900 dark:text-blue-200 shadow-sm math-content self-start sm:self-center">
+                                    ${formatMathContent(String(q.answer || q.correctAnswer || '')) || '—'}
+                                </div>
                             </div>
                         `;
                     } else if (isEssay) {
@@ -3483,10 +3533,10 @@
                             optHtml += `
                                 <div class="p-3.5 rounded-2xl border text-sm flex items-center justify-between gap-3 transition-all ${cardStyle}">
                                     <div class="flex items-center gap-3 min-w-0 flex-1">
-                                        <div class="w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${badgeStyle}">
+                                        <div class="w-7 h-7 rounded-xl flex items-center justify-center font-bold text-xs shrink-0 ${badgeStyle}">
                                             ${label}
                                         </div>
-                                        <div class="text-sm math-content break-words flex-1">
+                                        <div class="text-sm md:text-base math-content break-words flex-1 leading-relaxed">
                                             ${formatMathContent(opt)}
                                         </div>
                                     </div>
@@ -3531,8 +3581,14 @@
                 loadingEl?.classList.add('hidden');
                 resultEl?.classList.remove('hidden');
 
-                if (window.MathJax) {
-                    MathJax.typesetPromise([resultEl]).catch(() => {});
+                if (window.MathJax && window.MathJax.typesetPromise) {
+                    MathJax.typesetPromise([resultEl]).then(() => {
+                        if (window.renderTikz) window.renderTikz();
+                        if (window.autoScaleTables) window.autoScaleTables();
+                    }).catch(() => {});
+                } else {
+                    if (window.renderTikz) window.renderTikz();
+                    if (window.autoScaleTables) window.autoScaleTables();
                 }
 
             } catch (err) {
