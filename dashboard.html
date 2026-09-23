@@ -63,6 +63,7 @@
     };
     </script>
     <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <script src="bank-service.js"></script>
     
     <style>
         body { font-family: 'Inter', sans-serif; background-color: #F8FAFC; }
@@ -772,6 +773,9 @@
                         </div>
                         <div class="flex items-center gap-2">
                             <span id="bankCount" class="bg-primary-100 text-primary-700 px-3 py-1.5 rounded-lg text-sm font-bold shadow-sm">0 câu</span>
+                            <button onclick="window.location.href='book-manager.html'" class="h-10 px-3.5 rounded-xl bg-gradient-to-r from-teal-600 to-indigo-600 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm hover:from-teal-700 hover:to-indigo-700 transition-all shrink-0" title="Số hóa sách: Gán mã CCCD số và xuất file TeX">
+                                <i class="fa-solid fa-wand-magic-sparkles"></i> Số Hóa Sách (Sách ID)
+                            </button>
                             <button onclick="loadQuestionBank()" class="h-10 w-10 rounded-xl bg-gray-100 text-gray-600 border border-gray-200 hover:bg-primary-50 hover:text-primary-600 flex items-center justify-center shrink-0 transition-colors" title="Tải lại"><i class="fa-solid fa-rotate"></i></button>
                         </div>
                     </div>
@@ -796,9 +800,14 @@
                             <option value="Vận dụng">Vận dụng</option>
                             <option value="Vận dụng cao">Vận dụng cao</option>
                         </select>
-                        <div class="relative shrink-0 flex-1 min-w-[200px]">
-                            <input type="text" id="searchBank" onkeyup="window.applyBankFilters()" placeholder="Tìm theo ID hoặc CCCD..." class="h-10 pl-9 pr-3 border border-gray-300 rounded-xl text-sm w-full outline-none focus:ring-2 focus:ring-primary-100">
-                            <i class="fa-solid fa-search absolute left-3 top-3 text-gray-400"></i>
+                        <div class="relative shrink-0 flex-1 min-w-[260px] flex items-center gap-1.5">
+                            <div class="relative flex-1">
+                                <input type="text" id="searchBank" onkeyup="if(event.key==='Enter'){window.directLookupTeacherBank();}else{window.applyBankFilters();}" placeholder="Tìm theo MapID, CCCD, ID..." class="h-10 pl-9 pr-3 border border-gray-300 rounded-xl text-sm w-full outline-none focus:ring-2 focus:ring-primary-100">
+                                <i class="fa-solid fa-search absolute left-3 top-3 text-gray-400"></i>
+                            </div>
+                            <button id="btnDirectLookupBank" onclick="window.directLookupTeacherBank()" class="h-10 px-3.5 bg-primary-600 hover:bg-primary-700 text-white rounded-xl text-xs font-bold transition-all shrink-0 flex items-center gap-1.5 shadow-sm" title="Tra cứu trực tiếp từ Ngân hàng Cloudflare">
+                                <i class="fa-solid fa-magnifying-glass"></i> Tra cứu
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -806,7 +815,7 @@
             
             <!-- TOOLBAR: Bulk Actions & View Toggle -->
             <div class="bg-white border-b border-gray-100 px-4 md:px-6 py-3 flex items-center justify-between">
-                <div class="flex items-center gap-4">
+                <div id="bankBulkActionContainer" class="flex items-center gap-4">
                     <label class="flex items-center gap-2 cursor-pointer text-sm text-gray-600 hover:text-primary-600 font-bold">
                         <input type="checkbox" id="selectAllCheckbox" onchange="window.toggleSelectAllBank(this.checked)" class="w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 cursor-pointer">
                         Chọn tất cả
@@ -1912,6 +1921,17 @@
             return true;
         };
 
+        // Kiểm tra quyền chỉnh sửa và quản lý ngân hàng câu hỏi
+        window.canManageQuestionBank = () => {
+            if (typeof window.checkIsSuperAdmin === 'function' && window.checkIsSuperAdmin()) return true;
+            if (typeof window.hasPermission === 'function') {
+                return window.hasPermission('bank.manage_system') || 
+                       window.hasPermission('questions.manage') || 
+                       window.hasPermission('bank.manage');
+            }
+            return false;
+        };
+
         // Áp dụng quyền lên giao diện (Sidebar & nút tính năng)
         window.applyUIPermissions = () => {
             if (!window.currentAdminProfile) return;
@@ -1977,7 +1997,8 @@
             const navExambank = document.getElementById('nav-exambank');
             if (navExambank) navExambank.style.display = canExams ? '' : 'none';
             const navQuestionbank = document.getElementById('nav-questionbank');
-            if (navQuestionbank) navQuestionbank.style.display = (isSuper || window.hasPermission('questions.manage')) ? '' : 'none';
+            const canViewBank = isSuper || window.hasPermission('questions.manage') || window.hasPermission('bank.manage_system') || window.hasPermission('bank.manage') || window.hasPermission('bank.use_shared') || window.hasPermission('exams.view');
+            if (navQuestionbank) navQuestionbank.style.display = canViewBank ? '' : 'none';
 
             // Nút Soạn đề mới
             const btnCreateContent = document.getElementById('btnCreateContent');
@@ -6243,13 +6264,88 @@ function renderTagFilterUI() {
                 if (itemLv !== lv) return false;
             }
 
-            // 4. Tìm kiếm từ khóa
-            if (search && !actualMapId.toLowerCase().includes(search) && !item.id.toLowerCase().includes(search) && !item.content.toLowerCase().includes(search)) return false;
+            // 4. Tìm kiếm từ khóa (theo MapID, CCCD, ID hoặc Nội dung)
+            if (search) {
+                const sLow = search.toLowerCase();
+                const matchMapId = actualMapId.toLowerCase().includes(sLow);
+                const matchId = String(item.id || "").toLowerCase().includes(sLow);
+                const matchCccd = String(item.cccd || "").toLowerCase().includes(sLow);
+                const matchContent = String(item.content || "").toLowerCase().includes(sLow);
+                if (!matchMapId && !matchId && !matchCccd && !matchContent) return false;
+            }
 
             return true;
         });
 
         window.renderBankList(filtered);
+    };
+
+    // Tra cứu câu hỏi trực tiếp theo ID / CCCD (dành cho Giáo viên)
+    window.directLookupTeacherBank = async () => {
+        const input = document.getElementById('searchBank');
+        if (!input) return;
+        const query = input.value.trim();
+        if (!query) {
+            window.applyBankFilters();
+            return;
+        }
+
+        // 1. Tìm trong danh sách hiện tại
+        const localMatch = (window.globalBankQuestions || []).find(q => 
+            String(q.id).toLowerCase() === query.toLowerCase() || 
+            String(q.cccd).toLowerCase() === query.toLowerCase() ||
+            String(q.mapId).toLowerCase() === query.toLowerCase()
+        );
+
+        if (localMatch) {
+            window.applyBankFilters();
+            window.fetchAndPreview(localMatch.id);
+            return;
+        }
+
+        // 2. Nếu chưa có trong cache -> Gọi trực tiếp từ Cloudflare R2
+        const btn = document.getElementById('btnDirectLookupBank');
+        const oldHtml = btn ? btn.innerHTML : '';
+        if (btn) {
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+            btn.disabled = true;
+        }
+
+        try {
+            let questionData = null;
+            if (window.BankService) {
+                questionData = await window.BankService.getQuestionById(query, true);
+            } else {
+                const res = await fetch(`https://upload-helper.phamngockhanh-942001.workers.dev/bank?id=${encodeURIComponent(query)}`);
+                if (res.ok) questionData = await res.json();
+            }
+
+            if (questionData && (questionData.id || questionData.content)) {
+                const qId = questionData.id || questionData.cccd || query;
+                if (!window.globalBankQuestions) window.globalBankQuestions = [];
+                const exists = window.globalBankQuestions.some(q => q.id === qId);
+                if (!exists) {
+                    window.globalBankQuestions.unshift(questionData);
+                    try {
+                        localStorage.setItem('lms_cached_bank', JSON.stringify(window.globalBankQuestions));
+                    } catch(e) {}
+                }
+                window.applyBankFilters();
+                window.fetchAndPreview(qId);
+                if (window.showNotification) window.showNotification(`Đã tìm thấy câu hỏi ID #${qId}!`, "success");
+            } else {
+                if (window.showNotification) window.showNotification(`Không tìm thấy câu hỏi với mã "${query}" trên Cloudflare.`, "warning");
+                else alert(`Không tìm thấy câu hỏi với mã "${query}" trên Cloudflare.`);
+            }
+        } catch(err) {
+            console.error("Lỗi tra cứu:", err);
+            if (window.showNotification) window.showNotification("Lỗi tra cứu: " + err.message, "error");
+        } finally {
+            if (btn) {
+                btn.innerHTML = oldHtml;
+                btn.disabled = false;
+            }
+        }
     };
 
     // State for View and Selection
@@ -6275,6 +6371,10 @@ function renderTagFilterUI() {
     };
 
     window.toggleSelectAllBank = (isChecked) => {
+        if (!window.canManageQuestionBank || !window.canManageQuestionBank()) {
+            if (window.requirePermission) window.requirePermission('bank.manage_system', 'thao tác chọn câu hỏi');
+            return;
+        }
         const checkboxes = document.querySelectorAll('.bank-item-checkbox');
         checkboxes.forEach(cb => {
             cb.checked = isChecked;
@@ -6286,6 +6386,10 @@ function renderTagFilterUI() {
 
     window.toggleSelectBankQuestion = (e, id) => {
         e.stopPropagation();
+        if (!window.canManageQuestionBank || !window.canManageQuestionBank()) {
+            if (window.requirePermission) window.requirePermission('bank.manage_system', 'thao tác chọn câu hỏi');
+            return;
+        }
         if (e.target.checked) window.selectedBankQuestions.add(id);
         else window.selectedBankQuestions.delete(id);
         
@@ -6295,6 +6399,10 @@ function renderTagFilterUI() {
     };
 
     window.deleteSelectedQuestions = async () => {
+        if (!window.canManageQuestionBank || !window.canManageQuestionBank()) {
+            if (window.requirePermission) window.requirePermission('bank.manage_system', 'xóa câu hỏi trong ngân hàng');
+            return;
+        }
         const checkboxes = document.querySelectorAll('.bank-item-checkbox:checked');
         const idsToDelete = Array.from(checkboxes).map(cb => cb.value);
         
@@ -6314,8 +6422,14 @@ function renderTagFilterUI() {
             let successCount = 0;
             let failCount = 0;
             for (const id of idsToDelete) {
-                const res = await fetch(`https://upload-helper.phamngockhanh-942001.workers.dev/bank?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
-                if (res.ok) {
+                let isDeleted = false;
+                if (window.BankService) {
+                    isDeleted = await window.BankService.deleteQuestion(id);
+                } else {
+                    const res = await fetch(`https://upload-helper.phamngockhanh-942001.workers.dev/bank?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+                    isDeleted = res.ok;
+                }
+                if (isDeleted) {
                     successCount++;
                     const item = document.getElementById(`bank-item-${id}`);
                     if (item) item.remove();
@@ -6325,6 +6439,10 @@ function renderTagFilterUI() {
                     failCount++;
                 }
             }
+            
+            try {
+                localStorage.setItem('lms_cached_bank', JSON.stringify(window.globalBankQuestions));
+            } catch(e) {}
             
             window.showNotification(`Đã xóa thành công ${successCount} câu hỏi.` + (failCount > 0 ? ` (Lỗi ${failCount} câu)` : ""), successCount > 0 ? "success" : "error");
             
@@ -6346,8 +6464,9 @@ function renderTagFilterUI() {
     };
 
     window.updateBulkDeleteButton = () => {
+        const canEdit = window.canManageQuestionBank ? window.canManageQuestionBank() : false;
         const btn = document.getElementById('btnBulkDelete');
-        if (window.selectedBankQuestions.size > 0) {
+        if (canEdit && window.selectedBankQuestions.size > 0) {
             btn.classList.remove('hidden');
             btn.innerHTML = `<i class="fa-solid fa-trash-can mr-1"></i> Xóa đã chọn (${window.selectedBankQuestions.size})`;
         } else {
@@ -6362,7 +6481,12 @@ function renderTagFilterUI() {
         document.getElementById('bankCount').innerText = `${data.length} câu`;
         grid.innerHTML = '';
         
-        document.getElementById('selectAllCheckbox').checked = false;
+        const canEdit = window.canManageQuestionBank ? window.canManageQuestionBank() : false;
+        const bulkContainer = document.getElementById('bankBulkActionContainer');
+        if (bulkContainer) bulkContainer.style.display = canEdit ? '' : 'none';
+
+        const selectAllCb = document.getElementById('selectAllCheckbox');
+        if (selectAllCb) selectAllCb.checked = false;
 
         if(data.length === 0) {
             empty.classList.remove('hidden');
@@ -6397,29 +6521,42 @@ function renderTagFilterUI() {
             else if(lvText.includes('Vận dụng cao') || lvText === 'VDC') { levelColor = 'red'; lvText = 'Vận dụng cao'; }
             else if(lvText.includes('Vận dụng') || lvText === 'VD') { levelColor = 'orange'; lvText = 'Vận dụng'; }
 
+            const mapIdText = q.mapId || (q.id && q.id.includes('_') ? q.id.split('_')[0] : q.id);
+            const rawCccd = q.cccd || q.id || '';
+            const isNumericCccd = /^\d+$/.test(rawCccd);
+            const cccdBadgeHtml = isNumericCccd
+                ? `<span class="text-[10px] font-mono font-bold text-teal-700 bg-teal-50 px-2 py-0.5 rounded border border-teal-200 inline-flex items-center gap-1 shadow-2xs" title="Mã CCCD Sách & Ngân hàng"><i class="fa-solid fa-id-card text-[9px]"></i>CCCD: ${rawCccd}</span>`
+                : `<span class="text-[10px] font-mono text-gray-400 truncate max-w-[130px] inline-block" title="ID câu hỏi: ${rawCccd}">${rawCccd}</span>`;
+
             if (isList) {
-                div.innerHTML = `
+                const checkboxHtml = canEdit ? `
                     <div class="flex items-center justify-center shrink-0">
                         <input type="checkbox" value="${q.id}" ${isSelected ? 'checked' : ''} class="bank-item-checkbox w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 cursor-pointer" onclick="event.stopPropagation()" onchange="window.toggleSelectBankQuestion(event, '${q.id}')">
-                    </div>
-                    <div class="flex-1 min-w-0 flex items-center gap-4">
-                        <div class="font-bold text-gray-800 font-mono shrink-0 w-28 group-hover:text-primary-600 truncate"><i class="fa-solid fa-hashtag text-primary-500 text-xs mr-1"></i>${q.mapId || q.id.split('_')[0] || q.id}</div>
+                    </div>` : '';
+
+                div.innerHTML = `
+                    ${checkboxHtml}
+                    <div class="flex-1 min-w-0 flex items-center gap-3">
+                        <div class="font-bold text-gray-800 font-mono shrink-0 w-28 group-hover:text-primary-600 truncate"><i class="fa-solid fa-hashtag text-primary-500 text-xs mr-1"></i>${mapIdText}</div>
+                        <div class="shrink-0">${cccdBadgeHtml}</div>
                         <div class="hidden md:flex gap-2 shrink-0 w-32">
                             <span class="text-[10px] border border-gray-200 px-2 py-0.5 rounded bg-gray-50 text-gray-600 font-bold truncate"><i class="fa-solid fa-book text-gray-400 mr-1"></i>${q.subject || 'Khác'}</span>
                         </div>
-                        <div class="text-[10px] text-gray-400 font-mono truncate hidden lg:block" title="CCCD">${q.id}</div>
                     </div>
                     <span class="text-xs border border-${levelColor}-200 text-${levelColor}-600 px-2 py-1 rounded bg-${levelColor}-50 font-bold shrink-0 w-24 text-center">${lvText || 'Chưa rõ'}</span>
                     <button class="shrink-0 p-2 text-gray-400 group-hover:text-primary-600 transition-colors"><i class="fa-solid fa-chevron-right"></i></button>
                 `;
             } else {
+                const checkboxHtml = canEdit ? `
+                    <input type="checkbox" value="${q.id}" ${isSelected ? 'checked' : ''} class="bank-item-checkbox w-4 h-4 mt-1 rounded border-gray-300 text-primary-600 focus:ring-primary-500 cursor-pointer" onclick="event.stopPropagation()" onchange="window.toggleSelectBankQuestion(event, '${q.id}')">` : '';
+
                 div.innerHTML = `
                     <div class="flex justify-between items-start gap-2">
                         <div class="flex items-start gap-2">
-                            <input type="checkbox" value="${q.id}" ${isSelected ? 'checked' : ''} class="bank-item-checkbox w-4 h-4 mt-1 rounded border-gray-300 text-primary-600 focus:ring-primary-500 cursor-pointer" onclick="event.stopPropagation()" onchange="window.toggleSelectBankQuestion(event, '${q.id}')">
+                            ${checkboxHtml}
                             <div>
-                                <div class="font-bold text-gray-800 text-lg font-mono group-hover:text-primary-600 transition-colors flex items-center gap-1"><i class="fa-solid fa-hashtag text-primary-500 text-sm"></i>${q.mapId || q.id.split('_')[0] || q.id}</div>
-                                <div class="text-[10px] text-gray-400 font-mono mt-0.5" title="CCCD (ID Duy nhất)">${q.id}</div>
+                                <div class="font-bold text-gray-800 text-lg font-mono group-hover:text-primary-600 transition-colors flex items-center gap-1"><i class="fa-solid fa-hashtag text-primary-500 text-sm"></i>${mapIdText}</div>
+                                <div class="mt-1">${cccdBadgeHtml}</div>
                             </div>
                         </div>
                         <span class="text-xs border border-${levelColor}-200 text-${levelColor}-600 px-2 py-1 rounded bg-${levelColor}-50 font-bold whitespace-nowrap">${lvText || 'Chưa rõ'}</span>
@@ -6453,10 +6590,116 @@ function renderTagFilterUI() {
         modal.querySelector('.modal-content').classList.add('scale-95');
     };
 
-        window.openQuestionEditModal = (fullData) => {
+    window.switchEditQuestionType = (newType) => {
+        const container = document.getElementById('editTypeSpecificContainer');
+        if (!container) return;
+        
+        const restoreLaTeX = (str) => {
+            if(!str) return "";
+            return str.replaceAll('\\left\\{', '\\heva').replaceAll('\\left\\[', '\\hoac');
+        };
+
+        let html = '';
+        if (newType === 'mc') {
+            const labels = ['A', 'B', 'C', 'D'];
+            const curOptions = currentEditingQuestion?.options || ['', '', '', ''];
+            const curCorrect = typeof currentEditingQuestion?.correct === 'number' ? currentEditingQuestion.correct : (currentEditingQuestion?.correctAnswer ? labels.indexOf(currentEditingQuestion.correctAnswer) : 0);
+            html = `
+                <div class="bg-white p-4 rounded-xl border border-gray-200">
+                    <label class="block font-bold text-gray-700 mb-3 flex items-center justify-between">
+                        <span>Các phương án lựa chọn & Đáp án đúng</span>
+                        <span class="text-xs text-orange-600 font-normal">* Chọn nút tròn để đặt đáp án đúng</span>
+                    </label>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            `;
+            for (let i = 0; i < 4; i++) {
+                const optText = curOptions[i] || '';
+                const isCorrect = (curCorrect === i);
+                html += `
+                    <div class="flex items-start gap-3 p-3 rounded-xl border border-gray-200 bg-gray-50/50">
+                        <input type="radio" name="edit_correctAnswer" value="${i}" ${isCorrect ? 'checked' : ''} class="mt-2 w-5 h-5 text-orange-600 focus:ring-orange-500 cursor-pointer">
+                        <div class="flex-1">
+                            <span class="font-bold text-gray-700 text-sm block mb-1">Phương án ${labels[i]}</span>
+                            <textarea id="edit_opt_${i}" class="w-full h-16 p-2 border border-gray-300 rounded-lg font-mono text-sm bg-white">${restoreLaTeX(optText)}</textarea>
+                        </div>
+                    </div>
+                `;
+            }
+            html += `</div></div>`;
+        } else if (newType === 'tf') {
+            const labels = ['a', 'b', 'c', 'd'];
+            let stmts = currentEditingQuestion?.statements;
+            if (!stmts || stmts.length === 0) {
+                const opts = currentEditingQuestion?.options || ['', '', '', ''];
+                const ansArr = (currentEditingQuestion?.correctAnswer || 'S,S,S,S').split(',');
+                stmts = opts.map((t, idx) => ({ text: t, isTrue: ansArr[idx] === 'D' }));
+            }
+            html = `
+                <div class="bg-white p-4 rounded-xl border border-gray-200">
+                    <label class="block font-bold text-gray-700 mb-3">Các ý khẳng định (Đúng / Sai)</label>
+                    <div class="flex flex-col gap-3">
+            `;
+            for (let i = 0; i < 4; i++) {
+                const stmt = stmts[i] || { text: '', isTrue: false };
+                const isTrue = stmt.isTrue === true || stmt.isTrue === 'D';
+                html += `
+                    <div class="flex items-start gap-3 p-3 rounded-xl border border-gray-200 bg-gray-50/50">
+                        <select id="edit_tf_val_${i}" class="mt-1 p-2 border border-gray-300 rounded-lg font-bold text-sm ${isTrue ? 'text-green-600 bg-green-50' : 'text-red-600 bg-red-50'}">
+                            <option value="true" ${isTrue ? 'selected' : ''}>Đúng</option>
+                            <option value="false" ${!isTrue ? 'selected' : ''}>Sai</option>
+                        </select>
+                        <div class="flex-1">
+                            <span class="font-bold text-gray-700 text-sm block mb-1">Ý ${labels[i]})</span>
+                            <textarea id="edit_tf_text_${i}" class="w-full h-16 p-2 border border-gray-300 rounded-lg font-mono text-sm bg-white">${restoreLaTeX(stmt.text || '')}</textarea>
+                        </div>
+                    </div>
+                `;
+            }
+            html += `</div></div>`;
+        } else if (newType === 'short') {
+            const val = currentEditingQuestion?.answer || currentEditingQuestion?.correctAnswer || '';
+            html = `
+                <div class="bg-white p-4 rounded-xl border border-gray-200">
+                    <label class="block font-bold text-gray-700 mb-2">Đáp án chính xác (Trả lời ngắn / Số nguyên / Thập phân)</label>
+                    <input type="text" id="edit_correctAnswer_short" class="w-full p-3 border border-gray-300 rounded-xl font-mono text-base font-bold text-blue-900 bg-blue-50/30" value="${val}" placeholder="VD: 5.2 hoặc -3/4">
+                </div>
+            `;
+        } else if (newType === 'essay') {
+            html = `
+                <div class="bg-amber-50 p-4 rounded-xl border border-amber-200 text-amber-800 text-sm flex items-center gap-2">
+                    <i class="fa-solid fa-circle-info text-amber-600 text-base"></i>
+                    <span>Câu hỏi tự luận không có phương án trắc nghiệm. Vui lòng trình bày hướng dẫn giải ở ô <b>Lời giải chi tiết</b> bên dưới.</span>
+                </div>
+            `;
+        }
+
+        container.innerHTML = html;
+
+        if (newType === 'tf') {
+            for (let i = 0; i < 4; i++) {
+                const sel = document.getElementById(`edit_tf_val_${i}`);
+                if (sel) {
+                    sel.onchange = function() {
+                        if (this.value === 'true') {
+                            this.className = "mt-1 p-2 border border-gray-300 rounded-lg font-bold text-sm text-green-600 bg-green-50";
+                        } else {
+                            this.className = "mt-1 p-2 border border-gray-300 rounded-lg font-bold text-sm text-red-600 bg-red-50";
+                        }
+                    };
+                }
+            }
+        }
+    };
+
+    window.openQuestionEditModal = (fullData) => {
+        if (!window.canManageQuestionBank || !window.canManageQuestionBank()) {
+            if (window.requirePermission) window.requirePermission('bank.manage_system', 'chỉnh sửa câu hỏi trong ngân hàng');
+            return;
+        }
         currentEditingQuestion = JSON.parse(JSON.stringify(fullData)); // clone
         const modal = document.getElementById('questionEditModal');
-        document.getElementById('editModalSubtitle').innerText = `ID: ${fullData.id}`;
+        const qId = fullData.id || fullData.cccd || '';
+        document.getElementById('editModalSubtitle').innerText = `ID / CCCD: #${qId}`;
         
         const container = document.getElementById('editQuestionContainer');
         
@@ -6464,84 +6707,72 @@ function renderTagFilterUI() {
             if(!str) return "";
             return str.replaceAll('\\left\\{', '\\heva').replaceAll('\\left\\[', '\\hoac');
         };
-        
+
+        const rawType = fullData.type || '';
+        let qType = 'mc';
+        if (rawType === 'tf' || rawType === 'DUNG_SAI' || fullData.statements?.length) qType = 'tf';
+        else if (rawType === 'short' || rawType === 'TRA_LOI_NGAN' || fullData.answer) qType = 'short';
+        else if (rawType === 'essay' || rawType === 'TL') qType = 'essay';
+        else qType = 'mc';
+
+        const qMapId = fullData.mapId || '';
+        const qSubject = fullData.subject || 'Toán';
+        const qLevel = fullData.level || 'Thông hiểu';
+        const qSource = fullData.source || '';
+
         let htmlContent = `
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-3 bg-white p-4 rounded-xl border border-gray-200">
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Mã CCCD</label>
+                    <input type="text" id="edit_cccd" value="${qId}" readonly class="w-full p-2.5 bg-gray-100 border border-gray-300 rounded-lg font-mono text-sm text-gray-600 font-bold">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Mã MapID</label>
+                    <input type="text" id="edit_mapId" value="${qMapId}" placeholder="VD: 9D1H2-4" class="w-full p-2.5 border border-gray-300 rounded-lg font-mono text-sm focus:ring-2 focus:ring-orange-500 font-bold">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Mức độ</label>
+                    <select id="edit_level" class="w-full p-2.5 border border-gray-300 rounded-lg font-bold text-sm focus:ring-2 focus:ring-orange-500">
+                        <option value="Nhận biết" ${qLevel.includes('Nhận biết') || qLevel === 'NB' ? 'selected' : ''}>Nhận biết</option>
+                        <option value="Thông hiểu" ${qLevel.includes('Thông hiểu') || qLevel === 'TH' ? 'selected' : ''}>Thông hiểu</option>
+                        <option value="Vận dụng" ${qLevel.includes('Vận dụng') && !qLevel.includes('cao') || qLevel === 'VD' ? 'selected' : ''}>Vận dụng</option>
+                        <option value="Vận dụng cao" ${qLevel.includes('cao') || qLevel === 'VDC' ? 'selected' : ''}>Vận dụng cao</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Phân môn</label>
+                    <input type="text" id="edit_subject" value="${qSubject}" placeholder="Toán / Đại số..." class="w-full p-2.5 border border-gray-300 rounded-lg text-sm font-bold">
+                </div>
+                <div class="md:col-span-2">
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Nguồn gốc câu hỏi</label>
+                    <input type="text" id="edit_source" value="${qSource}" placeholder="VD: SGK Cánh Diều, Đề thi..." class="w-full p-2.5 border border-gray-300 rounded-lg text-sm">
+                </div>
+                <div class="md:col-span-2">
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Loại câu hỏi</label>
+                    <select id="edit_type" onchange="window.switchEditQuestionType(this.value)" class="w-full p-2.5 border border-gray-300 rounded-lg font-bold text-sm bg-orange-50 text-orange-800">
+                        <option value="mc" ${qType === 'mc' ? 'selected' : ''}>Trắc nghiệm 4 lựa chọn (MC)</option>
+                        <option value="tf" ${qType === 'tf' ? 'selected' : ''}>Đúng / Sai 4 ý (TF)</option>
+                        <option value="short" ${qType === 'short' ? 'selected' : ''}>Trả lời ngắn / Điền số (Short)</option>
+                        <option value="essay" ${qType === 'essay' ? 'selected' : ''}>Tự luận (Essay)</option>
+                    </select>
+                </div>
+            </div>
+
             <div>
-                <label class="block font-bold text-gray-700 mb-2">Đề bài</label>
+                <label class="block font-bold text-gray-700 mb-2">Đề bài (Hỗ trợ công thức LaTeX $...$ & TikZ)</label>
                 <textarea id="edit_content" class="w-full h-32 p-3 border border-gray-300 rounded-xl font-mono text-sm focus:ring-2 focus:ring-orange-500 focus:border-orange-500">${restoreLaTeX(fullData.content)}</textarea>
             </div>
-        `;
-        
-        if (fullData.type === 'TRAC_NGHIEM' && fullData.options) {
-            htmlContent += `<div class="bg-white p-4 rounded-xl border border-gray-200">
-                <label class="block font-bold text-gray-700 mb-4">Các lựa chọn & Đáp án đúng</label>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">`;
-            const labels = ['A', 'B', 'C', 'D'];
-            fullData.options.forEach((opt, idx) => {
-                const isCorrect = (fullData.correctAnswer === labels[idx]);
-                htmlContent += `
-                    <div class="flex items-start gap-3">
-                        <input type="radio" name="edit_correctAnswer" value="${labels[idx]}" ${isCorrect ? 'checked' : ''} class="mt-2 w-5 h-5 text-orange-600 focus:ring-orange-500 cursor-pointer">
-                        <div class="flex-1">
-                            <span class="font-bold text-gray-500 block mb-1">Phương án ${labels[idx]}</span>
-                            <textarea id="edit_opt_${idx}" class="w-full h-16 p-2 border border-gray-300 rounded-lg font-mono text-sm">${restoreLaTeX(opt)}</textarea>
-                        </div>
-                    </div>
-                `;
-            });
-            htmlContent += `</div></div>`;
-        } else if (fullData.type === 'DUNG_SAI' && fullData.options) {
-            htmlContent += `<div class="bg-white p-4 rounded-xl border border-gray-200">
-                <label class="block font-bold text-gray-700 mb-4">Các ý Đúng/Sai</label>
-                <div class="flex flex-col gap-4">`;
-            const labels = ['a', 'b', 'c', 'd'];
-            fullData.options.forEach((opt, idx) => {
-                const ansArray = fullData.correctAnswer ? fullData.correctAnswer.split(',') : ['S','S','S','S'];
-                const isTrue = ansArray[idx] === 'D';
-                htmlContent += `
-                    <div class="flex items-start gap-3">
-                        <select id="edit_tf_${idx}" class="mt-1 p-2 border border-gray-300 rounded-lg font-bold ${isTrue?'text-green-600 bg-green-50':'text-red-600 bg-red-50'}">
-                            <option value="D" ${isTrue?'selected':''}>Đúng</option>
-                            <option value="S" ${!isTrue?'selected':''}>Sai</option>
-                        </select>
-                        <div class="flex-1">
-                            <span class="font-bold text-gray-500 block mb-1">Ý ${labels[idx]})</span>
-                            <textarea id="edit_opt_${idx}" class="w-full h-16 p-2 border border-gray-300 rounded-lg font-mono text-sm">${restoreLaTeX(opt)}</textarea>
-                        </div>
-                    </div>
-                `;
-            });
-            htmlContent += `</div></div>`;
-        } else if (fullData.type === 'TRA_LOI_NGAN') {
-            htmlContent += `<div class="bg-white p-4 rounded-xl border border-gray-200">
-                <label class="block font-bold text-gray-700 mb-2">Đáp án (Trả lời ngắn)</label>
-                <input type="text" id="edit_correctAnswer_short" class="w-full p-3 border border-gray-300 rounded-xl font-mono text-sm" value="${fullData.correctAnswer || ''}">
-            </div>`;
-        }
-        
-        htmlContent += `
+
+            <div id="editTypeSpecificContainer"></div>
+
             <div>
-                <label class="block font-bold text-gray-700 mb-2">Lời giải chi tiết</label>
-                <textarea id="edit_solution" class="w-full h-32 p-3 border border-gray-300 rounded-xl font-mono text-sm focus:ring-2 focus:ring-orange-500 focus:border-orange-500">${restoreLaTeX(fullData.solution)}</textarea>
+                <label class="block font-bold text-gray-700 mb-2">Lời giải chi tiết (\\loigiai)</label>
+                <textarea id="edit_solution" class="w-full h-36 p-3 border border-gray-300 rounded-xl font-mono text-sm focus:ring-2 focus:ring-orange-500 focus:border-orange-500">${restoreLaTeX(fullData.solution)}</textarea>
             </div>
         `;
-        
+
         container.innerHTML = htmlContent;
-        
-        if (fullData.type === 'DUNG_SAI') {
-            for(let i=0; i<4; i++) {
-                const sel = document.getElementById(`edit_tf_${i}`);
-                if(sel) {
-                    sel.onchange = function() {
-                        if(this.value === 'D') {
-                            this.className = "mt-1 p-2 border border-gray-300 rounded-lg font-bold text-green-600 bg-green-50";
-                        } else {
-                            this.className = "mt-1 p-2 border border-gray-300 rounded-lg font-bold text-red-600 bg-red-50";
-                        }
-                    };
-                }
-            }
-        }
+        window.switchEditQuestionType(qType);
         
         // Hiện modal
         modal.classList.remove('opacity-0', 'pointer-events-none');
@@ -6555,79 +6786,109 @@ function renderTagFilterUI() {
 
     document.getElementById('btnSaveEditQuestion').onclick = async () => {
         if (!currentEditingQuestion) return;
-        
-        // Thu thập dữ liệu từ Form
-        const processLaTeX = (str) => {
-            if(!str) return "";
-            return str.trim();
-        };
-        
-        const newContent = document.getElementById('edit_content').value;
-        const newSolution = document.getElementById('edit_solution').value;
-        
-        currentEditingQuestion.content = processLaTeX(newContent);
-        currentEditingQuestion.solution = processLaTeX(newSolution);
-        
-        if (currentEditingQuestion.type === 'TRAC_NGHIEM') {
+        if (!window.canManageQuestionBank || !window.canManageQuestionBank()) {
+            if (window.requirePermission) window.requirePermission('bank.manage_system', 'chỉnh sửa câu hỏi trong ngân hàng');
+            return;
+        }
+
+        const newMapId = document.getElementById('edit_mapId')?.value.trim() || '';
+        const newLevel = document.getElementById('edit_level')?.value || 'Thông hiểu';
+        const newSubject = document.getElementById('edit_subject')?.value.trim() || 'Toán';
+        const newSource = document.getElementById('edit_source')?.value.trim() || '';
+        const newType = document.getElementById('edit_type')?.value || 'mc';
+        const newContent = document.getElementById('edit_content')?.value.trim() || '';
+        const newSolution = document.getElementById('edit_solution')?.value.trim() || '';
+
+        currentEditingQuestion.mapId = newMapId;
+        currentEditingQuestion.level = newLevel;
+        currentEditingQuestion.subject = newSubject;
+        currentEditingQuestion.source = newSource;
+        currentEditingQuestion.type = newType;
+        currentEditingQuestion.content = newContent;
+        currentEditingQuestion.solution = newSolution;
+
+        if (newType === 'mc') {
             const options = [];
-            for(let i=0; i<4; i++) {
+            for (let i = 0; i < 4; i++) {
                 const el = document.getElementById(`edit_opt_${i}`);
-                if(el) options.push(processLaTeX(el.value));
+                options.push(el ? el.value.trim() : '');
             }
-            if(options.length === 4) currentEditingQuestion.options = options;
-            
-            const radio = document.querySelector('input[name="edit_correctAnswer"]:checked');
-            if(radio) currentEditingQuestion.correctAnswer = radio.value;
-        } 
-        else if (currentEditingQuestion.type === 'DUNG_SAI') {
-            const options = [];
+            currentEditingQuestion.options = options;
+            const checkedRadio = document.querySelector('input[name="edit_correctAnswer"]:checked');
+            const correctIdx = checkedRadio ? parseInt(checkedRadio.value, 10) : 0;
+            currentEditingQuestion.correct = correctIdx;
+            currentEditingQuestion.correctAnswer = ['A','B','C','D'][correctIdx];
+            currentEditingQuestion.statements = [];
+            currentEditingQuestion.answer = '';
+        } else if (newType === 'tf') {
+            const statements = [];
             const ansArr = [];
-            for(let i=0; i<4; i++) {
-                const el = document.getElementById(`edit_opt_${i}`);
-                if(el) options.push(processLaTeX(el.value));
-                
-                const tfEl = document.getElementById(`edit_tf_${i}`);
-                if(tfEl) ansArr.push(tfEl.value);
+            for (let i = 0; i < 4; i++) {
+                const textEl = document.getElementById(`edit_tf_text_${i}`);
+                const valEl = document.getElementById(`edit_tf_val_${i}`);
+                const isTrue = valEl ? (valEl.value === 'true' || valEl.value === 'D') : false;
+                statements.push({
+                    text: textEl ? textEl.value.trim() : '',
+                    isTrue: isTrue
+                });
+                ansArr.push(isTrue ? 'D' : 'S');
             }
-            if(options.length === 4) currentEditingQuestion.options = options;
-            if(ansArr.length === 4) currentEditingQuestion.correctAnswer = ansArr.join(',');
+            currentEditingQuestion.statements = statements;
+            currentEditingQuestion.options = statements.map(s => s.text);
+            currentEditingQuestion.correctAnswer = ansArr.join(',');
+            currentEditingQuestion.answer = '';
+        } else if (newType === 'short') {
+            const shortEl = document.getElementById('edit_correctAnswer_short');
+            const ans = shortEl ? shortEl.value.trim() : '';
+            currentEditingQuestion.answer = ans;
+            currentEditingQuestion.correctAnswer = ans;
+            currentEditingQuestion.options = [];
+            currentEditingQuestion.statements = [];
+        } else if (newType === 'essay') {
+            currentEditingQuestion.options = [];
+            currentEditingQuestion.statements = [];
+            currentEditingQuestion.answer = '';
         }
-        else if (currentEditingQuestion.type === 'TRA_LOI_NGAN') {
-            const el = document.getElementById('edit_correctAnswer_short');
-            if(el) currentEditingQuestion.correctAnswer = el.value.trim();
-        }
-        
+
         const btn = document.getElementById('btnSaveEditQuestion');
         const originalText = btn.innerHTML;
         btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang lưu...';
         btn.disabled = true;
-        
+
         try {
-            // Re-pack data and upload to Cloudflare
-            const WORKER_URL_UPLOAD = "https://upload-helper.phamngockhanh-942001.workers.dev/";
-            const blob = new Blob([JSON.stringify(currentEditingQuestion, null, 2)], { type: 'application/json' });
-            const formData = new FormData();
-            formData.append('file', blob, `bank/${currentEditingQuestion.id}.json`);
-            
-            const res = await fetch(WORKER_URL_UPLOAD, { method: 'PUT', body: formData });
-            
-            if (res.ok) {
+            let saved = false;
+            if (window.BankService) {
+                saved = await window.BankService.saveSingleQuestion(currentEditingQuestion);
+            } else {
+                const WORKER_URL_UPLOAD = "https://upload-helper.phamngockhanh-942001.workers.dev/";
+                const blob = new Blob([JSON.stringify(currentEditingQuestion, null, 2)], { type: 'application/json' });
+                const formData = new FormData();
+                formData.append('file', blob, `bank/${currentEditingQuestion.id}.json`);
+                const res = await fetch(WORKER_URL_UPLOAD, { method: 'PUT', body: formData });
+                saved = res.ok;
+            }
+
+            if (saved) {
                 window.showNotification("Đã cập nhật câu hỏi thành công trên Cloudflare!", "success");
                 window.closeQuestionEditModal();
-                
+
                 // Cập nhật Cache local & UI
+                if (!window.globalBankQuestions) window.globalBankQuestions = [];
                 const idx = window.globalBankQuestions.findIndex(q => q.id === currentEditingQuestion.id);
-                if(idx !== -1) {
-                    window.globalBankQuestions[idx].content = currentEditingQuestion.content;
-                    window.globalBankQuestions[idx].solution = currentEditingQuestion.solution;
-                    localStorage.setItem('lms_cached_bank', JSON.stringify(window.globalBankQuestions));
-                    window.applyBankFilters();
+                if (idx !== -1) {
+                    window.globalBankQuestions[idx] = Object.assign({}, window.globalBankQuestions[idx], currentEditingQuestion);
+                } else {
+                    window.globalBankQuestions.unshift(currentEditingQuestion);
                 }
-                
+                try {
+                    localStorage.setItem('lms_cached_bank', JSON.stringify(window.globalBankQuestions));
+                } catch(e) {}
+                window.applyBankFilters();
+
                 // Mở lại preview với nội dung mới
                 setTimeout(() => {
                     window.fetchAndPreview(currentEditingQuestion.id);
-                }, 500);
+                }, 400);
             } else {
                 throw new Error("Không thể lưu file trên Cloudflare");
             }
@@ -6646,7 +6907,7 @@ function renderTagFilterUI() {
         const content = document.getElementById('questionPreviewContent');
         const subtitle = document.getElementById('previewModalSubtitle');
         
-        subtitle.innerText = `ID: ${id}`;
+        subtitle.innerText = `ID / CCCD: #${id}`;
         content.innerHTML = '<div class="flex flex-col items-center justify-center py-20 text-primary-500 gap-4"><i class="fa-solid fa-circle-notch fa-spin text-5xl"></i><p class="font-bold">Đang tải nội dung...</p></div>';
         
         // Show modal
@@ -6655,19 +6916,35 @@ function renderTagFilterUI() {
         modal.querySelector('.modal-content').classList.remove('scale-95');
         modal.querySelector('.modal-content').classList.add('scale-100');
 
+        const canEdit = window.canManageQuestionBank ? window.canManageQuestionBank() : false;
+
         // Nút xóa
         const btnDelete = document.getElementById('btnDeleteQuestion');
-        btnDelete.onclick = () => window.deleteBankQuestion(id);
+        if (btnDelete) {
+            btnDelete.style.display = canEdit ? '' : 'none';
+            btnDelete.onclick = () => window.deleteBankQuestion(id);
+        }
         
         // Nút sửa
         const btnEdit = document.getElementById('btnEditQuestion');
+        if (btnEdit) {
+            btnEdit.style.display = canEdit ? '' : 'none';
+        }
 
         try {
-            const WORKER_URL = "https://upload-helper.phamngockhanh-942001.workers.dev/bank";
-            const res = await fetch(`${WORKER_URL}?id=${encodeURIComponent(id)}`);
-            if(!res.ok) throw new Error("Lỗi tải file");
-            const fullData = await res.json();
-            btnEdit.onclick = () => { window.openQuestionEditModal(fullData); };
+            let fullData = null;
+            if (window.BankService) {
+                fullData = await window.BankService.getQuestionById(id, false);
+            }
+            if (!fullData) {
+                const WORKER_URL = "https://upload-helper.phamngockhanh-942001.workers.dev/bank";
+                const res = await fetch(`${WORKER_URL}?id=${encodeURIComponent(id)}`);
+                if(!res.ok) throw new Error("Lỗi tải file");
+                fullData = await res.json();
+            }
+            if (btnEdit) {
+                btnEdit.onclick = () => { window.openQuestionEditModal(fullData); };
+            }
             previewQuestionBank(fullData); 
         } catch(e) {
             console.error(e);
@@ -6676,6 +6953,10 @@ function renderTagFilterUI() {
     };
 
     window.deleteBankQuestion = async (id) => {
+        if (!window.canManageQuestionBank || !window.canManageQuestionBank()) {
+            if (window.requirePermission) window.requirePermission('bank.manage_system', 'xóa câu hỏi trong ngân hàng');
+            return;
+        }
         if(!confirm("Bạn có chắc chắn muốn xóa vĩnh viễn câu hỏi này khỏi hệ thống Cloudflare?")) return;
         const btnDelete = document.getElementById('btnDeleteQuestion');
         const oldText = btnDelete.innerHTML;
@@ -6683,12 +6964,23 @@ function renderTagFilterUI() {
         btnDelete.disabled = true;
 
         try {
-            const res = await fetch(`https://upload-helper.phamngockhanh-942001.workers.dev/bank?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
-            if(res.ok) {
+            let isDeleted = false;
+            if (window.BankService) {
+                isDeleted = await window.BankService.deleteQuestion(id);
+            } else {
+                const res = await fetch(`https://upload-helper.phamngockhanh-942001.workers.dev/bank?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+                isDeleted = res.ok;
+            }
+            if(isDeleted) {
                 window.showNotification("Xóa câu hỏi thành công", "success");
                 window.closeQuestionPreviewModal();
-                // Xóa khỏi danh sách hiện tại
-                window.globalBankQuestions = window.globalBankQuestions.filter(q => q.id !== id);
+                // Xóa khỏi danh sách hiện tại và cache
+                window.globalBankQuestions = (window.globalBankQuestions || []).filter(q => q.id !== id && q.cccd !== id);
+                try {
+                    localStorage.setItem('lms_cached_bank', JSON.stringify(window.globalBankQuestions));
+                } catch(e) {}
+                const countEl = document.getElementById('bankCount');
+                if (countEl) countEl.innerText = `${window.globalBankQuestions.length} câu`;
                 window.applyBankFilters();
             } else {
                 throw new Error("Lỗi server");
@@ -6707,18 +6999,60 @@ function renderTagFilterUI() {
         const content = document.getElementById('questionPreviewContent');
         const contentHtml = window.formatContent(q.content);
         
-        let optionsHtml = '';
-        if (q.options && q.options.length > 0) {
-            optionsHtml = `<div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-6">`;
+        let answerSectionHtml = '';
+        const qType = q.type || (q.statements?.length ? 'tf' : (q.options?.length ? 'mc' : (q.answer ? 'short' : 'essay')));
+
+        if ((qType === 'mc' || qType === 'TRAC_NGHIEM') && q.options && q.options.length > 0) {
+            answerSectionHtml = `<div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-6">`;
+            const correctIdx = typeof q.correct === 'number' ? q.correct : (q.correctAnswer ? ['A','B','C','D'].indexOf(q.correctAnswer) : -1);
             q.options.forEach((opt, idx) => {
-                const isTrue = idx === q.correct; 
-                optionsHtml += `
+                const isTrue = idx === correctIdx; 
+                answerSectionHtml += `
                     <div class="p-4 border rounded-xl relative ${isTrue ? 'bg-green-50 border-green-200 ring-2 ring-green-300' : 'bg-gray-50 border-gray-200'}">
-                        <span class="absolute top-4 left-4 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${isTrue?'bg-green-500 text-white':'bg-white border border-gray-300 text-gray-500'}">${String.fromCharCode(65+idx)}</span>
+                        <span class="absolute top-4 left-4 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${isTrue ? 'bg-green-500 text-white' : 'bg-white border border-gray-300 text-gray-500'}">${String.fromCharCode(65+idx)}</span>
                         <div class="pl-10 math-content text-gray-800">${window.formatContent(opt)}</div>
                     </div>`;
             });
-            optionsHtml += `</div>`;
+            answerSectionHtml += `</div>`;
+        } else if ((qType === 'tf' || qType === 'DUNG_SAI') && (q.statements || q.options)) {
+            const stmts = q.statements && q.statements.length > 0 ? q.statements : (q.options || []).map((t, i) => {
+                const ansArr = (q.correctAnswer || '').split(',');
+                return { text: t, isTrue: ansArr[i] === 'D' };
+            });
+            answerSectionHtml = `
+                <div class="mt-6 border border-gray-200 rounded-xl overflow-hidden bg-white shadow-sm">
+                    <table class="w-full text-sm text-left">
+                        <thead class="bg-gray-50 text-gray-500 font-bold border-b border-gray-200">
+                            <tr>
+                                <th class="p-3 w-12 text-center">Ý</th>
+                                <th class="p-3">Mệnh đề khẳng định</th>
+                                <th class="p-3 w-28 text-center">Đáp án đúng</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-100">
+            `;
+            stmts.forEach((stmt, sIdx) => {
+                const isTrue = stmt.isTrue;
+                answerSectionHtml += `
+                    <tr class="hover:bg-gray-50">
+                        <td class="p-3 text-center font-bold text-gray-500">${String.fromCharCode(97 + sIdx)})</td>
+                        <td class="p-3 text-gray-800 math-content">${window.formatContent(stmt.text || '')}</td>
+                        <td class="p-3 text-center">
+                            <span class="px-3 py-1 rounded-full text-xs font-bold ${isTrue ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}">
+                                ${isTrue ? '<i class="fa-solid fa-check mr-1"></i>ĐÚNG' : '<i class="fa-solid fa-xmark mr-1"></i>SAI'}
+                            </span>
+                        </td>
+                    </tr>
+                `;
+            });
+            answerSectionHtml += `</tbody></table></div>`;
+        } else if (qType === 'short' || qType === 'TRA_LOI_NGAN' || q.answer) {
+            answerSectionHtml = `
+                <div class="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-xl flex items-center gap-3">
+                    <span class="px-3 py-1 bg-blue-600 text-white rounded-lg text-xs font-bold uppercase shrink-0"><i class="fa-solid fa-key mr-1"></i>Đáp án</span>
+                    <span class="text-blue-900 font-mono font-bold text-base math-content">${q.answer || q.correctAnswer || 'Chưa thiết lập'}</span>
+                </div>
+            `;
         }
 
         const solutionHtml = q.solution ? `
@@ -6735,16 +7069,22 @@ function renderTagFilterUI() {
         let levelColor = 'gray';
         if(q.level && (q.level.includes('Nhận biết') || q.level === 'NB')) levelColor = 'green';
         else if(q.level && (q.level.includes('Thông hiểu') || q.level === 'TH')) levelColor = 'blue';
-        else if(q.level && (q.level.includes('Vận dụng') || q.level === 'VD')) levelColor = 'orange';
+        else if(q.level && (q.level.includes('Vận dụng') && !q.level.includes('cao') || q.level === 'VD')) levelColor = 'orange';
         else if(q.level && (q.level.includes('cao') || q.level === 'VDC')) levelColor = 'red';
+
+        const typeLabel = (qType === 'mc' || qType === 'TRAC_NGHIEM') ? 'Trắc nghiệm (4 lựa chọn)' : ((qType === 'tf' || qType === 'DUNG_SAI') ? 'Đúng / Sai' : ((qType === 'short' || qType === 'TRA_LOI_NGAN') ? 'Trả lời ngắn' : 'Tự luận'));
+        const sourceHtml = q.source ? `<span class="text-xs font-bold text-indigo-700 bg-indigo-50 px-2 py-1 rounded-md border border-indigo-200"><i class="fa-solid fa-bookmark text-indigo-400 mr-1"></i>${q.source}</span>` : '';
 
         content.innerHTML = `
             <div class="flex justify-between items-start mb-6 pb-4 border-b border-gray-100">
                 <div class="flex flex-col gap-2">
-                    <h3 class="text-2xl font-black text-primary-700 font-mono tracking-tight">${q.mapId || q.id}</h3>
-                    <div class="flex gap-2 mt-1">
+                    <h3 class="text-2xl font-black text-primary-700 font-mono tracking-tight">${q.mapId || (q.id && q.id.includes('_') ? q.id.split('_')[0] : q.id)}</h3>
+                    <div class="flex items-center gap-2 mt-1 flex-wrap">
+                        <span class="text-xs font-mono font-bold text-teal-700 bg-teal-50 px-2.5 py-1 rounded-md border border-teal-200 uppercase tracking-wide"><i class="fa-solid fa-id-card text-[11px] mr-1.5"></i>CCCD: #${q.cccd || q.id}</span>
                         <span class="text-xs font-bold text-${levelColor}-600 bg-${levelColor}-50 px-2 py-1 rounded-md border border-${levelColor}-100 uppercase tracking-wide">${q.level || 'Chưa rõ'}</span>
-                        <span class="text-xs font-bold text-gray-600 bg-gray-100 px-2 py-1 rounded-md border border-gray-200 uppercase">${q.type === 'TL' ? 'Tự luận' : 'Trắc nghiệm'}</span>
+                        <span class="text-xs font-bold text-gray-600 bg-gray-100 px-2 py-1 rounded-md border border-gray-200 uppercase">${typeLabel}</span>
+                        <span class="text-xs font-bold text-gray-600 bg-gray-100 px-2 py-1 rounded-md border border-gray-200"><i class="fa-solid fa-book text-gray-400 mr-1"></i>${q.subject || 'Toán'}</span>
+                        ${sourceHtml}
                     </div>
                 </div>
             </div>
@@ -6753,12 +7093,12 @@ function renderTagFilterUI() {
                 ${contentHtml}
             </div>
 
-            ${optionsHtml}
+            ${answerSectionHtml}
             ${solutionHtml}
         `;
 
         if (window.MathJax) {
-            MathJax.typesetPromise();
+            MathJax.typesetPromise([content]).catch(() => {});
         }
         if (window.renderTikz) {
             window.renderTikz();

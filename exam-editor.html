@@ -53,6 +53,7 @@
     <script src="https://unpkg.com/mammoth@1.12.1/mammoth.browser.min.js"></script>
     <script src="ai-grader.js"></script>
     <script src="ai-id-assigner.js?v=20260804-404fix"></script>
+    <script src="bank-service.js"></script>
     <style>
         body { font-family: 'Inter', sans-serif; background-color: #F8F9FA; }
         .font-handwriting { font-family: 'Pacifico', cursive; }
@@ -480,8 +481,9 @@
                         <button onclick="saveCurrentQuestionsToBank()" class="px-2.5 py-1.5 bg-indigo-100 text-indigo-700 rounded text-xs font-bold hover:bg-indigo-200 border border-indigo-200" title="Lưu các câu có ID vào kho"><i class="fa-solid fa-cloud-arrow-up mr-1"></i> Lưu Bank</button>
                         <button onclick="openScoringModal()" class="px-2.5 py-1.5 bg-yellow-100 text-yellow-700 rounded text-xs font-bold hover:bg-yellow-200"><i class="fa-solid fa-calculator mr-1"></i> Chia điểm</button>
                         <button onclick="openBookBankModal()" class="px-2.5 py-1.5 bg-purple-100 text-purple-700 rounded text-xs font-bold hover:bg-purple-200"><i class="fa-solid fa-book-open mr-1"></i> Sách</button>
-                        <button onclick="document.getElementById('texInput').click()" class="px-2.5 py-1.5 bg-green-100 text-green-700 rounded text-xs font-bold hover:bg-green-200"><i class="fa-solid fa-file-import mr-1"></i> LaTeX</button>
+                        <button onclick="document.getElementById('texInput').click()" class="px-2.5 py-1.5 bg-green-100 text-green-700 rounded text-xs font-bold hover:bg-green-200" title="Nhập đề từ file LaTeX (.tex)"><i class="fa-solid fa-file-import mr-1"></i> Nhập TeX</button>
                         <input type="file" id="texInput" accept=".tex,.txt" class="hidden" onchange="handleTexUpload(this)">
+                        <button onclick="window.openExportLatexModal()" class="px-2.5 py-1.5 bg-emerald-600 text-white rounded text-xs font-bold hover:bg-emerald-700 shadow-xs flex items-center gap-1.5 transition" title="Xuất lại file .tex chuẩn kèm mã CCCD / ID để biên dịch sách in"><i class="fa-solid fa-file-export"></i> Xuất TeX</button>
                         <button onclick="document.getElementById('wordInput').click()" class="px-2.5 py-1.5 bg-blue-100 text-blue-700 rounded text-xs font-bold hover:bg-blue-200"><i class="fa-solid fa-file-word mr-1"></i> Word</button>
                         <input type="file" id="wordInput" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" class="hidden" onchange="handleWordUpload(this)">
                     </div>
@@ -873,6 +875,75 @@
             <div class="p-4 border-t border-gray-100 flex justify-end gap-2 bg-gray-50 rounded-b-xl">
                 <button onclick="closeScoringModal()" class="px-4 py-2 bg-white border rounded-lg text-sm font-bold text-gray-600 hover:bg-gray-100">Hủy</button>
                 <button onclick="applyScoring()" class="px-4 py-2 bg-primary-600 text-white rounded-lg text-sm font-bold hover:bg-primary-700 shadow-md">Áp dụng</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL XUẤT FILE LATEX (SÁCH ID) -->
+    <div id="exportLatexModal" class="modal opacity-0 pointer-events-none fixed inset-0 z-[160] flex items-center justify-center bg-gray-900 bg-opacity-60 px-4 transition-all duration-300">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-4xl transform scale-95 transition-transform duration-300 flex flex-col max-h-[92vh] overflow-hidden">
+            <!-- Header -->
+            <div class="p-4 border-b border-gray-100 flex justify-between items-center bg-gradient-to-r from-emerald-50 to-teal-50">
+                <div class="flex items-center gap-2.5">
+                    <div class="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-bold shadow-sm">
+                        <i class="fa-solid fa-file-export"></i>
+                    </div>
+                    <div>
+                        <h3 class="font-bold text-gray-800 text-base">Xuất File LaTeX Chuẩn (Sách ID)</h3>
+                        <p class="text-xs text-gray-500">Mã câu hỏi định dạng: <code class="text-emerald-700 font-bold bg-white px-1.5 py-0.5 rounded border border-emerald-200">\begin{ex}[CCCD]%[Nguồn]%[MapID]</code></p>
+                    </div>
+                </div>
+                <button onclick="closeExportLatexModal()" class="text-gray-400 hover:text-red-500 transition-colors p-1"><i class="fa-solid fa-times text-lg"></i></button>
+            </div>
+
+            <!-- Body -->
+            <div class="p-5 overflow-y-auto space-y-4 flex-1">
+                <!-- Thống kê trạng thái -->
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div class="bg-gray-50 border border-gray-200 p-3 rounded-xl flex items-center justify-between">
+                        <span class="text-xs font-bold text-gray-500">Tổng số câu hỏi:</span>
+                        <span id="exportLatexTotalCount" class="text-base font-black text-gray-800">0</span>
+                    </div>
+                    <div class="bg-teal-50 border border-teal-200 p-3 rounded-xl flex items-center justify-between">
+                        <span class="text-xs font-bold text-teal-700">Đã có mã CCCD:</span>
+                        <span id="exportLatexWithCccdCount" class="text-base font-black text-teal-800">0</span>
+                    </div>
+                    <div class="bg-amber-50 border border-amber-200 p-3 rounded-xl flex items-center justify-between">
+                        <span class="text-xs font-bold text-amber-700">Chưa có CCCD:</span>
+                        <span id="exportLatexWithoutCccdCount" class="text-base font-black text-amber-800">0</span>
+                    </div>
+                </div>
+
+                <!-- Tùy chọn xuất -->
+                <div class="flex items-center justify-between bg-emerald-50/60 p-3 rounded-xl border border-emerald-100 flex-wrap gap-2 text-xs">
+                    <label class="flex items-center gap-2 cursor-pointer font-bold text-gray-700 select-none">
+                        <input type="checkbox" id="exportLatexIncludePreamble" class="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500" checked onchange="window.regenerateLatexPreview()">
+                        <span>Bao gồm Preamble đầy đủ (Để biên dịch độc lập ngay trên Overleaf / TeXStudio)</span>
+                    </label>
+                    <span id="exportLatexSourceHint" class="text-emerald-700 italic text-[11px]"></span>
+                </div>
+
+                <!-- Textarea Preview -->
+                <div class="relative">
+                    <label class="block text-xs font-bold text-gray-600 mb-1 flex items-center justify-between">
+                        <span>Mã nguồn LaTeX sinh ra:</span>
+                        <span class="text-[11px] text-gray-400">Bạn có thể xem hoặc chỉnh sửa trực tiếp trước khi tải</span>
+                    </label>
+                    <textarea id="exportLatexCodePreview" class="w-full h-80 p-3 border border-gray-300 rounded-xl font-mono text-xs text-gray-800 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-emerald-500 outline-none leading-relaxed" spellcheck="false"></textarea>
+                </div>
+            </div>
+
+            <!-- Footer -->
+            <div class="p-4 border-t border-gray-100 flex justify-between items-center bg-gray-50 flex-wrap gap-2">
+                <button onclick="closeExportLatexModal()" class="px-4 py-2 bg-white border border-gray-300 rounded-xl text-xs font-bold text-gray-600 hover:bg-gray-100 transition shadow-xs">Đóng</button>
+                <div class="flex items-center gap-2">
+                    <button onclick="window.copyExportLatexCode()" class="px-4 py-2 bg-white border border-emerald-300 text-emerald-700 rounded-xl text-xs font-bold hover:bg-emerald-50 transition shadow-xs flex items-center gap-1.5">
+                        <i class="fa-regular fa-copy"></i> Sao chép mã TeX
+                    </button>
+                    <button onclick="window.downloadExportLatexFile()" class="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shadow-md shadow-emerald-200 flex items-center gap-1.5">
+                        <i class="fa-solid fa-download"></i> Tải file .tex về máy
+                    </button>
+                </div>
             </div>
         </div>
     </div>
@@ -2015,10 +2086,15 @@
                     div.id = `q-preview-${idx}`;
                     div.onclick = () => loadQuestionToEditor(idx);
                     
-                    // 1. Tạo Badge ID
+                    // 1. Tạo Badge ID & Badge CCCD
                     let idBadge = q.mapId 
-                        ? `<span class="text-[10px] font-mono font-bold text-primary-700 bg-primary-100 px-1.5 py-0.5 rounded border border-primary-200" title="ID Câu hỏi">${q.mapId}</span>` 
-                        : `<span class="text-[10px] font-mono text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200" title="Chưa có ID">No-ID</span>`;
+                        ? `<span class="text-[10px] font-mono font-bold text-primary-700 bg-primary-100 px-1.5 py-0.5 rounded border border-primary-200" title="ID / MapID Câu hỏi">${q.mapId}</span>` 
+                        : `<span class="text-[10px] font-mono text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200" title="Chưa có MapID">No-ID</span>`;
+
+                    let cccdVal = q.cccd || q.bankId;
+                    let cccdBadge = cccdVal
+                        ? `<span class="text-[10px] font-mono font-bold text-teal-700 bg-teal-50 px-1.5 py-0.5 rounded border border-teal-200 flex items-center gap-1" title="Mã CCCD Sách & Ngân hàng"><i class="fa-solid fa-id-card text-[9px]"></i>#${cccdVal}</span>`
+                        : '';
 
                     // 2. Tạo Badge Mức độ
                     let levelBadge = '';
@@ -2050,9 +2126,10 @@
                     let html = `
                         <div class="flex justify-between items-start mb-2 gap-2">
                             <div class="flex flex-col gap-1">
-                                <div class="flex items-center gap-2">
+                                <div class="flex items-center gap-1.5 flex-wrap">
                                     <span class="font-bold text-sm text-gray-800 flex flex-wrap items-center gap-1">${cauLabel}</span>
                                     ${idBadge}
+                                    ${cccdBadge}
                                 </div>
                                 <div class="flex gap-1">
                                     ${subjectBadge} ${levelBadge}
@@ -2124,6 +2201,9 @@
             q.content = contentEl.value;
             const solEl = document.getElementById('editSolution'); if(solEl) q.solution = solEl.value;
             const pointEl = document.getElementById('editPoint'); if(pointEl) q.point = parseFloat(pointEl.value) || 0;
+            const envEl = document.getElementById('editEnv'); if(envEl) q.env = envEl.value.trim();
+            const mapIdEl = document.getElementById('editMapId'); if(mapIdEl) q.mapId = mapIdEl.value.trim();
+            const sourceEl = document.getElementById('editSource'); if(sourceEl) q.source = sourceEl.value.trim();
             if (q.type === 'mc') { const optInputs = document.querySelectorAll('.mc-option'); q.options = Array.from(optInputs).map(i => i.value); } 
             else if (q.type === 'tf') { const rows = document.querySelectorAll('#editorArea .tf-row'); q.statements = []; rows.forEach(row => { const text = row.querySelector('.tf-text').value; const isTrue = row.querySelector('.tf-check').checked; q.statements.push({text, isTrue}); }); } 
             else if (q.type === 'short') { const ansEl = document.getElementById('editShortAns'); if(ansEl) q.answer = ansEl.value; }
@@ -2139,13 +2219,43 @@
             const q = listType === 'mixed-tl' ? window.mixedTlQuestions[index] : window.questions[index];
             const editor = document.getElementById('editorArea');
             
+            const cccdVal = q.cccd || q.bankId || '';
+            const cccdBadgeHtml = cccdVal 
+                ? `<span class="font-mono font-bold text-teal-700 bg-teal-50 border border-teal-200 px-2 py-0.5 rounded text-xs flex items-center gap-1"><i class="fa-solid fa-id-card text-[10px]"></i> CCCD: #${cccdVal}</span>`
+                : `<span class="text-[11px] text-gray-400 italic">Chưa cấp CCCD</span>
+                   <button type="button" onclick="window.assignCccdToCurrentQuestion()" class="px-2 py-0.5 bg-teal-50 hover:bg-teal-100 text-teal-700 border border-teal-200 rounded text-xs font-bold transition flex items-center gap-1 shadow-xs" title="Cấp mã CCCD số cho câu này"><i class="fa-solid fa-wand-magic-sparkles text-[10px]"></i> Cấp CCCD</button>`;
+
+            const envVal = q.env || (q.type === 'essay' || q.type === 'tl' ? 'bt' : 'ex');
+            let idInfoBar = `
+                <div class="mb-3 px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl flex items-center justify-between flex-wrap gap-2 text-xs">
+                    <div class="flex items-center gap-2 flex-wrap">
+                        <span class="font-bold text-gray-600">Loại MT:</span>
+                        <select id="editEnv" class="px-2 py-0.5 border border-gray-300 rounded font-mono font-bold text-gray-700 bg-white" onchange="autoSaveMemory()">
+                            <option value="ex" ${envVal==='ex'?'selected':''}>ex (TN/Đề)</option>
+                            <option value="bt" ${envVal==='bt'?'selected':''}>bt (Bài tập)</option>
+                            <option value="vd" ${envVal==='vd'?'selected':''}>vd (Ví dụ)</option>
+                            <option value="vidu" ${envVal==='vidu'?'selected':''}>vidu (Ví dụ)</option>
+                        </select>
+                        <span class="font-bold text-gray-600 ml-1">MapID:</span>
+                        <input type="text" id="editMapId" class="w-24 px-2 py-0.5 border border-gray-300 rounded font-mono font-bold text-primary-700 bg-white" value="${q.mapId || ''}" placeholder="VD: 9D1H2-4" oninput="autoSaveMemory(); if(typeof renderPreviewList==='function') renderPreviewList();">
+                        <span class="font-bold text-gray-600 ml-1">Nguồn:</span>
+                        <input type="text" id="editSource" class="w-28 px-2 py-0.5 border border-gray-300 rounded text-gray-700 bg-white" value="${q.source || ''}" placeholder="Nguồn câu hỏi" oninput="autoSaveMemory()">
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <span class="font-bold text-gray-600">CCCD:</span>
+                        ${cccdBadgeHtml}
+                    </div>
+                </div>
+            `;
+
             let alertHtml = '';
             if (!q.mapId) {
-                alertHtml = `<div class="mb-2 text-[10px] text-orange-500 italic bg-orange-50 px-2 py-1 rounded border border-orange-100 flex items-center gap-1"><i class="fa-solid fa-circle-exclamation"></i> Câu này chưa có ID (Sẽ không được lưu vào Ngân hàng)</div>`;
+                alertHtml = `<div class="mb-2 text-[10px] text-orange-500 italic bg-orange-50 px-2 py-1 rounded border border-orange-100 flex items-center gap-1"><i class="fa-solid fa-circle-exclamation"></i> Câu này chưa có MapID (Khuyến khích gán ID dạng [9D1H1-1] để tiện tra cứu)</div>`;
             }
 
             // [FIX LỖI XEM TRƯỚC]: Bổ sung Khối Xem trước HTML/Ảnh nằm trên Textarea
             let html = `
+                ${idInfoBar}
                 ${alertHtml}
                 <div class="mb-4">
                     <div class="flex justify-between items-center mb-1">
@@ -2191,6 +2301,32 @@
         window.autoSaveMemory = () => { saveCurrentQuestionToMemory(); };
         window.setCorrectMC = (idx) => { window.questions[window.currentQIndex].correct = idx; loadQuestionToEditor(window.currentQIndex); };
         window.deleteCurrentQuestion = async () => { if (window.currentQIndex === -1) return; if(await window.customConfirm("Xóa câu hỏi này?")) { window.questions.splice(window.currentQIndex, 1); window.currentQIndex = -1; renderPreviewList(); document.getElementById('editorArea').innerHTML = ''; } };
+
+        window.assignCccdToCurrentQuestion = async () => {
+            if (window.currentQIndex === -1) return;
+            const q = window.currentQListType === 'mixed-tl' ? window.mixedTlQuestions[window.currentQIndex] : window.questions[window.currentQIndex];
+            if (!q) return;
+
+            if (window.BankService && window.BankService.isNumericCccd(q.cccd || q.bankId)) {
+                if(window.showToast) window.showToast(`Câu này đã có mã CCCD: #${q.cccd || q.bankId}`, "info");
+                return;
+            }
+
+            try {
+                if (window.BankService) {
+                    const batch = await window.BankService.allocateCccdBatch(1);
+                    const newCccd = batch.list[0];
+                    q.cccd = newCccd;
+                    q.bankId = newCccd;
+                    renderPreviewList();
+                    loadQuestionToEditor(window.currentQIndex, window.currentQListType);
+                    if(window.showToast) window.showToast(`Đã cấp mã CCCD mới: #${newCccd}`, "success");
+                }
+            } catch(e) {
+                console.error("Lỗi cấp CCCD:", e);
+                if(window.showToast) window.showToast("Lỗi cấp CCCD: " + e.message, "error");
+            }
+        };
 
         function cleanLatex(text) { if (!text) return ""; let cleaned = text.replace(/^%.*$/gm, '').replace(/(?<!\\)%.*/g, '').replace(/^\s*\[.*?\]/gm, ''); return cleaned.trim(); }
         
@@ -2533,7 +2669,13 @@
             reader.onload = function(e) {
                 if (window.currentQIndex !== -1) saveCurrentQuestionToMemory();
                 
-                let content = e.target.result;
+                const rawFileContent = e.target.result;
+                window.lastUploadedTexFile = {
+                    name: file.name,
+                    rawText: rawFileContent
+                };
+
+                let content = rawFileContent;
 
                // 1. Làm sạch LaTeX (Clean junk)
                 content = content.replace(/\\begin\{multicols\}\{.*?\}/g, "").replace(/\\end\{multicols\}/g, "");
@@ -2549,28 +2691,71 @@
                 content = content.replace(/\\begin\{array\}\s*\{[^{}]*?\}/g, '\\begin{matrix}').replace(/\\begin\{array\}/g, '\\begin{matrix}').replace(/\\end\{array\}/g, '\\end{matrix}');
 
                 pendingImageUploads = [];
-                const blockRegex = /\\begin\{(ex|bt|vd)\}([\s\S]*?)\\end\{\1\}/g;
+                const blockRegex = /\\begin\{(ex|bt|vd|vidu)\}([\s\S]*?)\\end\{\1\}/g;
                 let match, count = 0;
                 
                 while ((match = blockRegex.exec(content)) !== null) {
+                    const currentEnv = match[1];
                     let fullBody = match[2];
 
-                    // --- [MỚI] TỰ ĐỘNG BẮT ID & PHÂN LOẠI ---
+                    // --- BÓC TÁCH HEADER: [CCCD]%[Nguồn]%[MapID] ---
                     let questionID = "";
+                    let assignedCccd = "";
+                    let source = "";
                     let tags = { subject: 'Chưa phân loại', level: '', levelColor: 'gray' };
 
-                    // Regex tìm ID dạng %%[9D1...] hoặc %[9D1...]
-                    const idMatch = fullBody.match(/(?:%%|%)\s*\[([a-zA-Z0-9\-_.]+)\]/);
-                    if (idMatch) {
-                        questionID = idMatch[1]; 
-                        tags = parseQuestionID(questionID); // Gọi hàm phân tích
-                        fullBody = fullBody.replace(idMatch[0], ''); // Xóa mã ID khỏi nội dung
+                    const firstNewline = fullBody.indexOf('\n');
+                    const firstLine = firstNewline !== -1 ? fullBody.substring(0, firstNewline) : fullBody;
+                    const bracketMatches = Array.from(firstLine.matchAll(/\[(.*?)\]/g)).map(m => m[1].trim());
+
+                    if (bracketMatches.length >= 3) {
+                        assignedCccd = bracketMatches[0];
+                        source = bracketMatches[1];
+                        questionID = bracketMatches[2];
+                    } else if (bracketMatches.length === 2) {
+                        if (/^\d{5,10}$/.test(bracketMatches[0])) {
+                            assignedCccd = bracketMatches[0];
+                            if (/^[0-2]?[0-9][A-Z][0-9]/i.test(bracketMatches[1])) {
+                                questionID = bracketMatches[1];
+                            } else {
+                                source = bracketMatches[1];
+                            }
+                        } else {
+                            source = bracketMatches[0];
+                            questionID = bracketMatches[1];
+                        }
+                    } else if (bracketMatches.length === 1) {
+                        const val = bracketMatches[0];
+                        if (/^\d{5,10}$/.test(val)) {
+                            assignedCccd = val;
+                        } else if (/^[0-2]?[0-9][A-Z][0-9]/i.test(val)) {
+                            questionID = val;
+                        } else {
+                            source = val;
+                        }
                     }
-                    
-                    // Sau khi lấy ID xong, xóa tiếp các rác còn lại (ví dụ %[Câu 1])
-                    fullBody = fullBody.replace(/(?<!\\)%.*/g, ''); 
-                    fullBody = fullBody.replace(/^\s*\[.*?\]/, ''); 
-                    // -----------------------------------
+
+                    // Nếu chưa tìm thấy MapID, tìm dạng %[ID] trong toàn body
+                    if (!questionID) {
+                        const idMatch = fullBody.match(/(?:%%|%)\s*\[([a-zA-Z0-9\-_.]+)\]/);
+                        if (idMatch) {
+                            questionID = idMatch[1];
+                        }
+                    }
+
+                    if (questionID) {
+                        tags = parseQuestionID(questionID);
+                    }
+
+                    // Làm sạch header ở đầu nội dung câu hỏi
+                    if (firstNewline !== -1 && (bracketMatches.length > 0 || firstLine.trim().startsWith('%'))) {
+                        fullBody = fullBody.substring(firstNewline + 1);
+                    } else {
+                        fullBody = fullBody.replace(/^\s*\[.*?\](?:%\[.*?\])*/, '');
+                    }
+                    fullBody = fullBody.replace(/(?:%%|%)\s*\[[a-zA-Z0-9\-_.]+\]/g, '');
+                    fullBody = fullBody.replace(/(?<!\\)%.*/g, '');
+                    fullBody = fullBody.replace(/^\s*\[.*?\]/, '');
                     
                     let qType = 'essay';
                     // Thêm mapId vào qData
@@ -2665,7 +2850,11 @@
                     
                     // --- TẠO OBJECT CÂU HỎI CUỐI CÙNG ---
                     const finalQuestion = { 
-                        type: qType, 
+                        type: qType,
+                        env: currentEnv,
+                        cccd: assignedCccd,
+                        bankId: assignedCccd,
+                        source: source,
                         ...qData, 
                         mapId: questionID,      // Lưu ID gốc (VD: 9D1H1-6)
                         subject: tags.subject,  // Lưu môn (Đại/Hình)
@@ -6282,69 +6471,90 @@ YÊU CẦU NỘI DUNG LỜI PHÊ:
         // --- [BẢN CHUẨN R2] CẤP "CCCD" ĐỘC LẬP CHO TỪNG CÂU HỎI ---
         // ============================================================
         // ============================================================
-        // --- [BẢN CHUẨN R2] CẤP "CCCD" ĐỘC LẬP & LƯU ĐẦY ĐỦ ĐÁP ÁN ---
+        // ============================================================
+        // --- HỢP NHẤT: CẤP MÃ CCCD SỐ & NẠP VÀO NGÂN HÀNG (R2) QUA BANKSERVICE ---
         // ============================================================
         window.saveCurrentQuestionsToBank = async () => {
-            const validQuestions = window.questions.filter(q => q.mapId && q.mapId.trim() !== "");
+            const validQuestions = (window.questions || []).filter(q => (q.mapId && q.mapId.trim() !== "") || (q.content && q.content.trim() !== ""));
             
             if (validQuestions.length === 0) {
-                window.customAlert("Không tìm thấy câu hỏi nào có ID hợp lệ (VD: [9D1...]) để lưu!", "error");
+                window.customAlert("Không tìm thấy câu hỏi nào có nội dung để lưu vào Ngân hàng!", "error");
                 return;
             }
 
-            const confirmMsg = `Hệ thống sẽ đẩy ${validQuestions.length} câu hỏi vào Ngân hàng.\nMỗi câu sẽ được cấp mã định danh độc lập để không ghi đè lên câu cũ.\nBạn đồng ý chứ?`;
+            const needCccdQuestions = validQuestions.filter(q => !window.BankService?.isNumericCccd(q.cccd || q.bankId));
+            const confirmMsg = `Hệ thống sẽ nạp ${validQuestions.length} câu hỏi vào Ngân hàng câu hỏi R2.\n${needCccdQuestions.length > 0 ? `Trong đó có ${needCccdQuestions.length} câu sẽ được cấp mã CCCD số mới duy nhất.\n` : 'Tất cả câu đều đã có mã CCCD số.\n'}Bạn đồng ý chứ?`;
             if (!await window.customConfirm(confirmMsg)) return;
 
             const btn = document.querySelector('button[onclick*="saveCurrentQuestionsToBank"]');
             const oldHtml = btn ? btn.innerHTML : 'Lưu Bank';
-            if (btn) { btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang tải lên...'; btn.disabled = true; }
+            if (btn) { btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang nạp Bank...'; btn.disabled = true; }
 
             try {
-                const BASE_URL = "https://upload-helper.phamngockhanh-942001.workers.dev/";
-                let successCount = 0;
+                // 1. Cấp dải mã CCCD số từ bộ đếm trung tâm cho các câu chưa có CCCD
+                if (needCccdQuestions.length > 0 && window.BankService) {
+                    const batch = await window.BankService.allocateCccdBatch(needCccdQuestions.length);
+                    needCccdQuestions.forEach((q, idx) => {
+                        const newId = batch.list[idx];
+                        q.cccd = newId;
+                        q.bankId = newId;
+                    });
+                }
 
-                const uploadPromises = validQuestions.map(async (q) => {
-                    // Cấp Căn cước công dân (bankId)
-                    if (!q.bankId) {
-                        const uniqueSuffix = Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
-                        q.bankId = `${q.mapId}_${uniqueSuffix}`;
+                // 2. Chuẩn hóa format câu hỏi theo chuẩn thống nhất của BankService
+                const examId = window.currentExamId || "";
+                const payloads = validQuestions.map(q => {
+                    q.examId = examId;
+                    if (window.BankService) {
+                        return window.BankService.createBankQuestion(q, q.cccd || q.bankId);
                     }
-
-                    // ĐÓNG GÓI DỮ LIỆU ĐẦY ĐỦ
-                    const qData = {
-                        id: q.bankId,     
-                        mapId: q.mapId,   
-                        type: q.type,
+                    return {
+                        id: String(q.cccd || q.bankId || Date.now()),
+                        cccd: String(q.cccd || q.bankId || Date.now()),
+                        mapId: q.mapId || "",
+                        type: q.type || 'mc',
                         content: q.content || "",
                         solution: q.solution || "",
                         options: q.options || [],
-                        correct: q.correct, // <--- [FIX QUAN TRỌNG LÀ Ở ĐÂY]: Lưu lại vị trí đáp án đúng
+                        correct: q.correct,
                         statements: q.statements || [],
                         answer: q.answer || "",
                         subject: q.subject || "Khác",
                         level: q.level || "Thông hiểu",
                         levelColor: q.levelColor || "blue",
                         point: q.point || 0,
+                        examId: examId,
                         updatedAt: new Date().toISOString()
                     };
-
-                    const jsonString = JSON.stringify(qData);
-                    const blob = new Blob([jsonString], { type: 'application/json' });
-                    const formData = new FormData();
-                    
-                    // Lưu file bằng bankId
-                    formData.append('file', blob, `bank/${q.bankId}.json`);
-
-                    const response = await fetch(BASE_URL, { method: 'PUT', body: formData });
-                    if (response.ok) successCount++;
                 });
 
-                await Promise.all(uploadPromises);
-
-                if (successCount === validQuestions.length) {
-                    window.showToast(`Đã lưu thành công ${successCount} câu vào kho chung!`, "success");
+                // 3. Nạp lên Cloudflare R2 qua BankService
+                let res;
+                if (window.BankService) {
+                    res = await window.BankService.uploadQuestionsToBank(payloads, { concurrency: 5 });
                 } else {
-                    window.showToast(`Lưu được ${successCount}/${validQuestions.length} câu. Có lỗi mạng.`, "warning");
+                    const BASE_URL = "https://upload-helper.phamngockhanh-942001.workers.dev/";
+                    let successCount = 0;
+                    for (const p of payloads) {
+                        const blob = new Blob([JSON.stringify(p)], { type: 'application/json' });
+                        const formData = new FormData();
+                        formData.append('file', blob, `bank/${p.id}.json`);
+                        const r = await fetch(BASE_URL, { method: 'PUT', body: formData });
+                        if (r.ok) successCount++;
+                    }
+                    res = { successCount, failCount: payloads.length - successCount, total: payloads.length };
+                }
+
+                // 4. Đồng bộ lại UI danh sách để thấy ngay badge CCCD mới
+                if (typeof renderPreviewList === 'function') renderPreviewList();
+                if (window.currentQIndex !== -1 && typeof loadQuestionToEditor === 'function') {
+                    loadQuestionToEditor(window.currentQIndex, window.currentQListType);
+                }
+
+                if (res.successCount === validQuestions.length) {
+                    window.showToast(`✅ Đã nạp thành công ${res.successCount} câu vào Ngân hàng câu hỏi R2! Tất cả đều có mã CCCD số duy nhất.`, "success");
+                } else {
+                    window.showToast(`Đã nạp ${res.successCount}/${validQuestions.length} câu. (${res.failCount} câu lỗi mạng)`, "warning");
                 }
 
             } catch (err) {
@@ -6354,7 +6564,263 @@ YÊU CẦU NỘI DUNG LỜI PHÊ:
                 if (btn) { btn.innerHTML = oldHtml; btn.disabled = false; }
             }
         };
-    window.toggleHomeworkFields = () => {
+
+        // ============================================================
+        // --- XUẤT FILE LATEX CHUẨN CÓ MÃ CCCD / ID (\begin{ex}[CCCD]%[Nguồn]%[ID]) ---
+        // ============================================================
+
+        function formatQuestionToLatex(q) {
+            const env = q.env || (q.type === 'essay' || q.type === 'tl' ? 'bt' : 'ex');
+            const cccd = q.cccd || q.bankId || '';
+            const source = q.source || '';
+            const mapId = q.mapId || '';
+
+            let out = `\\begin{${env}}[${cccd}]%[${source}]%[${mapId}]\n`;
+            out += (q.content || '').trim() + '\n';
+
+            if (q.type === 'mc' && Array.isArray(q.options) && q.options.length > 0) {
+                const choiceItems = q.options.map((opt, i) => {
+                    const isCorrect = (i === q.correct);
+                    return `\t{${isCorrect ? '\\True ' : ''}${(opt || '').trim()}}`;
+                }).join('\n');
+                out += `\\choice\n${choiceItems}\n`;
+            } else if (q.type === 'tf' && Array.isArray(q.statements) && q.statements.length > 0) {
+                const tfItems = q.statements.map(stmt => {
+                    const isTrue = stmt.isTrue || stmt.correct === true;
+                    return `\t{${isTrue ? '\\True ' : ''}${(stmt.text || stmt.content || '').trim()}}`;
+                }).join('\n');
+                out += `\\choiceTF\n${tfItems}\n`;
+            } else if (q.type === 'short' && (q.answer !== undefined && q.answer !== null && String(q.answer).trim() !== '')) {
+                out += `\\shortans{${String(q.answer).trim()}}\n`;
+            }
+
+            const solText = (q.solution || '').trim();
+            out += `\\loigiai{\n${solText}\n}\n`;
+            out += `\\end{${env}}`;
+            return out;
+        }
+
+        function updateOriginalLatexWithCccd(rawText, questions) {
+            let qIdx = 0;
+            const isCRLF = rawText.includes('\r\n');
+            const lineEnding = isCRLF ? '\r\n' : '\n';
+            const lines = rawText.split(/\r?\n/);
+            const updatedLines = [];
+
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
+                const match = line.match(/^(\s*)\\begin\{(ex|bt|vd|vidu)\}(.*)$/);
+                if (match && qIdx < questions.length) {
+                    const indent = match[1];
+                    const currentEnv = match[2];
+                    let restOfLine = match[3] || '';
+                    const q = questions[qIdx];
+                    const env = q.env || currentEnv;
+                    const cccd = q.cccd || q.bankId || '';
+                    const source = q.source || '';
+                    const mapId = q.mapId || '';
+
+                    // Lọc bỏ các tham số cũ [...]%[...] ở đầu restOfLine
+                    restOfLine = restOfLine.replace(/^\s*\[.*?\]/, '').replace(/^\s*(?:%%|%)\[.*?\]/g, '').replace(/^\s*(?:%%|%)\[.*?\]/g, '').trim();
+
+                    const newLine = `${indent}\\begin{${env}}[${cccd}]%[${source}]%[${mapId}]`;
+                    if (restOfLine) {
+                        updatedLines.push(newLine);
+                        updatedLines.push(`${indent}${restOfLine}`);
+                    } else {
+                        updatedLines.push(newLine);
+                    }
+                    qIdx++;
+                } else {
+                    updatedLines.push(line);
+                }
+            }
+
+            return updatedLines.join(lineEnding);
+        }
+
+        function generateFullLatexDocument(questions, title = "Đề thi", includePreamble = true) {
+            const qBlocks = questions.map(q => formatQuestionToLatex(q)).join('\n\n');
+
+            if (!includePreamble) {
+                return qBlocks;
+            }
+
+            return `% ==============================================================================
+% FILE ĐỀ THI / SÁCH ID ĐƯỢC XUẤT TỰ ĐỘNG TỪ HỆ THỐNG
+% TIÊU ĐỀ: ${title}
+% TỔNG SỐ CÂU: ${questions.length} CÂU HỎI ĐÃ GẮN MÃ CCCD / ID
+% ==============================================================================
+\\documentclass[12pt,a4paper]{article}
+\\usepackage[utf8]{vietnam}
+\\usepackage{amsmath,amssymb,amsfonts}
+\\usepackage{tikz,tkz-euclide}
+\\usepackage{geometry}
+\\geometry{a4paper,left=2cm,right=2cm,top=2cm,bottom=2cm}
+
+% Định nghĩa môi trường nếu chưa có gói ex_test
+\\usepackage{environ}
+\\providecommand{\\True}{}
+\\NewEnviron{ex}[1][]{\\par\\noindent\\textbf{Câu:} \\BODY\\par}
+\\NewEnviron{bt}[1][]{\\par\\noindent\\textbf{Bài tập:} \\BODY\\par}
+\\NewEnviron{vd}[1][]{\\par\\noindent\\textbf{Ví dụ:} \\BODY\\par}
+\\NewEnviron{vidu}[1][]{\\par\\noindent\\textbf{Ví dụ:} \\BODY\\par}
+\\providecommand{\\choice}[4]{\\par\\begin{tabular}{llll} A. #1 & B. #2 & C. #3 & D. #4 \\end{tabular}\\par}
+\\providecommand{\\choiceTF}[4]{\\par (1) #1 \\par (2) #2 \\par (3) #3 \\par (4) #4\\par}
+\\providecommand{\\shortans}[1]{\\par\\textbf{Đáp số:} #1\\par}
+\\providecommand{\\loigiai}[1]{\\par\\noindent\\textit{Lời giải:}\\par #1}
+
+\\begin{document}
+
+\\begin{center}
+    {\\Large\\bfseries ${title.toUpperCase()}}\\par\\vspace{3mm}
+    \\textit{(Tài liệu số hóa kèm mã CCCD tra cứu)}
+\\end{center}
+\\vspace{5mm}
+
+${qBlocks}
+
+\\end{document}
+`;
+        }
+
+        window.regenerateLatexPreview = () => {
+            const questions = [...(window.questions || []), ...(window.mixedTlQuestions || [])];
+            const examTitle = (document.getElementById('settingTitle')?.value || window.examData?.title || "De_Thi").trim();
+            const includePreamble = document.getElementById('exportLatexIncludePreamble')?.checked ?? true;
+            const previewEl = document.getElementById('exportLatexCodePreview');
+            const sourceHint = document.getElementById('exportLatexSourceHint');
+
+            let code = "";
+            if (window.lastUploadedTexFile && window.lastUploadedTexFile.rawText) {
+                if (includePreamble) {
+                    code = updateOriginalLatexWithCccd(window.lastUploadedTexFile.rawText, questions);
+                    if (sourceHint) sourceHint.textContent = `Nguồn: Cập nhật trực tiếp từ file gốc [${window.lastUploadedTexFile.name}]`;
+                } else {
+                    code = generateFullLatexDocument(questions, examTitle, false);
+                    if (sourceHint) sourceHint.textContent = `Chỉ xuất thân các câu hỏi (không kèm preamble)`;
+                }
+            } else {
+                code = generateFullLatexDocument(questions, examTitle, includePreamble);
+                if (sourceHint) sourceHint.textContent = `Nguồn: Tự động tổng hợp từ ${questions.length} câu hỏi hiện có`;
+            }
+
+            if (previewEl) previewEl.value = code;
+        };
+
+        window.openExportLatexModal = async () => {
+            if (window.currentQIndex !== -1 && typeof saveCurrentQuestionToMemory === 'function') {
+                saveCurrentQuestionToMemory();
+            }
+
+            const questions = window.questions || [];
+            const mixedTl = window.mixedTlQuestions || [];
+            const allQuestions = [...questions, ...mixedTl];
+
+            if (allQuestions.length === 0) {
+                window.customAlert("Chưa có câu hỏi nào trong danh sách để xuất file LaTeX!", "error");
+                return;
+            }
+
+            // Kiểm tra câu hỏi chưa có CCCD
+            const needCccd = allQuestions.filter(q => !window.BankService?.isNumericCccd(q.cccd || q.bankId));
+            if (needCccd.length > 0) {
+                const confirmAllocate = await window.customConfirm(
+                    `Phát hiện ${needCccd.length}/${allQuestions.length} câu hỏi chưa có mã CCCD số.\nBạn có muốn hệ thống TỰ ĐỘNG CẤP MÃ CCCD và đồng bộ lên Ngân hàng trước khi xuất file không?\n\n- Bấm OK: Cấp mã CCCD 8 số và xuất file.\n- Bấm Hủy: Giữ nguyên để xuất file.`
+                );
+                if (confirmAllocate) {
+                    try {
+                        if (window.BankService) {
+                            const batch = await window.BankService.allocateCccdBatch(needCccd.length);
+                            needCccd.forEach((q, idx) => {
+                                const newId = batch.list[idx];
+                                q.cccd = newId;
+                                q.bankId = newId;
+                            });
+                            const payloads = needCccd.map(q => window.BankService.createBankQuestion(q, q.cccd));
+                            window.BankService.uploadQuestionsToBank(payloads).catch(console.error);
+                            if (typeof renderPreviewList === 'function') renderPreviewList();
+                            if (window.currentQIndex !== -1 && typeof loadQuestionToEditor === 'function') {
+                                loadQuestionToEditor(window.currentQIndex, window.currentQListType);
+                            }
+                        }
+                    } catch(e) {
+                        console.error("Lỗi cấp CCCD tự động:", e);
+                    }
+                }
+            }
+
+            // Cập nhật thống kê
+            const totalCountEl = document.getElementById('exportLatexTotalCount');
+            const withCccdCountEl = document.getElementById('exportLatexWithCccdCount');
+            const withoutCccdCountEl = document.getElementById('exportLatexWithoutCccdCount');
+            const withCount = allQuestions.filter(q => window.BankService?.isNumericCccd(q.cccd || q.bankId)).length;
+            const withoutCount = allQuestions.length - withCount;
+
+            if (totalCountEl) totalCountEl.textContent = allQuestions.length;
+            if (withCccdCountEl) withCccdCountEl.textContent = withCount;
+            if (withoutCccdCountEl) withoutCccdCountEl.textContent = withoutCount;
+
+            window.regenerateLatexPreview();
+
+            const modal = document.getElementById('exportLatexModal');
+            if (modal) {
+                modal.classList.remove('opacity-0', 'pointer-events-none');
+                modal.querySelector('div').classList.remove('scale-95');
+                modal.querySelector('div').classList.add('scale-100');
+            }
+        };
+
+        window.closeExportLatexModal = () => {
+            const modal = document.getElementById('exportLatexModal');
+            if (modal) {
+                modal.classList.add('opacity-0', 'pointer-events-none');
+                modal.querySelector('div').classList.add('scale-95');
+                modal.querySelector('div').classList.remove('scale-100');
+            }
+        };
+
+        window.copyExportLatexCode = async () => {
+            const textarea = document.getElementById('exportLatexCodePreview');
+            const content = textarea ? textarea.value : '';
+            if (!content) return;
+            try {
+                await navigator.clipboard.writeText(content);
+                window.showToast("Đã sao chép toàn bộ mã TeX vào Clipboard!", "success");
+            } catch(e) {
+                textarea.select();
+                document.execCommand('copy');
+                window.showToast("Đã sao chép mã TeX!", "success");
+            }
+        };
+
+        window.downloadExportLatexFile = () => {
+            const textarea = document.getElementById('exportLatexCodePreview');
+            const content = textarea ? textarea.value : '';
+            if (!content) {
+                window.showToast("Không có nội dung LaTeX để tải!", "warning");
+                return;
+            }
+            const examTitle = (document.getElementById('settingTitle')?.value || window.examData?.title || "De_Thi").trim();
+            let fileName = `${examTitle.replace(/[^a-zA-Z0-9_\-\u00C0-\u024F\u1EA0-\u1EF9]/g, '_')}_ID.tex`;
+            if (window.lastUploadedTexFile && window.lastUploadedTexFile.name) {
+                fileName = window.lastUploadedTexFile.name.replace(/\.(tex|txt)$/i, '') + '_ID.tex';
+            }
+
+            const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = fileName;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            window.showToast(`Đã tải xuống file: ${fileName}`, "success");
+        };
+
+        window.exportQuestionsToLatex = window.openExportLatexModal;
+        window.toggleHomeworkFields = () => {
             const type = document.getElementById('settingType').value;
             const hwArea = document.getElementById('homeworkConfigArea');
             const mixedArea = document.getElementById('mixedConfigArea');
