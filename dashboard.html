@@ -752,7 +752,7 @@
                         </div>
                         <button onclick="window.pasteExplorerItem()" id="btnPasteItem" class="p-2 md:px-3 md:py-2 bg-primary-100 text-primary-700 hover:bg-primary-200 rounded-lg text-xs md:text-sm font-bold transition-colors flex items-center justify-center shrink-0 hidden" title="Dán (Paste)"><i class="fa-solid fa-paste"></i><span class="hidden sm:inline ml-1.5">Dán</span></button>
                         <button onclick="window.createNewFolder()" class="p-2 md:px-3 md:py-2 bg-yellow-100 text-yellow-700 hover:bg-yellow-200 rounded-lg text-xs md:text-sm font-bold transition-colors flex items-center justify-center shrink-0" title="Tạo thư mục"><i class="fa-solid fa-folder-plus"></i><span class="hidden sm:inline ml-1.5">Tạo thư mục</span></button>
-                        <button id="btnCreateContent" onclick="window.location.href='exam-editor.html'" class="p-2 md:px-3 md:py-2 bg-green-100 text-green-700 hover:bg-green-200 rounded-lg text-xs md:text-sm font-bold transition-colors flex items-center justify-center shrink-0" title="Soạn đề mới"><i class="fa-solid fa-file-circle-plus"></i><span class="hidden sm:inline ml-1.5">Soạn đề mới</span></button>
+                        <button id="btnCreateContent" onclick="window.openCreateExam()" class="p-2 md:px-3 md:py-2 bg-green-100 text-green-700 hover:bg-green-200 rounded-lg text-xs md:text-sm font-bold transition-colors flex items-center justify-center shrink-0" title="Soạn đề mới"><i class="fa-solid fa-file-circle-plus"></i><span class="hidden sm:inline ml-1.5">Soạn đề mới</span></button>
                     </div>
                 </div>
                 <!-- Dòng 2: Breadcrumb (chỉ hiện trên desktop) -->
@@ -1793,16 +1793,30 @@
             btnHw.className = tab === 'homework' ? activeClass : inactiveClass;
             btnMixed.className = tab === 'mixed' ? activeClass : inactiveClass;
 
+            const getCreateUrl = (type = '') => {
+                const params = new URLSearchParams();
+                if (type) params.set('type', type);
+                if (currentViewingClassId) params.set('classId', currentViewingClassId);
+                if (currentFolderId) params.set('folderId', currentFolderId);
+                const qs = params.toString();
+                return 'exam-editor.html' + (qs ? '?' + qs : '');
+            };
+
+            window.openCreateExam = (customType) => {
+                const type = customType !== undefined ? customType : (tab === 'homework' ? 'homework' : (tab === 'mixed' ? 'mixed' : ''));
+                window.location.href = getCreateUrl(type);
+            };
+
             if (tab === 'exam') {
-                btnCreate.onclick = () => window.location.href='exam-editor.html' + (currentViewingClassId ? '?classId=' + currentViewingClassId : '');
+                btnCreate.onclick = () => window.openCreateExam('');
                 btnCreate.className = "p-2 md:px-3 md:py-2 bg-green-100 text-green-700 hover:bg-green-200 rounded-lg text-xs md:text-sm font-bold transition-colors flex items-center justify-center shrink-0";
                 btnCreate.innerHTML = '<i class="fa-solid fa-file-circle-plus"></i><span class="hidden sm:inline ml-1.5">Soạn đề mới</span>';
             } else if (tab === 'homework') {
-                btnCreate.onclick = () => window.location.href = 'exam-editor.html?type=homework' + (currentViewingClassId ? '&classId=' + currentViewingClassId : '');
+                btnCreate.onclick = () => window.openCreateExam('homework');
                 btnCreate.className = "p-2 md:px-3 md:py-2 bg-red-100 text-red-700 hover:bg-red-200 rounded-lg text-xs md:text-sm font-bold transition-colors flex items-center justify-center shrink-0";
                 btnCreate.innerHTML = '<i class="fa-solid fa-file-pdf"></i><span class="hidden sm:inline ml-1.5">Tạo bài Tự luận</span>';
             } else {
-                btnCreate.onclick = () => window.location.href = 'exam-editor.html?type=mixed' + (currentViewingClassId ? '&classId=' + currentViewingClassId : '');
+                btnCreate.onclick = () => window.openCreateExam('mixed');
                 btnCreate.className = "p-2 md:px-3 md:py-2 bg-purple-100 text-purple-700 hover:bg-purple-200 rounded-lg text-xs md:text-sm font-bold transition-colors flex items-center justify-center shrink-0";
                 btnCreate.innerHTML = '<i class="fa-solid fa-file-pen"></i><span class="hidden sm:inline ml-1.5">Soạn đề hỗn hợp</span>';
             }
@@ -4524,6 +4538,11 @@ function saveBankCache() {
 async function loadFileManager(forceRefresh = false) { 
     const container = document.getElementById('explorerGrid');
 
+    // Tự động làm mới dữ liệu nếu vừa quay lại từ trang biên soạn đề
+    if (document.referrer && document.referrer.includes('exam-editor.html')) {
+        forceRefresh = true;
+    }
+
     // 1. KIỂM TRA BỘ NHỚ ĐỆM (CACHE)
     const isSuper = window.currentAdminProfile?.role === 'super_admin' || ROOT_SUPER_ADMINS.map(e => e.toLowerCase()).includes(((window.currentAdminProfile?.email || (auth.currentUser ? auth.currentUser.email : '')) || '').toLowerCase());
     const canUseShared = isSuper || window.hasPermission('bank.use_shared');
@@ -4544,6 +4563,10 @@ async function loadFileManager(forceRefresh = false) {
             examData = JSON.parse(cachedE) || [];
             tagData = cachedT ? (JSON.parse(cachedT) || []) : [];
             hasValidCache = true;
+            const activeFolderFromUrl = new URLSearchParams(window.location.search).get('folderId') || sessionStorage.getItem('last_active_folder_id');
+            if (activeFolderFromUrl && folderData.some(f => f.id === activeFolderFromUrl)) {
+                currentFolderId = activeFolderFromUrl;
+            }
             if (container) {
                 renderTagFilterUI();
                 renderExplorer(); // Hiển thị tức thì trong 0s từ Cache!
@@ -4667,6 +4690,10 @@ async function loadFileManager(forceRefresh = false) {
             // Vẽ lại giao diện nếu đang ở tab Ngân hàng
             const bankView = document.getElementById('view-exambank');
             if (bankView && !bankView.classList.contains('hidden')) {
+                const activeFolderFromUrl = new URLSearchParams(window.location.search).get('folderId') || sessionStorage.getItem('last_active_folder_id');
+                if (activeFolderFromUrl && folderData.some(f => f.id === activeFolderFromUrl)) {
+                    currentFolderId = activeFolderFromUrl;
+                }
                 renderTagFilterUI();
                 renderExplorer(); 
             }
@@ -4980,7 +5007,18 @@ function renderTagFilterUI() {
             } catch (err) { console.error("Drop error", err); } 
             document.querySelectorAll('.dragging').forEach(el => el.classList.remove('dragging')); 
         }
-        window.navigateFolder = (id, name) => { if(id === 'root') { currentFolderId = null; breadcrumbs = []; } else { currentFolderId = id; breadcrumbs.push({id, name}); } renderExplorer(); }
+        window.navigateFolder = (id, name) => { 
+            if(id === 'root') { 
+                currentFolderId = null; 
+                breadcrumbs = []; 
+                sessionStorage.removeItem('last_active_folder_id');
+            } else { 
+                currentFolderId = id; 
+                breadcrumbs.push({id, name}); 
+                sessionStorage.setItem('last_active_folder_id', id);
+            } 
+            renderExplorer(); 
+        }
         
         window.explorerClipboard = { item: null, type: null, action: null };
         window.copyExplorerItem = (id, type) => {

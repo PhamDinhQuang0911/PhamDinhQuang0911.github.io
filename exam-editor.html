@@ -3409,6 +3409,13 @@
                 const rawTexToSave = window.lastUploadedTexFile?.rawText || window.examData?.rawTex || null;
                 const rawTexNameToSave = window.lastUploadedTexFile?.name || window.examData?.rawTexName || null;
                 
+                // Xác định folderId: ưu tiên folderId từ URL hoặc folderId hiện có của đề
+                const urlParams = new URLSearchParams(window.location.search);
+                const assignedFolderId = urlParams.get('folderId') || sessionStorage.getItem('last_active_folder_id');
+                const targetFolderId = currentExamId 
+                    ? (window.examData?.folderId !== undefined ? window.examData.folderId : (assignedFolderId || null))
+                    : (assignedFolderId || null);
+
                 await setDoc(examRef, { 
                     ...settings, 
                     n8nWebhooks: webhooksConfig,
@@ -3418,9 +3425,13 @@
                     status: status, 
                     rawTex: rawTexToSave,
                     rawTexName: rawTexNameToSave,
+                    folderId: targetFolderId,
                     updatedAt: new Date().toISOString(), 
                     ...(currentExamId ? {} : { createdAt: new Date().toISOString() }) 
                 }, { merge: true });
+
+                if (!window.examData) window.examData = {};
+                window.examData.folderId = targetFolderId;
 
                 if (rawTexToSave) {
                     if (!window.examData) window.examData = {};
@@ -4516,6 +4527,10 @@
             const assignToClassId = urlParams.get('assignTo'); // Lấy ID lớp nếu đang giao bài
             
             let targetUrl = 'dashboard.html?view=exambank'; // Mặc định về Ngân hàng đề
+            const activeFolder = (window.examData?.folderId) || urlParams.get('folderId') || sessionStorage.getItem('last_active_folder_id');
+            if (activeFolder) {
+                targetUrl += `&folderId=${encodeURIComponent(activeFolder)}`;
+            }
 
             if (assignToClassId) {
                 // Nếu đang soạn đề cho lớp -> Quay về chi tiết lớp đó, tab Bài tập
