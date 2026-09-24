@@ -14,6 +14,25 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script>
+    // Tự động giải phóng Service Worker & Cache cũ để cập nhật phiên bản mới
+    (function() {
+        const CACHE_RESET_ID = 'qmath_student_v16_reset';
+        if (localStorage.getItem('qm_reset_cache_student') !== CACHE_RESET_ID) {
+            if ('serviceWorker' in navigator) {
+                navigator.serviceWorker.getRegistrations().then(registrations => {
+                    for (const reg of registrations) reg.unregister();
+                });
+            }
+            if ('caches' in window) {
+                caches.keys().then(keys => {
+                    for (const k of keys) caches.delete(k);
+                });
+            }
+            localStorage.setItem('qm_reset_cache_student', CACHE_RESET_ID);
+        }
+    })();
+    </script>
+    <script>
         window.MathJax = {
             loader: { load: ['[tex]/noerrors', '[tex]/noundefined'] },
             tex: {
@@ -1057,9 +1076,18 @@
         let selectedAvatarFile = null; // Biến lưu file tạm
 
         // --- KÍCH HOẠT CACHE OFFLINE (QUAN TRỌNG) ---
-        const isIosInstalledApp = /iPad|iPhone|iPod/.test(navigator.userAgent)
-            && (navigator.standalone === true || window.matchMedia?.('(display-mode: standalone)').matches);
-        if (!isIosInstalledApp) {
+        // Nhận diện chuẩn xác toàn bộ thiết bị Apple (kể cả iPadOS 13+ tự nhận là Macintosh) và chế độ Lối tắt Standalone
+        const isAppleDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) || 
+            (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) ||
+            (navigator.userAgent.includes('Macintosh') && navigator.maxTouchPoints > 1);
+        const isStandaloneApp = (navigator.standalone === true) || 
+            (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) ||
+            (window.matchMedia && window.matchMedia('(display-mode: fullscreen)').matches);
+        const isIosInstalledApp = isAppleDevice && isStandaloneApp;
+
+        // TUYỆT ĐỐI KHÔNG bật multi-tab IndexedDB persistence khi chạy từ Lối tắt (Standalone)
+        // hoặc trên iOS/iPadOS standalone để ngăn chặn hoàn toàn lỗi deadlock IndexedDB WebKit làm treo vô tận các truy vấn Firestore (getDoc/getDocs/onSnapshot)
+        if (!isIosInstalledApp && !isStandaloneApp) {
             enableMultiTabIndexedDbPersistence(db).catch((err) => {
                 if (err.code == 'failed-precondition') console.warn('Đang mở nhiều tab (Multi-tab mode active).');
                 else if (err.code == 'unimplemented') console.warn('Trình duyệt không hỗ trợ cache.');
@@ -4828,7 +4856,8 @@ window.studentQuickLookupCccd = function() {
     }
 };
 </script>
-<script src="/sw-register.js?v=10"></script>
+<script src="/sw-register.js?v=16"></script>
+<script src="/app-installer.js?v=1"></script>
 </body>
 </html>
 
