@@ -21,12 +21,7 @@
                     window.location.href = `course-player.html?id=${encodeURIComponent(courseId)}`;
                     return;
                 }
-                // 1. ƯU TIÊN SỐ 1: history.back() để trình duyệt quay lại trang trước tức thì (0ms, không tải lại)
-                if (window.history.length > 1) {
-                    window.history.back();
-                    return;
-                }
-                // 2. Dự phòng nếu mở tab mới: document.referrer
+                // 1. Kiểm tra document.referrer từ cùng domain (không phải chính exam.html)
                 if (document.referrer && !document.referrer.includes('exam.html')) {
                     try {
                         const refUrl = new URL(document.referrer);
@@ -36,10 +31,30 @@
                         }
                     } catch(e) {}
                 }
+                // 2. Thử history.back() kèm fallback timeout nếu mở từ tab mới
+                if (window.history.length > 1) {
+                    window.history.back();
+                    setTimeout(() => {
+                        window.location.href = 'student.html';
+                    }, 350);
+                    return;
+                }
             } catch(err) {
                 console.warn('goBack error:', err);
             }
             window.location.href = 'student.html';
+        };
+
+        window.handleExamHeaderBack = async function() {
+            if (typeof isExamActive !== 'undefined' && isExamActive) {
+                if (typeof window.customConfirm === 'function') {
+                    const ok = await window.customConfirm('Bạn có chắc muốn rời khỏi bài thi không? Tiến trình làm bài đã được tự động lưu nháp.');
+                    if (!ok) return;
+                } else if (!confirm('Bạn có chắc muốn rời khỏi bài thi không? Tiến trình làm bài đã được tự động lưu nháp.')) {
+                    return;
+                }
+            }
+            window.goBack();
         };
     </script>
     <!-- PWA Settings -->
@@ -186,7 +201,7 @@
             padding: 0 !important;
         }
         
-        /* 4. Công thức Toán: Sát vào dòng chữ */
+        /* 4. Công thức Toán: Sát vào dòng chữ và ÉP ĐẬM NÉT, ĐEN TUYỀN CHỐNG MỜ */
         mjx-container:not([display="true"]) { margin: 0 !important; }
         
         mjx-container[display="true"] { 
@@ -198,20 +213,73 @@
             overflow-y: hidden !important; 
         }
 
-        /* 5. Mobile: Thu nhỏ công thức để vừa màn hình */
+        /* [FIX 1] ÉP MÀU ĐEN ĐẬM SẮC NÉT CHO TOÀN BỘ CÔNG THỨC TOÁN MATHJAX */
+        mjx-container,
+        mjx-container *,
+        .mjx-chtml,
+        .mjx-chtml *,
+        .MathJax,
+        .MathJax * {
+            color: #0f172a !important; /* Đen Slate-900 siêu đậm nét, chống mờ nhạt */
+            fill: #0f172a !important;
+            opacity: 1 !important;
+        }
+
+        /* Tăng cường độ nét của font MathJax (khắc phục hoàn toàn lỗi nét mảnh hairline trên mobile) */
+        mjx-c {
+            -webkit-text-stroke: 0.35px #0f172a !important;
+            text-shadow: 0 0 0.15px rgba(15, 23, 42, 0.45);
+        }
+
+        /* Đảm bảo toàn bộ chữ nội dung câu hỏi, bảng biểu, công thức luôn tương phản cao rõ nét */
+        #questionContent,
+        #questionContent p,
+        #questionContent span:not([class*="text-"]),
+        #questionContent div:not([class*="text-"]),
+        #answerOptions .flex-1,
+        .solution-box,
+        .solution-box p,
+        .solution-content,
+        .solution-content p,
+        .js-scale-table,
+        .js-scale-table td,
+        .js-scale-table th,
+        #solutionList p {
+            color: #0f172a !important;
+        }
+        .custom-radio:checked + div .check-circle {
+            color: #ffffff !important;
+            background-color: #FF6A00 !important;
+            border-color: #FF6A00 !important;
+        }
+
+        /* 5. Mobile: Căn chỉnh vừa vặn, không thu quá nhỏ làm mất nét */
         @media (max-width: 640px) {
             mjx-container {
-                font-size: 85% !important;
+                font-size: 94% !important; /* Tăng từ 85% lên 94% để nét công thức to rõ */
             }
             mjx-container[display="true"] {
                 max-width: 100vw !important;
-                font-size: 80% !important;
+                font-size: 90% !important;
             }
             #questionContent {
                 padding: 0 !important;
             }
         }
         mjx-assistive-mml { display: none !important; }
+
+        /* [FIX 3] BẢO VỆ CHỐNG SAO CHÉP & IN ẤN CHO GIAO DIỆN LỜI GIẢI */
+        #solutionView, #solutionContentArea {
+            -webkit-user-select: none !important;
+            -moz-user-select: none !important;
+            -ms-user-select: none !important;
+            user-select: none !important;
+        }
+        @media print {
+            #solutionView, #examMain, #questionArea {
+                display: none !important;
+            }
+        }
         
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
@@ -520,7 +588,9 @@
 
     <header id="examHeader" class="bg-white shadow-sm z-20 shrink-0 h-16 flex items-center justify-between px-4 lg:px-8 hidden">
         <div class="flex items-center gap-4">
-            <button onclick="window.history.back()" class="md:hidden text-gray-400"><i class="fa-solid fa-arrow-left"></i></button>
+            <button type="button" onclick="window.handleExamHeaderBack()" class="w-9 h-9 -ml-1 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-full flex items-center justify-center text-base cursor-pointer active:scale-90 transition shrink-0" title="Quay lại">
+                <i class="fa-solid fa-arrow-left"></i>
+            </button>
             <div id="headerLogoContainer" class="w-10 h-10 bg-orange-100 text-orange-600 rounded-lg flex items-center justify-center font-bold overflow-hidden shrink-0">
                 <i class="fa-solid fa-pen-nib"></i>
             </div>
@@ -776,6 +846,20 @@
             <button onclick="window.goBack()" class="py-2.5 bg-gray-100 rounded-lg text-gray-600 font-bold text-sm">Thoát</button>
             <button onclick="toggleMobilePalette('solutionSidebar')" class="py-2.5 bg-primary-50 text-primary-600 rounded-lg font-bold border border-primary-100"><i class="fa-solid fa-list-ol"></i> DS</button>
             <button onclick="document.getElementById('solutionContentArea').scrollTo({top:0, behavior:'smooth'})" class="py-2.5 bg-gray-100 rounded-lg text-gray-600 font-bold"><i class="fa-solid fa-arrow-up"></i> Lên</button>
+        </div>
+    </div>
+
+    <!-- MODAL CHE MÀN HÌNH CHỐNG CHỤP ẢNH KHI XEM LỜI GIẢI -->
+    <div id="solutionShieldModal" class="hidden fixed inset-0 z-[100] bg-slate-950/98 backdrop-blur-2xl flex flex-col items-center justify-center p-6 text-center select-none cursor-pointer" onclick="this.classList.add('hidden'); const sv = document.getElementById('solutionView'); if(sv) sv.style.filter='';">
+        <div class="w-16 h-16 rounded-2xl bg-red-500/20 text-red-500 flex items-center justify-center text-3xl mb-4 border border-red-500/30 animate-pulse">
+            <i class="fa-solid fa-shield-halved"></i>
+        </div>
+        <h3 class="text-xl md:text-2xl font-black text-white mb-2 tracking-tight">NỘI DUNG ĐƯỢC BẢO VỆ</h3>
+        <p class="text-sm text-slate-300 max-w-sm mb-4 leading-relaxed font-medium">
+            Hệ thống phát hiện thao tác chuyển màn hình hoặc chụp ảnh. Lời giải đã được tự động che để chống phát tán đề thi.
+        </p>
+        <div class="px-4 py-2 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs font-bold flex items-center gap-2">
+            <i class="fa-solid fa-hand-pointer"></i> Chạm vào màn hình để tiếp tục xem lời giải
         </div>
     </div>
 
@@ -2374,6 +2458,148 @@ const shortMatch = (a, b) => {
             } catch (e) { window.customAlert("Lỗi mở khóa: " + e.message, "error"); }
         };
 
+        // ==========================================
+        // CHỐNG CHỤP ẢNH MÀN HÌNH & BẢO VỆ LỜI GIẢI
+        // ==========================================
+        let solutionAntiScreenshotInitialized = false;
+
+        window.initSolutionAntiScreenshot = () => {
+            if (solutionAntiScreenshotInitialized) return;
+            solutionAntiScreenshotInitialized = true;
+
+            const solView = document.getElementById('solutionView');
+            const shieldModal = document.getElementById('solutionShieldModal');
+            if (!solView || !shieldModal) return;
+
+            let restoreTimeout = null;
+
+            const triggerSolutionShield = () => {
+                // Chỉ kích hoạt khi đang ở màn hình xem lời giải
+                if (solView.classList.contains('hidden')) return;
+
+                shieldModal.classList.remove('hidden');
+                solView.style.filter = 'blur(25px)';
+
+                // Xóa clipboard nếu có hỗ trợ
+                try {
+                    if (navigator.clipboard && navigator.clipboard.writeText) {
+                        navigator.clipboard.writeText('Nội dung đề thi & lời giải được bảo vệ bản quyền!');
+                    }
+                } catch (e) {}
+            };
+
+            const dismissSolutionShield = (delay = 400) => {
+                if (restoreTimeout) clearTimeout(restoreTimeout);
+                restoreTimeout = setTimeout(() => {
+                    shieldModal.classList.add('hidden');
+                    solView.style.filter = '';
+                }, delay);
+            };
+
+            // 1. Phát hiện chụp ảnh / chuyển tab trên Điện Thoại (iOS & Android)
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'hidden') {
+                    triggerSolutionShield();
+                } else {
+                    dismissSolutionShield(450);
+                }
+            });
+
+            window.addEventListener('blur', () => {
+                triggerSolutionShield();
+            });
+
+            window.addEventListener('focus', () => {
+                dismissSolutionShield(450);
+            });
+
+            // 2. Chặn phím tắt chụp ảnh màn hình & in ấn trên Máy Tính
+            window.addEventListener('keyup', (e) => {
+                if (solView.classList.contains('hidden')) return;
+                // Phím PrintScreen (Key code 44 hoặc key === 'PrintScreen')
+                if (e.key === 'PrintScreen' || e.keyCode === 44) {
+                    triggerSolutionShield();
+                    if (typeof window.customAlert === 'function') {
+                        window.customAlert('Nội dung lời giải được bảo vệ, vui lòng không chụp ảnh màn hình!', 'warning');
+                    }
+                }
+            });
+
+            window.addEventListener('keydown', (e) => {
+                if (solView.classList.contains('hidden')) return;
+                // Chặn PrintScreen
+                if (e.key === 'PrintScreen' || e.keyCode === 44) {
+                    triggerSolutionShield();
+                    e.preventDefault();
+                    return false;
+                }
+                // Chặn Win + Shift + S hoặc Cmd + Shift + 3/4
+                if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 's' || e.key === 'S')) {
+                    triggerSolutionShield();
+                    e.preventDefault();
+                    return false;
+                }
+                // Chặn Ctrl + P (in ấn)
+                if ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 'P')) {
+                    e.preventDefault();
+                    if (typeof window.customAlert === 'function') {
+                        window.customAlert('Không được phép in lời giải!', 'warning');
+                    }
+                    return false;
+                }
+                // Chặn Ctrl + S (lưu trang)
+                if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
+                    e.preventDefault();
+                    return false;
+                }
+            });
+
+            // 3. Chặn chuột phải & sao chép văn bản trong khu vực lời giải
+            solView.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                return false;
+            });
+            solView.addEventListener('copy', (e) => {
+                e.preventDefault();
+                if (typeof window.customAlert === 'function') {
+                    window.customAlert('Nội dung lời giải được bảo vệ bản quyền!', 'warning');
+                }
+                return false;
+            });
+        };
+
+        // Render Watermark (Dấu chìm tên học sinh & thời gian) chống chụp camera ngoài
+        window.renderSolutionWatermark = () => {
+            const solView = document.getElementById('solutionView');
+            if (!solView) return;
+
+            // Xóa watermark cũ nếu có
+            const oldWm = document.getElementById('solutionWatermarkLayer');
+            if (oldWm) oldWm.remove();
+
+            const studentName = (typeof currentUser !== 'undefined' && currentUser?.displayName) ? currentUser.displayName : ((typeof currentUser !== 'undefined' && currentUser?.email) ? currentUser.email.split('@')[0] : 'Học sinh');
+            const studentId = (typeof currentUser !== 'undefined' && currentUser?.uid) ? currentUser.uid.slice(0, 6) : '';
+            const now = new Date();
+            const timeStr = `${now.getHours()}:${now.getMinutes() < 10 ? '0' : ''}${now.getMinutes()} ${now.getDate()}/${now.getMonth() + 1}`;
+            const wmText = `${studentName} ${studentId ? '(' + studentId + ')' : ''} • ${timeStr}`;
+
+            const svgPattern = `<svg xmlns='http://www.w3.org/2000/svg' width='280' height='160'><text x='20' y='90' fill='rgba(15, 23, 42, 0.055)' font-size='12' font-family='sans-serif' font-weight='700' transform='rotate(-22 140 80)'>${wmText}</text></svg>`;
+            const base64Svg = btoa(unescape(encodeURIComponent(svgPattern)));
+
+            const wmLayer = document.createElement('div');
+            wmLayer.id = 'solutionWatermarkLayer';
+            wmLayer.style.cssText = `
+                position: fixed;
+                inset: 0;
+                pointer-events: none;
+                z-index: 25;
+                background-image: url('data:image/svg+xml;base64,${base64Svg}');
+                background-repeat: repeat;
+                opacity: 1;
+            `;
+            solView.appendChild(wmLayer);
+        };
+
         // --- HÀM XEM LẠI BÀI (ĐÃ NÂNG CẤP: SWITCH LỊCH SỬ & HIỆN THÔNG SỐ) ---
         // --- HÀM XEM LẠI BÀI (ĐÃ FIX: HIỆN DANH SÁCH LỊCH SỬ CHUẨN) ---
         window.viewDetailSolutions = () => {
@@ -2385,6 +2611,14 @@ const shortMatch = (a, b) => {
             document.getElementById('examMain').classList.add('hidden'); 
             document.getElementById('examHeader').classList.add('hidden'); 
             document.getElementById('solutionView').classList.remove('hidden');
+
+            // [ANTI-SCREENSHOT & WATERMARK] Kích hoạt bảo vệ lời giải
+            if (typeof window.initSolutionAntiScreenshot === 'function') {
+                window.initSolutionAntiScreenshot();
+            }
+            if (typeof window.renderSolutionWatermark === 'function') {
+                window.renderSolutionWatermark();
+            }
 
             // 2. Render Danh sách lịch sử bên Sidebar
             const historyBody = document.getElementById('historyTableBody'); 
