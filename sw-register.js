@@ -14,6 +14,6 @@
         return;
     }
 
-    const registration = await navigator.serviceWorker.register('/sw.js?v=16', { updateViaCache: 'none' });
+    const registration = await navigator.serviceWorker.register('/sw.js?v=17', { updateViaCache: 'none' });
     registration.update().catch(() => {});
 })().catch(() => {});
