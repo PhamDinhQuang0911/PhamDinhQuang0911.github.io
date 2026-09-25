@@ -1,5 +1,8 @@
 /**
- * QMath Security Shield (Cơ chế Chặn Chụp Màn Hình & Cảnh Báo Vi Phạm Bản Quyền)
+ * QMath Security Shield v4 (Cơ chế Chặn Chụp Màn Hình & Cảnh Báo Vi Phạm Bản Quyền Nâng Cao)
+ * - Tùy chọn Bật/Tắt theo từng Khu vực (Bảng xếp hạng, Tra cứu ID, Lời giải, Phòng thi, Khóa học).
+ * - Phân quyền Bật/Tắt theo Đề thi (exams), Lớp học (classes) và Khóa học (public_courses).
+ * - Nhận diện Context thời gian thực: chỉ chặn khi khu vực/đề/lớp đang BẬT cấm chụp.
  * - Chặn trực tiếp phím tắt chụp màn hình (PrintScreen, Win+Shift+S, Mac Cmd+Shift+3/4/5, Ctrl+P).
  * - Chặn cử chỉ vuốt 3 ngón tay trên màn hình điện thoại (thao tác chụp màn hình Android/iOS).
  * - Tự động hiển thị Modal Cảnh Báo Vi Phạm Bản Quyền khi phát hiện hành vi chụp.
@@ -9,11 +12,177 @@
 (function() {
     'use strict';
 
-    // 1. TỰ ĐỘNG CHÈN CSS CHỐNG BÔI ĐEN VÀ MODAL CẢNH BÁO
+    // 1. CẤU HÌNH BẢO MẬT & API TOÀN CỤC
+    const DEFAULT_CONFIG = {
+        globalEnabled: true,
+        zones: {
+            leaderboard: true,   // Bảng xếp hạng
+            lookup: true,        // Tra cứu câu hỏi theo ID
+            solution: true,      // Xem lời giải chi tiết
+            examRoom: true,      // Phòng làm bài thi
+            coursePlayer: true   // Bài giảng & tài liệu khóa học
+        }
+    };
+
+    // Đọc cache cấu hình từ localStorage
+    let currentConfig = { ...DEFAULT_CONFIG };
+    try {
+        const cached = localStorage.getItem('qmath_security_config');
+        if (cached) {
+            const parsed = JSON.parse(cached);
+            currentConfig.globalEnabled = parsed.globalEnabled !== false;
+            currentConfig.zones = { ...DEFAULT_CONFIG.zones, ...(parsed.zones || {}) };
+        }
+    } catch (_) {}
+
+    const securityContext = {
+        examId: null,
+        antiScreenshot: null, // true | false | null
+        classId: null,
+        courseId: null,
+        zone: null,
+        studentClasses: []
+    };
+
+    window.QMathSecurity = {
+        config: currentConfig,
+        currentContext: securityContext,
+
+        // Cập nhật cấu hình động
+        updateConfig(newConfig) {
+            if (!newConfig) return;
+            if (typeof newConfig.globalEnabled === 'boolean') {
+                this.config.globalEnabled = newConfig.globalEnabled;
+            }
+            if (newConfig.zones && typeof newConfig.zones === 'object') {
+                this.config.zones = { ...this.config.zones, ...newConfig.zones };
+            }
+            try {
+                localStorage.setItem('qmath_security_config', JSON.stringify(this.config));
+            } catch (_) {}
+        },
+
+        // Gán ngữ cảnh hiện tại (Đề thi, Khóa học, Lớp học, Khu vực)
+        setContext(ctx) {
+            if (!ctx || typeof ctx !== 'object') return;
+            Object.assign(this.currentContext, ctx);
+        },
+
+        // Lưu danh sách lớp của học sinh
+        setStudentClasses(classes) {
+            if (Array.isArray(classes)) {
+                this.currentContext.studentClasses = classes;
+            }
+        },
+
+        // Kiểm tra xem hiện tại có đang bị CẤM chụp hay không
+        isAntiScreenshotActive() {
+            // 1. Kiểm tra công tắc toàn cục
+            if (this.config.globalEnabled === false) return false;
+
+            // 2. Miễn trừ cho Giáo viên / Super Admin khi đang thao tác ở các trang quản trị
+            try {
+                const userStr = localStorage.getItem('user') || sessionStorage.getItem('user');
+                if (userStr) {
+                    const u = JSON.parse(userStr);
+                    if (u && (u.role === 'teacher' || u.role === 'admin' || u.role === 'super_admin')) {
+                        const path = window.location.pathname.toLowerCase();
+                        if (path.includes('dashboard') || path.includes('exam-editor') || path.includes('course-manager')) {
+                            return false;
+                        }
+                    }
+                }
+            } catch (_) {}
+
+            // 3. Kiểm tra theo từng Khu vực (Zones)
+            // A. Bảng xếp hạng
+            const lbModal = document.getElementById('examLeaderboardModal');
+            const isLbVisible = lbModal && !lbModal.classList.contains('hidden') && !lbModal.classList.contains('opacity-0');
+            if (isLbVisible) {
+                return this.config.zones.leaderboard !== false;
+            }
+
+            // B. Tra cứu câu hỏi theo ID
+            const lookupModal = document.getElementById('studentQuestionLookupModal');
+            const isLookupVisible = lookupModal && !lookupModal.classList.contains('pointer-events-none') && !lookupModal.classList.contains('opacity-0');
+            if (isLookupVisible) {
+                return this.config.zones.lookup !== false;
+            }
+
+            // C. Lời giải chi tiết
+            const solView = document.getElementById('solutionView');
+            const isSolVisible = solView && !solView.classList.contains('hidden');
+            if (isSolVisible) {
+                if (this.config.zones.solution === false) return false;
+                // Nếu đề thi cụ thể cho phép chụp ảnh -> Không chặn
+                if (this.currentContext.antiScreenshot === false) return false;
+                return true;
+            }
+
+            // D. Bài giảng khóa học (course-player.html)
+            const isCoursePlayerPage = window.location.pathname.toLowerCase().includes('course-player') || this.currentContext.zone === 'coursePlayer';
+            if (isCoursePlayerPage) {
+                if (this.config.zones.coursePlayer === false) return false;
+                if (this.currentContext.antiScreenshot === false) return false;
+                return true;
+            }
+
+            // E. Phòng thi / Làm bài trực tuyến (exam.html / practice.html)
+            const isExamPage = window.location.pathname.toLowerCase().includes('exam') || window.location.pathname.toLowerCase().includes('practice') || this.currentContext.zone === 'examRoom';
+            if (isExamPage) {
+                if (this.config.zones.examRoom === false) return false;
+                // Nếu đề thi cụ thể cho phép chụp ảnh -> Không chặn
+                if (this.currentContext.antiScreenshot === false) return false;
+
+                // Nếu học sinh thuộc lớp cấm chụp -> Chặn
+                if (this.currentContext.studentClasses && this.currentContext.studentClasses.length > 0) {
+                    const matchedClass = this.currentContext.classId 
+                        ? this.currentContext.studentClasses.find(c => c && c.id === this.currentContext.classId)
+                        : null;
+                    if (matchedClass && matchedClass.antiScreenshot === false) return false;
+                }
+                return true;
+            }
+
+            // F. Kiểm tra theo Lớp học cụ thể
+            if (this.currentContext.classId && this.currentContext.studentClasses) {
+                const cl = this.currentContext.studentClasses.find(c => c && c.id === this.currentContext.classId);
+                if (cl && cl.antiScreenshot === false) return false;
+                if (cl && cl.antiScreenshot === true) return true;
+            }
+
+            // G. Đề thi hoặc Khóa học cụ thể đặt cấm/cho phép
+            if (this.currentContext.antiScreenshot === false) return false;
+            if (this.currentContext.antiScreenshot === true) return true;
+
+            // Mặc định ở các vùng khác
+            return true;
+        },
+
+        triggerViolationAlert(reason) {
+            triggerViolationAlert(reason);
+        }
+    };
+
+    // Tự động lắng nghe cấu hình site_settings/security_config từ Firestore nếu có kết nối
+    function trySyncFirestoreConfig() {
+        if (typeof window.firebaseDb !== 'undefined' || typeof window.db !== 'undefined') {
+            const dbInstance = window.firebaseDb || window.db;
+            if (dbInstance && typeof window.getDoc === 'function' && typeof window.doc === 'function') {
+                window.getDoc(window.doc(dbInstance, "site_settings", "security_config")).then(snap => {
+                    if (snap && snap.exists()) {
+                        window.QMathSecurity.updateConfig(snap.data());
+                    }
+                }).catch(() => {});
+            }
+        }
+    }
+    setTimeout(trySyncFirestoreConfig, 1200);
+
+    // 2. TỰ ĐỘNG CHÈN CSS VÀ MODAL CẢNH BÁO VI PHẠM
     function initSecurityShieldUI() {
         if (document.getElementById('qmath-security-shield-style')) return;
 
-        // CSS
         const style = document.createElement('style');
         style.id = 'qmath-security-shield-style';
         style.textContent = `
@@ -35,7 +204,6 @@
         `;
         document.head.appendChild(style);
 
-        // Tạo Modal Cảnh Báo Vi Phạm Bản Quyền
         if (!document.getElementById('copyrightViolationModal')) {
             const modalHtml = `
             <div id="copyrightViolationModal" class="fixed inset-0 z-[2147483647] flex items-center justify-center bg-gray-950/80 backdrop-blur-md hidden opacity-0 p-4 select-none pointer-events-auto">
@@ -54,7 +222,6 @@
             </div>`;
             document.body.insertAdjacentHTML('beforeend', modalHtml);
 
-            // Bắt sự kiện đóng modal
             const btnClose = document.getElementById('btnDismissCopyrightViolation');
             if (btnClose) {
                 btnClose.addEventListener('click', closeViolationModal);
@@ -71,7 +238,7 @@
     let isModalOpen = false;
     let lastViolationTime = 0;
 
-    // 2. HIỂN THỊ MODAL CẢNH BÁO VI PHẠM
+    // 3. HIỂN THỊ MODAL CẢNH BÁO VI PHẠM
     function triggerViolationAlert(reason) {
         const now = Date.now();
         if (now - lastViolationTime < 1500) return; // Debounce 1.5s
@@ -113,14 +280,18 @@
         }, 250);
     }
 
-    // 3. CHẶN PHÍM TẮT CHỤP MÀN HÌNH (PrintScreen, Win+Shift+S, Mac Cmd+Shift+3/4/5, Ctrl+P)
+    // 4. CHẶN PHÍM TẮT CHỤP MÀN HÌNH (PrintScreen, Win+Shift+S, Mac Cmd+Shift+3/4/5, Ctrl+P)
     document.addEventListener('keydown', function(e) {
         const isPrintScreen = e.key === 'PrintScreen' || e.keyCode === 44;
-        const isDevTools = e.key === 'F12' || (e.ctrlKey && e.shiftKey && ['i', 'c', 'j'].indexOf(e.key.toLowerCase()) !== -1);
         const isPrint = (e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 'P');
         const isMacScreenshot = e.metaKey && e.shiftKey && ['3', '4', '5', 's'].indexOf(e.key.toLowerCase()) !== -1;
 
         if (isPrintScreen || isPrint || isMacScreenshot) {
+            // Kiểm tra xem hiện tại có đang bị cấm chụp hay không
+            if (!window.QMathSecurity.isAntiScreenshotActive()) {
+                return true; // Cho phép chụp ảnh bình thường!
+            }
+
             e.preventDefault();
             e.stopPropagation();
             triggerViolationAlert('Hệ thống đã chặn thao tác phím chụp màn hình. Nội dung được bảo vệ bản quyền!');
@@ -130,16 +301,21 @@
 
     document.addEventListener('keyup', function(e) {
         if (e.key === 'PrintScreen' || e.keyCode === 44) {
+            if (!window.QMathSecurity.isAntiScreenshotActive()) {
+                return true;
+            }
             e.preventDefault();
             e.stopPropagation();
             triggerViolationAlert('Hệ thống đã chặn thao tác chụp màn hình (PrintScreen). Nội dung được bảo vệ bản quyền!');
         }
     }, true);
 
-    // 4. CHẶN CỬ CHỈ VUỐT 3 NGÓN TAY CHỤP MÀN HÌNH TRÊN ĐIỆN THOẠI (Xiaomi, Oppo, Realme, Samsung...)
+    // 5. CHẶN CỬ CHỈ VUỐT 3 NGÓN TAY CHỤP MÀN HÌNH TRÊN ĐIỆN THOẠI
     window.addEventListener('touchstart', function(e) {
         if (e.touches && e.touches.length >= 3) {
-            // Chặn cử chỉ 3 ngón tay ngay lập tức
+            if (!window.QMathSecurity.isAntiScreenshotActive()) {
+                return; // Cho phép cử chỉ
+            }
             e.preventDefault();
             e.stopPropagation();
             triggerViolationAlert('Hệ thống phát hiện cử chỉ vuốt 3 ngón tay để chụp màn hình. Thao tác đã bị chặn!');
@@ -148,15 +324,17 @@
 
     window.addEventListener('touchmove', function(e) {
         if (e.touches && e.touches.length >= 3) {
-            // Chặn cử chỉ vuốt 3 ngón
+            if (!window.QMathSecurity.isAntiScreenshotActive()) {
+                return;
+            }
             e.preventDefault();
             e.stopPropagation();
             triggerViolationAlert('Hệ thống phát hiện cử chỉ vuốt 3 ngón tay để chụp màn hình. Thao tác đã bị chặn!');
         }
     }, { capture: true, passive: false });
 
-    // 5. THEO DÕI HÀNH VI RỜI KHỎI TRÌNH DUYỆT (CHỤP PHÍM CỨNG HOẶC CHUYỂN TAB) KHI ĐANG MỞ VÙNG BẢO VỆ
-    function isInsideProtectedZone() {
+    // 6. THEO DÕI HÀNH VI RỜI KHỎI TRÌNH DUYỆT KHI ĐANG MỞ VÙNG BẢO VỆ
+    function isInsideProtectedZoneDOM() {
         const lbModal = document.getElementById('examLeaderboardModal');
         if (lbModal && !lbModal.classList.contains('hidden') && !lbModal.classList.contains('opacity-0')) return true;
 
@@ -172,27 +350,28 @@
     let leaveTimestamp = 0;
     document.addEventListener('visibilitychange', function() {
         if (document.visibilityState === 'hidden') {
-            if (isInsideProtectedZone()) {
+            if (window.QMathSecurity.isAntiScreenshotActive() && isInsideProtectedZoneDOM()) {
                 leaveTimestamp = Date.now();
             }
         } else if (document.visibilityState === 'visible') {
             if (leaveTimestamp > 0) {
                 const elapsed = Date.now() - leaveTimestamp;
                 leaveTimestamp = 0;
-                // Nếu rời màn hình trong khoảng 0.3s - 3s (thời gian điển hình khi điện thoại chớp chụp màn hình phím cứng)
                 if (elapsed >= 250 && elapsed <= 4000) {
-                    triggerViolationAlert('Hệ thống phát hiện hành vi rời màn hình hoặc chụp ảnh phím cứng trong khu vực được bảo vệ!');
+                    if (window.QMathSecurity.isAntiScreenshotActive()) {
+                        triggerViolationAlert('Hệ thống phát hiện hành vi rời màn hình hoặc chụp ảnh phím cứng trong khu vực được bảo vệ!');
+                    }
                 }
             }
         }
     });
 
-    // 6. CHỐNG CHUỘT PHẢI VÀ CHỐNG COPY TRONG VÙNG BẢO MẬT
+    // 7. CHỐNG CHUỘT PHẢI VÀ CHỐNG COPY TRONG VÙNG BẢO MẬT
     document.addEventListener('contextmenu', function(e) {
         const tag = e.target ? e.target.tagName : '';
         if (tag === 'INPUT' || tag === 'TEXTAREA') return true;
 
-        if (isInsideProtectedZone()) {
+        if (window.QMathSecurity.isAntiScreenshotActive() && isInsideProtectedZoneDOM()) {
             e.preventDefault();
             return false;
         }
@@ -202,7 +381,7 @@
         const tag = e.target ? e.target.tagName : '';
         if (tag === 'INPUT' || tag === 'TEXTAREA') return true;
 
-        if (isInsideProtectedZone()) {
+        if (window.QMathSecurity.isAntiScreenshotActive() && isInsideProtectedZoneDOM()) {
             e.preventDefault();
             if (e.clipboardData) {
                 e.clipboardData.setData('text/plain', '');
