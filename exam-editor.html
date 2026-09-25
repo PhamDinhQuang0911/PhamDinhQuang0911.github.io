@@ -54,6 +54,70 @@
     <script src="ai-grader.js"></script>
     <script src="ai-id-assigner.js?v=20260924-hotswap"></script>
     <script src="bank-service.js"></script>
+    <script>
+        // Sẵn sàng ngay các hàm điều hướng giao diện trước khi tải dữ liệu
+        function toggleSidebar() {
+            const sidebar = document.getElementById('mainSidebar');
+            const overlay = document.getElementById('sidebarOverlay');
+            if (!sidebar) return;
+            if (sidebar.classList.contains('-translate-x-full')) {
+                sidebar.classList.remove('-translate-x-full');
+                if (overlay) overlay.classList.remove('hidden');
+            } else {
+                sidebar.classList.add('-translate-x-full');
+                if (overlay) overlay.classList.add('hidden');
+            }
+        }
+        window.toggleSidebar = toggleSidebar;
+
+        function switchView(viewId) { 
+            const s = document.getElementById('view-settings'); if (s) s.classList.add('hidden'); 
+            const e = document.getElementById('view-editor'); if (e) { e.classList.add('hidden'); e.classList.remove('flex'); } 
+            const st = document.getElementById('view-stats'); if (st) st.classList.add('hidden'); 
+            const g = document.getElementById('view-grading'); if (g) g.classList.add('hidden');
+            
+            document.querySelectorAll('.sidebar-item').forEach(i => i.classList.remove('active')); 
+            
+            if (viewId === 'settings') { 
+                if (s) s.classList.remove('hidden'); 
+                const m = document.getElementById('menu-settings'); if (m) m.classList.add('active'); 
+            } 
+            else if (viewId === 'editor') { 
+                if (e) { e.classList.remove('hidden'); e.classList.add('flex'); } 
+                const m = document.getElementById('menu-editor'); if (m) m.classList.add('active'); 
+                if (window.MathJax && window.MathJax.typesetPromise) window.MathJax.typesetPromise().catch(()=>{}); 
+                if (typeof window.renderPreviewList === 'function') window.renderPreviewList();
+            } 
+            else if (viewId === 'stats') { 
+                if (st) st.classList.remove('hidden'); 
+                const m = document.getElementById('menu-stats'); if (m) m.classList.add('active'); 
+                if (typeof window.loadStats === 'function') window.loadStats(); 
+            } 
+            else if (viewId === 'grading') { 
+                if (g) g.classList.remove('hidden'); 
+                const m = document.getElementById('menu-grading'); if (m) m.classList.add('active'); 
+                if (typeof window.loadStats === 'function') window.loadStats(); 
+            } 
+        }
+        window.switchView = switchView;
+
+        function handleWordUpload(input) {
+            if (typeof window._handleWordUploadImpl === 'function') {
+                return window._handleWordUploadImpl(input);
+            }
+            if (typeof window.showToast === 'function') {
+                window.showToast("Đang khởi tạo trình xử lý file Word...", "info");
+            }
+            const timer = setInterval(() => {
+                if (typeof window._handleWordUploadImpl === 'function') {
+                    clearInterval(timer);
+                    window._handleWordUploadImpl(input);
+                }
+            }, 100);
+            setTimeout(() => clearInterval(timer), 15000);
+        }
+        window.handleWordUpload = handleWordUpload;
+    </script>
     <style>
         body { font-family: 'Inter', sans-serif; background-color: #F8F9FA; }
         .font-handwriting { font-family: 'Pacifico', cursive; }
@@ -1220,110 +1284,28 @@
     <input type="file" id="folderInput" webkitdirectory directory multiple class="hidden">
 
 <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-        import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
-        import { getFirestore, doc, getDoc, getDocFromCache, setDoc, collection, query, where, getDocs, addDoc, updateDoc, deleteDoc, enableMultiTabIndexedDbPersistence } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
-        import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js";
-        
-        // --- IMPORT TỪ UTILS.JS ---
-        import { getTikzApiUrl, compileTikZToImage, compileTikZBatch, compileTikzLocalViaTikzJax, formatContent, convertArrayToMatrix, autoScaleTables, cleanTikzCode, extractNextBrace, renderTikz } from "./utils.js?v=5";
+        import { 
+            initializeApp, getAuth, onAuthStateChanged,
+            getFirestore, doc, getDoc, setDoc, deleteDoc, collection, query, where, getDocs, addDoc, updateDoc, enableMultiTabIndexedDbPersistence,
+            getStorage, ref, uploadBytes, getDownloadURL,
+            supabase
+        } from "./supabase-db-compat.js?v=21";
+
+        // --- IMPORT TỪ UTILS.JS VÀ PERF-CACHE ---
+        import { getTikzApiUrl, compileTikZToImage, compileTikZBatch, compileTikzLocalViaTikzJax, formatContent, convertArrayToMatrix, autoScaleTables, cleanTikzCode, extractNextBrace, renderTikz } from "./utils.js?v=9";
         import { readCache, writeCache } from "./perf-cache.js";
 
         // Gán vào window
         window.formatContent = formatContent;
         window.autoScaleTables = autoScaleTables;
         window.convertArrayToMatrix = convertArrayToMatrix; 
+        window.renderTikz = renderTikz;
 
-        // [MỚI] HÀM HỖ TRỢ: PHÂN TÍCH ID CÂU HỎI (VD: 9D1H1-6)
-        // [CẬP NHẬT] HÀM PHÂN TÍCH ID (Dựa trên MapID thực tế)
-        const parseQuestionID = (idStr) => {
-            // VD ID: 9D1H1-7
-            // Logic MapID thường là: [Lớp][Môn][Chương][Bài] (VD: 9D11)
-            // Trong ID câu hỏi, ký tự mức độ (N,H,V,C) thường chèn vào giữa
-            
-            let subject = 'Khác';
-            let level = 'Thông hiểu'; 
-            let levelColor = 'blue';
-            let topicName = ''; // Tên bài học lấy từ cây
-
-            // 1. XỬ LÝ MỨC ĐỘ (Dựa vào N, H, V, C)
-            const levelMatch = idStr.match(/[NHVC]/);
-            let levelChar = levelMatch ? levelMatch[0] : '';
-            
-            // Fallback nếu không tìm thấy 1 ký tự đơn lẻ
-            if (!levelChar) {
-                if(idStr.includes('NB')) levelChar = 'N';
-                else if(idStr.includes('TH')) levelChar = 'H';
-                else if(idStr.includes('VDC')) levelChar = 'C';
-                else if(idStr.includes('VD')) levelChar = 'V';
-            }
-
-            switch (levelChar) {
-                case 'N': level = 'Nhận biết'; levelColor = 'green'; break;
-                case 'H': level = 'Thông hiểu'; levelColor = 'blue'; break;
-                case 'V': level = 'Vận dụng'; levelColor = 'orange'; break;
-                case 'C': level = 'Vận dụng cao'; levelColor = 'red'; break;
-            }
-
-            // 2. XỬ LÝ MÔN & BÀI HỌC (Tra cứu từ window.globalIdTree)
-            // Giả thuyết: ID bài học trong cây là ID câu hỏi bỏ đi ký tự mức độ và phần đuôi -x
-            // VD: 9D1H1-7 -> Bỏ H, bỏ -7 -> Còn "9D11" (Đây là ID bài học trong cây)
-            
-            // Bước A: Tạo "ID sạch" để tra cứu
-            let cleanId = idStr.split('-')[0]; // Bỏ phần đuôi -7 -> 9D1H1
-            if (levelChar) {
-                cleanId = cleanId.replace(levelChar, ''); // Bỏ mức độ -> 9D11
-            }
-
-            // Bước B: Tra cứu trong cây đã tải
-            if (window.globalIdTree.length > 0) {
-                const foundName = findTopicNameInTree(window.globalIdTree, cleanId);
-                if (foundName) {
-                    topicName = foundName;
-                } else {
-                    // Nếu không tìm thấy bài (9D11), thử tìm chương (9D1)
-                    const chapId = cleanId.slice(0, -1); 
-                    const foundChap = findTopicNameInTree(window.globalIdTree, chapId);
-                    if (foundChap) topicName = foundChap;
-                }
-            }
-
-            // Bước C: Xác định môn (Dựa vào ký tự hoặc tên bài tìm được)
-            if (cleanId.includes('D')) subject = 'Đại số';
-            else if (cleanId.includes('H')) subject = 'Hình học';
-            else if (cleanId.includes('G')) subject = 'Giải tích';
-
-            // Trả về object đầy đủ
-            return { 
-                subject: subject, 
-                level: level, 
-                levelColor: levelColor,
-                topic: topicName || cleanId // Nếu không tìm thấy tên thì hiện tạm ID
-            };
-        };
-
-    // --- HÀM MỚI: BẬT/TẮT Ô NHẬP LIỆU KẾT QUẢ ---
-
-    // --- HÀM MỚI: BẬT/TẮT Ô NHẬP LIỆU KẾT QUẢ ---
-        window.toggleResultOptions = () => {
-            const val = document.querySelector('input[name="settingShowResult"]:checked').value;
-            const passInput = document.getElementById('settingPassScoreInput');
-            const feeInput = document.getElementById('settingFeeQpointInput');
-            
-            // Reset trạng thái
-            passInput.disabled = true; passInput.classList.add('bg-gray-100');
-            feeInput.disabled = true; feeInput.classList.add('bg-gray-100');
-
-            if (val === 'pass_score') {
-                passInput.disabled = false; passInput.classList.remove('bg-gray-100'); 
-            } else if (val === 'fee_qpoint') {
-                feeInput.disabled = false; feeInput.classList.remove('bg-gray-100'); 
-            }
-        };
-
-        // CẤU HÌNH FIREBASE
-        const firebaseConfig = { apiKey: "AIzaSyCqAX3x1MbJ3do7m3EaH9JA4kFuVhlAc78", authDomain: "lms-thitracnghiem.firebaseapp.com", projectId: "lms-thitracnghiem", storageBucket: "lms-thitracnghiem.firebasestorage.app", messagingSenderId: "760187217240", appId: "1:760187217240:web:d043cd5808c349f87a712d" };
-        const app = initializeApp(firebaseConfig); const auth = getAuth(app); const db = getFirestore(app); const storage = getStorage(app);
+        // CẤU HÌNH SUPABASE
+        const app = initializeApp({});
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const storage = getStorage(app);
         window._examDb = db;
         const isAppleDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) || 
             (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) ||
@@ -1334,7 +1316,7 @@
         const isIosInstalledApp = isAppleDevice && isStandaloneApp;
         // iOS/iPadOS standalone dễ giữ IndexedDB/SW cũ rất lâu; dùng memory cache để dữ liệu
         // luôn đi mạng ngay. Safari/Chrome mở dạng web vẫn giữ cache đa-tab như trước.
-        if (!isIosInstalledApp && !isStandaloneApp) {
+        if (!isIosInstalledApp && !isStandaloneApp && typeof enableMultiTabIndexedDbPersistence === 'function') {
             enableMultiTabIndexedDbPersistence(db).catch((err) => {
                 if (err.code == 'failed-precondition') console.warn('Đang mở nhiều tab (Multi-tab mode active).');
             });
@@ -3122,6 +3104,21 @@
         // --- IMPORT WORD (.DOCX) ---
         // Word thường không chứa cấu trúc \begin{ex}; vì vậy sau khi Mammoth đọc file,
         // ta nhận diện các nhãn Câu/A/B/C/D/Lời giải và chuyển thành question object chuẩn.
+                function cleanWordMathLatex(str) {
+            if (!str || typeof str !== 'string') return str;
+            const regexMangledSystem = /\\left\s*([^\\]*(?:\\(?!(?:begin\{array\}|right))[^\\]*)*?)\s*\\begin\{array\}\s*\{[^{}]*\}\s*\\end\{array\}\s*\\right(?:\\\.|\.|\{|\})?\s*([\s\S]*?)\s*(?:\\\{|\\\}|\\\.|(?=\$))/g;
+            str = str.replace(regexMangledSystem, (match, eq1, eq2) => {
+                const clean1 = (eq1 || '').trim().replace(/^\\left\s*/, '');
+                const clean2 = (eq2 || '').trim().replace(/^[.\\]+/, '').trim();
+                return `\\begin{cases} ${clean1} \\\\ ${clean2} \\end{cases}`;
+            });
+            str = str.replace(/\\begin\{array\}\s*\{[^{}]*\}\s*\\end\{array\}/g, '');
+            str = str.replace(/\\left([a-zA-Z0-9])/g, '$1');
+            str = str.replace(/\\right([a-zA-Z0-9])/g, '$1');
+            return str;
+        }
+        window.cleanWordMathLatex = cleanWordMathLatex;
+
         function wordHtmlToImportText(html) {
             const source = new DOMParser().parseFromString(html || '', 'text/html');
             const wordTables = [];
@@ -3248,7 +3245,7 @@
             }
         }
 
-        window.handleWordUpload = async (input) => {
+        window._handleWordUploadImpl = async (input) => {
             const file = input.files && input.files[0];
             input.value = '';
             if (!file) return;
@@ -3259,6 +3256,16 @@
             if (!window.mammoth) {
                 window.customAlert('Không tải được thư viện đọc Word. Vui lòng kiểm tra kết nối Internet rồi tải lại trang.', 'error');
                 return;
+            }
+
+            // Nạp thư viện giải mã ảnh vector EMF/WMF theo nhu cầu
+            if (typeof window.convertMetafileToDataUrl !== 'function') {
+                try {
+                    const emfMod = await import('./emf-converter.js?v=20260925');
+                    window.convertMetafileToDataUrl = emfMod.convertMetafileToDataUrl;
+                } catch (emfErr) {
+                    console.warn('[Word import] Không thể nạp mô-đun emf-converter:', emfErr);
+                }
             }
 
             window.showToast('Đang đọc file Word...', 'info');
@@ -3287,7 +3294,31 @@
 
                 // Mammoth mặc định bỏ qua gạch chân. Ép xuất <u> để parser nhận được
                 // A./a) được giáo viên gạch chân làm đáp án đúng.
-                const result = await window.mammoth.convertToHtml({ arrayBuffer }, { styleMap: ['u => u'] });
+                const mammothOptions = {
+                    styleMap: ['u => u'],
+                    convertImage: window.mammoth.images.imgElement(element => {
+                        const contentType = element.contentType || '';
+                        if (contentType === 'image/x-emf' || contentType === 'image/x-wmf') {
+                            return element.readAsArrayBuffer().then(async (buf) => {
+                                try {
+                                    const arrayBuffer = (buf instanceof ArrayBuffer) ? buf : (buf.buffer ? buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) : new Uint8Array(buf).buffer);
+                                    if (typeof window.convertMetafileToDataUrl === 'function') {
+                                        const pngUrl = await window.convertMetafileToDataUrl(arrayBuffer, { dpiScale: 2 });
+                                        if (pngUrl) return { src: pngUrl, alt: 'Hình minh họa' };
+                                    }
+                                } catch (e) {
+                                    console.warn('[Word import] Lỗi chuyển EMF sang PNG:', e);
+                                }
+                                const b64 = await element.readAsBase64String();
+                                return { src: `data:${contentType};base64,${b64}`, alt: 'Hình minh họa' };
+                            });
+                        }
+                        return element.readAsBase64String().then(b64 => {
+                            return { src: `data:${contentType};base64,${b64}`, alt: 'Hình minh họa' };
+                        });
+                    })
+                };
+                const result = await window.mammoth.convertToHtml({ arrayBuffer }, mammothOptions);
                 const parsedQuestions = parseWordQuestions(wordHtmlToImportText(result.value));
                 if (!parsedQuestions.length) {
                     throw new Error('Không tìm thấy câu hỏi. File Word cần có nhãn dạng “Câu 1.” hoặc “Bài 1.”.');
@@ -3318,6 +3349,7 @@
                 window.customAlert(`Không thể nạp file Word: ${error.message}\n\n👉 Bạn có thể bấm vào biểu tượng dấu hỏi (?) cạnh nút Word để xem hướng dẫn cấu trúc file Word chuẩn nhé.`, 'error');
             }
         };
+        window.handleWordUpload = window._handleWordUploadImpl;
 
         function getAllImageUrls(dataObj) {
             const str = JSON.stringify(dataObj);

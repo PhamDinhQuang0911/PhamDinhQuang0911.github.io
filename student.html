@@ -407,6 +407,53 @@
         }
     </style>
     <script>/* Ap dark mode ngay de tranh chop trang */ try { if (localStorage.getItem('qmath_theme') === 'dark') document.documentElement.classList.add('dark'); } catch(e) {}</script>
+    <script>
+        // Sẵn sàng ngay các hàm điều hướng trước khi tải dữ liệu
+        window.switchTab = function(id) {
+            try {
+                if (id !== 'class-detail') {
+                    sessionStorage.setItem('last_active_tab', id);
+                    if (window.QMathSecurity) window.QMathSecurity.setContext({ classId: null });
+                }
+            } catch(e) {}
+            document.querySelectorAll('.tab-content').forEach(e => e.classList.add('hidden'));
+            const t = document.getElementById('tab-' + id);
+            if (t) t.classList.remove('hidden');
+            document.querySelectorAll('.sidebar-item').forEach(e => e.classList.remove('active'));
+            const nav = document.getElementById('nav-' + id);
+            if (nav) nav.classList.add('active');
+            if (window.innerWidth < 768) { 
+                const sb = document.getElementById('sidebar');
+                if (sb) {
+                    sb.classList.add('sidebar-closed'); 
+                    sb.classList.remove('sidebar-open');
+                }
+                const ov = document.getElementById('mobileOverlay');
+                if (ov) ov.classList.add('hidden'); 
+            }
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+            const mainArea = document.getElementById('mainScrollArea');
+            if (mainArea) mainArea.scrollTo({ top: 0, behavior: 'smooth' });
+        };
+        window.toggleMobileSidebar = function() {
+            const sb = document.getElementById('sidebar');
+            const ov = document.getElementById('mobileOverlay');
+            if (!sb) return;
+            if (sb.classList.contains('sidebar-closed')) {
+                sb.classList.remove('sidebar-closed');
+                sb.classList.add('sidebar-open');
+                if (ov) ov.classList.remove('hidden');
+            } else {
+                sb.classList.add('sidebar-closed');
+                sb.classList.remove('sidebar-open');
+                if (ov) ov.classList.add('hidden');
+            }
+        };
+        window.openProfileModal = function() {
+            const m = document.getElementById('profileModal');
+            if (m) m.classList.remove('hidden');
+        };
+    </script>
     <link rel="stylesheet" href="/styles.css?v=5">
 <meta name="view-transition" content="same-origin" /></head>
 <body class="h-screen flex overflow-hidden font-sans" data-page="student">
@@ -1052,23 +1099,15 @@
         window.renderTikz = renderTikz;
         window.autoScaleTables = autoScaleTables;
 
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-        import { getAuth, onAuthStateChanged, signOut, updateProfile, updatePassword, EmailAuthProvider, reauthenticateWithCredential } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
-        // Thêm enableIndexedDbPersistence vào dòng import này
-        import { getFirestore, doc, getDoc, updateDoc, collection, getDocs, query, where, addDoc, limit, orderBy, deleteDoc, setDoc, onSnapshot, enableMultiTabIndexedDbPersistence, increment } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { 
+            initializeApp, getAuth, onAuthStateChanged, signOut, updateProfile,
+            getFirestore, doc, getDoc, setDoc, updateDoc, collection, getDocs, query, where, orderBy, onSnapshot, limit, addDoc, enableMultiTabIndexedDbPersistence, deleteDoc, increment,
+            supabase
+        } from "./supabase-db-compat.js?v=21";
         import { readCache, writeCache } from "./perf-cache.js";
 
-        // CẤU HÌNH FIREBASE
-        const firebaseConfig = {
-            apiKey: "AIzaSyCqAX3x1MbJ3do7m3EaH9JA4kFuVhlAc78",
-            authDomain: "lms-thitracnghiem.firebaseapp.com",
-            projectId: "lms-thitracnghiem",
-            storageBucket: "lms-thitracnghiem.firebasestorage.app",
-            messagingSenderId: "760187217240",
-            appId: "1:760187217240:web:d043cd5808c349f87a712d"
-        };
-
-        const app = initializeApp(firebaseConfig);
+        // CẤU HÌNH SUPABASE
+        const app = initializeApp({});
         const auth = getAuth(app);
         const db = getFirestore(app);
         // --- CẤU HÌNH UPLOAD ẢNH (Cloudflare Worker) ---
@@ -1085,7 +1124,7 @@
             (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) ||
             (window.matchMedia && window.matchMedia('(display-mode: fullscreen)').matches);
 
-        if (!isMobileOrApple && !isStandaloneApp) {
+        if (!isMobileOrApple && !isStandaloneApp && typeof enableMultiTabIndexedDbPersistence === 'function') {
             enableMultiTabIndexedDbPersistence(db).catch((err) => {
                 if (err.code == 'failed-precondition') console.warn('Đang mở nhiều tab (Multi-tab mode active).');
                 else if (err.code == 'unimplemented') console.warn('Trình duyệt không hỗ trợ cache.');
