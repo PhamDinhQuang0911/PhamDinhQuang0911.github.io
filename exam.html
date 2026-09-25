@@ -849,20 +849,6 @@
         </div>
     </div>
 
-    <!-- MODAL CHE MÀN HÌNH CHỐNG CHỤP ẢNH KHI XEM LỜI GIẢI -->
-    <div id="solutionShieldModal" class="hidden fixed inset-0 z-[100] bg-slate-950/98 backdrop-blur-2xl flex flex-col items-center justify-center p-6 text-center select-none cursor-pointer" onclick="this.classList.add('hidden'); const sv = document.getElementById('solutionView'); if(sv) sv.style.filter='';">
-        <div class="w-16 h-16 rounded-2xl bg-red-500/20 text-red-500 flex items-center justify-center text-3xl mb-4 border border-red-500/30 animate-pulse">
-            <i class="fa-solid fa-shield-halved"></i>
-        </div>
-        <h3 class="text-xl md:text-2xl font-black text-white mb-2 tracking-tight">NỘI DUNG ĐƯỢC BẢO VỆ</h3>
-        <p class="text-sm text-slate-300 max-w-sm mb-4 leading-relaxed font-medium">
-            Hệ thống phát hiện thao tác chuyển màn hình hoặc chụp ảnh. Lời giải đã được tự động che để chống phát tán đề thi.
-        </p>
-        <div class="px-4 py-2 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs font-bold flex items-center gap-2">
-            <i class="fa-solid fa-hand-pointer"></i> Chạm vào màn hình để tiếp tục xem lời giải
-        </div>
-    </div>
-
     <div id="customModal" class="fixed inset-0 z-[100] flex items-center justify-center opacity-0 pointer-events-none transition-opacity duration-300 px-4">
         <div class="absolute inset-0 bg-gray-900 bg-opacity-50 backdrop-blur-sm"></div>
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm transform scale-95 transition-transform duration-300 relative overflow-hidden z-10" id="customModalBox">
@@ -1053,8 +1039,14 @@
         const isIosInstalledApp = isAppleDevice && isStandaloneApp;
         if (!isIosInstalledApp && !isStandaloneApp) enableMultiTabIndexedDbPersistence(db).catch(() => {});
         
+        // Đồng bộ cấu hình chống chụp ảnh từ Firestore
+        if (window.AntiScreenshot) {
+            window.AntiScreenshot.syncFromFirestore(db, doc, getDoc);
+        }
+
         // Nếu URL có tham số view=leaderboard, mở modal BXH ngay lập tức để không bị lộ màn hình sảnh (Lobby)
         if (new URLSearchParams(window.location.search).get('view') === 'leaderboard') {
+            if (window.AntiScreenshot) window.AntiScreenshot.enterZone('leaderboard');
             const lbMod = document.getElementById('examLeaderboardModal');
             if (lbMod) {
                 lbMod.classList.remove('hidden');
@@ -2463,148 +2455,6 @@ const shortMatch = (a, b) => {
             } catch (e) { window.customAlert("Lỗi mở khóa: " + e.message, "error"); }
         };
 
-        // ==========================================
-        // CHỐNG CHỤP ẢNH MÀN HÌNH & BẢO VỆ LỜI GIẢI
-        // ==========================================
-        let solutionAntiScreenshotInitialized = false;
-
-        window.initSolutionAntiScreenshot = () => {
-            if (solutionAntiScreenshotInitialized) return;
-            solutionAntiScreenshotInitialized = true;
-
-            const solView = document.getElementById('solutionView');
-            const shieldModal = document.getElementById('solutionShieldModal');
-            if (!solView || !shieldModal) return;
-
-            let restoreTimeout = null;
-
-            const triggerSolutionShield = () => {
-                // Chỉ kích hoạt khi đang ở màn hình xem lời giải
-                if (solView.classList.contains('hidden')) return;
-
-                shieldModal.classList.remove('hidden');
-                solView.style.filter = 'blur(25px)';
-
-                // Xóa clipboard nếu có hỗ trợ
-                try {
-                    if (navigator.clipboard && navigator.clipboard.writeText) {
-                        navigator.clipboard.writeText('Nội dung đề thi & lời giải được bảo vệ bản quyền!');
-                    }
-                } catch (e) {}
-            };
-
-            const dismissSolutionShield = (delay = 400) => {
-                if (restoreTimeout) clearTimeout(restoreTimeout);
-                restoreTimeout = setTimeout(() => {
-                    shieldModal.classList.add('hidden');
-                    solView.style.filter = '';
-                }, delay);
-            };
-
-            // 1. Phát hiện chụp ảnh / chuyển tab trên Điện Thoại (iOS & Android)
-            document.addEventListener('visibilitychange', () => {
-                if (document.visibilityState === 'hidden') {
-                    triggerSolutionShield();
-                } else {
-                    dismissSolutionShield(450);
-                }
-            });
-
-            window.addEventListener('blur', () => {
-                triggerSolutionShield();
-            });
-
-            window.addEventListener('focus', () => {
-                dismissSolutionShield(450);
-            });
-
-            // 2. Chặn phím tắt chụp ảnh màn hình & in ấn trên Máy Tính
-            window.addEventListener('keyup', (e) => {
-                if (solView.classList.contains('hidden')) return;
-                // Phím PrintScreen (Key code 44 hoặc key === 'PrintScreen')
-                if (e.key === 'PrintScreen' || e.keyCode === 44) {
-                    triggerSolutionShield();
-                    if (typeof window.customAlert === 'function') {
-                        window.customAlert('Nội dung lời giải được bảo vệ, vui lòng không chụp ảnh màn hình!', 'warning');
-                    }
-                }
-            });
-
-            window.addEventListener('keydown', (e) => {
-                if (solView.classList.contains('hidden')) return;
-                // Chặn PrintScreen
-                if (e.key === 'PrintScreen' || e.keyCode === 44) {
-                    triggerSolutionShield();
-                    e.preventDefault();
-                    return false;
-                }
-                // Chặn Win + Shift + S hoặc Cmd + Shift + 3/4
-                if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 's' || e.key === 'S')) {
-                    triggerSolutionShield();
-                    e.preventDefault();
-                    return false;
-                }
-                // Chặn Ctrl + P (in ấn)
-                if ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 'P')) {
-                    e.preventDefault();
-                    if (typeof window.customAlert === 'function') {
-                        window.customAlert('Không được phép in lời giải!', 'warning');
-                    }
-                    return false;
-                }
-                // Chặn Ctrl + S (lưu trang)
-                if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
-                    e.preventDefault();
-                    return false;
-                }
-            });
-
-            // 3. Chặn chuột phải & sao chép văn bản trong khu vực lời giải
-            solView.addEventListener('contextmenu', (e) => {
-                e.preventDefault();
-                return false;
-            });
-            solView.addEventListener('copy', (e) => {
-                e.preventDefault();
-                if (typeof window.customAlert === 'function') {
-                    window.customAlert('Nội dung lời giải được bảo vệ bản quyền!', 'warning');
-                }
-                return false;
-            });
-        };
-
-        // Render Watermark (Dấu chìm tên học sinh & thời gian) chống chụp camera ngoài
-        window.renderSolutionWatermark = () => {
-            const solView = document.getElementById('solutionView');
-            if (!solView) return;
-
-            // Xóa watermark cũ nếu có
-            const oldWm = document.getElementById('solutionWatermarkLayer');
-            if (oldWm) oldWm.remove();
-
-            const studentName = (typeof currentUser !== 'undefined' && currentUser?.displayName) ? currentUser.displayName : ((typeof currentUser !== 'undefined' && currentUser?.email) ? currentUser.email.split('@')[0] : 'Học sinh');
-            const studentId = (typeof currentUser !== 'undefined' && currentUser?.uid) ? currentUser.uid.slice(0, 6) : '';
-            const now = new Date();
-            const timeStr = `${now.getHours()}:${now.getMinutes() < 10 ? '0' : ''}${now.getMinutes()} ${now.getDate()}/${now.getMonth() + 1}`;
-            const wmText = `${studentName} ${studentId ? '(' + studentId + ')' : ''} • ${timeStr}`;
-
-            const svgPattern = `<svg xmlns='http://www.w3.org/2000/svg' width='280' height='160'><text x='20' y='90' fill='rgba(15, 23, 42, 0.055)' font-size='12' font-family='sans-serif' font-weight='700' transform='rotate(-22 140 80)'>${wmText}</text></svg>`;
-            const base64Svg = btoa(unescape(encodeURIComponent(svgPattern)));
-
-            const wmLayer = document.createElement('div');
-            wmLayer.id = 'solutionWatermarkLayer';
-            wmLayer.style.cssText = `
-                position: fixed;
-                inset: 0;
-                pointer-events: none;
-                z-index: 25;
-                background-image: url('data:image/svg+xml;base64,${base64Svg}');
-                background-repeat: repeat;
-                opacity: 1;
-            `;
-            solView.appendChild(wmLayer);
-        };
-
         // --- HÀM XEM LẠI BÀI (ĐÃ NÂNG CẤP: SWITCH LỊCH SỬ & HIỆN THÔNG SỐ) ---
         // --- HÀM XEM LẠI BÀI (ĐÃ FIX: HIỆN DANH SÁCH LỊCH SỬ CHUẨN) ---
         window.viewDetailSolutions = () => {
@@ -2617,12 +2467,10 @@ const shortMatch = (a, b) => {
             document.getElementById('examHeader').classList.add('hidden'); 
             document.getElementById('solutionView').classList.remove('hidden');
 
-            // [ANTI-SCREENSHOT & WATERMARK] Kích hoạt bảo vệ lời giải
-            if (typeof window.initSolutionAntiScreenshot === 'function') {
-                window.initSolutionAntiScreenshot();
-            }
-            if (typeof window.renderSolutionWatermark === 'function') {
-                window.renderSolutionWatermark();
+            // [ANTI-SCREENSHOT] Kích hoạt bảo vệ lời giải & xem lại bài thi theo cơ chế bản quyền
+            if (window.AntiScreenshot) {
+                window.AntiScreenshot.enterZone('solutions');
+                window.AntiScreenshot.enterZone('review');
             }
 
             // 2. Render Danh sách lịch sử bên Sidebar
@@ -4937,6 +4785,7 @@ window.requestResubmit = async () => {
         window.openExamLeaderboard = async (forceRefresh = false) => {
             const modal = document.getElementById('examLeaderboardModal');
             if (!modal) return;
+            if (window.AntiScreenshot) window.AntiScreenshot.enterZone('leaderboard');
 
             const targetExamId = examId || window.currentExamId || new URLSearchParams(window.location.search).get('id');
             const examTitle = examData?.title || (document.getElementById('examTitle')?.textContent) || 'Đề thi';
@@ -4998,6 +4847,7 @@ window.requestResubmit = async () => {
         };
 
         window.closeExamLeaderboard = () => {
+            if (window.AntiScreenshot) window.AntiScreenshot.leaveZone('leaderboard');
             const modal = document.getElementById('examLeaderboardModal');
             if (!modal) return;
             modal.classList.add('opacity-0');
@@ -5339,5 +5189,6 @@ window.requestResubmit = async () => {
         </div>
     </div>
 <script src="/sw-register.js?v=10"></script>
+<script src="/anti-screenshot.js?v=2"></script>
 </body>
 </html>
