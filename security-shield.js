@@ -1,157 +1,39 @@
 /**
- * QMath Security Shield
- * Bảo vệ bản quyền & chống chụp màn hình cho các khu vực nhạy cảm:
- * 1. Bảng Xếp Hạng (#examLeaderboardModal / #examLeaderboardBox / #leaderboardModal)
- * 2. Tra cứu câu hỏi theo ID & Lời giải (#studentQuestionLookupModal / #lookupModalBody)
- * 3. Xem chi tiết Lời giải đề thi (#solutionView / #solutionContentArea)
+ * QMath Security Shield (Cơ chế Chống Chụp Màn Hình & Bảo Vệ Bản Quyền Gốc)
+ * - Tự động kích hoạt màn hình đen tuyệt đối (#000) khi phát hiện hành vi chụp ảnh.
+ * - Hiển thị cảnh báo vi phạm bản quyền.
+ * - Xóa sạch clipboard và vô hiệu hóa công cụ chụp (PrintScreen, Snipping Tool, phím cứng điện thoại).
  */
 (function() {
     'use strict';
 
-    // Danh sách các selector cần bảo vệ khi đang hiển thị
-    const PROTECTED_SELECTORS = [
-        {
-            modal: '#examLeaderboardModal',
-            content: '#examLeaderboardBox',
-            isOpen: function(m) { return m && !m.classList.contains('hidden') && !m.classList.contains('opacity-0'); }
-        },
-        {
-            modal: '#leaderboardModal',
-            content: '#leaderboardModal > div',
-            isOpen: function(m) { return m && !m.classList.contains('hidden') && !m.classList.contains('opacity-0'); }
-        },
-        {
-            modal: '#studentQuestionLookupModal',
-            content: '#lookupModalBody',
-            isOpen: function(m) { return m && !m.classList.contains('pointer-events-none') && !m.classList.contains('opacity-0'); }
-        },
-        {
-            modal: '#solutionView',
-            content: '#solutionView',
-            isOpen: function(m) { return m && !m.classList.contains('hidden'); }
-        }
-    ];
+    // 1. TẠO LỚP PHỦ MÀN HÌNH ĐEN & CSS BẢO VỆ
+    function injectProtectionStylesAndOverlay() {
+        if (document.getElementById('anti-screenshot-overlay')) return;
 
-    function getActiveProtectedElements() {
-        const activeElements = [];
-        for (let i = 0; i < PROTECTED_SELECTORS.length; i++) {
-            const item = PROTECTED_SELECTORS[i];
-            const modalEl = document.querySelector(item.modal);
-            if (item.isOpen(modalEl)) {
-                const contentEl = item.content ? document.querySelector(item.content) : modalEl;
-                if (contentEl) activeElements.push(contentEl);
-            }
-        }
-        return activeElements;
-    }
-
-    let unblurTimer = null;
-
-    function applyShieldBlur(duration) {
-        const targets = getActiveProtectedElements();
-        if (targets.length === 0) return;
-
-        targets.forEach(function(el) {
-            el.style.transition = 'filter 0.08s ease';
-            el.style.filter = 'blur(28px)';
-            el.style.userSelect = 'none';
-            el.style.webkitUserSelect = 'none';
-        });
-
-        if (duration && duration > 0) {
-            clearTimeout(unblurTimer);
-            unblurTimer = setTimeout(removeShieldBlur, duration);
-        }
-    }
-
-    function removeShieldBlur(delay) {
-        clearTimeout(unblurTimer);
-        const wait = typeof delay === 'number' ? delay : 350;
-        unblurTimer = setTimeout(function() {
-            const targets = getActiveProtectedElements();
-            targets.forEach(function(el) {
-                el.style.filter = '';
-            });
-        }, wait);
-    }
-
-    // 1. Chống chụp màn hình trên điện thoại di động (iOS / Android)
-    document.addEventListener('visibilitychange', function() {
-        if (document.visibilityState === 'hidden') {
-            applyShieldBlur();
-        } else {
-            removeShieldBlur(400);
-        }
-    }, { passive: true });
-
-    window.addEventListener('blur', function() {
-        applyShieldBlur();
-    }, { passive: true });
-
-    window.addEventListener('focus', function() {
-        removeShieldBlur(350);
-    }, { passive: true });
-
-    // 2. Chặn các phím chụp màn hình trên máy tính (PrintScreen, Win+Shift+S, Cmd+Shift+3/4/5)
-    window.addEventListener('keyup', function(e) {
-        if (e.key === 'PrintScreen' || e.keyCode === 44) {
-            applyShieldBlur(1800);
-            try {
-                if (navigator.clipboard && navigator.clipboard.writeText) {
-                    navigator.clipboard.writeText('Nội dung được bảo vệ bản quyền bởi QMath!');
-                }
-            } catch (_) {}
-        }
-    }, { passive: true });
-
-    window.addEventListener('keydown', function(e) {
-        if (e.key === 'PrintScreen' || e.keyCode === 44) {
-            applyShieldBlur(1800);
-        }
-        // Chặn Ctrl+P / Cmd+P (In ấn khi đang mở tài liệu bảo mật)
-        if ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 'P')) {
-            const targets = getActiveProtectedElements();
-            if (targets.length > 0) {
-                e.preventDefault();
-                applyShieldBlur(1500);
-            }
-        }
-        // Chặn Mac Cmd+Shift+3, Cmd+Shift+4, Cmd+Shift+5
-        if (e.metaKey && e.shiftKey && ['3', '4', '5'].indexOf(e.key) !== -1) {
-            applyShieldBlur(1800);
-        }
-    });
-
-    // 3. Chống sao chép & click chuột phải trong các khu vực bảo vệ
-    document.addEventListener('contextmenu', function(e) {
-        const targets = getActiveProtectedElements();
-        for (let i = 0; i < targets.length; i++) {
-            if (targets[i].contains(e.target)) {
-                e.preventDefault();
-                return false;
-            }
-        }
-    });
-
-    document.addEventListener('copy', function(e) {
-        const targets = getActiveProtectedElements();
-        for (let i = 0; i < targets.length; i++) {
-            if (targets[i].contains(e.target)) {
-                e.preventDefault();
-                if (e.clipboardData) {
-                    e.clipboardData.setData('text/plain', 'Nội dung được bảo vệ bản quyền bởi QMath!');
-                }
-                return false;
-            }
-        }
-    });
-
-    // 4. Áp dụng CSS user-select: none cho các khu vực bảo mật khi trang sẵn sàng
-    function applySelectNone() {
-        if (document.getElementById('qmath-security-style')) return;
+        // Thêm CSS bảo vệ
         const style = document.createElement('style');
-        style.id = 'qmath-security-style';
+        style.id = 'anti-screenshot-styles';
         style.textContent = `
+            #anti-screenshot-overlay {
+                position: fixed !important;
+                top: 0 !important;
+                left: 0 !important;
+                width: 100vw !important;
+                height: 100vh !important;
+                background-color: #000000 !important;
+                z-index: 2147483647 !important;
+                display: none;
+                cursor: not-allowed;
+                pointer-events: all;
+            }
+            @media print {
+                body { display: none !important; }
+            }
+            .blur-content {
+                filter: blur(25px) grayscale(100%) !important;
+                transition: filter 0.05s linear;
+            }
             #examLeaderboardBox, #lookupModalBody, #solutionView {
                 -webkit-user-select: none !important;
                 -moz-user-select: none !important;
@@ -160,11 +42,137 @@
             }
         `;
         document.head.appendChild(style);
+
+        // Thêm div màn hình đen
+        const overlay = document.createElement('div');
+        overlay.id = 'anti-screenshot-overlay';
+        overlay.setAttribute('aria-hidden', 'true');
+        document.body.appendChild(overlay);
     }
 
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', applySelectNone);
+        document.addEventListener('DOMContentLoaded', injectProtectionStylesAndOverlay);
     } else {
-        applySelectNone();
+        injectProtectionStylesAndOverlay();
     }
+
+    let isWarningShown = false;
+    let blackScreenTimer = null;
+
+    // 2. HÀM KÍCH HOẠT MÀN HÌNH ĐEN TUYỆT ĐỐI (0.8 GIÂY)
+    function activeBlackScreen(duration) {
+        const overlay = document.getElementById('anti-screenshot-overlay');
+        if (!overlay) return;
+        overlay.style.display = 'block';
+        clearTimeout(blackScreenTimer);
+        const time = typeof duration === 'number' ? duration : 800;
+        blackScreenTimer = setTimeout(function() {
+            overlay.style.display = 'none';
+        }, time);
+    }
+
+    // 3. HIỂN THỊ CẢNH BÁO VI PHẠM BẢN QUYỀN
+    function showViolationWarning() {
+        if (isWarningShown) return;
+        isWarningShown = true;
+        setTimeout(function() { isWarningShown = false; }, 4000);
+
+        const msg = 'Cảnh báo: Nội dung bản quyền. Hành vi chụp màn hình đã bị chặn!';
+        if (typeof window.showNotification === 'function') {
+            window.showNotification(msg, 'error');
+        } else if (typeof window.customAlert === 'function') {
+            window.customAlert(msg, 'error');
+        } else {
+            alert(msg);
+        }
+    }
+
+    // 4. CHẶN PHÍM TẮT CHỤP MÀN HÌNH & F12
+    document.addEventListener('keydown', function(e) {
+        // Danh sách phím cần chặn: F12, PrintScreen, Ctrl+P, Ctrl+S, Ctrl+Shift+I/C/J/S, Mac Cmd+Shift+3/4/5
+        const isPrintScreen = e.key === 'PrintScreen' || e.keyCode === 44;
+        const isDevTools = e.key === 'F12' || (e.ctrlKey && e.shiftKey && ['i', 'c', 'j'].indexOf(e.key.toLowerCase()) !== -1);
+        const isPrintOrSave = (e.ctrlKey || e.metaKey) && ['p', 's', 'u'].indexOf(e.key.toLowerCase()) !== -1;
+        const isMacScreenshot = e.metaKey && e.shiftKey && ['3', '4', '5', 's'].indexOf(e.key.toLowerCase()) !== -1;
+
+        if (isPrintScreen || isDevTools || isPrintOrSave || isMacScreenshot) {
+            activeBlackScreen(900);
+            e.preventDefault();
+            e.stopPropagation();
+
+            // Xóa sạch clipboard
+            try {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText('Nội dung được bảo vệ bản quyền bởi QMath!');
+                }
+            } catch (_) {}
+
+            showViolationWarning();
+            return false;
+        }
+    }, true);
+
+    // 5. XỬ LÝ PHÍM PRINTSCREEN (Sự kiện Keyup)
+    document.addEventListener('keyup', function(e) {
+        if (e.key === 'PrintScreen' || e.keyCode === 44) {
+            activeBlackScreen(900);
+            try {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText('Nội dung được bảo vệ bản quyền bởi QMath!');
+                }
+            } catch (_) {}
+            showViolationWarning();
+        }
+    }, true);
+
+    // 6. CHỐNG CHỤP MÀN HÌNH TRÊN ĐIỆN THOẠI & CHỐNG SNIPPING TOOL / LIGHTSHOT
+    document.addEventListener('visibilitychange', function() {
+        if (document.visibilityState === 'hidden') {
+            activeBlackScreen(1200);
+            if (document.body) document.body.classList.add('blur-content');
+        } else {
+            const overlay = document.getElementById('anti-screenshot-overlay');
+            if (overlay) overlay.style.display = 'none';
+            if (document.body) document.body.classList.remove('blur-content');
+        }
+    });
+
+    // Mất tiêu điểm cửa sổ (chống Snipping Tool trên máy tính)
+    window.addEventListener('blur', function() {
+        // Tránh kích hoạt nhầm khi học sinh đang gõ vào ô input/textarea
+        const active = document.activeElement;
+        if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT')) {
+            return;
+        }
+        const overlay = document.getElementById('anti-screenshot-overlay');
+        if (overlay) overlay.style.display = 'block';
+        if (document.body) document.body.classList.add('blur-content');
+    });
+
+    window.addEventListener('focus', function() {
+        const overlay = document.getElementById('anti-screenshot-overlay');
+        if (overlay) overlay.style.display = 'none';
+        if (document.body) document.body.classList.remove('blur-content');
+    });
+
+    // 7. CHẶN CHUỘT PHẢI
+    document.addEventListener('contextmenu', function(e) {
+        const tag = e.target ? e.target.tagName : '';
+        if (tag === 'INPUT' || tag === 'TEXTAREA') return true;
+        e.preventDefault();
+        return false;
+    });
+
+    // 8. CHẶN SAO CHÉP TRONG CÁC KHU VỰC BẢO MẬT
+    document.addEventListener('copy', function(e) {
+        const tag = e.target ? e.target.tagName : '';
+        if (tag === 'INPUT' || tag === 'TEXTAREA') return true;
+
+        e.preventDefault();
+        if (e.clipboardData) {
+            e.clipboardData.setData('text/plain', 'Nội dung được bảo vệ bản quyền bởi QMath!');
+        }
+        showViolationWarning();
+        return false;
+    });
 })();
