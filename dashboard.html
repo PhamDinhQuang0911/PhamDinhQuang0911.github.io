@@ -1953,14 +1953,23 @@
         window.autoScaleTables = autoScaleTables;
         window.renderTikz = renderTikz;
 
-        import { 
-            initializeApp, deleteApp, getAuth, onAuthStateChanged, signOut, createUserWithEmailAndPassword, updateProfile, updatePassword,
-            getFirestore, doc, getDoc, getDocFromCache, setDoc, collection, addDoc, query, where, orderBy, getDocs, updateDoc, deleteDoc, arrayUnion, limit, enableMultiTabIndexedDbPersistence, onSnapshot,
-            getStorage, ref, deleteObject, getFunctions, httpsCallable, supabase, DEFAULT_ADMIN
-        } from "./supabase-db-compat.js?v=21";
+        import { initializeApp, deleteApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getAuth, onAuthStateChanged, signOut, createUserWithEmailAndPassword, updateProfile, updatePassword } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+        import { getFirestore, doc, getDoc, getDocFromCache, setDoc, collection, addDoc, query, where, orderBy, getDocs, updateDoc, deleteDoc, arrayUnion, limit, enableMultiTabIndexedDbPersistence, onSnapshot, increment } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { getStorage, ref, deleteObject } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js";
+        import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-functions.js";
 
-        // 1. CẤU HÌNH SUPABASE (HỆ THỐNG ĐÃ CHUYỂN TỪ FIREBASE SANG SUPABASE)
-        const app = initializeApp({});
+        // 1. CẤU HÌNH FIREBASE
+        const firebaseConfig = {
+            apiKey: "AIzaSyCqAX3x1MbJ3do7m3EaH9JA4kFuVhlAc78",
+            authDomain: "lms-thitracnghiem.firebaseapp.com",
+            projectId: "lms-thitracnghiem",
+            storageBucket: "lms-thitracnghiem.firebasestorage.app",
+            messagingSenderId: "760187217240",
+            appId: "1:760187217240:web:d043cd5808c349f87a712d"
+        };
+
+        const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
         const db = getFirestore(app);
         const storage = getStorage(app);
@@ -1969,7 +1978,6 @@
         // Gắn vào window
         window.db = db;
         window.auth = auth;
-        window.supabase = supabase;
 
         // --- BỘ ĐỆM AN TOÀN TRÁNH TRÀN QUOTA LOCALSTORAGE (5MB) ---
         window.stripQuestionsForCache = function(arr) {
@@ -3384,7 +3392,41 @@
             }
 
             try {
-                // 1. Lưu vào configurations/admin_roles
+                // 1. Tạo tài khoản Firebase Auth bằng Secondary App (nếu có mật khẩu và là tài khoản mới)
+                let createdAuthUid = null;
+                if (password) {
+                    try {
+                        const secApp = initializeApp(firebaseConfig, "AdminCreator_" + Date.now());
+                        const secAuth = getAuth(secApp);
+                        try {
+                            const cred = await createUserWithEmailAndPassword(secAuth, email, password);
+                            createdAuthUid = cred.user.uid;
+                            if (displayName) {
+                                await updateProfile(cred.user, { displayName });
+                            }
+                            await signOut(secAuth);
+                        } catch(authErr) {
+                            if (authErr.code === 'auth/email-already-in-use') {
+                                console.log("Email đã tồn tại trong Firebase Auth, chuyển sang cập nhật Firestore.");
+                                try {
+                                    const updateFunc = httpsCallable(functions, 'updateStudentPassword');
+                                    await updateFunc({ email, newPassword: password });
+                                } catch(fnErr) {}
+                            } else {
+                                throw authErr;
+                            }
+                        } finally {
+                            await deleteApp(secApp);
+                        }
+                    } catch(authWrapperErr) {
+                        console.warn("Lỗi tạo Auth người dùng:", authWrapperErr);
+                        if (authWrapperErr.code !== 'auth/email-already-in-use') {
+                            throw new Error("Lỗi khởi tạo tài khoản đăng nhập: " + (authWrapperErr.message || authWrapperErr));
+                        }
+                    }
+                }
+
+                // 2. Lưu vào configurations/admin_roles
                 const cfgRef = doc(db, "configurations", "admin_roles");
                 let accounts = [];
                 try {
@@ -3397,7 +3439,7 @@
                 const finalPassword = password || existingAcc?.password || '';
 
                 const accRecord = {
-                    id: docId || ('admin_' + Date.now()),
+                    id: docId || createdAuthUid || ('admin_' + Date.now()),
                     email,
                     password: finalPassword,
                     displayName: displayName || email.split('@')[0],
@@ -3418,39 +3460,24 @@
 
                 await setDoc(cfgRef, { accounts, updatedAt: new Date().toISOString() }, { merge: true });
 
-                // 2. Lưu vào collection admin_accounts
+                // 3. Lưu vào collection admin_accounts
                 try {
                     const cleanDocId = email.replace(/[@.]/g, '_');
                     await setDoc(doc(db, "admin_accounts", cleanDocId), accRecord, { merge: true });
                 } catch (e) {}
 
-                // 3. Đồng bộ vào bảng users trên Supabase để đăng nhập trực tiếp
+                // 4. Lưu vào Firestore users collection
                 try {
-                    const { data: existingUsers } = await supabase
-                        .from('users')
-                        .select('id, email, password')
-                        .or(`email.ilike.${email},id.eq.${email}`)
-                        .limit(1);
-
-                    const userPayload = {
+                    const userDocId = createdAuthUid || docId || email.replace(/[@.]/g, '_');
+                    await setDoc(doc(db, "users", userDocId), {
                         email: email,
-                        display_name: displayName || email.split('@')[0],
+                        displayName: displayName || email.split('@')[0],
                         role: role === 'super_admin' ? 'admin' : 'teacher',
-                        updated_at: new Date().toISOString()
-                    };
-                    if (finalPassword) {
-                        userPayload.password = finalPassword;
-                    }
-
-                    if (existingUsers && existingUsers.length > 0) {
-                        await supabase.from('users').update(userPayload).eq('id', existingUsers[0].id);
-                    } else {
-                        userPayload.id = accRecord.id;
-                        userPayload.created_at = new Date().toISOString();
-                        await supabase.from('users').insert(userPayload);
-                    }
-                } catch (userErr) {
-                    console.warn("Lỗi đồng bộ bảng users:", userErr);
+                        password: finalPassword,
+                        updatedAt: new Date().toISOString()
+                    }, { merge: true });
+                } catch(userErr) {
+                    console.warn("Lỗi lưu users collection:", userErr);
                 }
 
                 window.showNotification(`Đã lưu tài khoản ${email} thành công!`, 'success');
@@ -3542,10 +3569,6 @@
 
         // 4. AUTH
         onAuthStateChanged(auth, async (user) => {
-            if (!user) {
-                user = DEFAULT_ADMIN;
-                auth.currentUser = DEFAULT_ADMIN;
-            }
             if (user) {
                 getDoc(doc(db, "configurations", "map_id_tree")).then(snap => {
                     if(snap.exists()) window.globalIdTree = snap.data().tree || [];
@@ -8430,7 +8453,6 @@ function renderTagFilterUI() {
         window.saveMathTypeApi = async () => {
             const url = document.getElementById('webhookMathTypeUrl').value.trim();
             try {
-                const { setDoc, doc } = await import("./supabase-db-compat.js?v=21");
                 await setDoc(doc(db, "configurations", "mathtype_api"), { url: url }, { merge: true });
                 updateAiModalBadges();
                 window.showNotification("Lưu cấu hình API MathType thành công!", "success");
