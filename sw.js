@@ -14,13 +14,14 @@
  * (network-first) nhưng nên tăng khi đổi styles.css/utils.js để chắc chắn.
  */
 
-const VERSION = 'qmath-v18';
+const VERSION = 'qmath-v22-supabase';
 const STATIC_CACHE = `${VERSION}-static`;
 const PAGE_CACHE = `${VERSION}-pages`;
 const CDN_CACHE = `${VERSION}-cdn`;
 
 // Các host KHÔNG BAO GIỜ được cache (dữ liệu động / API)
 const NEVER_CACHE_HOSTS = [
+  'supabase.co',
   'firestore.googleapis.com',
   'identitytoolkit.googleapis.com',
   'securetoken.googleapis.com',
@@ -96,19 +97,33 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // 3. File tĩnh cùng domain: stale-while-revalidate
+  // 3. File code adapter DB Supabase: luôn NETWORK-FIRST để không bao giờ bị lệch phiên bản module
+  if (url.origin === self.location.origin && (url.pathname.includes('supabase-db-compat') || url.pathname.includes('supabase-client'))) {
+    event.respondWith(
+      fetch(req)
+        .then((res) => {
+          const copy = res.clone();
+          caches.open(STATIC_CACHE).then((c) => c.put(req, copy));
+          return res;
+        })
+        .catch(() => caches.match(req))
+    );
+    return;
+  }
+
+  // 4. File tĩnh cùng domain: stale-while-revalidate
   if (url.origin === self.location.origin && STATIC_EXT.test(url.pathname)) {
     event.respondWith(staleWhileRevalidate(req, STATIC_CACHE));
     return;
   }
 
-  // 4. CDN tin cậy: stale-while-revalidate
+  // 5. CDN tin cậy: stale-while-revalidate
   if (CDN_HOSTS.includes(url.hostname)) {
     event.respondWith(staleWhileRevalidate(req, CDN_CACHE));
     return;
   }
 
-  // 5. Còn lại: mặc định qua mạng, không cache
+  // 6. Còn lại: mặc định qua mạng, không cache
 });
 
 function staleWhileRevalidate(req, cacheName) {
