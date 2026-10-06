@@ -239,7 +239,9 @@
          */
         compareQuestions(q1, q2) {
             if (!q1 || !q2) return { score: 0, isMatch: false };
-            if (q1.id && q2.id && String(q1.id) === String(q2.id)) return { score: 100, isMatch: true };
+            // Hai câu cùng một mã ID hoặc CCCD là cùng 1 câu hỏi trong hệ thống, không phải câu trùng cần gộp
+            if (q1.id && q2.id && String(q1.id) === String(q2.id)) return { score: 0, isMatch: false, reason: "Cùng một mã câu hỏi" };
+            if (q1.cccd && q2.cccd && String(q1.cccd) === String(q2.cccd)) return { score: 0, isMatch: false, reason: "Cùng một mã CCCD" };
 
             const c1 = (q1.content || '').trim();
             const c2 = (q2.content || '').trim();
@@ -335,7 +337,19 @@
             const onProgress = options.onProgress || null;
             const clusters = [];
             const visited = new Set();
-            const list = (Array.isArray(questionList) ? questionList : []).filter(q => q && q.content && q.content.trim().length >= 5);
+
+            // 0. Khử trùng lặp bản ghi theo ID/CCCD (đảm bảo mỗi câu hỏi chỉ xuất hiện đúng 1 lần trong danh sách quét)
+            const uniqueMap = new Map();
+            (Array.isArray(questionList) ? questionList : []).forEach(q => {
+                if (!q) return;
+                const k = String(q.id || q.cccd || '').trim();
+                if (k && !uniqueMap.has(k)) {
+                    uniqueMap.set(k, q);
+                } else if (!k) {
+                    uniqueMap.set(`temp_${uniqueMap.size}`, q);
+                }
+            });
+            const list = Array.from(uniqueMap.values()).filter(q => q && q.content && q.content.trim().length >= 5);
             const n = list.length;
 
             if (n < 2) return [];
@@ -360,15 +374,15 @@
 
                 for (let i = 0; i < bLen; i++) {
                     const itemA = bucketItems[i].q;
-                    const idA = String(itemA.id || itemA.cccd);
-                    if (visited.has(idA)) continue;
+                    const idA = String(itemA.id || itemA.cccd || '');
+                    if (!idA || visited.has(idA)) continue;
 
                     const currentCluster = [itemA];
 
                     for (let j = i + 1; j < bLen; j++) {
                         const itemB = bucketItems[j].q;
-                        const idB = String(itemB.id || itemB.cccd);
-                        if (visited.has(idB)) continue;
+                        const idB = String(itemB.id || itemB.cccd || '');
+                        if (!idB || idB === idA || visited.has(idB)) continue;
 
                         const res = this.compareQuestions(itemA, itemB);
 
