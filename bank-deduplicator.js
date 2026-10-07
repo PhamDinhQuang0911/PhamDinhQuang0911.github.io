@@ -254,6 +254,20 @@
                 return { score: 0, isMatch: false, reason: "Khác loại câu hỏi" };
             }
 
+            // 0. Kiểm tra trùng khớp hoàn toàn nội dung và các phương án (100% tuyệt đối)
+            const normC1 = c1.replace(/\s+/g, ' ');
+            const normC2 = c2.replace(/\s+/g, ' ');
+            const rawOpts1 = (q1.options || []).map(o => String(o).trim()).filter(Boolean).sort().join('||');
+            const rawOpts2 = (q2.options || []).map(o => String(o).trim()).filter(Boolean).sort().join('||');
+            if (normC1 === normC2 && rawOpts1 === rawOpts2) {
+                return {
+                    score: 100,
+                    details: { options: 100, math: 100, text: 100 },
+                    isMatch: true,
+                    isPotential: true
+                };
+            }
+
             // 1. So khớp 4 phương án trắc nghiệm
             const opts1 = this.getCanonicalOptions(q1.options || []);
             const opts2 = this.getCanonicalOptions(q2.options || []);
@@ -290,13 +304,18 @@
                     // Nếu đáp án chỉ là các số đếm đơn giản (1, 2, 3, 4), không thể dựa vào đáp án
                     // Trọng số chính phải nằm ở công thức Toán và đề bài
                     totalScore = (scoreMath * 0.55) + (scoreText * 0.35) + (scoreOptions * 0.10);
+                } else if (hasMathBlocks && scoreMath < 0.30) {
+                    // Hai câu có công thức hoàn toàn khác nhau thì không thể là một
+                    totalScore = (scoreMath * 0.50) + (scoreText * 0.30) + (scoreOptions * 0.20);
                 } else if (scoreOptions >= 0.98) {
                     // Đáp án đặc thù và khớp 100%
-                    if (scoreMath >= 0.50 || scoreText >= 0.40) {
-                        totalScore = 0.96;
-                    } else if (hasMathBlocks && scoreMath < 0.30) {
-                        // Hai câu có công thức hoàn toàn khác nhau thì không thể là một
-                        totalScore = (scoreMath * 0.50) + (scoreText * 0.30) + (scoreOptions * 0.20);
+                    if (scoreMath >= 0.98 && scoreText >= 0.98) {
+                        totalScore = 1.0; // Trùng khớp 100% tuyệt đối
+                    } else if (scoreMath >= 0.92 && scoreText >= 0.90) {
+                        totalScore = 0.98; // Trùng khớp rất cao >= 98%
+                    } else if (scoreMath >= 0.50 || scoreText >= 0.40) {
+                        const weighted = (scoreOptions * 0.50) + (scoreMath * 0.30) + (scoreText * 0.20);
+                        totalScore = Math.max(weighted, 0.96);
                     } else {
                         totalScore = (scoreOptions * 0.50) + (scoreMath * 0.30) + (scoreText * 0.20);
                     }
@@ -307,7 +326,13 @@
                 }
             } else {
                 // Câu tự luận hoặc điền khuyết (không có 4 phương án)
-                totalScore = (scoreMath * 0.60) + (scoreText * 0.40);
+                if (scoreMath >= 0.98 && scoreText >= 0.98) {
+                    totalScore = 1.0;
+                } else if (scoreMath >= 0.92 && scoreText >= 0.90) {
+                    totalScore = 0.98;
+                } else {
+                    totalScore = (scoreMath * 0.60) + (scoreText * 0.40);
+                }
             }
 
             // Nếu cả hai câu đều có khối toán học mà độ tương đồng toán quá thấp (< 0.25)
