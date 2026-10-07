@@ -10805,6 +10805,9 @@ function renderTagFilterUI() {
 
                 const syncMsg = syncCount > 0 ? ` (Đã tự động đồng bộ ${syncCount} đề thi liên quan)` : '';
                 window.showNotification(`Đã cập nhật câu hỏi thành công trên Cloudflare!${syncMsg}`, "success");
+                
+                const dedupeCtx = window.activeDedupeEditContext;
+                window.activeDedupeEditContext = null;
                 window.closeQuestionEditModal();
 
                 // Cập nhật Cache local & UI
@@ -10820,10 +10823,14 @@ function renderTagFilterUI() {
                 } catch(e) {}
                 window.applyBankFilters();
 
-                // Mở lại preview với nội dung mới
-                setTimeout(() => {
-                    window.fetchAndPreview(currentEditingQuestion.id);
-                }, 400);
+                if (dedupeCtx && typeof window.handleDedupePostEditUpdate === 'function') {
+                    window.handleDedupePostEditUpdate(dedupeCtx.questionId, dedupeCtx.clusterId, currentEditingQuestion);
+                } else {
+                    // Mở lại preview với nội dung mới
+                    setTimeout(() => {
+                        window.fetchAndPreview(currentEditingQuestion.id);
+                    }, 400);
+                }
             } else {
                 throw new Error("Không thể lưu file trên Cloudflare");
             }
@@ -13940,6 +13947,16 @@ function renderTagFilterUI() {
                             </div>
                             ${optListHtml}
                         </div>
+                        <div class="mt-3 pt-2.5 border-t border-gray-100 flex items-center justify-between gap-2 flex-wrap">
+                            <button type="button" onclick="window.editQuestionFromDedupeCluster('${q.id}', '${cluster.clusterId}')" class="px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 rounded-xl text-xs font-bold border border-amber-200 transition-all flex items-center gap-1.5 shadow-2xs cursor-pointer" title="Sửa trực tiếp nội dung câu hỏi này và cập nhật ghi đè lên Cloudflare">
+                                <i class="fa-solid fa-pen-to-square text-amber-600"></i> Sửa & Ghi đè câu này
+                            </button>
+                            ${!isSelectedMaster ? `
+                            <button type="button" onclick="window.overwriteContentToMaster('${q.id}', '${cluster.master.id}', '${cluster.clusterId}')" class="px-2.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-800 rounded-xl text-xs font-bold border border-blue-200 transition-all flex items-center gap-1.5 shadow-2xs cursor-pointer ml-auto" title="Lấy toàn bộ nội dung, đáp án và lời giải của câu này để ghi đè vào câu trước đó #${cluster.master.id}">
+                                <i class="fa-solid fa-clone text-blue-600"></i> Ghi đè vào câu trước (#${cluster.master.id})
+                            </button>
+                            ` : ''}
+                        </div>
                     </div>
                 `;
             });
@@ -13971,6 +13988,178 @@ function renderTagFilterUI() {
         // Kích hoạt render MathJax
         if (window.MathJax && window.MathJax.typesetPromise) {
             window.MathJax.typesetPromise([listEl]).catch(() => {});
+        }
+    };
+
+    window.activeDedupeEditContext = null;
+
+    window.editQuestionFromDedupeCluster = async (qId, clusterId) => {
+        let fullQ = (window.globalBankQuestions || []).find(x => String(x.id) === String(qId) || String(x.cccd) === String(qId));
+        if (!fullQ || !fullQ.content) {
+            try {
+                const res = await fetch(`https://upload-helper.phamngockhanh-942001.workers.dev/bank?id=${encodeURIComponent(qId)}`);
+                if (res.ok) fullQ = await res.json();
+            } catch(e) {}
+        }
+        if (!fullQ) {
+            const cluster = (window.currentDedupeClusters || []).find(c => c.clusterId === clusterId);
+            if (cluster) {
+                const allQ = [cluster.master, ...cluster.duplicates];
+                fullQ = allQ.find(x => String(x.id) === String(qId) || String(x.cccd) === String(qId));
+            }
+        }
+        if (!fullQ) {
+            alert("Không tìm thấy dữ liệu câu hỏi #" + qId);
+            return;
+        }
+
+        window.activeDedupeEditContext = {
+            questionId: String(qId),
+            clusterId: String(clusterId)
+        };
+
+        window.openQuestionEditModal(fullQ);
+    };
+
+    window.handleDedupePostEditUpdate = (questionId, clusterId, updatedQuestion) => {
+        if (!window.currentDedupeClusters || !Array.isArray(window.currentDedupeClusters)) return;
+        const cluster = window.currentDedupeClusters.find(c => c.clusterId === clusterId);
+        if (!cluster) return;
+
+        // 1. Cập nhật dữ liệu mới vào master hoặc duplicate tương ứng
+        if (String(cluster.master.id) === String(questionId) || String(cluster.master.cccd) === String(questionId)) {
+            cluster.master = Object.assign({}, cluster.master, updatedQuestion);
+        }
+        if (Array.isArray(cluster.duplicates)) {
+            const dIdx = cluster.duplicates.findIndex(d => String(d.id) === String(questionId) || String(d.cccd) === String(questionId));
+            if (dIdx !== -1) {
+                cluster.duplicates[dIdx] = Object.assign({}, cluster.duplicates[dIdx], updatedQuestion);
+            }
+        }
+
+        // 2. Kiểm tra lại độ tương đồng giữa Master và từng câu Duplicate bằng BankDeduplicator
+        const threshold = parseInt(document.getElementById('dedupeThresholdSelect')?.value || '85', 10);
+        const remainingDuplicates = [];
+
+        if (Array.isArray(cluster.duplicates)) {
+            for (const d of cluster.duplicates) {
+                const cmp = window.BankDeduplicator ? window.BankDeduplicator.compareQuestions(cluster.master, d) : { score: 0 };
+                if (cmp.score >= threshold) {
+                    remainingDuplicates.push({
+                        ...d,
+                        matchScore: cmp.score,
+                        matchDetails: cmp.details
+                    });
+                }
+            }
+        }
+
+        // 3. Nếu cụm không còn câu trùng nào
+        if (remainingDuplicates.length === 0) {
+            window.currentDedupeClusters = window.currentDedupeClusters.filter(c => c.clusterId !== clusterId);
+            if (window.showNotification) {
+                window.showNotification(`Đã sửa câu hỏi #${questionId}! Câu đã có nội dung mới và cụm này không còn bị trùng lặp.`, "success");
+            }
+        } else {
+            cluster.duplicates = remainingDuplicates;
+            cluster.maxScore = Math.max(...remainingDuplicates.map(d => d.matchScore || threshold));
+            if (window.showNotification) {
+                window.showNotification(`Đã cập nhật câu hỏi #${questionId} thành công trong cụm!`, "success");
+            }
+        }
+
+        // 4. Render lại danh sách cụm trùng
+        window.renderDeduplicateClusters(window.currentDedupeClusters);
+    };
+
+    window.overwriteContentToMaster = async (sourceId, targetMasterId, clusterId) => {
+        if (!confirm(`Bạn có chắc chắn muốn lấy toàn bộ nội dung (đề bài, phương án, lời giải) của câu #${sourceId} để GHI ĐÈ vào câu gốc #${targetMasterId}?\n\nSau khi ghi đè, câu gốc #${targetMasterId} sẽ mang nội dung mới này trên Cloudflare R2.`)) {
+            return;
+        }
+
+        try {
+            // Lấy dữ liệu 2 câu
+            let sourceQ = (window.globalBankQuestions || []).find(q => String(q.id) === String(sourceId) || String(q.cccd) === String(sourceId));
+            let targetQ = (window.globalBankQuestions || []).find(q => String(q.id) === String(targetMasterId) || String(q.cccd) === String(targetMasterId));
+
+            if (!sourceQ || !sourceQ.content) {
+                const res = await fetch(`https://upload-helper.phamngockhanh-942001.workers.dev/bank?id=${encodeURIComponent(sourceId)}`);
+                if (res.ok) sourceQ = await res.json();
+            }
+            if (!targetQ || !targetQ.content) {
+                const res2 = await fetch(`https://upload-helper.phamngockhanh-942001.workers.dev/bank?id=${encodeURIComponent(targetMasterId)}`);
+                if (res2.ok) targetQ = await res2.json();
+            }
+
+            if (!sourceQ || !targetQ) {
+                alert("Không thể tải đầy đủ thông tin hai câu hỏi để thực hiện ghi đè.");
+                return;
+            }
+
+            // Ghi đè nội dung từ source sang target, giữ nguyên định danh ID, CCCD của target
+            const updatedTarget = {
+                ...targetQ,
+                content: sourceQ.content,
+                options: Array.isArray(sourceQ.options) ? [...sourceQ.options] : [],
+                correct: sourceQ.correct !== undefined ? sourceQ.correct : -1,
+                correctAnswer: sourceQ.correctAnswer || '',
+                statements: Array.isArray(sourceQ.statements) ? [...sourceQ.statements] : [],
+                answer: sourceQ.answer !== undefined ? sourceQ.answer : '',
+                solution: sourceQ.solution || '',
+                type: sourceQ.type || 'mc',
+                mapId: sourceQ.mapId || targetQ.mapId || '',
+                level: sourceQ.level || targetQ.level || null,
+                subject: sourceQ.subject || targetQ.subject || 'Toán',
+                updatedAt: new Date().toISOString()
+            };
+
+            // Lưu câu target mới lên Cloudflare R2
+            let saved = false;
+            if (window.BankService) {
+                saved = await window.BankService.saveSingleQuestion(updatedTarget);
+            } else {
+                const blob = new Blob([JSON.stringify(updatedTarget, null, 2)], { type: 'application/json' });
+                const fd = new FormData();
+                fd.append('file', blob, `bank/${updatedTarget.id}.json`);
+                const upRes = await fetch("https://upload-helper.phamngockhanh-942001.workers.dev/", { method: 'PUT', body: fd });
+                saved = upRes.ok;
+            }
+
+            if (!saved) throw new Error("Không thể lưu câu hỏi ghi đè lên Cloudflare R2");
+
+            // Cập nhật bộ nhớ cache
+            if (Array.isArray(window.globalBankQuestions)) {
+                const tIdx = window.globalBankQuestions.findIndex(q => String(q.id) === String(targetMasterId));
+                if (tIdx !== -1) window.globalBankQuestions[tIdx] = Object.assign({}, window.globalBankQuestions[tIdx], updatedTarget);
+                try {
+                    localStorage.setItem('lms_cached_bank', JSON.stringify(window.globalBankQuestions));
+                } catch(e) {}
+            }
+
+            // Đồng bộ đề thi
+            try {
+                if (typeof window.syncUpdatedQuestionToAllExams === 'function') {
+                    await window.syncUpdatedQuestionToAllExams(targetMasterId, updatedTarget);
+                }
+            } catch(e) {}
+
+            // Tự động gộp câu sourceId thành alias của targetMasterId để không còn bị trùng lặp
+            if (window.BankDeduplicator) {
+                await window.BankDeduplicator.persistMergeToR2(targetMasterId, [sourceId], window.globalBankQuestions, window.BankService);
+            }
+
+            // Loại bỏ cụm này khỏi danh sách quét trùng
+            window.currentDedupeClusters = (window.currentDedupeClusters || []).filter(c => c.clusterId !== clusterId);
+            window.renderDeduplicateClusters(window.currentDedupeClusters);
+
+            if (window.showNotification) {
+                window.showNotification(`Đã ghi đè thành công nội dung của câu #${sourceId} vào câu gốc #${targetMasterId}! Cụm trùng đã được giải quyết.`, "success");
+            } else {
+                alert(`Đã ghi đè thành công nội dung câu #${sourceId} vào câu gốc #${targetMasterId}!`);
+            }
+        } catch(err) {
+            console.error("Lỗi khi ghi đè vào câu trước:", err);
+            alert("Lỗi khi ghi đè: " + err.message);
         }
     };
 
