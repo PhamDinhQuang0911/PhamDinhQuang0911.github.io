@@ -16,7 +16,8 @@
  *   const r = await qp.spend(5, 'ai_hint');  // trừ điểm -> {ok, balance}
  */
 import {
-    doc, getDoc, setDoc, updateDoc, addDoc, collection, increment
+    doc, getDoc, setDoc, updateDoc, addDoc, collection, increment,
+    query, where, orderBy, limit, getDocs
 } from "./supabase-db-compat.js?v=25";
 
 export const QP_COSTS = {
@@ -31,6 +32,34 @@ export const QP_REWARDS = {
     goodScoreBonus: 10,    // thưởng thêm nếu đúng >= 80%
     reportAccepted: 50     // báo lỗi được giáo viên duyệt (dành cho tương lai)
 };
+
+export const DEFAULT_QPOINT_PACKAGES = [
+    { id: 'qp_50', name: 'Gói Khởi Động', points: 50, bonus: 0, price: 20000, popular: false, desc: 'Dành cho ôn luyện nhẹ nhàng' },
+    { id: 'qp_150', name: 'Gói Tiêu Chuẩn', points: 150, bonus: 15, price: 50000, popular: true, desc: 'Được học sinh lựa chọn nhiều nhất' },
+    { id: 'qp_350', name: 'Gói Siêu Cấp', points: 350, bonus: 50, price: 100000, popular: false, desc: 'Tặng thêm 50 Qp, tiết kiệm 15%' },
+    { id: 'qp_1000', name: 'Gói Không Giới Hạn', points: 1000, bonus: 200, price: 250000, popular: false, desc: 'Tặng thêm 200 Qp, luyện đề thoải mái' }
+];
+
+export async function getQPointConfig(db) {
+    try {
+        const snap = await getDoc(doc(db, "site_settings", "qpoint_packages"));
+        if (snap.exists() && snap.data()) {
+            const data = snap.data();
+            return {
+                enabled: data.enabled !== false,
+                packages: (Array.isArray(data.packages) && data.packages.length > 0) ? data.packages : DEFAULT_QPOINT_PACKAGES,
+                note: data.note || 'QPoint dùng để xem gợi ý AI, dùng trợ giúp 50/50 và xem lời giải chi tiết.'
+            };
+        }
+    } catch(e) {
+        console.warn("[QPoint] Lỗi đọc cấu hình gói:", e);
+    }
+    return {
+        enabled: true,
+        packages: DEFAULT_QPOINT_PACKAGES,
+        note: 'QPoint dùng để xem gợi ý AI, dùng trợ giúp 50/50 và xem lời giải chi tiết.'
+    };
+}
 
 export function createQPoint(db, uid) {
     let balance = 0;
@@ -111,6 +140,48 @@ export function createQPoint(db, uid) {
                 balance += amount; notify();
                 return { ok: false, balance, error: 'network' };
             }
+        },
+
+        /** Thiết lập số dư chỉ định (dành cho Admin / Thầy cô) */
+        async setBalance(newBalance, reason, meta) {
+            newBalance = Math.max(0, Math.floor(Number(newBalance) || 0));
+            const delta = newBalance - balance;
+            balance = newBalance;
+            notify();
+            try {
+                await updateDoc(doc(db, "users", uid), { qpoints: balance });
+                await writeLedger(delta, reason || 'set_balance', balance, meta);
+                return { ok: true, balance };
+            } catch (e) {
+                console.warn("QPoint: lỗi gán số dư", e);
+                return { ok: false, balance };
+            }
         }
     };
 }
+
+/**
+ * Lấy lịch sử giao dịch QPoint của học sinh
+ * @param {object} db - Database instance
+ * @param {string} uid - User ID
+ * @param {number} maxCount - Số lượng giao dịch tối đa
+ */
+export async function getStudentQPointTransactions(db, uid, maxCount = 50) {
+    if (!uid) return [];
+    try {
+        const q = query(
+            collection(db, "qpoint_transactions"),
+            where("uid", "==", uid),
+            orderBy("at", "desc"),
+            limit(maxCount)
+        );
+        const snap = await getDocs(q);
+        const list = [];
+        snap.forEach(d => list.push({ id: d.id, ...d.data() }));
+        return list;
+    } catch (e) {
+        console.warn("[QPoint] Lỗi tải sổ giao dịch:", e);
+        return [];
+    }
+}
+
