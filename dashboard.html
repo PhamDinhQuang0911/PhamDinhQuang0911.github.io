@@ -1235,6 +1235,10 @@
             <button onclick="switchView('students')" id="nav-students" class="nav-item w-full text-left px-3 py-2.5 rounded-xl text-gray-600 hover:bg-gray-50 transition-colors flex items-center gap-3"><i class="fa-solid fa-user-graduate"></i> Quản lý Học sinh</button>
             <button onclick="switchView('exambank')" id="nav-exambank" class="nav-item w-full text-left px-3 py-2.5 rounded-xl text-gray-600 hover:bg-gray-50 transition-colors flex items-center gap-3"><i class="fa-solid fa-folder-tree"></i> Quản lý Đề thi</button>
             <button onclick="switchView('questionbank')" id="nav-questionbank" class="nav-item w-full text-left px-3 py-2.5 rounded-xl text-gray-600 hover:bg-gray-50 transition-colors flex items-center gap-3"><i class="fa-solid fa-database text-primary-600"></i> Ngân hàng câu hỏi</button>
+            <button onclick="window.openReportManagementModal(); window.closeSidebar()" id="nav-reports" class="nav-item w-full text-left px-3 py-2.5 rounded-xl text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors flex items-center justify-between">
+                <span class="flex items-center gap-3"><i class="fa-solid fa-flag text-rose-500"></i> Quản lý Báo lỗi</span>
+                <span id="sidebarReportBadge" class="hidden text-[10px] bg-rose-500 text-white px-2 py-0.5 rounded-full font-black">0</span>
+            </button>
             <a href="topic-builder.html" class="nav-item w-full text-left px-3 py-2.5 rounded-xl text-gray-600 hover:bg-gray-50 transition-colors flex items-center gap-3"><i class="fa-solid fa-cubes"></i> Xưởng Chuyên Đề</a>
             <button onclick="window.location.href='course-manager.html'" id="nav-courses" class="nav-item w-full text-left px-3 py-2.5 rounded-xl text-gray-600 hover:bg-gray-50 transition-colors flex items-center gap-3"><i class="fa-solid fa-layer-group"></i> Quản lý Khóa học</button>
             <button onclick="window.location.href='dashboard-mapid.html'" id="nav-mapid" class="nav-item w-full text-left px-3 py-2.5 rounded-xl text-gray-600 hover:bg-gray-50 transition-colors flex items-center gap-3"><i class="fa-solid fa-sitemap"></i> Quản lý ID</button>
@@ -1701,6 +1705,10 @@
                             </button>
                             <button onclick="window.location.href='book-manager.html'" class="btn-season-primary h-9 md:h-10 px-3 md:px-3.5 rounded-xl text-white font-bold text-xs flex items-center gap-1.5 shrink-0 whitespace-nowrap cursor-pointer shadow-2xs" title="Số hóa sách: Gán mã CCCD số và xuất file TeX">
                                 <i class="fa-solid fa-wand-magic-sparkles"></i> <span>Số Hóa Sách (Sách ID)</span>
+                            </button>
+                            <button onclick="window.openReportManagementModal()" class="btn-season-secondary h-9 md:h-10 px-3 md:px-3.5 rounded-xl font-bold text-xs flex items-center gap-1.5 shrink-0 whitespace-nowrap cursor-pointer shadow-2xs text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-900" title="Quản lý và giải quyết các báo cáo lỗi câu hỏi từ học sinh">
+                                <i class="fa-solid fa-flag text-rose-600 dark:text-rose-400"></i> <span>Báo lỗi câu hỏi</span>
+                                <span id="bankReportBadge" class="hidden ml-1 px-1.5 py-0.2 rounded-full bg-rose-500 text-white text-[10px] font-black">0</span>
                             </button>
                             <button onclick="window.openSystemBackupModal('bank')" class="btn-season-secondary h-9 md:h-10 px-3 md:px-3.5 rounded-xl font-bold text-xs flex items-center gap-1.5 shrink-0 whitespace-nowrap cursor-pointer shadow-2xs text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-900" title="Sao lưu hoặc phục hồi Ngân hàng câu hỏi R2">
                                 <i class="fa-solid fa-cloud-arrow-down text-blue-600 dark:text-blue-400"></i> <span>Sao lưu & Phục hồi</span>
@@ -3783,7 +3791,7 @@
 
         import { 
             initializeApp, deleteApp, getAuth, onAuthStateChanged, signOut, createUserWithEmailAndPassword, updateProfile, updatePassword,
-            getFirestore, doc, getDoc, getDocFromCache, setDoc, collection, addDoc, query, where, orderBy, getDocs, updateDoc, deleteDoc, arrayUnion, limit, enableMultiTabIndexedDbPersistence, onSnapshot,
+            getFirestore, doc, getDoc, getDocFromCache, setDoc, collection, addDoc, query, where, orderBy, getDocs, updateDoc, deleteDoc, arrayUnion, limit, enableMultiTabIndexedDbPersistence, onSnapshot, increment,
             getStorage, ref, deleteObject, getFunctions, httpsCallable, supabase, DEFAULT_ADMIN
         } from "./supabase-db-compat.js?v=25";
 
@@ -8850,6 +8858,20 @@ function renderTagFilterUI() {
                     }
                 });
 
+                // Cập nhật huy hiệu báo lỗi câu hỏi trên menu và ngân hàng
+                const reportReqs = requests.filter(r => r.type === 'error_report' || (!r.examId && r.questionId));
+                const sideBadges = [document.getElementById('sidebarReportBadge'), document.getElementById('bankReportBadge')];
+                sideBadges.forEach(el => {
+                    if (el) {
+                        if (reportReqs.length > 0) {
+                            el.innerText = reportReqs.length;
+                            el.classList.remove('hidden');
+                        } else {
+                            el.classList.add('hidden');
+                        }
+                    }
+                });
+
                 // Render danh sách
                 const listEl = document.getElementById('notificationList');
                 if (!listEl) return;
@@ -8860,23 +8882,66 @@ function renderTagFilterUI() {
                     listEl.innerHTML = '';
                     requests.forEach(req => {
                         const item = document.createElement('div');
-                        item.className = "bg-white p-3 mb-1 rounded-xl border border-gray-100 shadow-sm hover:shadow-md transition-all group relative";
-                        item.innerHTML = `
-                            <div class="flex justify-between items-start mb-1">
-                                <div class="font-bold text-sm text-gray-800 cursor-pointer hover:text-primary-600" onclick="window.location.href='exam-editor.html?id=${req.examId}&view=stats'">${req.studentName}</div>
-                                <span class="text-[10px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">${new Date(req.createdAt).toLocaleTimeString('vi-VN', {hour:'2-digit', minute:'2-digit'})}</span>
-                            </div>
-                            <div class="text-xs text-gray-500 mb-2">
-                                Xin làm lại: <span class="font-bold text-primary-600 cursor-pointer hover:underline" onclick="window.location.href='exam-editor.html?id=${req.examId}&view=stats'">${req.examTitle}</span>
-                            </div>
-                            <div class="text-[11px] bg-yellow-50 text-yellow-800 p-2 rounded-lg border border-yellow-100 mb-2 italic">
-                                <i class="fa-solid fa-quote-left text-yellow-400 mr-1"></i>${req.reason || 'Không có lý do'}
-                            </div>
-                            <div class="flex gap-2">
-                                <button onclick="quickApprove('${req.id}', '${req.examId}', '${req.studentId}', this)" class="flex-1 py-1.5 bg-green-500 text-white text-xs font-bold rounded-lg hover:bg-green-600 shadow-sm transition-colors flex items-center justify-center gap-1"><i class="fa-solid fa-check"></i> Duyệt</button>
-                                <button onclick="quickDeny('${req.id}', this)" class="flex-1 py-1.5 bg-gray-100 text-gray-600 text-xs font-bold rounded-lg hover:bg-gray-200 transition-colors">Từ chối</button>
-                            </div>
-                        `;
+                        const isErrorReport = (req.type === 'error_report' || (!req.examId && req.questionId));
+
+                        if (isErrorReport) {
+                            const timeStr = req.createdAt ? new Date(req.createdAt).toLocaleTimeString('vi-VN', {hour:'2-digit', minute:'2-digit'}) : '';
+                            const qId = req.questionId || 'N/A';
+                            const errCat = req.errorType || 'Lỗi câu hỏi';
+                            const descText = req.description || req.reason || 'Học sinh báo lỗi câu hỏi này.';
+
+                            item.className = "bg-rose-50/70 dark:bg-rose-950/40 p-3 mb-2 rounded-xl border border-rose-100 dark:border-rose-900 shadow-2xs hover:shadow-md transition-all group relative";
+                            item.innerHTML = `
+                                <div class="flex justify-between items-start mb-1.5">
+                                    <div class="flex items-center gap-1.5 flex-wrap">
+                                        <span class="text-[10px] font-black uppercase px-2 py-0.5 rounded-md bg-rose-500 text-white flex items-center gap-1 shadow-2xs">
+                                            <i class="fa-solid fa-triangle-exclamation"></i> Báo lỗi
+                                        </span>
+                                        <span class="text-xs font-mono font-bold text-gray-800 dark:text-gray-100 cursor-pointer hover:text-primary-600 hover:underline" onclick="window.fetchAndPreview('${qId}')" title="Xem chi tiết câu hỏi">#${qId}</span>
+                                        <span class="text-[10px] bg-white dark:bg-slate-800 text-rose-600 dark:text-rose-400 font-semibold px-1.5 py-0.5 rounded border border-rose-200 dark:border-rose-800">${errCat}</span>
+                                    </div>
+                                    <span class="text-[10px] text-gray-400 font-mono">${timeStr}</span>
+                                </div>
+                                <div class="text-xs text-gray-600 dark:text-gray-300 mb-1 flex items-center gap-1.5">
+                                    <i class="fa-solid fa-user-pen text-gray-400 text-[10px]"></i> Học sinh: <b class="text-gray-800 dark:text-gray-100">${req.studentName || 'Học sinh'}</b>
+                                </div>
+                                <div class="text-[11px] bg-white dark:bg-slate-800 text-gray-700 dark:text-gray-200 p-2.5 rounded-lg border border-rose-100 dark:border-rose-900/60 mb-2 leading-relaxed">
+                                    <i class="fa-solid fa-quote-left text-rose-300 mr-1"></i>${descText}
+                                </div>
+                                <div class="flex gap-1.5 items-center flex-wrap">
+                                    <button onclick="window.fetchAndPreview('${qId}')" class="flex-1 min-w-[75px] py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg shadow-2xs transition-colors flex items-center justify-center gap-1" title="Mở xem trước câu hỏi và sửa nội dung">
+                                        <i class="fa-solid fa-eye"></i> Xem câu
+                                    </button>
+                                    <button onclick="window.resolveReportWithReward('${req.id}', '${qId}', '${req.studentId || ''}', this)" class="flex-1 min-w-[95px] py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow-2xs transition-colors flex items-center justify-center gap-1" title="Duyệt lỗi & Tặng +50 QPoint cho học sinh">
+                                        <i class="fa-solid fa-gift"></i> Duyệt +50Qp
+                                    </button>
+                                    <button onclick="window.resolveReportOnly('${req.id}', this)" class="py-1.5 px-2 bg-gray-100 dark:bg-slate-700 hover:bg-gray-200 text-gray-600 dark:text-gray-200 text-xs font-bold rounded-lg transition-colors flex items-center justify-center" title="Đánh dấu đã sửa xong (Không thưởng)">
+                                        <i class="fa-solid fa-check"></i>
+                                    </button>
+                                    <button onclick="quickDeny('${req.id}', this)" class="py-1.5 px-2 bg-gray-100 dark:bg-slate-700 hover:bg-rose-100 text-gray-400 hover:text-rose-600 text-xs font-bold rounded-lg transition-colors" title="Bỏ qua / Xóa báo cáo">
+                                        <i class="fa-solid fa-trash-can"></i>
+                                    </button>
+                                </div>
+                            `;
+                        } else {
+                            item.className = "bg-white p-3 mb-1 rounded-xl border border-gray-100 shadow-sm hover:shadow-md transition-all group relative";
+                            item.innerHTML = `
+                                <div class="flex justify-between items-start mb-1">
+                                    <div class="font-bold text-sm text-gray-800 cursor-pointer hover:text-primary-600" onclick="window.location.href='exam-editor.html?id=${req.examId}&view=stats'">${req.studentName}</div>
+                                    <span class="text-[10px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">${new Date(req.createdAt).toLocaleTimeString('vi-VN', {hour:'2-digit', minute:'2-digit'})}</span>
+                                </div>
+                                <div class="text-xs text-gray-500 mb-2">
+                                    Xin làm lại: <span class="font-bold text-primary-600 cursor-pointer hover:underline" onclick="window.location.href='exam-editor.html?id=${req.examId}&view=stats'">${req.examTitle || 'Đề thi'}</span>
+                                </div>
+                                <div class="text-[11px] bg-yellow-50 text-yellow-800 p-2 rounded-lg border border-yellow-100 mb-2 italic">
+                                    <i class="fa-solid fa-quote-left text-yellow-400 mr-1"></i>${req.reason || 'Không có lý do'}
+                                </div>
+                                <div class="flex gap-2">
+                                    <button onclick="quickApprove('${req.id}', '${req.examId}', '${req.studentId}', this)" class="flex-1 py-1.5 bg-green-500 text-white text-xs font-bold rounded-lg hover:bg-green-600 shadow-sm transition-colors flex items-center justify-center gap-1"><i class="fa-solid fa-check"></i> Duyệt</button>
+                                    <button onclick="quickDeny('${req.id}', this)" class="flex-1 py-1.5 bg-gray-100 text-gray-600 text-xs font-bold rounded-lg hover:bg-gray-200 transition-colors">Từ chối</button>
+                                </div>
+                            `;
+                        }
                         listEl.appendChild(item);
                     });
                 }
@@ -8894,14 +8959,10 @@ function renderTagFilterUI() {
             const originalText = btn.innerHTML;
             btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; btn.disabled = true;
             try {
-                // 1. CẤP VÉ LÀM LẠI TRƯỚC (chắc chắn nhất): đổi trạng thái yêu cầu thành 'approved'.
-                // Học sinh sẽ thấy vé này và được phép làm lại kể cả khi bước xóa bài cũ bên dưới thất bại.
                 await updateDoc(doc(db, "access_requests", reqId), {
                     status: 'approved',
                     approvedAt: new Date().toISOString()
                 });
-
-                // 2. Không xóa kết quả cũ để học sinh có thể chọn "Giữ lại bài cũ" hoặc "Làm mới hoàn toàn"
                 window.showNotification("Đã duyệt và cấp quyền thi lại!", "success");
             } catch (e) {
                 console.error(e);
@@ -8911,11 +8972,238 @@ function renderTagFilterUI() {
         };
 
         window.quickDeny = async (reqId, btn) => {
-            if(!confirm("Từ chối yêu cầu này?")) return;
+            if(!confirm("Từ chối hoặc xóa yêu cầu này?")) return;
             try {
                 await deleteDoc(doc(db, "access_requests", reqId));
-                window.showNotification("Đã từ chối yêu cầu.", "info");
+                window.showNotification("Đã xóa yêu cầu.", "info");
+                if (typeof window.loadReportManagementData === 'function') window.loadReportManagementData();
             } catch (e) { console.error(e); }
+        };
+
+        // --- XỬ LÝ BÁO CÁO LỖI CÂU HỎI & THƯỞNG QPOINT ---
+        window.resolveReportWithReward = async (reqId, qId, studentId, btn) => {
+            if(!confirm(`Duyệt báo cáo lỗi câu #${qId} và tặng 50 QPoint thưởng cho học sinh?`)) return;
+            const originalText = btn ? btn.innerHTML : '';
+            if (btn) { btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; btn.disabled = true; }
+            try {
+                // 1. Cập nhật trạng thái báo cáo
+                await updateDoc(doc(db, "access_requests", reqId), {
+                    status: 'resolved',
+                    resolvedAt: new Date().toISOString(),
+                    awardedQp: 50
+                });
+
+                // 2. Tặng QPoint nếu có studentId
+                if (studentId) {
+                    try {
+                        await updateDoc(doc(db, "users", studentId), {
+                            qpoints: increment(50)
+                        });
+                        await addDoc(collection(db, "qpoint_transactions"), {
+                            uid: studentId,
+                            amount: 50,
+                            reason: 'report_reward',
+                            balanceAfter: null,
+                            meta: { questionId: qId, reportId: reqId },
+                            at: new Date().toISOString()
+                        });
+                    } catch(errQp) {
+                        console.warn("[QPoint] Lỗi cộng điểm thưởng:", errQp);
+                    }
+                }
+
+                window.showNotification(`Đã duyệt lỗi câu #${qId} và thưởng +50 QPoint cho học sinh!`, "success");
+                if (typeof window.loadReportManagementData === 'function') window.loadReportManagementData();
+            } catch(e) {
+                console.error(e);
+                window.showNotification("Lỗi: " + e.message, "error");
+            } finally {
+                if (btn) { btn.innerHTML = originalText; btn.disabled = false; }
+            }
+        };
+
+        window.resolveReportOnly = async (reqId, btn) => {
+            const originalText = btn ? btn.innerHTML : '';
+            if (btn) { btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; btn.disabled = true; }
+            try {
+                await updateDoc(doc(db, "access_requests", reqId), {
+                    status: 'resolved',
+                    resolvedAt: new Date().toISOString()
+                });
+                window.showNotification("Đã đánh dấu đã sửa câu hỏi!", "success");
+                if (typeof window.loadReportManagementData === 'function') window.loadReportManagementData();
+            } catch(e) {
+                console.error(e);
+                window.showNotification("Lỗi: " + e.message, "error");
+            } finally {
+                if (btn) { btn.innerHTML = originalText; btn.disabled = false; }
+            }
+        };
+
+        window.deleteReportItem = async (reqId, btn) => {
+            if (!confirm("Bạn có chắc muốn xóa báo cáo này?")) return;
+            const originalText = btn ? btn.innerHTML : '';
+            if (btn) { btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; btn.disabled = true; }
+            try {
+                await deleteDoc(doc(db, "access_requests", reqId));
+                window.showNotification("Đã xóa báo cáo.", "info");
+                if (typeof window.loadReportManagementData === 'function') window.loadReportManagementData();
+            } catch(e) {
+                console.error(e);
+                window.showNotification("Lỗi: " + e.message, "error");
+            } finally {
+                if (btn) { btn.innerHTML = originalText; btn.disabled = false; }
+            }
+        };
+
+        // --- TRUNG TÂM QUẢN LÝ BÁO CÁO LỖI CÂU HỎI CHUYÊN NGHIỆP ---
+        window.allReportItems = [];
+        window.currentReportFilter = 'pending';
+
+        window.openReportManagementModal = () => {
+            const modal = document.getElementById('reportManagementModal');
+            if (!modal) return;
+            modal.classList.remove('hidden');
+            window.loadReportManagementData();
+        };
+
+        window.closeReportManagementModal = () => {
+            const modal = document.getElementById('reportManagementModal');
+            if (modal) modal.classList.add('hidden');
+        };
+
+        window.setReportFilterStatus = (status) => {
+            window.currentReportFilter = status;
+            ['pending', 'resolved', 'all'].forEach(s => {
+                const btn = document.getElementById('repFilterBtn-' + s);
+                if (btn) {
+                    if (s === status) {
+                        btn.className = "px-3 py-1.5 rounded-xl text-xs font-black transition-all bg-white dark:bg-slate-700 text-rose-600 dark:text-rose-400 shadow-2xs";
+                    } else {
+                        btn.className = "px-3 py-1.5 rounded-xl text-xs font-bold text-gray-600 dark:text-gray-300 hover:text-gray-900 transition-all";
+                    }
+                }
+            });
+            window.renderReportCards();
+        };
+
+        window.loadReportManagementData = async () => {
+            const container = document.getElementById('reportCardsContainer');
+            if (!container) return;
+            container.innerHTML = '<div class="flex justify-center py-16"><i class="fa-solid fa-spinner fa-spin text-3xl text-rose-500"></i></div>';
+            try {
+                const qSnap = await getDocs(collection(db, "access_requests"));
+                const items = [];
+                qSnap.forEach(d => {
+                    const data = d.data();
+                    if (data.type === 'error_report' || (!data.examId && data.questionId)) {
+                        items.push({ id: d.id, ...data });
+                    }
+                });
+                items.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+                window.allReportItems = items;
+
+                const pendingCount = items.filter(x => x.status === 'pending').length;
+                const resolvedCount = items.filter(x => x.status === 'resolved').length;
+                let totalAwarded = 0;
+                items.forEach(x => { if (x.awardedQp) totalAwarded += Number(x.awardedQp); });
+
+                const setTxt = (id, val) => { const el = document.getElementById(id); if (el) el.innerText = val; };
+                setTxt('repStatPending', pendingCount);
+                setTxt('repStatResolved', resolvedCount);
+                setTxt('repStatRewarded', totalAwarded + ' Qp');
+                setTxt('repStatTotal', items.length);
+                setTxt('repBadgePending', pendingCount);
+                setTxt('repBadgeResolved', resolvedCount);
+                setTxt('repBadgeAll', items.length);
+
+                window.renderReportCards();
+            } catch(e) {
+                console.error("Lỗi tải báo cáo lỗi:", e);
+                container.innerHTML = `<div class="text-center text-rose-500 py-10 text-xs">Lỗi tải dữ liệu: ${e.message}</div>`;
+            }
+        };
+
+        window.renderReportCards = () => {
+            const container = document.getElementById('reportCardsContainer');
+            if (!container) return;
+
+            const qSearch = (document.getElementById('repSearchInput')?.value || '').toLowerCase().trim();
+            const filter = window.currentReportFilter;
+
+            let filtered = window.allReportItems || [];
+            if (filter === 'pending') filtered = filtered.filter(x => x.status === 'pending');
+            else if (filter === 'resolved') filtered = filtered.filter(x => x.status === 'resolved');
+
+            if (qSearch) {
+                filtered = filtered.filter(x => {
+                    const qId = String(x.questionId || '').toLowerCase();
+                    const name = String(x.studentName || '').toLowerCase();
+                    const desc = String(x.description || x.reason || '').toLowerCase();
+                    return qId.includes(qSearch) || name.includes(qSearch) || desc.includes(qSearch);
+                });
+            }
+
+            if (filtered.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center py-16 text-gray-400">
+                        <i class="fa-solid fa-circle-check text-4xl mb-3 text-emerald-400 opacity-60"></i>
+                        <p class="font-bold text-sm text-gray-700 dark:text-gray-300">Không có báo cáo lỗi nào trong mục này!</p>
+                        <p class="text-xs text-gray-400 mt-1">Các câu hỏi đều đang hoạt động tốt hoặc đã được giải quyết xong.</p>
+                    </div>`;
+                return;
+            }
+
+            container.innerHTML = '';
+            filtered.forEach(rep => {
+                const card = document.createElement('div');
+                const isPending = rep.status === 'pending';
+                const timeStr = rep.createdAt ? new Date(rep.createdAt).toLocaleString('vi-VN') : 'Không rõ ngày';
+                const qId = rep.questionId || 'N/A';
+                const errCat = rep.errorType || 'Lỗi câu hỏi';
+                const desc = rep.description || rep.reason || 'Không có mô tả chi tiết';
+
+                card.className = "bg-white dark:bg-slate-800 p-4 sm:p-5 rounded-2xl border border-gray-200 dark:border-slate-700 shadow-2xs hover:shadow-md transition-all flex flex-col md:flex-row md:items-center justify-between gap-4";
+                card.innerHTML = `
+                    <div class="flex-1 space-y-2 min-w-0">
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <span class="px-2.5 py-1 rounded-xl text-xs font-mono font-black text-rose-600 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900 cursor-pointer hover:underline" onclick="window.fetchAndPreview('${qId}')" title="Click để xem & sửa câu hỏi này">
+                                <i class="fa-solid fa-hashtag mr-0.5"></i>${qId}
+                            </span>
+                            <span class="text-[11px] font-bold px-2.5 py-0.5 rounded-lg bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-gray-300">
+                                ${errCat}
+                            </span>
+                            <span class="text-[11px] px-2.5 py-0.5 rounded-full font-black ${isPending ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300' : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'}">
+                                ${isPending ? '🟡 Chờ xử lý' : '🟢 Đã giải quyết' + (rep.awardedQp ? ` (+${rep.awardedQp} Qp)` : '')}
+                            </span>
+                        </div>
+                        <div class="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-3">
+                            <span><i class="fa-solid fa-user-pen mr-1"></i>Học sinh: <b class="text-gray-800 dark:text-gray-200">${rep.studentName || 'Học sinh'}</b></span>
+                            <span><i class="fa-regular fa-clock mr-1"></i>${timeStr}</span>
+                        </div>
+                        <div class="text-xs text-gray-800 dark:text-gray-200 bg-gray-50 dark:bg-slate-900 p-3 rounded-xl border border-gray-100 dark:border-slate-700/60 leading-relaxed">
+                            <i class="fa-solid fa-quote-left text-rose-400 mr-1.5 opacity-60"></i>${desc}
+                        </div>
+                    </div>
+                    <div class="flex md:flex-col gap-2 shrink-0 justify-end">
+                        <button onclick="window.fetchAndPreview('${qId}')" class="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black shadow-2xs transition-colors flex items-center justify-center gap-1.5">
+                            <i class="fa-solid fa-eye"></i> Xem câu hỏi
+                        </button>
+                        ${isPending ? `
+                            <button onclick="window.resolveReportWithReward('${rep.id}', '${qId}', '${rep.studentId || ''}', this)" class="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black shadow-2xs transition-colors flex items-center justify-center gap-1.5" title="Duyệt lỗi & Tặng +50 QPoint cho học sinh">
+                                <i class="fa-solid fa-gift"></i> Duyệt +50 Qp
+                            </button>
+                            <button onclick="window.resolveReportOnly('${rep.id}', this)" class="px-3 py-1.5 bg-gray-100 dark:bg-slate-700 hover:bg-gray-200 text-gray-700 dark:text-gray-200 rounded-xl text-xs font-bold transition-colors flex items-center justify-center gap-1">
+                                <i class="fa-solid fa-check"></i> Đã sửa
+                            </button>
+                        ` : ''}
+                        <button onclick="window.deleteReportItem('${rep.id}', this)" class="px-3 py-1.5 bg-gray-100 dark:bg-slate-700 hover:bg-rose-100 hover:text-rose-600 text-gray-400 rounded-xl text-xs font-bold transition-colors flex items-center justify-center gap-1" title="Xóa báo cáo này">
+                            <i class="fa-solid fa-trash-can"></i> Xóa
+                        </button>
+                    </div>
+                `;
+                container.appendChild(card);
+            });
         };
         // --- QUẢN LÝ BÀI TẬP TRONG LỚP (NÂNG CẤP) ---
         // --- LOGIC GIAO BÀI TẬP TỰ LUẬN ---
@@ -15491,17 +15779,114 @@ window.deleteTag = async (id) => {
         };
         initTheme();
     </script>
-    <div id="notificationPanel" class="hidden fixed z-[150] w-80 bg-white rounded-2xl shadow-2xl border border-gray-200 overflow-hidden animate-fade-in transform transition-all
+    <div id="notificationPanel" class="hidden fixed z-[150] w-88 sm:w-96 bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-slate-800 overflow-hidden animate-fade-in transform transition-all
     top-16 right-2 origin-top-right
     md:top-20 md:left-64 md:ml-4 md:right-auto md:origin-top-left">
-        <div class="p-3 border-b border-gray-100 bg-primary-50 flex justify-between items-center">
-            <h4 class="font-bold text-primary-800 text-sm"><i class="fa-solid fa-bell mr-2"></i>Thông báo mới</h4>
+        <div class="p-3 border-b border-gray-100 dark:border-slate-800 bg-primary-50 dark:bg-slate-800 flex justify-between items-center">
+            <h4 class="font-bold text-primary-800 dark:text-primary-300 text-sm"><i class="fa-solid fa-bell mr-2"></i>Thông báo mới</h4>
             <button onclick="toggleNotificationPanel()" class="text-gray-400 hover:text-red-500"><i class="fa-solid fa-times"></i></button>
         </div>
-        <div id="notificationList" class="max-h-[300px] overflow-y-auto custom-scrollbar p-1 bg-gray-50/50">
+        <div id="notificationList" class="max-h-[340px] overflow-y-auto custom-scrollbar p-2 bg-gray-50/50 dark:bg-slate-900">
             <div class="text-center py-8 text-gray-400 text-xs">
                 <i class="fa-regular fa-envelope-open text-2xl mb-2 opacity-50"></i>
                 <p>Không có thông báo nào.</p>
+            </div>
+        </div>
+        <div class="p-2.5 border-t border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900 flex justify-between items-center">
+            <button onclick="window.openReportManagementModal(); toggleNotificationPanel();" class="w-full text-xs text-rose-600 dark:text-rose-400 hover:text-rose-700 font-bold flex items-center justify-center gap-1.5 py-1.5 px-3 bg-rose-50 dark:bg-rose-950/40 rounded-xl border border-rose-200 dark:border-rose-900/60 shadow-2xs hover:bg-rose-100 transition-all">
+                <i class="fa-solid fa-flag"></i> Mở Quản lý Báo lỗi câu hỏi <i class="fa-solid fa-arrow-right text-[10px]"></i>
+            </button>
+        </div>
+    </div>
+
+    <!-- MODAL QUẢN LÝ BÁO CÁO LỖI CÂU HỎI CHUYÊN NGHIỆP -->
+    <div id="reportManagementModal" class="hidden fixed inset-0 z-[160] bg-gray-900/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5 md:p-8 animate-fade-in">
+        <div class="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl flex flex-col border border-gray-200 dark:border-slate-800 overflow-hidden" style="width: min(95vw, 1100px); max-height: 88vh; height: 88vh;">
+            <!-- Header -->
+            <div class="p-4 sm:p-5 border-b border-gray-100 dark:border-slate-800 flex justify-between items-center bg-rose-50/70 dark:bg-rose-950/30 rounded-t-3xl shrink-0">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-2xl bg-rose-500 text-white flex items-center justify-center shadow-md shadow-rose-200 dark:shadow-none shrink-0">
+                        <i class="fa-solid fa-triangle-exclamation text-lg"></i>
+                    </div>
+                    <div>
+                        <h3 class="text-base sm:text-lg font-black text-gray-800 dark:text-gray-100 flex items-center gap-2">
+                            Trung Tâm Quản Lý Báo Cáo Lỗi Câu Hỏi
+                        </h3>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Đối soát phản ánh từ học sinh, xem trước/sửa câu hỏi và duyệt thưởng QPoint</p>
+                    </div>
+                </div>
+                <button onclick="window.closeReportManagementModal()" class="w-9 h-9 rounded-full bg-white dark:bg-slate-800 text-gray-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/50 flex items-center justify-center shadow-xs transition shrink-0 cursor-pointer">
+                    <i class="fa-solid fa-xmark text-sm"></i>
+                </button>
+            </div>
+
+            <!-- Stats Bar -->
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3 p-3.5 sm:p-4 bg-gray-50/70 dark:bg-slate-800/50 border-b border-gray-100 dark:border-slate-800 shrink-0">
+                <div class="bg-white dark:bg-slate-800 p-3 rounded-2xl border border-rose-100 dark:border-rose-900/40 shadow-2xs flex items-center gap-3">
+                    <div class="w-9 h-9 rounded-xl bg-rose-100 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 flex items-center justify-center font-black text-sm shrink-0">
+                        <i class="fa-solid fa-clock-rotate-left"></i>
+                    </div>
+                    <div>
+                        <div class="text-[10px] uppercase font-bold text-gray-400">Chờ xử lý</div>
+                        <div class="text-lg font-black text-rose-600 dark:text-rose-400" id="repStatPending">0</div>
+                    </div>
+                </div>
+                <div class="bg-white dark:bg-slate-800 p-3 rounded-2xl border border-emerald-100 dark:border-emerald-900/40 shadow-2xs flex items-center gap-3">
+                    <div class="w-9 h-9 rounded-xl bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-black text-sm shrink-0">
+                        <i class="fa-solid fa-circle-check"></i>
+                    </div>
+                    <div>
+                        <div class="text-[10px] uppercase font-bold text-gray-400">Đã giải quyết</div>
+                        <div class="text-lg font-black text-emerald-600 dark:text-emerald-400" id="repStatResolved">0</div>
+                    </div>
+                </div>
+                <div class="bg-white dark:bg-slate-800 p-3 rounded-2xl border border-amber-100 dark:border-amber-900/40 shadow-2xs flex items-center gap-3">
+                    <div class="w-9 h-9 rounded-xl bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 flex items-center justify-center font-black text-sm shrink-0">
+                        <i class="fa-solid fa-gift"></i>
+                    </div>
+                    <div>
+                        <div class="text-[10px] uppercase font-bold text-gray-400">Đã thưởng Qp</div>
+                        <div class="text-lg font-black text-amber-600 dark:text-amber-400" id="repStatRewarded">0</div>
+                    </div>
+                </div>
+                <div class="bg-white dark:bg-slate-800 p-3 rounded-2xl border border-blue-100 dark:border-blue-900/40 shadow-2xs flex items-center gap-3">
+                    <div class="w-9 h-9 rounded-xl bg-blue-100 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex items-center justify-center font-black text-sm shrink-0">
+                        <i class="fa-solid fa-list-check"></i>
+                    </div>
+                    <div>
+                        <div class="text-[10px] uppercase font-bold text-gray-400">Tổng báo cáo</div>
+                        <div class="text-lg font-black text-blue-600 dark:text-blue-400" id="repStatTotal">0</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Toolbar & Filter -->
+            <div class="p-3 sm:p-4 border-b border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900 shrink-0 flex flex-col md:flex-row gap-2.5 md:items-center justify-between">
+                <div class="flex items-center gap-1.5 p-1 bg-gray-100 dark:bg-slate-800 rounded-2xl self-start">
+                    <button onclick="window.setReportFilterStatus('pending')" id="repFilterBtn-pending" class="px-3 py-1.5 rounded-xl text-xs font-black transition-all bg-white dark:bg-slate-700 text-rose-600 dark:text-rose-400 shadow-2xs">
+                        🔴 Chờ xử lý (<span id="repBadgePending">0</span>)
+                    </button>
+                    <button onclick="window.setReportFilterStatus('resolved')" id="repFilterBtn-resolved" class="px-3 py-1.5 rounded-xl text-xs font-bold text-gray-600 dark:text-gray-300 hover:text-gray-900 transition-all">
+                        🟢 Đã giải quyết (<span id="repBadgeResolved">0</span>)
+                    </button>
+                    <button onclick="window.setReportFilterStatus('all')" id="repFilterBtn-all" class="px-3 py-1.5 rounded-xl text-xs font-bold text-gray-600 dark:text-gray-300 hover:text-gray-900 transition-all">
+                        Tất cả (<span id="repBadgeAll">0</span>)
+                    </button>
+                </div>
+                <div class="flex items-center gap-2 flex-1 md:max-w-md">
+                    <div class="relative flex-1">
+                        <i class="fa-solid fa-magnifying-glass absolute left-3 top-2.5 text-gray-400 text-xs"></i>
+                        <input type="text" id="repSearchInput" oninput="window.renderReportCards()" placeholder="Tìm theo mã ID câu hỏi hoặc tên học sinh..." class="w-full pl-8 pr-3 py-2 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 text-gray-800 dark:text-gray-100 rounded-xl outline-none focus:ring-2 focus:ring-rose-200 text-xs">
+                    </div>
+                    <button onclick="window.loadReportManagementData()" class="h-8.5 w-8.5 rounded-xl bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 flex items-center justify-center shrink-0 transition-colors cursor-pointer" title="Làm mới">
+                        <i class="fa-solid fa-rotate text-xs"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Content List -->
+            <div class="flex-1 overflow-y-auto p-4 sm:p-5 custom-scrollbar space-y-3 bg-gray-50/40 dark:bg-slate-900" id="reportCardsContainer">
+                <div class="flex justify-center py-16"><i class="fa-solid fa-spinner fa-spin text-3xl text-rose-500"></i></div>
             </div>
         </div>
     </div>

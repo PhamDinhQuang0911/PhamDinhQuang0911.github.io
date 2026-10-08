@@ -17,7 +17,7 @@
  */
 import {
     doc, getDoc, setDoc, updateDoc, addDoc, collection, increment
-} from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+} from "./supabase-db-compat.js?v=25";
 
 export const QP_COSTS = {
     ai_hint: 5,      // 1 lượt Gợi ý AI
@@ -97,8 +97,8 @@ export function createQPoint(db, uid) {
          */
         async spend(amount, reason, meta) {
             amount = Math.floor(Number(amount) || 0);
-            if (free || amount <= 0) return { ok: true, balance };
-            if (!loaded) return { ok: false, balance, error: 'not_loaded' };
+            if (amount <= 0) return { ok: true, balance };
+            if (!loaded) await this.load();
             if (balance < amount) return { ok: false, balance, error: 'insufficient' };
             balance -= amount;
             notify();
