@@ -956,7 +956,8 @@ const TABLE_COLUMNS = {
     orders: ['id', 'user_id', 'user_name', 'user_phone', 'course_id', 'document_id', 'course_title', 'quantity', 'unit_price', 'shipping_fee', 'amount', 'original_amount', 'voucher_code', 'voucher_discount', 'voucher_id', 'status', 'content', 'order_type', 'delivery_type', 'shipping_info', 'created_at', 'updated_at'],
     vouchers: ['id', 'code', 'discount_type', 'discount_value', 'min_order_value', 'max_discount', 'max_usage', 'used', 'used_by', 'start_date', 'end_date', 'status', 'course_id', 'created_at'],
     site_settings: ['key', 'value', 'updated_at'],
-    admin_accounts: ['id', 'email', 'display_name', 'role', 'status', 'permissions', 'assigned_courses', 'note', 'created_at', 'updated_at', 'raw_data']
+    admin_accounts: ['id', 'email', 'display_name', 'role', 'status', 'permissions', 'assigned_courses', 'note', 'created_at', 'updated_at', 'raw_data'],
+    qpoint_transactions: ['id', 'uid', 'amount', 'reason', 'balanceAfter', 'balance_after', 'meta', 'at', 'created_at', 'raw_data']
 };
 
 function toSupabasePayload(table, id, data) {
@@ -1044,6 +1045,27 @@ export async function getDoc(docRef) {
                 }
             } catch(e) {
                 console.warn("[Supabase getDoc] Lỗi đọc configurations cho custom_topics:", e);
+            }
+        }
+
+        if (table === 'qpoint_transactions') {
+            try {
+                const confId = docRef.id.startsWith('qptx_') ? docRef.id : ('qptx_' + docRef.id);
+                const { data: confData } = await supabase
+                    .from('configurations')
+                    .select('*')
+                    .eq('id', confId)
+                    .maybeSingle();
+                if (confData && confData.raw_data) {
+                    const docData = unwrapRecord({ ...confData.raw_data, id: confData.raw_data.id || docRef.id });
+                    return {
+                        id: docRef.id,
+                        exists: () => true,
+                        data: () => docData
+                    };
+                }
+            } catch(e) {
+                console.warn("[Supabase getDoc] Lỗi đọc configurations cho qpoint_transactions:", e);
             }
         }
 
@@ -1184,6 +1206,54 @@ export async function getDocs(queryOrColRef) {
                 };
             } catch(err) {
                 console.warn("[Supabase getDocs] Lỗi đọc custom_topics từ configurations:", err);
+                return { docs: [], forEach: () => {}, size: 0, empty: true };
+            }
+        }
+
+        if (table === 'qpoint_transactions') {
+            try {
+                const { data: confTxs, error: txErr } = await supabase
+                    .from('configurations')
+                    .select('*')
+                    .like('id', 'qptx_%');
+                if (txErr) throw txErr;
+                let resultRows = (confTxs || []).map(r => {
+                    const raw = (r.raw_data && typeof r.raw_data === 'object') ? r.raw_data : {};
+                    const txId = raw.id || r.id.replace(/^qptx_/, '');
+                    return { id: txId, ...raw };
+                });
+                const constraints = queryOrColRef.constraints || [];
+                const docs = resultRows.map(r => {
+                    const docData = unwrapRecord(r);
+                    return {
+                        id: r.id || r.key,
+                        exists: () => true,
+                        data: () => docData
+                    };
+                }).filter(doc => {
+                    const d = doc.data();
+                    for (const c of constraints) {
+                        if (c.type === 'where') {
+                            const val = d[c.field] !== undefined ? d[c.field] : d[mapFieldToColumn(c.field)];
+                            if (c.op === '==' || c.op === '===') {
+                                if (val !== c.value) return false;
+                            } else if (c.op === '!=') {
+                                if (val === c.value) return false;
+                            } else if (c.op === 'in') {
+                                if (!Array.isArray(c.value) || !c.value.includes(val)) return false;
+                            }
+                        }
+                    }
+                    return true;
+                });
+                return {
+                    docs,
+                    forEach: (cb) => docs.forEach(cb),
+                    size: docs.length,
+                    empty: docs.length === 0
+                };
+            } catch(eTx) {
+                console.warn("[Supabase getDocs] Lỗi đọc qpoint_transactions từ configurations:", eTx);
                 return { docs: [], forEach: () => {}, size: 0, empty: true };
             }
         }
@@ -1537,6 +1607,20 @@ export async function addDoc(colRef, data) {
             updated_at: new Date().toISOString()
         };
         await supabase.from('configurations').upsert(confPayload, { onConflict: 'id' });
+        return { id: newId };
+    }
+
+    if (table === 'qpoint_transactions') {
+        const confPayload = {
+            id: 'qptx_' + newId,
+            raw_data: { id: newId, ...data, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+            updated_at: new Date().toISOString()
+        };
+        try {
+            await supabase.from('configurations').upsert(confPayload, { onConflict: 'id' });
+        } catch(e) {
+            console.warn('[Supabase addDoc qpoint_transactions]:', e);
+        }
         return { id: newId };
     }
 

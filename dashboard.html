@@ -4084,8 +4084,8 @@
             initializeApp, deleteApp, getAuth, onAuthStateChanged, signOut, createUserWithEmailAndPassword, updateProfile, updatePassword,
             getFirestore, doc, getDoc, getDocFromCache, setDoc, collection, addDoc, query, where, orderBy, getDocs, updateDoc, deleteDoc, arrayUnion, limit, enableMultiTabIndexedDbPersistence, onSnapshot, increment,
             getStorage, ref, deleteObject, getFunctions, httpsCallable, supabase, DEFAULT_ADMIN
-        } from "./supabase-db-compat.js?v=25";
-        import { DEFAULT_QPOINT_PACKAGES, getQPointConfig, getStudentQPointTransactions } from "./qpoint.js?v=29";
+        } from "./supabase-db-compat.js?v=27";
+        import { DEFAULT_QPOINT_PACKAGES, getQPointConfig, getStudentQPointTransactions } from "./qpoint.js?v=30";
 
         // 1. CẤU HÌNH SUPABASE (HỆ THỐNG ĐÃ CHUYỂN TỪ FIREBASE SANG SUPABASE)
         const app = initializeApp({});
@@ -15645,7 +15645,7 @@ function renderTagFilterUI() {
         window.saveMathTypeApi = async () => {
             const url = document.getElementById('webhookMathTypeUrl').value.trim();
             try {
-                const { setDoc, doc } = await import("./supabase-db-compat.js?v=25");
+                const { setDoc, doc } = await import("./supabase-db-compat.js?v=27");
                 await setDoc(doc(db, "configurations", "mathtype_api"), { url: url }, { merge: true });
                 updateAiModalBadges();
                 window.showNotification("Lưu cấu hình API MathType thành công!", "success");
@@ -15873,8 +15873,13 @@ function renderTagFilterUI() {
 
                     if (matchKey) {
                         const existing = studentMap.get(matchKey);
-                        if (!existing.uid && uid) existing.uid = uid;
-                        existing.qpoints = qp;
+                        if (uid) {
+                            existing.uid = uid;
+                            existing.dbId = uid;
+                        }
+                        if (email && !existing.email) existing.email = email;
+                        if (username && !existing.username) existing.username = username;
+                        existing.qpoints = Math.max(existing.qpoints || 0, qp);
                         if (!existing.name || existing.name === existing.username) existing.name = name;
                     } else if (u.role === 'student' || !u.role || u.role === 'user') {
                         studentMap.set(uid || email || username, {
@@ -16447,29 +16452,82 @@ function renderTagFilterUI() {
             if (submitBtn) { submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang thực hiện...'; submitBtn.disabled = true; }
 
             try {
-                // 1. Cập nhật bảng users
-                await updateDoc(doc(db, "users", st.uid), {
-                    qpoints: newBalance
-                });
+                // 1. Cập nhật bảng users bằng Supabase và updateDoc
+                if (window.supabase) {
+                    try {
+                        const conds = [];
+                        if (st.uid) conds.push(`id.eq.${st.uid}`);
+                        if (st.dbId && st.dbId !== st.uid) conds.push(`id.eq.${st.dbId}`);
+                        if (st.email) conds.push(`email.ilike.${st.email}`);
+                        if (st.username) conds.push(`email.ilike.${st.username}@hocsinh.com`);
+                        if (conds.length > 0) {
+                            await window.supabase.from('users').update({
+                                qpoints: newBalance,
+                                updated_at: new Date().toISOString()
+                            }).or(conds.join(','));
+                        }
+                    } catch(errSb) {
+                        console.warn("Lỗi update users qua supabase direct:", errSb);
+                    }
+                }
+
+                if (st.uid) {
+                    await updateDoc(doc(db, "users", st.uid), {
+                        qpoints: newBalance
+                    }).catch(e => console.warn("Lỗi updateDoc users:", e));
+                }
 
                 // 2. Ghi sổ giao dịch qpoint_transactions
-                await addDoc(collection(db, "qpoint_transactions"), {
-                    uid: st.uid,
-                    amount: delta,
-                    reason: reasonText,
-                    balanceAfter: newBalance,
-                    meta: {
-                        grantedBy: teacherEmail,
-                        action: window.currentQpViewAction,
-                        studentName: st.name
-                    },
-                    at: new Date().toISOString()
-                });
+                try {
+                    await addDoc(collection(db, "qpoint_transactions"), {
+                        uid: st.uid,
+                        amount: delta,
+                        reason: reasonText,
+                        balanceAfter: newBalance,
+                        meta: {
+                            grantedBy: teacherEmail,
+                            action: window.currentQpViewAction,
+                            studentName: st.name,
+                            studentEmail: st.email || '',
+                            studentUsername: st.username || ''
+                        },
+                        at: new Date().toISOString()
+                    });
+                } catch(eTx) {
+                    console.warn("Lỗi ghi sổ qpoint_transactions:", eTx);
+                }
 
-                // 3. Cập nhật local data trong window.allGlobalStudents
+                // 3. Đồng bộ số dư vào danh sách học sinh của các lớp học
+                if (Array.isArray(window.allClassesData)) {
+                    for (const cl of window.allClassesData) {
+                        if (cl.students && Array.isArray(cl.students)) {
+                            let classModified = false;
+                            cl.students.forEach(s => {
+                                const match = (s.uid && (s.uid === st.uid || s.uid === st.dbId)) ||
+                                              (s.email && st.email && s.email.toLowerCase() === st.email.toLowerCase()) ||
+                                              (s.username && st.username && s.username.toLowerCase() === st.username.toLowerCase());
+                                if (match) {
+                                    s.qpoints = newBalance;
+                                    classModified = true;
+                                }
+                            });
+                            if (classModified && cl.id) {
+                                updateDoc(doc(db, "classes", cl.id), {
+                                    students: cl.students
+                                }).catch(eCl => console.warn("Lỗi sync qpoints vào class:", eCl));
+                            }
+                        }
+                    }
+                }
+
+                // 4. Cập nhật local data trong window.allGlobalStudents
                 st.qpoints = newBalance;
-                const found = (window.allGlobalStudents || []).find(s => s.uid === st.uid);
-                if (found) found.qpoints = newBalance;
+                (window.allGlobalStudents || []).forEach(s => {
+                    const match = (s.uid && (s.uid === st.uid || s.uid === st.dbId)) ||
+                                  (s.email && st.email && s.email.toLowerCase() === st.email.toLowerCase()) ||
+                                  (s.username && st.username && s.username.toLowerCase() === st.username.toLowerCase());
+                    if (match) s.qpoints = newBalance;
+                });
 
                 // 4. Cập nhật giao diện
                 window.renderQpViewStudentsTable(document.getElementById('qpViewTableFilter')?.value || '');

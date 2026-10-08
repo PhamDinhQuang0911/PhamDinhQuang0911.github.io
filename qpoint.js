@@ -61,7 +61,7 @@ export async function getQPointConfig(db) {
     };
 }
 
-export function createQPoint(db, uid) {
+export function createQPoint(db, uid, options = {}) {
     let balance = 0;
     let loaded = false;
     let free = false; // true với giáo viên/admin -> không bị trừ điểm
@@ -88,12 +88,45 @@ export function createQPoint(db, uid) {
 
         onChange(fn) { listeners.push(fn); if (loaded) fn(balance); },
 
-        /** Đọc số dư; nếu tài khoản chưa từng có Qpoint -> tặng quà chào mừng */
+        /** Đọc số dư; nếu tài khoản chưa từng có Qpoint -> tặng quà chào mừng; tự đồng bộ nếu có tài khoản trùng email */
         async load() {
             try {
                 const uRef = doc(db, "users", uid);
                 const snap = await getDoc(uRef);
-                const data = snap.exists() ? snap.data() : {};
+                let data = snap.exists() ? snap.data() : {};
+
+                // Nếu data không có qpoints hoặc qpoints === 0, và có email hoặc username,
+                // kiểm tra xem có tài khoản nào khác của học sinh này có điểm cao hơn không (do lịch sử chuyển đổi hoặc thầy cô cấp)
+                const optEmail = (typeof options === 'object' && options ? (options.email || '') : '').trim().toLowerCase();
+                const optUser = (typeof options === 'object' && options ? (options.username || '') : '').trim().toLowerCase();
+                if ((typeof data.qpoints !== 'number' || data.qpoints === 0) && (optEmail || optUser)) {
+                    try {
+                        const emailList = [];
+                        if (optEmail) emailList.push(optEmail);
+                        if (optUser) emailList.push(`${optUser}@hocsinh.com`);
+                        if (optEmail && optEmail.includes('@')) {
+                            const uPart = optEmail.split('@')[0];
+                            if (uPart) emailList.push(`${uPart}@hocsinh.com`);
+                        }
+                        const uniqueEmails = [...new Set(emailList.filter(Boolean))];
+                        if (uniqueEmails.length > 0) {
+                            const qSnap = await getDocs(query(collection(db, "users"), where("email", "in", uniqueEmails)));
+                            let maxQp = data.qpoints || 0;
+                            qSnap.forEach(d => {
+                                const row = d.data();
+                                const qVal = typeof row.qpoints === 'number' ? row.qpoints : ((row.raw_data && typeof row.raw_data.qpoints === 'number') ? row.raw_data.qpoints : 0);
+                                if (qVal > maxQp) maxQp = qVal;
+                            });
+                            if (maxQp > (data.qpoints || 0)) {
+                                data.qpoints = maxQp;
+                                await updateDoc(uRef, { qpoints: maxQp }).catch(() => {});
+                            }
+                        }
+                    } catch(eFallback) {
+                        console.warn("[QPoint] Lỗi đồng bộ tài khoản trùng lặp:", eFallback);
+                    }
+                }
+
                 if (typeof data.qpoints === 'number') {
                     balance = data.qpoints;
                 } else {
