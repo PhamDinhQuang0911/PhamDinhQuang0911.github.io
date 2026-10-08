@@ -56,6 +56,57 @@
         }
         return Promise.resolve();
     };
+
+    // Early declaration of Navigation to prevent 'ReferenceError'
+    window.switchHubTab = function(tabName) {
+        ['viewLanding', 'viewRoadmap', 'viewCustom', 'viewHistory', 'practiceStep', 'resultStep'].forEach(function(id) {
+            var el = document.getElementById(id);
+            if (el) el.classList.add('hidden');
+        });
+
+        // Top Header Tabs
+        document.querySelectorAll('.hub-tab-btn').forEach(function(btn) { btn.classList.remove('active'); });
+        if (tabName === 'roadmap') document.getElementById('navTabRoadmap')?.classList.add('active');
+        if (tabName === 'custom') document.getElementById('navTabCustom')?.classList.add('active');
+        if (tabName === 'history') document.getElementById('navTabHistory')?.classList.add('active');
+
+        // Subnav Pills
+        document.querySelectorAll('.subnav-pill').forEach(function(b) {
+            b.classList.remove('active-subnav');
+        });
+        document.querySelectorAll('.subnav-pill-' + tabName).forEach(function(b) {
+            b.classList.add('active-subnav');
+        });
+
+        if (tabName === 'landing') {
+            document.getElementById('viewLanding')?.classList.remove('hidden');
+            document.getElementById('customMobileBar')?.classList.add('hidden');
+        } else if (tabName === 'roadmap') {
+            document.getElementById('viewRoadmap')?.classList.remove('hidden');
+            document.getElementById('customMobileBar')?.classList.add('hidden');
+            if (window.loadRoadmaps) window.loadRoadmaps();
+        } else if (tabName === 'custom') {
+            document.getElementById('viewCustom')?.classList.remove('hidden');
+            document.getElementById('customMobileBar')?.classList.remove('hidden');
+            if (window.renderTopicList) window.renderTopicList();
+            if (window.updateMobileSummary) window.updateMobileSummary();
+        } else if (tabName === 'history') {
+            document.getElementById('viewHistory')?.classList.remove('hidden');
+            document.getElementById('customMobileBar')?.classList.add('hidden');
+            if (window.loadInlineHistory) window.loadInlineHistory();
+        }
+
+        try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch(e) {}
+    };
+
+    window.selectMode = function(mode) {
+        if (mode === 'roadmap' || mode === 'topic') window.switchHubTab('roadmap');
+        else window.switchHubTab('custom');
+    };
+
+    window.backToLanding = function() {
+        window.switchHubTab('landing');
+    };
     </script>
     <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
     <link rel="stylesheet" type="text/css" href="https://tikzjax.com/v1/fonts.css">
@@ -70,10 +121,46 @@
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
         .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
 
+        /* Banners with robust fallback colors */
+        .roadmap-hero-gradient {
+            background: linear-gradient(135deg, #1e1b4b 0%, #312e81 55%, #4338ca 100%) !important;
+            color: #ffffff !important;
+        }
+        .custom-hero-gradient {
+            background: linear-gradient(135deg, #064e3b 0%, #047857 55%, #0d9488 100%) !important;
+            color: #ffffff !important;
+        }
+
+        /* 2 Giant Mode Selection Cards */
+        .mode-selection-card {
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            cursor: pointer;
+        }
+        .mode-selection-card:hover {
+            transform: translateY(-8px);
+        }
+        .mode-card-roadmap {
+            border: 2px solid #e0e7ff;
+            background: #ffffff;
+        }
+        .mode-card-roadmap:hover {
+            border-color: #6366f1;
+            box-shadow: 0 22px 35px -10px rgba(99, 102, 241, 0.28);
+        }
+        .mode-card-custom {
+            border: 2px solid #ccfbf1;
+            background: #ffffff;
+        }
+        .mode-card-custom:hover {
+            border-color: #0d9488;
+            box-shadow: 0 22px 35px -10px rgba(13, 148, 136, 0.28);
+        }
+
         /* Hub Tab Navigation */
         .hub-tab-btn {
             position: relative;
-            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
             user-select: none;
         }
         .hub-tab-btn.active {
@@ -83,6 +170,18 @@
         }
         .hub-tab-btn.active .tab-icon {
             color: #ffffff !important;
+        }
+
+        /* Subnav switcher pills */
+        .subnav-pill {
+            transition: all 0.2s ease;
+            user-select: none;
+            cursor: pointer;
+        }
+        .subnav-pill.active-subnav {
+            background: #4f46e5 !important;
+            color: #ffffff !important;
+            box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);
         }
 
         /* Filter Pills */
@@ -117,8 +216,8 @@
             transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         }
         .topic-roadmap-card:hover {
-            transform: translateY(-4px);
-            box-shadow: 0 14px 28px -6px rgba(0, 0, 0, 0.12);
+            transform: translateY(-5px);
+            box-shadow: 0 16px 30px -8px rgba(0, 0, 0, 0.14);
         }
 
         /* Mobile Sticky Floating Bar */
@@ -135,11 +234,6 @@
             box-shadow: 0 -8px 25px rgba(0, 0, 0, 0.08);
             transition: transform 0.3s ease;
         }
-        .dark .mobile-floating-bar {
-            background: rgba(15, 23, 42, 0.96);
-            border-color: #334155;
-            box-shadow: 0 -8px 25px rgba(0, 0, 0, 0.4);
-        }
 
         /* Tree Styles */
         .topic-card { border: 1px solid #E2E8F0; transition: all 0.3s ease; background: white; }
@@ -150,7 +244,7 @@
         .topic-header .arrow-icon { transition: transform 0.3s; }
         .topic-card.active .arrow-icon { transform: rotate(180deg); color: #6366F1; }
         .topic-body { max-height: 0; overflow: hidden; transition: max-height 0.4s cubic-bezier(0.4, 0, 0.2, 1); opacity: 0.5; }
-        .topic-card.active .topic-body { max-height: 2500px; opacity: 1; padding-bottom: 12px; }
+        .topic-card.active .topic-body { max-height: 3000px; opacity: 1; padding-bottom: 12px; }
 
         details > summary { list-style: none; cursor: pointer; transition: color 0.2s; outline: none; }
         details > summary::-webkit-details-marker { display: none; }
@@ -174,26 +268,22 @@
         .dark .topic-header:hover { background-color: #27354a; }
         .dark .tree-item:hover { background-color: #27354a; }
         .dark .tree-branch { border-color: #475569; }
+        .dark .mode-card-roadmap { background: #1e293b; border-color: #312e81; }
+        .dark .mode-card-roadmap:hover { border-color: #818cf8; box-shadow: 0 20px 30px -10px rgba(99, 102, 241, 0.4); }
+        .dark .mode-card-custom { background: #1e293b; border-color: #134e4a; }
+        .dark .mode-card-custom:hover { border-color: #2dd4bf; box-shadow: 0 20px 30px -10px rgba(13, 148, 136, 0.4); }
+        .dark .mobile-floating-bar { background: rgba(15, 23, 42, 0.96); border-color: #334155; }
         .dark .math-content img, .dark #lookupModalBody img {
-            background-color: #ffffff !important;
-            padding: 8px 12px !important;
-            border-radius: 12px !important;
-            display: inline-block !important;
-            max-width: 100% !important;
+            background-color: #ffffff !important; padding: 8px 12px !important; border-radius: 12px !important; display: inline-block !important; max-width: 100% !important;
         }
         .dark .math-content svg:not(.lucide):not(.fa-solid):not(.fa-regular):not([class*="fa-"]) {
-            background-color: #ffffff !important;
-            padding: 8px 12px !important;
-            border-radius: 12px !important;
-            color: #111827 !important;
+            background-color: #ffffff !important; padding: 8px 12px !important; border-radius: 12px !important; color: #111827 !important;
         }
         .dark .math-content, .dark mjx-container, .dark mjx-container * {
-            color: #f8fafc !important;
-            fill: #f8fafc !important;
+            color: #f8fafc !important; fill: #f8fafc !important;
         }
     </style>
     <script>
-        // Đồng bộ dark mode với LocalStorage
         try { if (localStorage.getItem('qmath_theme') === 'dark') document.documentElement.classList.add('dark'); } catch(e) {}
     </script>
     <link rel="stylesheet" href="/styles.css?v=6">
@@ -204,8 +294,8 @@
     <header class="bg-white dark:bg-slate-900 border-b border-gray-200 dark:border-slate-800 sticky top-0 z-50 shadow-sm transition-colors">
         <div class="max-w-7xl mx-auto px-3 sm:px-6 h-14 sm:h-16 flex items-center justify-between gap-2">
             <!-- Brand Logo -->
-            <div class="flex items-center gap-2 sm:gap-3 cursor-pointer shrink-0" onclick="window.location.href='student.html'">
-                <div class="w-9 h-9 sm:w-10 sm:h-10 bg-gradient-to-br from-indigo-600 to-purple-600 rounded-xl flex items-center justify-center text-white shadow-md shadow-indigo-200 dark:shadow-none text-base">
+            <div class="flex items-center gap-2 sm:gap-3 cursor-pointer shrink-0" onclick="window.switchHubTab('landing')">
+                <div class="w-9 h-9 sm:w-10 sm:h-10 bg-gradient-to-br from-indigo-600 to-purple-600 rounded-xl flex items-center justify-center text-white shadow-md text-base">
                     <i class="fa-solid fa-brain"></i>
                 </div>
                 <div>
@@ -214,17 +304,17 @@
                 </div>
             </div>
 
-            <!-- Central Hub Tab Switcher (Desktop & Tablet) -->
+            <!-- Central Hub Tab Switcher -->
             <nav class="hidden md:flex items-center gap-1.5 bg-gray-100 dark:bg-slate-800 p-1 rounded-2xl border border-gray-200 dark:border-slate-700">
-                <button id="navTabRoadmap" onclick="switchHubTab('roadmap')" class="hub-tab-btn active px-3.5 py-1.5 rounded-xl text-xs font-black flex items-center gap-2 text-gray-600 dark:text-gray-300">
+                <button id="navTabRoadmap" onclick="switchHubTab('roadmap')" class="hub-tab-btn px-3.5 py-1.5 rounded-xl text-xs font-black flex items-center gap-2 text-gray-600 dark:text-gray-300">
                     <i class="fa-solid fa-graduation-cap tab-icon text-indigo-500"></i>
                     <span>Lộ trình Chuyên đề</span>
                     <span class="text-[9px] bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 px-1.5 py-0.5 rounded-md font-bold">Xưởng</span>
                 </button>
                 <button id="navTabCustom" onclick="switchHubTab('custom')" class="hub-tab-btn px-3.5 py-1.5 rounded-xl text-xs font-black flex items-center gap-2 text-gray-600 dark:text-gray-300">
-                    <i class="fa-solid fa-sliders tab-icon text-purple-500"></i>
+                    <i class="fa-solid fa-sliders tab-icon text-emerald-500"></i>
                     <span>Luyện tập tự chọn</span>
-                    <span class="text-[9px] bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300 px-1.5 py-0.5 rounded-md font-bold">Tự do</span>
+                    <span class="text-[9px] bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 px-1.5 py-0.5 rounded-md font-bold">Tự do</span>
                 </button>
                 <button id="navTabHistory" onclick="switchHubTab('history')" class="hub-tab-btn px-3.5 py-1.5 rounded-xl text-xs font-black flex items-center gap-2 text-gray-600 dark:text-gray-300">
                     <i class="fa-solid fa-clock-rotate-left tab-icon text-amber-500"></i>
@@ -235,12 +325,12 @@
             <!-- Actions Header -->
             <div class="flex items-center gap-1.5 sm:gap-2 shrink-0">
                 <!-- QPoint Balance -->
-                <div id="qpChip" class="hidden h-8 sm:h-9 px-2.5 sm:px-3 rounded-full bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-800 flex items-center gap-1.5 text-amber-700 dark:text-amber-300 font-black text-xs sm:text-sm shrink-0 shadow-2xs" title="QPoint - Tích lũy khi giải đúng câu hỏi">
+                <div id="qpChip" class="hidden h-8 sm:h-9 px-2.5 sm:px-3 rounded-full bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-800 flex items-center gap-1.5 text-amber-700 dark:text-amber-300 font-black text-xs sm:text-sm shrink-0" title="QPoint - Tích lũy khi giải đúng câu hỏi">
                     <i class="fa-solid fa-coins text-amber-500 text-xs sm:text-sm"></i>
                     <span class="qp-balance">0</span>
                 </div>
                 <!-- Tra cứu ID nhanh -->
-                <button onclick="window.openQuestionLookupModal()" class="h-8 sm:h-9 px-2.5 sm:px-3 rounded-full bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 dark:hover:bg-indigo-900 flex items-center gap-1.5 text-indigo-700 dark:text-indigo-300 font-bold text-xs border border-indigo-200 dark:border-indigo-800 transition-all shadow-2xs" title="Tra cứu câu hỏi & lời giải theo ID sách">
+                <button onclick="window.openQuestionLookupModal()" class="h-8 sm:h-9 px-2.5 sm:px-3 rounded-full bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 dark:hover:bg-indigo-900 flex items-center gap-1.5 text-indigo-700 dark:text-indigo-300 font-bold text-xs border border-indigo-200 dark:border-indigo-800 transition-all" title="Tra cứu câu hỏi theo mã ID sách">
                     <i class="fa-solid fa-magnifying-glass text-xs"></i>
                     <span class="hidden sm:inline">Tra cứu ID</span>
                 </button>
@@ -257,13 +347,16 @@
 
         <!-- Mobile Hub Subnav -->
         <div class="flex md:hidden border-t border-gray-200 dark:border-slate-800 bg-gray-50/80 dark:bg-slate-900/80 px-2 py-1.5 justify-around gap-1">
-            <button onclick="switchHubTab('roadmap')" id="mobileNavTabRoadmap" class="flex-1 py-1.5 px-2 rounded-xl text-[11px] font-black text-center text-indigo-600 dark:text-indigo-400 bg-white dark:bg-slate-800 shadow-2xs border border-indigo-200 dark:border-slate-700 flex items-center justify-center gap-1.5">
+            <button onclick="switchHubTab('landing')" class="flex-1 py-1.5 px-2 rounded-xl text-[11px] font-bold text-center text-gray-600 dark:text-gray-400 hover:text-indigo-600 flex items-center justify-center gap-1">
+                <i class="fa-solid fa-house"></i> Trang chủ
+            </button>
+            <button onclick="switchHubTab('roadmap')" class="flex-1 py-1.5 px-2 rounded-xl text-[11px] font-bold text-center text-indigo-600 dark:text-indigo-400 bg-white dark:bg-slate-800 shadow-2xs border border-indigo-200 dark:border-slate-700 flex items-center justify-center gap-1">
                 <i class="fa-solid fa-graduation-cap"></i> Chuyên đề
             </button>
-            <button onclick="switchHubTab('custom')" id="mobileNavTabCustom" class="flex-1 py-1.5 px-2 rounded-xl text-[11px] font-bold text-center text-gray-600 dark:text-gray-400 hover:text-indigo-600 flex items-center justify-center gap-1.5">
+            <button onclick="switchHubTab('custom')" class="flex-1 py-1.5 px-2 rounded-xl text-[11px] font-bold text-center text-emerald-600 dark:text-emerald-400 flex items-center justify-center gap-1">
                 <i class="fa-solid fa-sliders"></i> Tự chọn
             </button>
-            <button onclick="switchHubTab('history')" id="mobileNavTabHistory" class="flex-1 py-1.5 px-2 rounded-xl text-[11px] font-bold text-center text-gray-600 dark:text-gray-400 hover:text-indigo-600 flex items-center justify-center gap-1.5">
+            <button onclick="switchHubTab('history')" class="flex-1 py-1.5 px-2 rounded-xl text-[11px] font-bold text-center text-gray-600 dark:text-gray-400 flex items-center justify-center gap-1">
                 <i class="fa-solid fa-clock-rotate-left"></i> Lịch sử
             </button>
         </div>
@@ -273,14 +366,175 @@
     <main class="flex-1 p-3 sm:p-5 md:p-6 max-w-7xl mx-auto w-full relative">
 
         <!-- ============================================================ -->
-        <!-- TAB 1: LỘ TRÌNH CHUYÊN ĐỀ (XƯỞNG CHUYÊN ĐỀ)                 -->
+        <!-- VIEW 0: LANDING HUB - NỔI BẬT LÊN 2 LỰA CHỌN CHÍNH           -->
         <!-- ============================================================ -->
-        <section id="viewRoadmap" class="hub-view animate-fade-in space-y-5">
-            <!-- Header Banner -->
-            <div class="bg-gradient-to-r from-indigo-900 via-indigo-800 to-purple-900 text-white rounded-3xl p-5 sm:p-7 shadow-xl relative overflow-hidden">
-                <div class="absolute -right-10 -bottom-10 w-56 h-56 bg-white/10 rounded-full blur-2xl pointer-events-none"></div>
+        <section id="viewLanding" class="hub-view animate-fade-in space-y-6">
+            <!-- Hero Title -->
+            <div class="text-center max-w-3xl mx-auto pt-2 pb-1">
+                <span class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-indigo-50 dark:bg-indigo-950/70 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 font-black text-xs uppercase tracking-wider mb-2">
+                    <i class="fa-solid fa-wand-magic-sparkles"></i> Hệ Thống Luyện Tập Thông Minh
+                </span>
+                <h2 class="text-2xl sm:text-3xl md:text-4xl font-black text-gray-900 dark:text-white tracking-tight">
+                    Bạn Muốn Luyện Tập Gì Hôm Nay?
+                </h2>
+                <p class="text-xs sm:text-sm md:text-base text-gray-500 dark:text-gray-400 mt-1 font-medium">
+                    Chọn 1 trong 2 chế độ luyện tập bên dưới để bắt đầu hành trình chinh phục điểm 10.
+                </p>
+            </div>
+
+            <!-- TWO GIANT MODE SELECTION CARDS -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-5 max-w-5xl mx-auto">
+                <!-- CARD 1: LỘ TRÌNH CHUYÊN ĐỀ (XƯỞNG CHUYÊN ĐỀ) -->
+                <div onclick="switchHubTab('roadmap')" class="mode-selection-card mode-card-roadmap rounded-3xl p-6 sm:p-8 flex flex-col justify-between overflow-hidden relative group">
+                    <div class="absolute top-0 right-0 w-36 h-36 bg-gradient-to-bl from-indigo-100 to-purple-50 dark:from-indigo-950/40 dark:to-purple-950/20 rounded-bl-full -mr-10 -mt-10 pointer-events-none transition-transform group-hover:scale-110"></div>
+                    <div class="relative z-10 space-y-4">
+                        <div class="flex items-center justify-between">
+                            <div class="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-gradient-to-br from-indigo-600 to-purple-600 text-white flex items-center justify-center text-2xl sm:text-3xl shadow-lg shadow-indigo-200 dark:shadow-none">
+                                <i class="fa-solid fa-graduation-cap"></i>
+                            </div>
+                            <span class="text-[10px] sm:text-xs font-black uppercase tracking-wider text-indigo-700 dark:text-indigo-300 bg-indigo-100 dark:bg-indigo-950/70 px-3 py-1 rounded-full">
+                                Xưởng Chuyên Đề
+                            </span>
+                        </div>
+
+                        <div>
+                            <h3 class="text-xl sm:text-2xl font-black text-gray-900 dark:text-white leading-tight">
+                                Học Theo Lộ Trình & Chuyên Đề
+                            </h3>
+                            <p class="text-xs sm:text-sm text-gray-500 dark:text-gray-400 mt-2 leading-relaxed">
+                                Luyện tập các chuyên đề bám sát chương trình do thầy cô biên soạn. Có đầy đủ chương, bài học và dạng toán từ cơ bản đến nâng cao.
+                            </p>
+                        </div>
+
+                        <!-- Highlights List -->
+                        <div class="space-y-2 pt-2 border-t border-gray-100 dark:border-slate-700/60">
+                            <div class="flex items-center gap-2 text-xs font-bold text-gray-700 dark:text-slate-300">
+                                <i class="fa-solid fa-circle-check text-indigo-600"></i>
+                                <span>Đề cương mục lục rõ ràng từng chương & bài</span>
+                            </div>
+                            <div class="flex items-center gap-2 text-xs font-bold text-gray-700 dark:text-slate-300">
+                                <i class="fa-solid fa-circle-check text-indigo-600"></i>
+                                <span>Chuyên đề Miễn phí & VIP chuyên sâu thi vào 10, THPT QG</span>
+                            </div>
+                            <div class="flex items-center gap-2 text-xs font-bold text-gray-700 dark:text-slate-300">
+                                <i class="fa-solid fa-circle-check text-indigo-600"></i>
+                                <span>Lộ trình bài bản giúp nắm chắc kiến thức cốt lõi</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="pt-6 relative z-10">
+                        <button class="w-full py-3 sm:py-3.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white font-black text-sm rounded-2xl shadow-lg shadow-indigo-200 dark:shadow-none flex items-center justify-center gap-2 group-hover:gap-3 transition-all">
+                            <span>Khám phá các chuyên đề</span>
+                            <i class="fa-solid fa-arrow-right text-xs"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- CARD 2: LUYỆN TẬP TỰ CHỌN (TẠO ĐỀ THEO YÊU CẦU) -->
+                <div onclick="switchHubTab('custom')" class="mode-selection-card mode-card-custom rounded-3xl p-6 sm:p-8 flex flex-col justify-between overflow-hidden relative group">
+                    <div class="absolute top-0 right-0 w-36 h-36 bg-gradient-to-bl from-teal-100 to-emerald-50 dark:from-teal-950/40 dark:to-emerald-950/20 rounded-bl-full -mr-10 -mt-10 pointer-events-none transition-transform group-hover:scale-110"></div>
+                    <div class="relative z-10 space-y-4">
+                        <div class="flex items-center justify-between">
+                            <div class="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-gradient-to-br from-teal-600 to-emerald-600 text-white flex items-center justify-center text-2xl sm:text-3xl shadow-lg shadow-teal-200 dark:shadow-none">
+                                <i class="fa-solid fa-sliders"></i>
+                            </div>
+                            <span class="text-[10px] sm:text-xs font-black uppercase tracking-wider text-teal-700 dark:text-teal-300 bg-teal-100 dark:bg-teal-950/70 px-3 py-1 rounded-full">
+                                Tự Chọn Đa Cấp Độ
+                            </span>
+                        </div>
+
+                        <div>
+                            <h3 class="text-xl sm:text-2xl font-black text-gray-900 dark:text-white leading-tight">
+                                Luyện Tập Tự Chọn Theo Yêu Cầu
+                            </h3>
+                            <p class="text-xs sm:text-sm text-gray-500 dark:text-gray-400 mt-2 leading-relaxed">
+                                Tự do tạo đề ôn thi: Chọn Khối lớp (6-12), Phân môn, tích chọn dạng bài cần bổ trợ trên cây ma trận, chọn cấp độ từ Nhận biết đến Vận dụng cao.
+                            </p>
+                        </div>
+
+                        <!-- Highlights List -->
+                        <div class="space-y-2 pt-2 border-t border-gray-100 dark:border-slate-700/60">
+                            <div class="flex items-center gap-2 text-xs font-bold text-gray-700 dark:text-slate-300">
+                                <i class="fa-solid fa-circle-check text-teal-600"></i>
+                                <span>7 Khối lớp (Lớp 6 đến Lớp 12) & 2,070+ câu hỏi</span>
+                            </div>
+                            <div class="flex items-center gap-2 text-xs font-bold text-gray-700 dark:text-slate-300">
+                                <i class="fa-solid fa-circle-check text-teal-600"></i>
+                                <span>Lọc chính xác dạng bài yếu trên cây chuyên đề chi tiết</span>
+                            </div>
+                            <div class="flex items-center gap-2 text-xs font-bold text-gray-700 dark:text-slate-300">
+                                <i class="fa-solid fa-circle-check text-teal-600"></i>
+                                <span>Chế độ làm bài thi hoặc xem ngay giải thích từng câu</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="pt-6 relative z-10">
+                        <button class="w-full py-3 sm:py-3.5 bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-700 hover:to-emerald-700 text-white font-black text-sm rounded-2xl shadow-lg shadow-teal-200 dark:shadow-none flex items-center justify-center gap-2 group-hover:gap-3 transition-all">
+                            <span>Tự tạo đề luyện tập</span>
+                            <i class="fa-solid fa-arrow-right text-xs"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Quick Start Bar & Banner tra cứu -->
+            <div class="max-w-5xl mx-auto space-y-4 pt-2">
+                <!-- Tra cứu ID sách Banner -->
+                <div class="bg-gradient-to-r from-indigo-50 via-purple-50 to-blue-50 dark:from-slate-800 dark:via-indigo-950/40 dark:to-slate-800 border border-indigo-100 dark:border-slate-700 rounded-3xl p-4 sm:p-5 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 shadow-xs">
+                    <div class="flex items-center gap-3 min-w-0">
+                        <div class="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-indigo-600 text-white flex items-center justify-center text-lg shrink-0">
+                            <i class="fa-solid fa-barcode"></i>
+                        </div>
+                        <div>
+                            <h4 class="font-black text-gray-900 dark:text-white text-sm sm:text-base leading-snug">
+                                Tra cứu Lời giải & Đáp án theo ID câu hỏi
+                            </h4>
+                            <p class="text-xs text-gray-500 dark:text-gray-400">Nhập mã ID 8 chữ số in trong sách để tra cứu lời giải chi tiết.</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2 shrink-0">
+                        <input type="text" id="landingLookupInput" placeholder="VD: 10002299..." class="px-3 py-2 bg-white dark:bg-slate-900 border border-gray-300 dark:border-slate-600 rounded-xl font-mono font-bold text-xs outline-none focus:ring-2 focus:ring-indigo-300 w-36 sm:w-44" onkeydown="if(event.key==='Enter') window.quickLookupFromLanding()">
+                        <button onclick="window.quickLookupFromLanding()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-sm flex items-center gap-1.5 shrink-0">
+                            <i class="fa-solid fa-magnifying-glass"></i> Tra cứu
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Luyện nhanh 1 chạm -->
+                <div class="flex flex-wrap items-center justify-center gap-2 pt-1">
+                    <span class="text-xs font-black text-gray-400 uppercase tracking-wider mr-1"><i class="fa-solid fa-bolt text-amber-500"></i> Luyện nhanh:</span>
+                    <button onclick="window.quickStart(10)" class="px-3.5 py-1.5 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-full text-xs font-bold text-gray-700 dark:text-gray-200 hover:border-indigo-400 shadow-2xs">⚡ 10 câu ngẫu nhiên</button>
+                    <button onclick="window.quickStart(20)" class="px-3.5 py-1.5 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-full text-xs font-bold text-gray-700 dark:text-gray-200 hover:border-indigo-400 shadow-2xs">⚡ 20 câu ngẫu nhiên</button>
+                    <button onclick="window.quickStart(5, ['VD', 'VDC'])" class="px-3.5 py-1.5 bg-white dark:bg-slate-800 border border-red-200 dark:border-red-900/60 rounded-full text-xs font-bold text-red-600 dark:text-red-400 hover:border-red-400 shadow-2xs">🔥 5 câu Vận dụng cao</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- ============================================================ -->
+        <!-- VIEW 1: LỘ TRÌNH CHUYÊN ĐỀ (XƯỞNG CHUYÊN ĐỀ)                 -->
+        <!-- ============================================================ -->
+        <section id="viewRoadmap" class="hub-view hidden animate-fade-in space-y-5">
+            <!-- Mode Top Switcher Bar -->
+            <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-1">
+                <button onclick="switchHubTab('landing')" class="inline-flex items-center gap-2 text-xs font-bold text-gray-500 hover:text-indigo-600 transition-colors">
+                    <i class="fa-solid fa-arrow-left"></i> <span>Chọn chế độ khác</span>
+                </button>
+                <div class="flex items-center gap-1.5 bg-gray-100 dark:bg-slate-800 p-1 rounded-2xl border border-gray-200 dark:border-slate-700 self-stretch sm:self-auto">
+                    <button onclick="switchHubTab('roadmap')" class="subnav-pill subnav-pill-roadmap active-subnav flex-1 sm:flex-initial px-4 py-1.5 rounded-xl text-xs font-black text-gray-600 dark:text-gray-300 flex items-center justify-center gap-1.5">
+                        <i class="fa-solid fa-graduation-cap text-indigo-500"></i> Lộ trình Chuyên đề
+                    </button>
+                    <button onclick="switchHubTab('custom')" class="subnav-pill subnav-pill-custom flex-1 sm:flex-initial px-4 py-1.5 rounded-xl text-xs font-bold text-gray-600 dark:text-gray-300 flex items-center justify-center gap-1.5">
+                        <i class="fa-solid fa-sliders text-teal-500"></i> Luyện tập tự chọn
+                    </button>
+                </div>
+            </div>
+
+            <!-- Header Banner (Robust Fallback Gradient) -->
+            <div class="roadmap-hero-gradient rounded-3xl p-6 sm:p-8 shadow-xl relative overflow-hidden" style="background: linear-gradient(135deg, #1e1b4b 0%, #312e81 55%, #4338ca 100%) !important;">
                 <div class="relative z-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-                    <div class="max-w-2xl">
+                    <div class="max-w-2xl text-white">
                         <div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/20 backdrop-blur-md text-white text-xs font-black uppercase tracking-wider mb-2">
                             <i class="fa-solid fa-graduation-cap"></i> Xưởng Chuyên Đề & Lộ Trình Ôn Thi
                         </div>
@@ -293,13 +547,13 @@
                     </div>
                     <!-- Quick Stats Pill -->
                     <div class="flex items-center gap-3 bg-white/10 backdrop-blur-md px-4 py-2.5 rounded-2xl border border-white/20 shrink-0">
-                        <div class="text-center">
-                            <span id="roadmapTotalCount" class="block text-xl font-black text-white leading-none">...</span>
+                        <div class="text-center text-white">
+                            <span id="roadmapTotalCount" class="block text-xl font-black text-white leading-none">0</span>
                             <span class="text-[10px] text-indigo-200 font-bold uppercase tracking-wider">Chuyên đề</span>
                         </div>
                         <div class="h-6 w-px bg-white/20"></div>
                         <div class="text-center">
-                            <span id="roadmapQuestionCount" class="block text-xl font-black text-amber-300 leading-none">...</span>
+                            <span id="roadmapQuestionCount" class="block text-xl font-black text-amber-300 leading-none">0</span>
                             <span class="text-[10px] text-indigo-200 font-bold uppercase tracking-wider">Câu hỏi</span>
                         </div>
                     </div>
@@ -345,9 +599,24 @@
         </section>
 
         <!-- ============================================================ -->
-        <!-- TAB 2: LUYỆN TẬP TỰ CHỌN (KHU VỰC TỰ DO)                      -->
+        <!-- VIEW 2: LUYỆN TẬP TỰ CHỌN (KHU VỰC TỰ DO)                      -->
         <!-- ============================================================ -->
-        <section id="viewCustom" class="hub-view hidden animate-fade-in">
+        <section id="viewCustom" class="hub-view hidden animate-fade-in space-y-5">
+            <!-- Mode Top Switcher Bar -->
+            <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-1">
+                <button onclick="switchHubTab('landing')" class="inline-flex items-center gap-2 text-xs font-bold text-gray-500 hover:text-indigo-600 transition-colors">
+                    <i class="fa-solid fa-arrow-left"></i> <span>Chọn chế độ khác</span>
+                </button>
+                <div class="flex items-center gap-1.5 bg-gray-100 dark:bg-slate-800 p-1 rounded-2xl border border-gray-200 dark:border-slate-700 self-stretch sm:self-auto">
+                    <button onclick="switchHubTab('roadmap')" class="subnav-pill subnav-pill-roadmap flex-1 sm:flex-initial px-4 py-1.5 rounded-xl text-xs font-bold text-gray-600 dark:text-gray-300 flex items-center justify-center gap-1.5">
+                        <i class="fa-solid fa-graduation-cap text-indigo-500"></i> Lộ trình Chuyên đề
+                    </button>
+                    <button onclick="switchHubTab('custom')" class="subnav-pill subnav-pill-custom active-subnav flex-1 sm:flex-initial px-4 py-1.5 rounded-xl text-xs font-black text-gray-600 dark:text-gray-300 flex items-center justify-center gap-1.5">
+                        <i class="fa-solid fa-sliders text-teal-500"></i> Luyện tập tự chọn
+                    </button>
+                </div>
+            </div>
+
             <!-- 2-Column Responsive Layout -->
             <div class="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
 
@@ -355,7 +624,7 @@
                 <div class="lg:col-span-5 bg-white dark:bg-slate-800/95 rounded-3xl p-4 sm:p-5 border border-gray-200 dark:border-slate-700 shadow-sm space-y-4">
                     <div class="flex items-center justify-between pb-3 border-b border-gray-100 dark:border-slate-700">
                         <div class="flex items-center gap-2">
-                            <div class="w-8 h-8 rounded-xl bg-purple-50 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400 flex items-center justify-center font-bold text-sm">
+                            <div class="w-8 h-8 rounded-xl bg-teal-50 dark:bg-teal-950/60 text-teal-600 dark:text-teal-400 flex items-center justify-center font-bold text-sm">
                                 <i class="fa-solid fa-sliders"></i>
                             </div>
                             <div>
@@ -372,7 +641,7 @@
                     <div>
                         <label class="block text-[11px] font-black text-gray-400 dark:text-gray-400 uppercase tracking-wider mb-1.5">Khối Lớp</label>
                         <div class="grid grid-cols-7 gap-1.5" id="gradePillGroup">
-                            <button type="button" onclick="selectCustomGrade('12')" class="grade-pill active py-2 text-center rounded-xl border border-gray-200 dark:border-slate-700 text-xs font-black transition-all" data-grade="12">12</button>
+                            <button type="button" onclick="selectCustomGrade('12')" class="grade-pill active py-2 text-center rounded-xl border border-indigo-600 bg-indigo-600 text-white text-xs font-black transition-all" data-grade="12">12</button>
                             <button type="button" onclick="selectCustomGrade('11')" class="grade-pill py-2 text-center rounded-xl border border-gray-200 dark:border-slate-700 text-xs font-black transition-all" data-grade="11">11</button>
                             <button type="button" onclick="selectCustomGrade('10')" class="grade-pill py-2 text-center rounded-xl border border-gray-200 dark:border-slate-700 text-xs font-black transition-all" data-grade="10">10</button>
                             <button type="button" onclick="selectCustomGrade('9')" class="grade-pill py-2 text-center rounded-xl border border-gray-200 dark:border-slate-700 text-xs font-black transition-all" data-grade="9">9</button>
@@ -386,7 +655,7 @@
                     <div>
                         <label class="block text-[11px] font-black text-gray-400 uppercase tracking-wider mb-1.5">Phân Môn</label>
                         <div class="grid grid-cols-3 gap-2" id="subjectPillGroup">
-                            <button type="button" onclick="selectCustomSubject('all')" class="subject-pill active py-2 text-center rounded-xl border border-gray-200 dark:border-slate-700 text-xs font-black transition-all" data-subject="all">Tất cả</button>
+                            <button type="button" onclick="selectCustomSubject('all')" class="subject-pill active py-2 text-center rounded-xl border border-teal-600 bg-teal-600 text-white text-xs font-black transition-all" data-subject="all">Tất cả</button>
                             <button type="button" onclick="selectCustomSubject('dai_so')" class="subject-pill py-2 text-center rounded-xl border border-gray-200 dark:border-slate-700 text-xs font-black transition-all" data-subject="dai_so">Đại số</button>
                             <button type="button" onclick="selectCustomSubject('hinh_hoc')" class="subject-pill py-2 text-center rounded-xl border border-gray-200 dark:border-slate-700 text-xs font-black transition-all" data-subject="hinh_hoc">Hình học</button>
                         </div>
@@ -468,7 +737,7 @@
                             <span class="text-xs font-bold text-gray-700 dark:text-gray-300">Sắp xếp dễ -> khó</span>
                             <label class="relative inline-flex items-center cursor-pointer">
                                 <input type="checkbox" id="toggleSortDifficulty" class="sr-only peer" checked>
-                                <div class="w-9 h-5 bg-gray-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
+                                <div class="w-9 h-5 bg-gray-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-teal-600"></div>
                             </label>
                         </div>
 
@@ -493,10 +762,10 @@
 
                     <!-- DESKTOP ACTION BUTTONS -->
                     <div class="space-y-2 pt-2">
-                        <button onclick="startPractice()" class="w-full py-3 bg-gradient-to-r from-indigo-600 via-indigo-700 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white font-black rounded-2xl shadow-lg shadow-indigo-200 dark:shadow-none transform active:scale-98 transition-all text-sm flex items-center justify-center gap-2">
+                        <button onclick="startPractice()" class="w-full py-3 bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-700 hover:to-emerald-700 text-white font-black rounded-2xl shadow-lg shadow-teal-200 dark:shadow-none transform active:scale-98 transition-all text-sm flex items-center justify-center gap-2">
                             <i class="fa-solid fa-rocket"></i> BẮT ĐẦU LUYỆN TẬP
                         </button>
-                        <button onclick="startPractice(true)" class="w-full py-2 bg-white dark:bg-slate-800 border-2 border-indigo-200 dark:border-slate-700 hover:bg-indigo-50 text-indigo-700 dark:text-indigo-300 font-black rounded-2xl shadow-xs transition-all text-xs flex items-center justify-center gap-2">
+                        <button onclick="startPractice(true)" class="w-full py-2 bg-white dark:bg-slate-800 border-2 border-teal-200 dark:border-slate-700 hover:bg-teal-50 text-teal-700 dark:text-teal-300 font-black rounded-2xl shadow-xs transition-all text-xs flex items-center justify-center gap-2">
                             <i class="fa-solid fa-file-pdf text-red-500"></i> XUẤT ĐỀ THI BẢN IN PDF
                         </button>
                     </div>
@@ -508,7 +777,7 @@
                     <div class="p-4 sm:p-5 border-b border-gray-100 dark:border-slate-700 bg-gray-50/70 dark:bg-slate-800/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
                         <div>
                             <h3 class="font-black text-gray-900 dark:text-white text-base flex items-center gap-2">
-                                <i class="fa-solid fa-folder-tree text-indigo-600"></i> CHỌN CHUYÊN ĐỀ & DẠNG BÀI
+                                <i class="fa-solid fa-folder-tree text-teal-600"></i> CHỌN CHUYÊN ĐỀ & DẠNG BÀI
                             </h3>
                             <p class="text-[11px] text-gray-400 font-semibold mt-0.5">Tích chọn các bài học bạn muốn ôn tập</p>
                         </div>
@@ -516,7 +785,7 @@
                         <!-- Status & Clear -->
                         <div class="flex items-center gap-2">
                             <div id="selectionStatus" class="text-xs font-bold bg-white dark:bg-slate-900 px-3 py-1.5 rounded-full border border-gray-200 dark:border-slate-700 text-gray-600 dark:text-gray-300 shadow-2xs">
-                                <i class="fa-solid fa-shuffle mr-1 text-indigo-500"></i> Ngẫu nhiên cả khối
+                                <i class="fa-solid fa-shuffle mr-1 text-teal-500"></i> Ngẫu nhiên cả khối
                             </div>
                             <button onclick="clearAllTreeChecks()" class="text-xs font-bold text-red-500 hover:text-red-700 px-2 py-1 bg-red-50 dark:bg-red-950/40 rounded-lg transition-colors" title="Bỏ chọn tất cả">
                                 <i class="fa-solid fa-trash-can"></i>
@@ -527,7 +796,7 @@
                     <!-- Search Filter & Controls for Tree -->
                     <div class="px-4 py-2.5 border-b border-gray-100 dark:border-slate-700 bg-white dark:bg-slate-900 flex items-center justify-between gap-2 shrink-0">
                         <div class="relative flex-1">
-                            <input type="text" id="treeSearchInput" oninput="filterTreeMapTree()" placeholder="Tìm nhanh bài học, dạng toán theo tên..." class="w-full pl-8 pr-3 py-1.5 text-xs bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-indigo-300">
+                            <input type="text" id="treeSearchInput" oninput="filterTreeMapTree()" placeholder="Tìm nhanh bài học, dạng toán theo tên..." class="w-full pl-8 pr-3 py-1.5 text-xs bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl outline-none focus:ring-2 focus:ring-teal-300">
                             <i class="fa-solid fa-magnifying-glass absolute left-2.5 top-2.5 text-gray-400 text-xs"></i>
                         </div>
                         <div class="flex items-center gap-1.5 shrink-0">
@@ -543,7 +812,7 @@
                     <!-- Tree Container Scrollable -->
                     <div id="treeContainer" class="flex-1 overflow-y-auto p-4 custom-scrollbar space-y-3">
                         <div class="text-center py-24 text-gray-400">
-                            <i class="fa-solid fa-spinner fa-spin text-3xl mb-3 text-indigo-400"></i>
+                            <i class="fa-solid fa-spinner fa-spin text-3xl mb-3 text-teal-400"></i>
                             <p class="text-sm font-bold">Đang nạp cây chuyên đề...</p>
                         </div>
                     </div>
@@ -561,16 +830,31 @@
                         Chưa chọn chuyên đề (Ngẫu nhiên)
                     </p>
                 </div>
-                <button onclick="startPractice()" class="px-5 py-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-black text-xs rounded-xl shadow-md shadow-indigo-200 shrink-0 flex items-center gap-1.5 active:scale-95">
+                <button onclick="startPractice()" class="px-5 py-2.5 bg-gradient-to-r from-teal-600 to-emerald-600 text-white font-black text-xs rounded-xl shadow-md shadow-teal-200 shrink-0 flex items-center gap-1.5 active:scale-95">
                     <i class="fa-solid fa-rocket"></i> Bắt đầu ngay
                 </button>
             </div>
         </section>
 
         <!-- ============================================================ -->
-        <!-- TAB 3: BẢNG VÀNG CÁ NHÂN & LỊCH SỬ                           -->
+        <!-- VIEW 3: BẢNG VÀNG CÁ NHÂN & LỊCH SỬ                           -->
         <!-- ============================================================ -->
         <section id="viewHistory" class="hub-view hidden animate-fade-in space-y-5">
+            <!-- Mode Top Switcher Bar -->
+            <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-1">
+                <button onclick="switchHubTab('landing')" class="inline-flex items-center gap-2 text-xs font-bold text-gray-500 hover:text-indigo-600 transition-colors">
+                    <i class="fa-solid fa-arrow-left"></i> <span>Chọn chế độ khác</span>
+                </button>
+                <div class="flex items-center gap-1.5 bg-gray-100 dark:bg-slate-800 p-1 rounded-2xl border border-gray-200 dark:border-slate-700 self-stretch sm:self-auto">
+                    <button onclick="switchHubTab('roadmap')" class="subnav-pill subnav-pill-roadmap flex-1 sm:flex-initial px-4 py-1.5 rounded-xl text-xs font-bold text-gray-600 dark:text-gray-300 flex items-center justify-center gap-1.5">
+                        <i class="fa-solid fa-graduation-cap text-indigo-500"></i> Lộ trình Chuyên đề
+                    </button>
+                    <button onclick="switchHubTab('custom')" class="subnav-pill subnav-pill-custom flex-1 sm:flex-initial px-4 py-1.5 rounded-xl text-xs font-bold text-gray-600 dark:text-gray-300 flex items-center justify-center gap-1.5">
+                        <i class="fa-solid fa-sliders text-teal-500"></i> Luyện tập tự chọn
+                    </button>
+                </div>
+            </div>
+
             <!-- Learning Progress Card -->
             <div id="learningProgressCard" class="bg-white dark:bg-slate-800/95 rounded-3xl p-5 sm:p-7 border border-indigo-100 dark:border-slate-700 shadow-sm relative overflow-hidden">
                 <div class="relative z-10 flex flex-col md:flex-row gap-5 items-stretch md:items-center">
@@ -727,8 +1011,8 @@
                 </div>
 
                 <div class="p-6 bg-gray-50 dark:bg-slate-900/60 flex flex-col sm:flex-row items-center justify-center gap-3">
-                    <button onclick="switchHubTab('custom')" class="w-full sm:w-auto px-5 py-2.5 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 text-gray-700 dark:text-gray-200 font-bold rounded-xl hover:bg-gray-100 text-xs shadow-2xs">
-                        <i class="fa-solid fa-arrow-left mr-1.5"></i> Về phòng luyện
+                    <button onclick="switchHubTab('landing')" class="w-full sm:w-auto px-5 py-2.5 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 text-gray-700 dark:text-gray-200 font-bold rounded-xl hover:bg-gray-100 text-xs shadow-2xs">
+                        <i class="fa-solid fa-arrow-left mr-1.5"></i> Về trang chọn
                     </button>
                     <button onclick="viewSolutions()" class="w-full sm:w-auto px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-xl text-xs shadow-md shadow-indigo-200">
                         <i class="fa-solid fa-book-open mr-1.5"></i> Xem lời giải chi tiết
@@ -982,6 +1266,8 @@
             return false;
         };
 
+        // CORRECT FIREBASE/SUPABASE APP INITIALIZATION
+        const app = initializeApp();
         const auth = getAuth(app);
         const db = getFirestore(app);
 
@@ -1050,9 +1336,10 @@
         function handleUrlRouting() {
             const params = new URLSearchParams(window.location.search);
             const mode = params.get('mode');
-            if (mode === 'roadmap') switchHubTab('roadmap');
-            else if (mode === 'custom') switchHubTab('custom');
-            else if (mode === 'history') switchHubTab('history');
+            if (mode === 'roadmap') window.switchHubTab('roadmap');
+            else if (mode === 'custom') window.switchHubTab('custom');
+            else if (mode === 'history') window.switchHubTab('history');
+            else window.switchHubTab('landing'); // Default to landing hub
 
             const lookup = params.get('lookup') || params.get('id') || params.get('cccd');
             if (lookup) {
@@ -1060,55 +1347,11 @@
             }
         }
 
-        // --- HUB TAB SWITCHING ---
-        window.switchHubTab = (tabName) => {
-            // Hide all views
-            ['viewRoadmap', 'viewCustom', 'viewHistory', 'practiceStep', 'resultStep'].forEach(id => {
-                const el = document.getElementById(id);
-                if (el) el.classList.add('hidden');
-            });
-
-            // Update Desktop buttons
-            document.querySelectorAll('.hub-tab-btn').forEach(btn => btn.classList.remove('active'));
-            if (tabName === 'roadmap') document.getElementById('navTabRoadmap')?.classList.add('active');
-            if (tabName === 'custom') document.getElementById('navTabCustom')?.classList.add('active');
-            if (tabName === 'history') document.getElementById('navTabHistory')?.classList.add('active');
-
-            // Update Mobile buttons
-            ['mobileNavTabRoadmap', 'mobileNavTabCustom', 'mobileNavTabHistory'].forEach(id => {
-                const b = document.getElementById(id);
-                if (b) {
-                    b.classList.remove('text-indigo-600', 'dark:text-indigo-400', 'bg-white', 'dark:bg-slate-800', 'shadow-2xs');
-                    b.classList.add('text-gray-600', 'dark:text-gray-400');
-                }
-            });
-            const activeMb = document.getElementById('mobileNavTab' + tabName.charAt(0).toUpperCase() + tabName.slice(1));
-            if (activeMb) {
-                activeMb.classList.add('text-indigo-600', 'dark:text-indigo-400', 'bg-white', 'dark:bg-slate-800', 'shadow-2xs');
-                activeMb.classList.remove('text-gray-600', 'dark:text-gray-400');
-            }
-
-            // Show target view
-            if (tabName === 'roadmap') {
-                document.getElementById('viewRoadmap')?.classList.remove('hidden');
-                document.getElementById('customMobileBar')?.classList.add('hidden');
-            } else if (tabName === 'custom') {
-                document.getElementById('viewCustom')?.classList.remove('hidden');
-                document.getElementById('customMobileBar')?.classList.remove('hidden');
-                updateMobileSummary();
-            } else if (tabName === 'history') {
-                document.getElementById('viewHistory')?.classList.remove('hidden');
-                document.getElementById('customMobileBar')?.classList.add('hidden');
-                loadInlineHistory();
-            }
-        };
-
         // --- FAST BANK CATALOG LOADER (R2 + CACHE) ---
         async function loadBankCatalogFast() {
             const CATALOG_URL = "https://pub-2efc95bbe7924897bdd0db54d0da243f.r2.dev/bank_catalog.json";
             const CACHE_KEY = "lms_cached_bank_v2";
 
-            // 1. Try reading from localStorage cache
             try {
                 const cachedStr = localStorage.getItem(CACHE_KEY);
                 if (cachedStr) {
@@ -1117,12 +1360,10 @@
                         window.globalBankCatalog = parsed.data;
                         window.globalBankMetadata = parsed.data;
                         annotateTreeCounts();
-                        console.info("[BankCatalog] Loaded instantly from cache:", window.globalBankCatalog.length, "câu hỏi");
                     }
                 }
             } catch(e) {}
 
-            // 2. Fetch fresh catalog asynchronously
             try {
                 const res = await fetch(CATALOG_URL);
                 if (res.ok) {
@@ -1133,8 +1374,7 @@
                         annotateTreeCounts();
                         try {
                             localStorage.setItem(CACHE_KEY, JSON.stringify({ timestamp: Date.now(), data }));
-                        } catch(e) {} // Quota safety
-                        console.info("[BankCatalog] Updated from R2:", data.length, "câu hỏi");
+                        } catch(e) {}
                     }
                 }
             } catch (err) {
@@ -1260,11 +1500,11 @@
                             card.innerHTML = `
                                 <div class="topic-header p-3.5 sm:p-4 flex justify-between items-center bg-gray-50/70 dark:bg-slate-800 border-b border-gray-100 dark:border-slate-700" onclick="toggleAccordionCard(this, event)">
                                     <div class="flex items-center gap-3 min-w-0">
-                                        <div class="w-8 h-8 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold text-sm shrink-0 border border-indigo-100 dark:border-slate-700">
+                                        <div class="w-8 h-8 rounded-xl bg-teal-50 dark:bg-teal-950/60 text-teal-600 dark:text-teal-400 flex items-center justify-center font-bold text-sm shrink-0 border border-teal-100 dark:border-slate-700">
                                             <i class="fa-solid fa-book"></i>
                                         </div>
                                         <div class="flex items-center gap-2 min-w-0">
-                                            <input type="checkbox" id="${headerId}" class="map-check-parent w-4 h-4 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500 cursor-pointer shrink-0" onclick="event.stopPropagation()" onchange="toggleAllChildren(this)">
+                                            <input type="checkbox" id="${headerId}" class="map-check-parent w-4 h-4 text-teal-600 rounded border-gray-300 focus:ring-teal-500 cursor-pointer shrink-0" onclick="event.stopPropagation()" onchange="toggleAllChildren(this)">
                                             <label for="${headerId}" class="font-bold text-gray-800 dark:text-white text-xs sm:text-sm leading-tight cursor-pointer truncate math-content">${sectionNode.name}</label>
                                         </div>
                                     </div>
@@ -1318,8 +1558,8 @@
             const count = document.querySelectorAll('.map-check:checked').length;
             const statusEl = document.getElementById('selectionStatus');
             if (statusEl) {
-                if (count === 0) statusEl.innerHTML = '<i class="fa-solid fa-shuffle mr-1 text-indigo-500"></i> Ngẫu nhiên cả khối';
-                else statusEl.innerHTML = `Đã chọn: <b class="text-indigo-600">${count} dạng bài</b>`;
+                if (count === 0) statusEl.innerHTML = '<i class="fa-solid fa-shuffle mr-1 text-teal-500"></i> Ngẫu nhiên cả khối';
+                else statusEl.innerHTML = `Đã chọn: <b class="text-teal-600">${count} dạng bài</b>`;
             }
             updateMobileSummary();
         };
@@ -1360,8 +1600,11 @@
         window.selectCustomGrade = (grade) => {
             window.currentConfig.grade = grade;
             document.querySelectorAll('.grade-pill').forEach(b => {
-                if (b.dataset.grade === grade) b.classList.add('active', 'bg-indigo-600', 'text-white', 'border-indigo-600');
-                else b.classList.remove('active', 'bg-indigo-600', 'text-white', 'border-indigo-600');
+                if (b.dataset.grade === grade) {
+                    b.classList.add('active', 'bg-indigo-600', 'text-white', 'border-indigo-600');
+                } else {
+                    b.classList.remove('active', 'bg-indigo-600', 'text-white', 'border-indigo-600');
+                }
             });
             renderTopicList();
             updateMobileSummary();
@@ -1370,8 +1613,11 @@
         window.selectCustomSubject = (subject) => {
             window.currentConfig.subject = subject;
             document.querySelectorAll('.subject-pill').forEach(b => {
-                if (b.dataset.subject === subject) b.classList.add('active', 'bg-purple-600', 'text-white', 'border-purple-600');
-                else b.classList.remove('active', 'bg-purple-600', 'text-white', 'border-purple-600');
+                if (b.dataset.subject === subject) {
+                    b.classList.add('active', 'bg-teal-600', 'text-white', 'border-teal-600');
+                } else {
+                    b.classList.remove('active', 'bg-teal-600', 'text-white', 'border-teal-600');
+                }
             });
             renderTopicList();
             updateMobileSummary();
@@ -1422,8 +1668,6 @@
             selectCustomGrade('12');
             selectCustomSubject('all');
             window.currentConfig.levels = ['TH', 'VD'];
-            toggleAllLevels();
-            window.currentConfig.levels = ['TH', 'VD'];
             ['NB','TH','VD','VDC'].forEach(lv => {
                 const pill = document.getElementById('pill-' + lv);
                 const activeClass = 'active-' + lv.toLowerCase();
@@ -1443,7 +1687,7 @@
             clearAllTreeChecks();
         };
 
-        function updateMobileSummary() {
+        window.updateMobileSummary = () => {
             const grade = window.currentConfig.grade;
             const subMap = { 'all': 'Toàn bộ môn', 'dai_so': 'Đại số', 'hinh_hoc': 'Hình học' };
             const qCount = document.getElementById('inputQCount')?.value || 10;
@@ -1453,7 +1697,7 @@
             const subEl = document.getElementById('mobileSelectionSub');
             if (summaryEl) summaryEl.innerText = `Lớp ${grade} • ${subMap[window.currentConfig.subject] || 'Toán'} • ${qCount} câu`;
             if (subEl) subEl.innerText = checkedTreeCount > 0 ? `Đã chọn ${checkedTreeCount} dạng bài cụ thể` : 'Ngẫu nhiên tất cả chuyên đề';
-        }
+        };
 
         // --- LOAD ROADMAPS (CUSTOM_TOPICS FROM XƯỞNG CHUYÊN ĐỀ) ---
         let currentRoadmapGradeFilter = '';
@@ -1464,13 +1708,11 @@
 
             try {
                 let topics = [];
-                // 1. Fetch published custom_topics from Supabase
                 try {
                     const snap = await getDocs(query(collection(db, "custom_topics"), where("status", "==", "published")));
                     snap.forEach(d => topics.push({ id: d.id, ...d.data() }));
                 } catch(e) {}
 
-                // 2. Fallback sample topics if database has none or few
                 if (topics.length === 0) {
                     topics = [
                         {
@@ -1562,7 +1804,6 @@
             if (access === 'free') filtered = filtered.filter(t => !t.isVip && (!t.price || t.price === 0));
             if (access === 'vip') filtered = filtered.filter(t => t.isVip || (t.price && t.price > 0));
 
-            // Update stats
             document.getElementById('roadmapTotalCount').innerText = filtered.length;
             let totalQ = 0; filtered.forEach(t => totalQ += (t.questionCount || 0));
             document.getElementById('roadmapQuestionCount').innerText = totalQ;
@@ -1700,7 +1941,6 @@
                 }
                 if (!topic) throw new Error("Không tìm thấy chuyên đề.");
 
-                // Collect question IDs in order
                 const qIds = [];
                 (topic.outline || []).forEach(ch => (ch.children || []).forEach(ls => (ls.items || []).forEach(it => {
                     if (it.type === 'question' && it.qId && !qIds.includes(it.qId)) qIds.push(it.qId);
@@ -1708,13 +1948,11 @@
 
                 let questions = [];
                 if (qIds.length > 0 && window.globalBankCatalog && window.globalBankCatalog.length > 0) {
-                    // Match directly from fast in-memory catalog
                     const mapById = {};
                     window.globalBankCatalog.forEach(q => { mapById[String(q.id)] = q; if(q.cccd) mapById[String(q.cccd)] = q; });
                     questions = qIds.map(id => mapById[String(id)]).filter(Boolean);
                 }
 
-                // If some or all missing, fetch single questions from R2 CDN
                 if (questions.length < qIds.length) {
                     const missing = qIds.filter(id => !questions.some(q => String(q.id) === String(id) || String(q.cccd) === String(id)));
                     const fetched = await Promise.all(missing.map(async (mId) => {
@@ -1727,7 +1965,6 @@
                     questions.push(...fetched.filter(Boolean));
                 }
 
-                // If still empty (e.g. sample topic with few questions), pick matching grade questions
                 if (questions.length === 0) {
                     const gradePrefix = String(topic.grade || '12');
                     questions = (window.globalBankCatalog || []).filter(q => String(q.mapId || q.id).startsWith(gradePrefix)).slice(0, 15);
@@ -1740,8 +1977,7 @@
                 questions.forEach(q => totalSec += (q.type === 'tf' ? 240 : 108));
                 const totalMin = Math.ceil(totalSec / 60);
 
-                document.getElementById('viewRoadmap').classList.add('hidden');
-                document.getElementById('viewCustom').classList.add('hidden');
+                ['viewLanding', 'viewRoadmap', 'viewCustom', 'viewHistory'].forEach(id => document.getElementById(id)?.classList.add('hidden'));
                 document.getElementById('customMobileBar')?.classList.add('hidden');
                 document.getElementById('practiceStep').classList.remove('hidden');
 
@@ -1753,6 +1989,37 @@
             } finally {
                 if (btn) { btn.innerHTML = ogHtml; btn.disabled = false; }
             }
+        };
+
+        // --- QUICK START 1 CHẠM ---
+        window.quickStart = function(count, levels) {
+            window.switchHubTab('custom');
+            setTimeout(() => {
+                const qc = document.getElementById('inputQCount');
+                if (qc) qc.value = count || 10;
+                if (levels) {
+                    window.currentConfig.levels = [...levels];
+                    ['NB','TH','VD','VDC'].forEach(lv => {
+                        const pill = document.getElementById('pill-' + lv);
+                        const activeClass = 'active-' + lv.toLowerCase();
+                        if (levels.includes(lv)) {
+                            pill?.classList.add('active', activeClass);
+                            pill?.querySelector('.check-ico')?.classList.remove('opacity-0');
+                        } else {
+                            pill?.classList.remove('active', activeClass);
+                            pill?.querySelector('.check-ico')?.classList.add('opacity-0');
+                        }
+                    });
+                }
+                clearAllTreeChecks();
+                startPractice();
+            }, 300);
+        };
+
+        window.quickLookupFromLanding = function() {
+            const val = (document.getElementById('landingLookupInput')?.value || '').trim();
+            if (!val) { alert("Vui lòng nhập mã ID câu hỏi!"); return; }
+            window.openQuestionLookupModal(val);
         };
 
         // --- START CUSTOM PRACTICE (0ms IN-MEMORY FILTERING) ---
@@ -1771,7 +2038,6 @@
                 const reqTheory = document.getElementById('filterTheory')?.checked;
                 const reqRealWorld = document.getElementById('filterRealWorld')?.checked;
 
-                // Checked tree IDs
                 const checkedMapIds = Array.from(document.querySelectorAll('.tree-item .map-check:checked'))
                     .map(cb => cb.value)
                     .filter(Boolean);
@@ -1787,7 +2053,6 @@
                 };
                 const checkedCleanIds = checkedMapIds.map(getBaseIdForMatch);
 
-                // Filter pool in memory from globalBankCatalog
                 let pool = (window.globalBankCatalog || []).filter(q => {
                     if (practiceId) return String(q.id) === practiceId || String(q.cccd) === practiceId;
                     const actualMapId = String(q.mapId || q.id || "").trim();
@@ -1798,12 +2063,10 @@
                     const subjectMatch = actualMapId.match(/^\d+([a-zA-Z])/);
                     const subjectChar = subjectMatch ? subjectMatch[1].toUpperCase() : "";
 
-                    // Station 1: Grade & Subject
                     if (!actualMapId.startsWith(grade)) return false;
                     if (subject === 'dai_so' && !['D', 'G'].includes(subjectChar)) return false;
                     if (subject === 'hinh_hoc' && subjectChar !== 'H') return false;
 
-                    // Station 2: Level
                     if (checkedLevels.length > 0) {
                         const isMatch = checkedLevels.some(code => {
                             if (code === 'NB' && (actualLevel.includes('NHẬN BIẾT') || actualLevel === 'NB')) return true;
@@ -1815,7 +2078,6 @@
                         if (!isMatch) return false;
                     }
 
-                    // Station 3: Topic / Problem Type (if checked)
                     if (checkedCleanIds.length > 0) {
                         const isMatchTopic = checkedCleanIds.some(tId => {
                             if (qBaseId === tId || qBaseId.startsWith(tId + '|')) return true;
@@ -1826,7 +2088,6 @@
                         if (!isMatchTopic) return false;
                     }
 
-                    // Station 4: Theory / RealWorld
                     if (reqTheory || reqRealWorld) {
                         const qTags = String(q.tags || '').toLowerCase();
                         let pass = false;
@@ -1843,7 +2104,6 @@
                     return;
                 }
 
-                // Shuffle & pick
                 for (let i = pool.length - 1; i > 0; i--) {
                     const j = Math.floor(Math.random() * (i + 1));
                     [pool[i], pool[j]] = [pool[j], pool[i]];
@@ -1864,7 +2124,6 @@
 
                 window.practiceQuestions = selected;
 
-                // Duration
                 let totalMin = customTime;
                 if (totalMin === 0) {
                     let totalSec = 0;
@@ -1872,7 +2131,6 @@
                     totalMin = Math.ceil(totalSec / 60);
                 }
 
-                // Export to PDF
                 if (isExportPdf) {
                     const practiceData = {
                         title: "Đề Luyện Tập Toán Học Tư Duy",
@@ -1889,10 +2147,7 @@
                     return;
                 }
 
-                // Transition to practice testing screen
-                document.getElementById('viewCustom').classList.add('hidden');
-                document.getElementById('viewRoadmap').classList.add('hidden');
-                document.getElementById('viewHistory').classList.add('hidden');
+                ['viewLanding', 'viewRoadmap', 'viewCustom', 'viewHistory'].forEach(id => document.getElementById(id)?.classList.add('hidden'));
                 document.getElementById('customMobileBar')?.classList.add('hidden');
                 document.getElementById('practiceStep').classList.remove('hidden');
 
@@ -1998,14 +2253,12 @@
                     </div>
                     ${inputHtml}`;
 
-                // Lifelines (50/50 & Hint AI)
                 let hintHtml = q.solution ? `<button onclick="useHint(${idx})" id="hintBtn-${idx}" class="text-xs text-amber-600 dark:text-amber-400 font-bold flex items-center gap-1 px-3 py-1.5 bg-amber-50 dark:bg-amber-950/60 rounded-xl border border-amber-200 dark:border-amber-800"><i class="fa-solid fa-lightbulb"></i> Gợi ý AI <span class="text-[9px] opacity-70">(5 Qp)</span></button>` : '';
                 let fiftyHtml = (q.type === 'mc') ? `<button onclick="use5050(${idx})" id="fiftyBtn-${idx}" class="text-xs text-indigo-600 dark:text-indigo-400 font-bold flex items-center gap-1 px-3 py-1.5 bg-indigo-50 dark:bg-indigo-950/60 rounded-xl border border-indigo-200 dark:border-indigo-800"><i class="fa-solid fa-wand-magic-sparkles"></i> 50/50 <span class="text-[9px] opacity-70">(3 Qp)</span></button>` : '';
                 if (hintHtml || fiftyHtml) {
                     qDiv.innerHTML += `<div class="flex justify-end gap-2 mt-4 pt-3 border-t border-gray-100 dark:border-slate-700/60 w-full">${hintHtml}${fiftyHtml}</div>`;
                 }
 
-                // Container for Instant Feedback if enabled
                 const instantBox = document.createElement('div');
                 instantBox.id = 'instant-box-' + idx;
                 instantBox.className = "mt-3 hidden animate-fade-in";
@@ -2013,7 +2266,6 @@
 
                 container.appendChild(qDiv);
 
-                // Palette jump button
                 const pBtn = document.createElement('button');
                 pBtn.id = 'p-btn-' + idx;
                 pBtn.className = "h-8 w-full rounded-xl border border-gray-200 dark:border-slate-700 flex items-center justify-center font-black text-xs text-gray-400 hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors";
@@ -2054,7 +2306,6 @@
                 window.userAnswers[qIdx][value.sub] = value.val;
             }
 
-            // Update Palette Status
             const btn = document.getElementById('p-btn-' + qIdx);
             if (btn) {
                 btn.className = "h-8 w-full rounded-xl bg-indigo-600 text-white border-indigo-600 flex items-center justify-center font-black text-xs shadow-2xs";
@@ -2068,7 +2319,6 @@
             if (pBar) pBar.style.width = pct + '%';
             if (pTxt) pTxt.innerText = `${done}/${total}`;
 
-            // Instant feedback if enabled
             if (window.currentConfig.instantFeedback && !window.instantAnswered[qIdx]) {
                 checkAndShowInstantSolution(qIdx);
             }
@@ -2150,7 +2400,6 @@
             const score = totalQ > 0 ? (correctCount / totalQ) * 10 : 0;
             const fixedScore = score.toFixed(1);
 
-            // Prepare save data
             const currentUser = auth.currentUser;
             if (currentUser) {
                 const checkedLvs = window.currentConfig.levels.map(l => {
@@ -2203,7 +2452,6 @@
             document.getElementById('resCorrect').textContent = correct;
             document.getElementById('resWrong').textContent = total - correct;
 
-            // QPoint Reward
             try {
                 if (window.QP && window.QP.loaded && total > 0) {
                     let earned = correct * (window.QP_REWARDS?.perCorrect || 2);
@@ -2212,7 +2460,6 @@
                 }
             } catch(e) {}
 
-            // Confetti
             try {
                 if (typeof confetti === 'function') {
                     confetti({ particleCount: 80, spread: 70, origin: { y: 0.6 } });
@@ -2266,7 +2513,7 @@
         window.confirmExitPractice = () => {
             if (confirm("Bạn có chắc muốn thoát khỏi bài làm dở không?")) {
                 if (timerInterval) clearInterval(timerInterval);
-                switchHubTab('custom');
+                switchHubTab('landing');
             }
         };
 
@@ -2380,13 +2627,11 @@
                     }
                 });
 
-                // Streak
                 lastDates.sort((a,b) => new Date(b) - new Date(a));
                 let streak = 0;
                 const today = new Date().toISOString().split('T')[0];
                 if (lastDates.includes(today)) streak = 1;
 
-                // XP & Level
                 const xp = totalSolved * 10 + totalCorrect * 5;
                 let levelName = "Tân Binh Luyện Tập";
                 let nextXp = 500;
@@ -2511,12 +2756,10 @@
 
             try {
                 let q = null;
-                // Fast lookup in memory catalog
                 if (window.globalBankCatalog && window.globalBankCatalog.length > 0) {
                     q = window.globalBankCatalog.find(item => String(item.id) === qId || String(item.cccd) === qId);
                 }
 
-                // If not in memory, fetch directly from R2 CDN
                 if (!q) {
                     try {
                         const r = await fetch(`https://pub-2efc95bbe7924897bdd0db54d0da243f.r2.dev/bank/${encodeURIComponent(qId)}.json`);
@@ -2534,7 +2777,6 @@
                 loadingEl?.classList.add('hidden');
                 resultEl?.classList.remove('hidden');
 
-                // Badges
                 const badgesBox = document.getElementById('lookupBadgesContainer');
                 if (badgesBox) {
                     badgesBox.innerHTML = `
@@ -2547,11 +2789,9 @@
                         </span>`;
                 }
 
-                // Content
                 const contentEl = document.getElementById('lookupQuestionContent');
                 if (contentEl) contentEl.innerHTML = window.formatContent ? window.formatContent(q.content) : q.content;
 
-                // Answer
                 const answerEl = document.getElementById('lookupAnswerSection');
                 if (answerEl) {
                     let ansHtml = '';
@@ -2574,7 +2814,6 @@
                     answerEl.innerHTML = ansHtml;
                 }
 
-                // Solution
                 const solEl = document.getElementById('lookupSolutionSection');
                 if (solEl) {
                     if (q.solution) {
