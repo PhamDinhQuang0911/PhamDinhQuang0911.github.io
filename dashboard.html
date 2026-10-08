@@ -4085,7 +4085,7 @@
             getFirestore, doc, getDoc, getDocFromCache, setDoc, collection, addDoc, query, where, orderBy, getDocs, updateDoc, deleteDoc, arrayUnion, limit, enableMultiTabIndexedDbPersistence, onSnapshot, increment,
             getStorage, ref, deleteObject, getFunctions, httpsCallable, supabase, DEFAULT_ADMIN
         } from "./supabase-db-compat.js?v=25";
-        import { DEFAULT_QPOINT_PACKAGES, getQPointConfig, getStudentQPointTransactions } from "./qpoint.js";
+        import { DEFAULT_QPOINT_PACKAGES, getQPointConfig, getStudentQPointTransactions } from "./qpoint.js?v=29";
 
         // 1. CẤU HÌNH SUPABASE (HỆ THỐNG ĐÃ CHUYỂN TỪ FIREBASE SANG SUPABASE)
         const app = initializeApp({});
@@ -9347,6 +9347,18 @@ function renderTagFilterUI() {
                     status: 'resolved',
                     resolvedAt: new Date().toISOString()
                 });
+
+                // Cập nhật trạng thái đơn hàng bên orders nếu có
+                try {
+                    const reqSnap = await getDoc(doc(db, "access_requests", reqId));
+                    const reqData = reqSnap.exists() ? reqSnap.data() : null;
+                    if (reqData && reqData.orderId) {
+                        await updateDoc(doc(db, "orders", reqData.orderId), {
+                            status: 'completed',
+                            resolvedAt: new Date().toISOString()
+                        }).catch(() => {});
+                    }
+                } catch(eOrd) {}
 
                 if (studentId) {
                     await updateDoc(doc(db, "users", studentId), {
