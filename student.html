@@ -7688,6 +7688,114 @@
             }
         };
 
+        // Kích hoạt quét tức thì đơn nâng cấp Giáo viên qua Google Apps Script Webhook
+        window.triggerStudentTeacherScan = (isAuto = true) => {
+            const scanUrl = teacherBankConfig?.SCAN_TRIGGER_URL || "https://script.google.com/macros/s/AKfycbxTRrSksmNVCb9UjOXhfTmKjY4XFrZO5QlIc_CnPoemUEEo5akhPoCmpYv3_x78AN_neQ/exec";
+            if (!scanUrl) return;
+
+            try {
+                const pingUrl = scanUrl + (scanUrl.includes('?') ? '&' : '?') + '_t=' + Date.now();
+                const img = new Image();
+                img.src = pingUrl;
+            } catch(e) {}
+
+            try {
+                fetch(scanUrl, {
+                    method: 'GET',
+                    mode: 'no-cors',
+                    credentials: 'omit',
+                    cache: 'no-store'
+                }).catch(() => {});
+            } catch(e) {}
+
+            if (!isAuto && window.showNotification) {
+                window.showNotification("⚡ Đã gửi yêu cầu đối soát tới hệ thống ngân hàng!", "info");
+            }
+        };
+
+        window.confirmStuTeacherTransferred = async () => {
+            const price = Number(currentTeacherPkgConfig?.price) || 500000;
+            const priceFormatted = price.toLocaleString('vi-VN') + ' đ';
+            const memo = currentStuTeacherMemo || '';
+            const ok = confirm(
+                "⚠️ CẢNH BÁO QUAN TRỌNG TRƯỚC KHI XÁC NHẬN:\n\n" +
+                "Thầy/Cô vui lòng đảm bảo ĐÃ THỰC HIỆN CHUYỂN KHOẢN thành công qua app ngân hàng:\n" +
+                `• Số tiền: ${priceFormatted}\n` +
+                `• Nội dung CK: ${memo}\n\n` +
+                "Để tránh trường hợp đơn hàng bị từ chối hoặc sai sót, Thầy/Cô đã thực sự chuyển khoản chưa?"
+            );
+            if (!ok) return;
+
+            const btn = document.getElementById('btnConfirmStuTeacherTransferred');
+            const notice = document.getElementById('stuTeacherTransferSentNotice');
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i> Đang gửi xác nhận & đối soát...';
+            }
+
+            try {
+                if (currentStuTeacherOrderId) {
+                    await updateDoc(doc(db, "orders", currentStuTeacherOrderId), {
+                        manualTransferred: true,
+                        transferredAt: new Date().toISOString()
+                    });
+                }
+                if (currentStuTeacherReqId) {
+                    await updateDoc(doc(db, "access_requests", currentStuTeacherReqId), {
+                        manualTransferred: true,
+                        transferredAt: new Date().toISOString()
+                    });
+                }
+
+                if (btn) {
+                    btn.className = "w-full py-2.5 px-3 bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-xs cursor-default flex items-center justify-center gap-1.5 opacity-90";
+                    btn.innerHTML = '<i class="fa-solid fa-check"></i> Đã gửi báo chuyển khoản';
+                }
+                if (notice) notice.classList.remove('hidden');
+
+                // Kích hoạt quét thủ công script ngân hàng
+                if (window.triggerStudentTeacherScan) {
+                    window.triggerStudentTeacherScan(true);
+                }
+
+                // Smart polling kiểm tra kết quả duyệt/thanh toán ngay
+                let isMatched = false;
+                if (currentStuTeacherOrderId) {
+                    await new Promise(r => setTimeout(r, 1200));
+                    const snap1 = await getDoc(doc(db, "orders", currentStuTeacherOrderId));
+                    if (snap1.exists()) {
+                        const s = String(snap1.data().status || '').toLowerCase();
+                        if (s === 'completed' || s === 'approved' || s === 'paid' || s === 'resolved') isMatched = true;
+                    }
+
+                    if (!isMatched) {
+                        await new Promise(r => setTimeout(r, 1500));
+                        const snap2 = await getDoc(doc(db, "orders", currentStuTeacherOrderId));
+                        if (snap2.exists()) {
+                            const s = String(snap2.data().status || '').toLowerCase();
+                            if (s === 'completed' || s === 'approved' || s === 'paid' || s === 'resolved') isMatched = true;
+                        }
+                    }
+                }
+
+                if (isMatched) {
+                    await window.handleTeacherPaymentSuccess();
+                    return;
+                }
+
+                if (window.showNotification) {
+                    window.showNotification("🎉 Đã gửi xác nhận chuyển khoản & lệnh đối soát! Hệ thống đang kiểm tra giao dịch...", "success");
+                }
+            } catch (err) {
+                console.error("Lỗi xác nhận chuyển khoản:", err);
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="fa-solid fa-circle-check"></i> Đã chuyển khoản, xác nhận thanh toán';
+                }
+                alert("Lỗi khi gửi xác nhận: " + err.message);
+            }
+        };
+
         window.startStuTeacherRealtimeListener = (ordId, reqId) => {
             if (stuTeacherOrderListener) { stuTeacherOrderListener(); stuTeacherOrderListener = null; }
             if (stuTeacherReqListener) { stuTeacherReqListener(); stuTeacherReqListener = null; }
@@ -7739,14 +7847,10 @@
         window.recheckTeacherPayment = async () => {
             const btn = document.getElementById('btnRecheckTeacherPayment');
             const origHtml = btn ? btn.innerHTML : '';
-            if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang đối soát với ngân hàng...'; }
+            if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang đối soát và kiểm tra đơn...'; }
 
             try {
-                // Kích hoạt quét ngân hàng
-                if (teacherBankConfig?.SCAN_TRIGGER_URL) {
-                    fetch(teacherBankConfig.SCAN_TRIGGER_URL, { mode: 'no-cors' }).catch(() => {});
-                }
-
+                // 1. Kiểm tra nhanh (<100ms) trong Firestore
                 let success = false;
                 if (currentStuTeacherOrderId) {
                     const snapOrd = await getDoc(doc(db, "orders", currentStuTeacherOrderId));
@@ -7772,8 +7876,40 @@
 
                 if (success) {
                     await window.handleTeacherPaymentSuccess();
+                    return;
+                }
+
+                // 2. Kích hoạt webhook quét ngân hàng thủ công (chạy nền)
+                if (window.triggerStudentTeacherScan) {
+                    window.triggerStudentTeacherScan(false);
+                }
+
+                // 3. Smart Polling kiểm tra lại Firestore (lần 1 sau 1.2s)
+                await new Promise(r => setTimeout(r, 1200));
+                if (currentStuTeacherOrderId) {
+                    const snap1 = await getDoc(doc(db, "orders", currentStuTeacherOrderId));
+                    if (snap1.exists()) {
+                        const s = String(snap1.data().status || '').toLowerCase();
+                        if (s === 'completed' || s === 'approved' || s === 'paid' || s === 'resolved') success = true;
+                    }
+                }
+
+                // 4. Smart Polling kiểm tra lại Firestore (lần 2 sau 1.5s nữa)
+                if (!success && currentStuTeacherOrderId) {
+                    await new Promise(r => setTimeout(r, 1500));
+                    const snap2 = await getDoc(doc(db, "orders", currentStuTeacherOrderId));
+                    if (snap2.exists()) {
+                        const s = String(snap2.data().status || '').toLowerCase();
+                        if (s === 'completed' || s === 'approved' || s === 'paid' || s === 'resolved') success = true;
+                    }
+                }
+
+                if (success) {
+                    await window.handleTeacherPaymentSuccess();
                 } else {
-                    if (window.showNotification) window.showNotification("Chưa nhận được giao dịch. Thầy/Cô vui lòng đợi trong giây lát hoặc liên hệ hỗ trợ!", "info");
+                    if (window.showNotification) {
+                        window.showNotification("Hệ thống đã gửi yêu cầu đối soát tới ngân hàng. Nếu Thầy/Cô vừa chuyển tiền, ngân hàng có thể mất 30s - 1 phút để cập nhật số dư. Thầy/Cô vui lòng thử bấm lại sau giây lát nhé!", "info");
+                    }
                 }
             } catch(e) {
                 console.error("Lỗi recheck giáo viên:", e);
@@ -7808,6 +7944,31 @@
 
             try {
                 const userEmail = (user.email || '').toLowerCase().trim();
+
+                // Đọc cấu hình quyền mặc định và khóa học từ configurations/teacher_package_config
+                let defaultPerms = [
+                    'classes.view', 'classes.manage', 'students.manage',
+                    'exams.create', 'exams.assign', 'exams.grade', 'exams.manage_own', 'exams.delete_own',
+                    'bank.use_shared', 'courses.use', 'courses.view', 'books.create', 'topics.use',
+                    'ai.use', 'security.anti_screenshot'
+                ];
+                let defaultAssignedCourses = ['*'];
+
+                try {
+                    const pkgSnap = await getDoc(doc(db, "configurations", "teacher_package_config"));
+                    if (pkgSnap.exists()) {
+                        const pkgData = pkgSnap.data();
+                        if (Array.isArray(pkgData.defaultPermissions) && pkgData.defaultPermissions.length > 0) {
+                            defaultPerms = pkgData.defaultPermissions;
+                        }
+                        if (Array.isArray(pkgData.defaultAssignedCourseIds) && pkgData.defaultAssignedCourseIds.length > 0) {
+                            defaultAssignedCourses = pkgData.defaultAssignedCourseIds;
+                        }
+                    }
+                } catch(ePkg) {
+                    console.warn("Không đọc được configurations/teacher_package_config, dùng preset mặc định:", ePkg);
+                }
+
                 const cfgRef = doc(db, "configurations", "admin_roles");
                 let accounts = [];
                 try {
@@ -7820,13 +7981,6 @@
                     (user.uid && a.id === user.uid)
                 );
 
-                const teacherPermissions = [
-                    'view_dashboard', 'manage_classes', 'create_homework', 
-                    'manage_students', 'export_results', 'view_reports', 
-                    'manage_questions', 'create_exam', 'manage_exams', 
-                    'grade_exams', 'manage_files', 'manage_courses', 'manage_live_sessions'
-                ];
-
                 const teacherRecord = {
                     id: user.uid,
                     email: userEmail,
@@ -7834,8 +7988,8 @@
                     phone: user.phoneNumber || null,
                     role: 'admin',
                     status: 'active',
-                    permissions: teacherPermissions,
-                    assignedCourseIds: ['*'],
+                    permissions: defaultPerms,
+                    assignedCourseIds: defaultAssignedCourses,
                     note: 'Nâng cấp từ tài khoản Học sinh (Thanh toán tự động / Super Admin duyệt)',
                     registeredVia: 'teacher_package',
                     updatedAt: new Date().toISOString(),
@@ -7860,6 +8014,8 @@
                 await setDoc(doc(db, "users", user.uid), {
                     role: 'teacher',
                     isTeacher: true,
+                    permissions: defaultPerms,
+                    assignedCourseIds: defaultAssignedCourses,
                     updatedAt: new Date().toISOString()
                 }, { merge: true });
 
@@ -8856,6 +9012,24 @@
                                             <i class="fa-solid fa-rotate"></i>
                                             <span>Kiểm tra lại giao dịch</span>
                                         </button>
+                                    </div>
+
+                                    <!-- Nút Đã chuyển khoản, xác nhận thanh toán -->
+                                    <div class="mt-3 w-full pt-2.5 border-t border-indigo-100 dark:border-slate-700 space-y-2">
+                                        <button type="button" id="btnConfirmStuTeacherTransferred" onclick="window.confirmStuTeacherTransferred()" class="w-full py-2.5 px-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-black text-xs sm:text-sm rounded-xl shadow-md active:scale-95 transition-all flex items-center justify-center gap-1.5 cursor-pointer">
+                                            <i class="fa-solid fa-circle-check"></i>
+                                            <span>Đã chuyển khoản, xác nhận thanh toán</span>
+                                        </button>
+                                        <div class="p-2 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-[10px] text-amber-800 dark:text-amber-300 flex items-start gap-1.5 text-left leading-relaxed">
+                                            <i class="fa-solid fa-triangle-exclamation text-amber-600 mt-0.5 shrink-0 text-[11px]"></i>
+                                            <span><b>Cảnh báo:</b> Thầy/Cô vui lòng chuyển khoản trước khi bấm nút này để tránh bị hủy đơn.</span>
+                                        </div>
+                                        <div id="stuTeacherTransferSentNotice" class="hidden p-2.5 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-300 dark:border-emerald-800 rounded-xl text-center">
+                                            <div class="text-[11px] font-bold text-emerald-800 dark:text-emerald-300 flex items-center justify-center gap-1">
+                                                <i class="fa-solid fa-circle-check text-emerald-600"></i> Đã gửi yêu cầu xác nhận thanh toán!
+                                            </div>
+                                            <p class="text-[10px] text-emerald-700 dark:text-emerald-400 mt-0.5">Admin đang kiểm tra giao dịch và kích hoạt tài khoản Giáo viên.</p>
+                                        </div>
                                     </div>
                                 </div>
 
