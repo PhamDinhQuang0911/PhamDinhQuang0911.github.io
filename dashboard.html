@@ -507,7 +507,9 @@
             Q: "\\mathbb{Q}",
             vectors: ["\\overrightarrow{#1}", 1],
             vec: ["\\overrightarrow{#1}", 1],
-            mtx: ["\\left[\\begin{matrix}#1\\end{matrix}\\right]", 1]
+            mtx: ["\\left[\\begin{matrix}#1\\end{matrix}\\right]", 1],
+            arrow: "\\rightarrow",
+            Arrow: "\\Rightarrow"
           }
         },
         options: { ignoreHtmlClass: 'tex2jax_ignore', processHtmlClass: 'tex2jax_process' },
@@ -4112,7 +4114,7 @@
 
         import { 
             initializeApp, deleteApp, getAuth, onAuthStateChanged, signOut, createUserWithEmailAndPassword, updateProfile, updatePassword,
-            getFirestore, doc, getDoc, getDocFromCache, setDoc, collection, addDoc, query, where, orderBy, getDocs, updateDoc, deleteDoc, arrayUnion, limit, enableMultiTabIndexedDbPersistence, onSnapshot, increment,
+            getFirestore, doc, getDoc, getDocFromCache, setDoc, collection, addDoc, query, where, orderBy, getDocs, updateDoc, deleteDoc, arrayUnion, arrayRemove, limit, enableMultiTabIndexedDbPersistence, onSnapshot, increment,
             getStorage, ref, deleteObject, getFunctions, httpsCallable, supabase, DEFAULT_ADMIN
         } from "./supabase-db-compat.js?v=27";
         import { DEFAULT_QPOINT_PACKAGES, getQPointConfig, getStudentQPointTransactions } from "./qpoint.js?v=30";
@@ -6625,6 +6627,16 @@
                     assignedCourses: arrayUnion(courseItem)
                 });
 
+                // Đồng bộ gán vào public_courses
+                try {
+                    const courseRef = doc(db, "public_courses", courseId);
+                    await updateDoc(courseRef, {
+                        assignedClassIds: arrayUnion(currentViewingClassId)
+                    });
+                } catch(eCourse) {
+                    console.warn("Lỗi đồng bộ assignedClassIds sang public_courses:", eCourse);
+                }
+
                 // Cập nhật cache cục bộ
                 if (window.currentClassData) {
                     if (!Array.isArray(window.currentClassData.assignedCourses)) {
@@ -6662,6 +6674,16 @@
                 const updatedList = currAssigned.filter(c => c.courseId !== courseId);
 
                 await updateDoc(classRef, { assignedCourses: updatedList });
+
+                // Đồng bộ gỡ khỏi public_courses
+                try {
+                    const courseRef = doc(db, "public_courses", courseId);
+                    await updateDoc(courseRef, {
+                        assignedClassIds: arrayRemove(classId)
+                    });
+                } catch(eCourse) {
+                    console.warn("Lỗi gỡ assignedClassIds khỏi public_courses:", eCourse);
+                }
 
                 // Cập nhật cache cục bộ
                 if (window.currentClassData && window.currentClassData.id === classId) {

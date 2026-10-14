@@ -26,6 +26,7 @@
     </script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="html5-qrcode.min.js"></script>
     <script>
     // Tự động giải phóng Service Worker & Cache cũ để cập nhật phiên bản mới
     (function() {
@@ -72,7 +73,9 @@
                     Q: "\\mathbb{Q}",
                     vectors: ["\\overrightarrow{#1}", 1],
                     vec: ["\\overrightarrow{#1}", 1],
-                    mtx: ["\\left[\\begin{matrix}#1\\end{matrix}\\right]", 1]
+                    mtx: ["\\left[\\begin{matrix}#1\\end{matrix}\\right]", 1],
+                    arrow: "\\rightarrow",
+                    Arrow: "\\Rightarrow"
                 }
             },
             options: {
@@ -506,6 +509,48 @@
             const m = document.getElementById('profileModal');
             if (m) m.classList.remove('hidden');
         };
+        window.openQrScannerModal = window.openQrScannerModal || function() {
+            const modal = document.getElementById('qrScannerModal');
+            if (!modal) return;
+            modal.classList.remove('opacity-0', 'pointer-events-none', 'hidden');
+            modal.style.opacity = '1';
+            modal.style.pointerEvents = 'auto';
+            modal.style.display = 'flex';
+            const content = modal.querySelector('.modal-content');
+            if (content) { content.classList.remove('scale-95'); content.classList.add('scale-100'); }
+        };
+        window.closeQrScannerModal = window.closeQrScannerModal || function() {
+            const modal = document.getElementById('qrScannerModal');
+            if (!modal) return;
+            modal.classList.add('opacity-0', 'pointer-events-none');
+            modal.style.opacity = '0';
+            modal.style.pointerEvents = 'none';
+            const content = modal.querySelector('.modal-content');
+            if (content) { content.classList.add('scale-95'); content.classList.remove('scale-100'); }
+        };
+        window.studentOpenLookupModal = window.studentOpenLookupModal || function(initialId = null) {
+            const modal = document.getElementById('studentQuestionLookupModal');
+            if (!modal) return;
+            modal.classList.remove('opacity-0', 'pointer-events-none', 'hidden');
+            modal.style.opacity = '1';
+            modal.style.pointerEvents = 'auto';
+            const content = modal.querySelector('.modal-content');
+            if (content) { content.classList.remove('scale-95'); content.classList.add('scale-100'); }
+            const input = document.getElementById('modalLookupInput');
+            if (input) {
+                if (initialId) input.value = initialId;
+                setTimeout(() => input.focus(), 100);
+            }
+        };
+        window.closeQuestionLookupModal = window.closeQuestionLookupModal || function() {
+            const modal = document.getElementById('studentQuestionLookupModal');
+            if (!modal) return;
+            modal.classList.add('opacity-0', 'pointer-events-none');
+            modal.style.opacity = '0';
+            modal.style.pointerEvents = 'none';
+            const content = modal.querySelector('.modal-content');
+            if (content) { content.classList.add('scale-95'); content.classList.remove('scale-100'); }
+        };
     </script>
     <link rel="stylesheet" href="/styles.css?v=5">
 <meta name="view-transition" content="same-origin" /></head>
@@ -536,6 +581,7 @@
             <div class="px-4 pt-4 pb-2 text-[10px] font-black text-gray-400 uppercase tracking-wider">Học liệu</div>
             <button onclick="switchTab('my-courses')" id="nav-my-courses" class="sidebar-item w-full text-left px-4 py-3 text-gray-600 flex items-center gap-3 transition-all rounded-xl"><i class="fa-solid fa-book-bookmark w-5"></i> Khóa học đã mua</button>
             <button onclick="switchTab('market')" id="nav-market" class="sidebar-item w-full text-left px-4 py-3 text-gray-600 flex items-center gap-3 transition-all rounded-xl"><i class="fa-solid fa-store w-5"></i> Đăng ký khóa mới</button>
+            <button onclick="window.openQrScannerModal()" id="nav-qr-scan" class="sidebar-item w-full text-left px-4 py-3 text-gray-600 flex items-center gap-3 transition-all rounded-xl hover:bg-blue-50 hover:text-blue-700"><i class="fa-solid fa-qrcode w-5 text-blue-600"></i> <span>Quét mã QR</span></button>
         </nav>
         
         <div class="p-3 md:p-4 border-t border-primary-100 bg-primary-50/30 relative z-10 space-y-3 shrink-0 pb-8 md:pb-4 mt-auto">
@@ -577,6 +623,9 @@
                 <span class="font-black text-brand text-lg">Góc Học Tập</span>
             </div>
             <div class="flex items-center gap-2">
+                <button type="button" onclick="window.openQrScannerModal()" class="w-8 h-8 rounded-full bg-blue-50 text-blue-600 hover:bg-blue-100 border border-blue-200 flex items-center justify-center text-sm shadow-2xs active:scale-95 transition-all cursor-pointer" title="Quét mã QR">
+                    <i class="fa-solid fa-qrcode"></i>
+                </button>
                 <div onclick="window.openQPointShopModal()" class="h-8 px-2.5 rounded-full bg-amber-50 border border-amber-200 flex items-center gap-1.5 text-amber-700 font-black text-xs cursor-pointer shadow-2xs">
                     <i class="fa-solid fa-coins text-amber-500"></i>
                     <span class="qp-balance">0</span>
@@ -625,26 +674,30 @@
             </div>
         </div>
 
-        <!-- 2. Nút Tra cứu Lời giải (ID) -->
-        <div onclick="window.studentOpenLookupModal()" class="bg-white dark:bg-slate-800/90 p-4 md:p-5 rounded-2xl md:rounded-3xl shadow-sm hover:shadow-xl hover:-translate-y-1.5 transition-all duration-300 border border-teal-100 dark:border-teal-800/40 group cursor-pointer relative overflow-hidden flex flex-col justify-between ring-1 ring-teal-500/10 hover:ring-teal-500/30">
+        <!-- 2. Nút Quét mã & Tra cứu ID -->
+        <div class="bg-white dark:bg-slate-800/90 p-4 md:p-5 rounded-2xl md:rounded-3xl shadow-sm hover:shadow-xl hover:-translate-y-1.5 transition-all duration-300 border border-teal-100 dark:border-teal-800/40 group relative overflow-hidden flex flex-col justify-between ring-1 ring-teal-500/10 hover:ring-teal-500/30">
             <div class="absolute -right-6 -bottom-6 w-24 h-24 bg-teal-500/10 dark:bg-teal-500/20 rounded-full blur-xl group-hover:scale-150 transition-transform duration-500 pointer-events-none"></div>
-            <div>
+            <div onclick="window.studentOpenLookupModal()" class="cursor-pointer">
                 <div class="flex items-center justify-between mb-3.5">
                     <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-teal-500 to-emerald-600 text-white flex items-center justify-center text-xl shadow-md shadow-teal-500/30 group-hover:scale-110 group-hover:rotate-3 transition-transform duration-300">
                         <i class="fa-solid fa-qrcode"></i>
                     </div>
-                    <span class="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold uppercase tracking-wider bg-teal-100 dark:bg-teal-900/40 text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-700 shadow-2xs">ID</span>
+                    <span class="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold uppercase tracking-wider bg-teal-100 dark:bg-teal-900/40 text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-700 shadow-2xs">QUÉT QR / ID</span>
                 </div>
                 <h3 class="text-base md:text-lg font-black text-gray-800 dark:text-white group-hover:text-teal-600 dark:group-hover:text-teal-400 transition-colors">
-                    Tra cứu Lời giải
+                    Quét mã & Tra cứu
                 </h3>
                 <p class="text-xs text-gray-500 dark:text-slate-400 mt-1 line-clamp-1 font-medium">
-                    Nhập mã ID câu hỏi
+                    Tra ID câu hỏi sách hoặc quét QR đề
                 </p>
             </div>
-            <div class="mt-4 pt-3 border-t border-gray-100 dark:border-slate-700/50 flex items-center justify-between text-xs font-bold text-gray-400 dark:text-slate-400 group-hover:text-teal-600 dark:group-hover:text-teal-400 transition-colors">
-                <span>Tra cứu ngay</span>
-                <i class="fa-solid fa-arrow-right text-[11px] group-hover:translate-x-1 transition-transform"></i>
+            <div class="mt-4 pt-3 border-t border-gray-100 dark:border-slate-700/50 flex items-center gap-2">
+                <button type="button" onclick="event.stopPropagation(); window.openQrScannerModal();" class="flex-1 py-2 px-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 transition-all shadow-xs cursor-pointer active:scale-95">
+                    <i class="fa-solid fa-camera"></i> Quét QR
+                </button>
+                <button type="button" onclick="event.stopPropagation(); window.studentOpenLookupModal();" class="flex-1 py-2 px-2.5 bg-teal-50 hover:bg-teal-100 text-teal-700 dark:bg-teal-950/50 dark:text-teal-300 font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 transition-all border border-teal-200 dark:border-teal-800 shadow-2xs cursor-pointer active:scale-95">
+                    <i class="fa-solid fa-magnifying-glass"></i> Tra cứu ID
+                </button>
             </div>
         </div>
 
@@ -1056,14 +1109,16 @@
             </div>
 
             <div id="successState" class="hidden">
-                <div class="w-24 h-24 mx-auto mb-6 bg-green-100 text-green-600 rounded-full flex items-center justify-center text-5xl animate-[bounce_1s_infinite]">
+                <div class="w-20 h-20 mx-auto mb-5 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center text-4xl animate-[bounce_1s_infinite] shadow-lg shadow-emerald-500/20">
                     <i class="fa-solid fa-check"></i>
                 </div>
-                <h3 class="text-2xl font-black text-gray-800 mb-2">Thanh toán thành công!</h3>
-                <p class="text-gray-500 text-sm mb-6">Khóa học đã được kích hoạt. Bạn có thể vào học ngay bây giờ.</p>
-                <button onclick="window.finishPaymentProcess()" class="w-full py-3.5 bg-brand text-white font-bold rounded-xl shadow-lg hover:bg-primary-700 transition-all text-lg">
-                    <i class="fa-solid fa-arrow-right mr-2"></i> VÀO HỌC NGAY
-                </button>
+                <h3 class="text-2xl font-black text-gray-800 dark:text-white mb-2">Thanh toán thành công!</h3>
+                <p id="paymentSuccessSubtitle" class="text-gray-500 dark:text-slate-400 text-sm mb-6 leading-relaxed">Khóa học đã được kích hoạt. Bạn có thể vào học ngay bây giờ.</p>
+                <div id="paymentSuccessActionBtns" class="space-y-2.5">
+                    <button onclick="window.finishPaymentProcess()" class="w-full py-3.5 bg-brand text-white font-bold rounded-xl shadow-lg hover:bg-primary-700 transition-all text-base flex items-center justify-center gap-2 cursor-pointer">
+                        <i class="fa-solid fa-arrow-right mr-1"></i> VÀO HỌC NGAY
+                    </button>
+                </div>
             </div>
         </div>
     </div>
@@ -1226,7 +1281,7 @@
 
         import { 
             initializeApp, getAuth, onAuthStateChanged, signOut, updateProfile, updatePassword, reauthenticateWithCredential, EmailAuthProvider,
-            getFirestore, doc, getDoc, setDoc, updateDoc, collection, getDocs, query, where, orderBy, onSnapshot, limit, addDoc, enableMultiTabIndexedDbPersistence, deleteDoc, increment,
+            getFirestore, doc, getDoc, setDoc, updateDoc, collection, getDocs, query, where, orderBy, onSnapshot, limit, addDoc, enableMultiTabIndexedDbPersistence, deleteDoc, increment, arrayUnion,
             supabase, getServerNow, calibrateServerTime, parseDateSafe
         } from "./supabase-db-compat.js?v=29";
         window.EmailAuthProvider = EmailAuthProvider;
@@ -1269,6 +1324,7 @@
         window.pendingTaskMode = 'active';
         let studentResultsMap = {};
         let purchasedCourseIds = new Set(); // Lưu danh sách ID khóa học đã mua để kiểm tra nhanh
+        window.purchasedCourseIds = purchasedCourseIds;
         let processingListener = null; // Biến lưu trình lắng nghe sự kiện thanh toán
 
         // === BIẾN GLOBAL CHO VIEW MODE ===
@@ -1316,6 +1372,11 @@
                         if (user) user.qpoints = bal;
                     });
                     window.QP.load().catch(e => console.warn(e));
+                    getQPointConfig(db).then(cfg => {
+                        if (cfg && cfg.costs) {
+                            window.QP_COSTS = { ...QP_COSTS, ...cfg.costs };
+                        }
+                    }).catch(() => {});
                 } catch(eQp) { console.warn("QPoint error:", eQp); }
 
                 // 2. Gọi các hàm tải dữ liệu NGAY LẬP TỨC (Không dùng await)
@@ -1382,6 +1443,7 @@
             try {
                 const snap = await getDoc(doc(db, "users", user.uid));
                 const data = snap.exists() ? snap.data() : {};
+                window.currentUserProfile = data;
                 const name = data.displayName || user.displayName || "Bạn";
                 document.getElementById('userName').innerText = name;
                 document.getElementById('welcomeName').innerText = name;
@@ -3071,30 +3133,64 @@
 
                 // Lấy thêm các khóa học được phân bổ / gán từ các lớp học mà học sinh đang tham gia
                 try {
-                    const qClasses = query(collection(db, "classes"), where("studentIds", "array-contains", user.uid));
-                    const sClasses = await getDocs(qClasses);
-                    sClasses.forEach(cd => {
-                        const classData = cd.data();
+                    const myClasses = await loadStudentClasses(user);
+                    const userClassIds = (myClasses || []).map(c => c.id);
+                    (myClasses || []).forEach(classData => {
                         const assignedCourses = classData.assignedCourses || [];
                         assignedCourses.forEach(ac => {
                             if (ac && ac.courseId) {
                                 const alreadyInPaid = paidItems.some(item => item.courseId === ac.courseId);
                                 if (!alreadyInPaid) {
                                     paidItems.push({
-                                        orderId: 'class_' + cd.id + '_' + ac.courseId,
+                                        orderId: 'class_' + classData.id + '_' + ac.courseId,
                                         courseId: ac.courseId,
                                         courseTitle: ac.courseTitle || 'Khóa học từ lớp',
                                         bannerUrl: ac.bannerUrl || '',
                                         status: 'approved',
                                         fromClass: true,
                                         className: classData.name || 'Lớp học',
-                                        classId: cd.id,
+                                        classId: classData.id,
                                         assignedAt: ac.assignedAt || ''
                                     });
                                 }
                             }
                         });
                     });
+
+                    // Kiểm tra thêm nếu public_courses có assignedClassIds chứa lớp của HS
+                    if (userClassIds.length > 0) {
+                        try {
+                            let marketCourses = window.dataCache.market;
+                            if (!marketCourses || marketCourses.length === 0) {
+                                const sMarket = await getDocs(collection(db, "public_courses"));
+                                marketCourses = [];
+                                sMarket.forEach(d => marketCourses.push({ id: d.id, ...d.data() }));
+                                window.dataCache.market = marketCourses;
+                            }
+                            marketCourses.forEach(c => {
+                                if (Array.isArray(c.assignedClassIds) && c.assignedClassIds.some(cid => userClassIds.includes(cid))) {
+                                    const alreadyInPaid = paidItems.some(item => item.courseId === c.id);
+                                    if (!alreadyInPaid) {
+                                        const matchedClass = myClasses.find(cl => c.assignedClassIds.includes(cl.id));
+                                        const className = matchedClass ? matchedClass.name : 'Lớp học';
+                                        paidItems.push({
+                                            orderId: 'class_' + (matchedClass?.id || 'assigned') + '_' + c.id,
+                                            courseId: c.id,
+                                            courseTitle: c.title || 'Khóa học từ lớp',
+                                            bannerUrl: c.bannerUrl || c.thumbnail || (Array.isArray(c.images) ? c.images[0] : '') || '',
+                                            status: 'approved',
+                                            fromClass: true,
+                                            className: className,
+                                            classId: matchedClass?.id || '',
+                                            assignedAt: new Date().toISOString()
+                                        });
+                                    }
+                                }
+                            });
+                        } catch(eSub) {
+                            console.warn("Lỗi kiểm tra marketCourses assignedClassIds:", eSub);
+                        }
+                    }
                 } catch(errClasses) {
                     console.warn("Lỗi kiểm tra khóa học theo lớp của học sinh:", errClasses);
                 }
@@ -3104,8 +3200,25 @@
                     try {
                         const cRef = doc(db, "public_courses", o.courseId);
                         const cSnap = await getDoc(cRef);
-                        // Nếu khóa học còn tồn tại -> Giữ lại order
-                        if(cSnap.exists()) return o;
+                        // Nếu khóa học còn tồn tại -> Giữ lại order và cập nhật ảnh/tiêu đề mới nhất
+                        if (cSnap.exists()) {
+                            const cd = cSnap.data();
+                            if (!o.bannerUrl && (cd.thumbnail || (Array.isArray(cd.images) && cd.images[0]) || cd.bannerUrl)) {
+                                o.bannerUrl = cd.thumbnail || (Array.isArray(cd.images) ? cd.images[0] : cd.bannerUrl);
+                            }
+                            if (!o.courseTitle || o.courseTitle === 'Khóa học từ lớp') {
+                                o.courseTitle = cd.title || o.courseTitle;
+                            }
+                            // Đọc tiến độ học tập thực tế từ user_progress
+                            try {
+                                const progRef = doc(db, "user_progress", `${currentUser.uid}_${o.courseId}`);
+                                const progSnap = await getDoc(progRef);
+                                if (progSnap.exists() && progSnap.data().progress !== undefined) {
+                                    o.progress = progSnap.data().progress;
+                                }
+                            } catch(eProg) {}
+                            return o;
+                        }
                         // Nếu khóa học đã xóa -> Trả về null để lọc bỏ
                         return null;
                     } catch(e) { return null; }
@@ -3204,7 +3317,7 @@
 
         // --- PAYMENT & VOUCHER UNIFIED SYSTEM (2-STEP, SHIPPING, QUANTITY & EXAM PACK SUPPORT) ---
         const paymentModalHTML = `
-            <div id="paymentModal" data-allow-screenshot="true" class="modal opacity-0 pointer-events-none hidden fixed inset-0 z-[100] bg-gray-50 dark:bg-gray-900 flex flex-col transition-all duration-300 overflow-y-auto">
+            <div id="paymentModal" data-allow-screenshot="true" class="modal opacity-0 pointer-events-none hidden fixed inset-0 z-[120] bg-gray-50 dark:bg-gray-900 flex flex-col transition-all duration-300 overflow-y-auto">
                 <!-- Header Modal -->
                 <div class="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-4 py-3 sm:px-6 flex justify-between items-center sticky top-0 z-20 shadow-xs">
                     <div class="flex items-center gap-2">
@@ -3816,6 +3929,15 @@
 
             // Đặt lại giao diện về Bước 1
             setCheckoutStep(1);
+
+            // Lưu lại câu hỏi đang tra cứu nếu có để tạo sự liền mạch sau khi thanh toán xong
+            if (!window._lookupPendingQuestionId) {
+                const pendingId = (currentLookupQuestion ? (currentLookupQuestion.cccd || currentLookupQuestion.id) : null) || document.getElementById('modalLookupInput')?.value?.trim();
+                if (pendingId) {
+                    window._lookupPendingQuestionId = String(pendingId).trim();
+                    try { sessionStorage.setItem('pendingLookupQuestionId', window._lookupPendingQuestionId); } catch(e) {}
+                }
+            }
 
             // Đặt lại voucher ưu đãi
             _appliedVoucher = null;
@@ -4530,6 +4652,7 @@
                 const onPaymentSuccess = async (data) => {
                     document.getElementById('processingState')?.classList.add('hidden');
                     document.getElementById('successState')?.classList.remove('hidden');
+                    if (typeof window.updatePaymentSuccessUI === 'function') window.updatePaymentSuccessUI();
                     if (window._studentRecheckTimer) {
                         clearInterval(window._studentRecheckTimer);
                         window._studentRecheckTimer = null;
@@ -4655,6 +4778,7 @@
 
                             document.getElementById('processingState').classList.add('hidden');
                             document.getElementById('successState').classList.remove('hidden');
+                            if (typeof window.updatePaymentSuccessUI === 'function') window.updatePaymentSuccessUI();
                             
                             await loadMyPurchased(auth.currentUser); 
                             await loadMarket(); 
@@ -4688,12 +4812,91 @@
             }
         };
 
+        // Hàm cập nhật nút bấm trong modal thanh toán thành công
+        window.updatePaymentSuccessUI = () => {
+            const pendingQId = window._lookupPendingQuestionId || sessionStorage.getItem('pendingLookupQuestionId');
+            const container = document.getElementById('paymentSuccessActionBtns');
+            const subTitle = document.getElementById('paymentSuccessSubtitle');
+            if (!container) return;
+
+            if (pendingQId) {
+                if (subTitle) {
+                    subTitle.innerHTML = `Khóa học đã được kích hoạt thành công! Câu hỏi <b class="text-amber-600 dark:text-amber-400">#${pendingQId}</b> và toàn bộ nội dung trong khóa học đã được mở khóa tự động.`;
+                }
+                container.innerHTML = `
+                    <button type="button" onclick="window.continueToLookupQuestion('${pendingQId}')" class="w-full py-3.5 px-4 bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:from-amber-600 hover:to-orange-600 text-white font-black rounded-xl shadow-lg shadow-amber-500/25 transition-all text-sm sm:text-base flex items-center justify-center gap-2 cursor-pointer active:scale-98">
+                        <i class="fa-solid fa-unlock-keyhole text-lg"></i> Xem ngay lời giải câu hỏi #${pendingQId}
+                    </button>
+                    <button type="button" onclick="window.finishPaymentProcess()" class="w-full py-2.5 px-4 bg-gray-100 hover:bg-gray-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-gray-700 dark:text-gray-200 font-bold rounded-xl transition-all text-xs sm:text-sm flex items-center justify-center gap-2 cursor-pointer">
+                        <i class="fa-solid fa-graduation-cap"></i> Vào danh sách khóa học của tôi
+                    </button>
+                `;
+            } else {
+                if (subTitle) {
+                    subTitle.innerText = "Khóa học đã được kích hoạt. Bạn có thể vào học ngay bây giờ.";
+                }
+                container.innerHTML = `
+                    <button onclick="window.finishPaymentProcess()" class="w-full py-3.5 bg-brand text-white font-bold rounded-xl shadow-lg hover:bg-primary-700 transition-all text-base flex items-center justify-center gap-2 cursor-pointer">
+                        <i class="fa-solid fa-arrow-right mr-1"></i> VÀO HỌC NGAY
+                    </button>
+                `;
+            }
+        };
+
+        // Chuyển tiếp liền mạch từ màn hình thanh toán thành công về câu hỏi đang tra cứu
+        window.continueToLookupQuestion = async (qId) => {
+            const targetQId = qId || window._lookupPendingQuestionId || sessionStorage.getItem('pendingLookupQuestionId');
+            if (window._studentRecheckTimer) {
+                clearInterval(window._studentRecheckTimer);
+                window._studentRecheckTimer = null;
+            }
+            document.getElementById('recheckPaymentBox')?.classList.add('hidden');
+            document.getElementById('processingModal')?.classList.add('hidden');
+
+            window._lookupPendingQuestionId = null;
+            try { sessionStorage.removeItem('pendingLookupQuestionId'); } catch(e) {}
+
+            // Đảm bảo dữ liệu khóa học đã mua được nạp mới nhất
+            if (auth.currentUser) {
+                try { await loadMyPurchased(auth.currentUser); } catch(e) {}
+            }
+
+            // Mở Question Lookup modal
+            if (typeof window.studentOpenLookupModal === 'function') {
+                window.studentOpenLookupModal(targetQId);
+            } else if (typeof window.openQuestionLookupModal === 'function') {
+                window.openQuestionLookupModal(targetQId);
+            }
+
+            if (typeof window.showNotification === 'function') {
+                window.showNotification(`🎉 Đã mở khóa thành công câu hỏi #${targetQId}!`, 'success');
+            }
+
+            // Chạy tra cứu câu hỏi ngay để hiển thị đề bài, đáp án và lời giải chi tiết
+            if (targetQId && typeof window.executeStudentLookup === 'function') {
+                await window.executeStudentLookup(targetQId, true);
+            }
+        };
+
+        // Hàm bắt đầu mua khóa học từ bảng tra cứu
+        window.startCoursePurchaseFromLookup = (courseId, qId) => {
+            if (qId) {
+                window._lookupPendingQuestionId = String(qId).trim();
+                try { sessionStorage.setItem('pendingLookupQuestionId', window._lookupPendingQuestionId); } catch(e) {}
+            }
+            if (typeof window.openPaymentModal === 'function') {
+                window.openPaymentModal(courseId);
+            }
+        };
+
         // Hàm bấm nút "Vào học ngay" sau khi thành công
         window.finishPaymentProcess = () => {
             if (window._studentRecheckTimer) {
                 clearInterval(window._studentRecheckTimer);
                 window._studentRecheckTimer = null;
             }
+            window._lookupPendingQuestionId = null;
+            try { sessionStorage.removeItem('pendingLookupQuestionId'); } catch(e) {}
             document.getElementById('recheckPaymentBox')?.classList.add('hidden');
             document.getElementById('processingModal').classList.add('hidden');
             window.switchTab('my-courses');
@@ -5106,6 +5309,7 @@
 
                         document.getElementById('processingState').classList.add('hidden');
                         document.getElementById('successState').classList.remove('hidden');
+                        if (typeof window.updatePaymentSuccessUI === 'function') window.updatePaymentSuccessUI();
                         await loadMyPurchased(auth.currentUser); 
                         await loadMarket(); 
                         if (processingListener) { processingListener(); processingListener = null; }
@@ -5380,11 +5584,19 @@
         let currentLookupQuestion = null;
 
         window.studentOpenLookupModal = (initialId = null) => {
-            if (window.QMathSecurity) window.QMathSecurity.setContext({ zone: 'lookup' });
+            if (window.QMathSecurity) {
+                try { window.QMathSecurity.setContext({ zone: 'lookup' }); } catch(e) {}
+            }
             const modal = document.getElementById('studentQuestionLookupModal');
             if (!modal) return;
-            modal.classList.remove('opacity-0', 'pointer-events-none');
-            modal.querySelector('.modal-content')?.classList.remove('scale-95');
+            modal.classList.remove('opacity-0', 'pointer-events-none', 'hidden');
+            modal.style.opacity = '1';
+            modal.style.pointerEvents = 'auto';
+            const content = modal.querySelector('.modal-content');
+            if (content) {
+                content.classList.remove('scale-95');
+                content.classList.add('scale-100');
+            }
 
             const input = document.getElementById('modalLookupInput');
             if (input) {
@@ -5392,17 +5604,25 @@
                 setTimeout(() => input.focus(), 100);
             }
 
-            if (initialId) {
+            if (initialId && typeof window.executeStudentLookup === 'function') {
                 window.executeStudentLookup(initialId);
             }
         };
 
         window.closeQuestionLookupModal = () => {
-            if (window.QMathSecurity) window.QMathSecurity.setContext({ zone: null });
+            if (window.QMathSecurity) {
+                try { window.QMathSecurity.setContext({ zone: null }); } catch(e) {}
+            }
             const modal = document.getElementById('studentQuestionLookupModal');
             if (!modal) return;
             modal.classList.add('opacity-0', 'pointer-events-none');
-            modal.querySelector('.modal-content')?.classList.add('scale-95');
+            modal.style.opacity = '0';
+            modal.style.pointerEvents = 'none';
+            const content = modal.querySelector('.modal-content');
+            if (content) {
+                content.classList.add('scale-95');
+                content.classList.remove('scale-100');
+            }
         };
 
         window.dashboardExecuteLookup = () => {
@@ -5486,6 +5706,368 @@
             });
         }
 
+        // Helper: Lấy danh sách toàn bộ khóa học công khai (kèm cache)
+        async function fetchAllPublicCoursesForLookup() {
+            if (window.dataCache && Array.isArray(window.dataCache.market) && window.dataCache.market.length > 0) {
+                return window.dataCache.market;
+            }
+            try {
+                const s = await getDocs(collection(db, "public_courses"));
+                const list = [];
+                s.forEach(d => list.push({ id: d.id, ...d.data() }));
+                if (!window.dataCache) window.dataCache = {};
+                window.dataCache.market = list;
+                return list;
+            } catch(e) {
+                console.warn("Lỗi tải danh sách khóa học cho tra cứu:", e);
+                return [];
+            }
+        }
+
+        // Helper: Bộ nhớ lưu danh sách câu hỏi học sinh đã mở khóa bằng QPoint
+        function getUnlockedQuestions(uid) {
+            if (!uid) return new Set();
+            const key = `qm_unlocked_q_${uid}`;
+            try {
+                const raw = localStorage.getItem(key);
+                if (raw) return new Set(JSON.parse(raw));
+            } catch(e) {}
+            return new Set();
+        }
+
+        function saveUnlockedQuestion(uid, qId) {
+            if (!uid || !qId) return;
+            const qStr = String(qId).trim();
+            const key = `qm_unlocked_q_${uid}`;
+            try {
+                const set = getUnlockedQuestions(uid);
+                set.add(qStr);
+                localStorage.setItem(key, JSON.stringify(Array.from(set)));
+            } catch(e) {}
+            try {
+                updateDoc(doc(db, "users", uid), {
+                    unlockedQuestions: arrayUnion(qStr)
+                }).catch(() => {});
+            } catch(e) {}
+        }
+
+        // Helper: Tìm các khóa học bảo vệ / chứa câu hỏi này (hoặc chứa đề thi có câu hỏi này)
+        window.getRequiredCoursesForQuestion = async (q) => {
+            if (!q) return [];
+            const allCourses = await fetchAllPublicCoursesForLookup();
+            if (!allCourses || allCourses.length === 0) return [];
+
+            const qIdStr = String(q.id || '').trim();
+            const qCccdStr = String(q.cccd || '').trim();
+            const qMapIdStr = String(q.mapId || '').trim().toLowerCase();
+            const qBookMapIdStr = String(q.bookMapId || q.bookId || q.book || '').trim().toLowerCase();
+            const qExamIdStr = String(q.examId || '').trim();
+            const qExamIds = Array.isArray(q.examIds) ? q.examIds.map(x => String(x).trim()) : (qExamIdStr ? [qExamIdStr] : []);
+
+            // Nếu câu hỏi chưa gắn trực tiếp examId, đối soát nhanh Supabase xem đề thi nào chứa câu hỏi này
+            if (qExamIds.length === 0 && (typeof supabase !== 'undefined' || window.supabase)) {
+                try {
+                    const sb = window.supabase || supabase;
+                    const cccdNum = qCccdStr || qIdStr;
+                    if (cccdNum) {
+                        const { data: matchedExams } = await sb.from('exams')
+                            .select('id')
+                            .contains('questions', JSON.stringify([{ cccd: cccdNum }]))
+                            .limit(10);
+                        if (Array.isArray(matchedExams) && matchedExams.length > 0) {
+                            matchedExams.forEach(e => {
+                                if (e && e.id) qExamIds.push(String(e.id).trim());
+                            });
+                        }
+                    }
+                } catch(e) {}
+            }
+
+            return allCourses.filter(c => {
+                if (!c) return false;
+
+                // 1. Kiểm tra danh sách restrictedQuestionIds được giáo viên gán trong khóa học
+                if (Array.isArray(c.restrictedQuestionIds) && c.restrictedQuestionIds.length > 0) {
+                    const matchId = c.restrictedQuestionIds.some(id => {
+                        const s = String(id).trim();
+                        return (qIdStr && s === qIdStr) || (qCccdStr && s === qCccdStr);
+                    });
+                    if (matchId) return true;
+                }
+
+                // 2. Gán trực tiếp courseId / courseIds trên câu hỏi
+                if (q.courseId && String(q.courseId).trim() === c.id) return true;
+                if (Array.isArray(q.courseIds) && q.courseIds.map(x => String(x).trim()).includes(c.id)) return true;
+                if (Array.isArray(q.requiredCourses) && q.requiredCourses.map(x => String(x).trim()).includes(c.id)) return true;
+
+                // 3. Khớp mã Sách / MapID giữa khóa học và câu hỏi
+                const cBookMap = String(c.bookMapId || '').trim().toLowerCase();
+                if (cBookMap && cBookMap.length > 0) {
+                    if (qBookMapIdStr && (qBookMapIdStr === cBookMap || qBookMapIdStr.includes(cBookMap) || cBookMap.includes(qBookMapIdStr))) return true;
+                    if (qMapIdStr && (qMapIdStr === cBookMap || qMapIdStr.includes(cBookMap) || cBookMap.includes(qMapIdStr))) return true;
+                }
+
+                // 4. Khóa học có đề thi khớp examId của câu hỏi (sampleExamId, examId, examIds, hoặc trong giáo án curriculum)
+                const courseExamIds = [];
+                if (c.sampleExamId) courseExamIds.push(String(c.sampleExamId).trim());
+                if (c.examId) courseExamIds.push(String(c.examId).trim());
+                if (Array.isArray(c.examIds)) c.examIds.forEach(x => courseExamIds.push(String(x).trim()));
+                if (Array.isArray(c.curriculum)) {
+                    for (const chap of c.curriculum) {
+                        if (Array.isArray(chap.lessons)) {
+                            for (const les of chap.lessons) {
+                                if (Array.isArray(les.items)) {
+                                    for (const it of les.items) {
+                                        if (it) {
+                                            if (it.quizId) courseExamIds.push(String(it.quizId).trim());
+                                            if (it.examId) courseExamIds.push(String(it.examId).trim());
+                                            if (it.type === 'quiz' || it.type === 'exam') {
+                                                if (it.id) courseExamIds.push(String(it.id).trim());
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (courseExamIds.length > 0 && qExamIds.length > 0) {
+                    const matchExam = qExamIds.some(eid => eid && courseExamIds.includes(eid));
+                    if (matchExam) return true;
+                }
+
+                return false;
+            });
+        };
+
+        // Helper: Kiểm tra quyền xem đáp án và giải chi tiết
+        window.checkQuestionLookupAccess = async (q, requiredCourses) => {
+            // Lọc các khóa học CÓ PHÍ chứa câu hỏi/đề thi
+            const paidCourses = (requiredCourses || []).filter(c => c && Number(c.price) > 0);
+
+            // Không thuộc khóa học có phí nào -> Mở tự do cho toàn bộ học sinh
+            if (paidCourses.length === 0) {
+                return { isAuthorized: true, isRestricted: false, paidCourses: [] };
+            }
+
+            const user = auth.currentUser;
+
+            // Kiểm tra quyền giáo viên / admin -> Toàn quyền
+            const userRole = window.currentUserProfile?.role;
+            if (window.isAdmin || window.isTeacher || ['admin', 'super_admin', 'teacher'].includes(userRole)) {
+                return { isAuthorized: true, isRestricted: true, role: 'staff', paidCourses };
+            }
+            if (user && user.email && ADMIN_EMAILS.includes(user.email)) {
+                return { isAuthorized: true, isRestricted: true, role: 'admin_email', paidCourses };
+            }
+
+            // Chưa đăng nhập mà gặp câu hỏi có phí -> Khóa
+            if (!user) {
+                return { isAuthorized: false, isRestricted: true, reason: 'unauthenticated', paidCourses };
+            }
+
+            // 1. Kiểm tra trong purchasedCourseIds (khóa học đã mua hoặc được phân công từ lớp)
+            if (!purchasedCourseIds || purchasedCourseIds.size === 0) {
+                try {
+                    await loadMyPurchased(user);
+                } catch(e) {}
+            }
+
+            for (const c of paidCourses) {
+                if (purchasedCourseIds && purchasedCourseIds.has(c.id)) {
+                    return { isAuthorized: true, isRestricted: true, reason: 'purchased', course: c, paidCourses };
+                }
+            }
+
+            // Kiểm tra thêm dự phòng lớp học của học sinh
+            try {
+                const assignedClassIdsSet = new Set();
+                paidCourses.forEach(c => {
+                    if (Array.isArray(c.assignedClassIds)) {
+                        c.assignedClassIds.forEach(cid => assignedClassIdsSet.add(cid));
+                    }
+                });
+
+                if (assignedClassIdsSet.size > 0) {
+                    const qCls = query(collection(db, "classes"), where("studentIds", "array-contains", user.uid));
+                    const snapCls = await getDocs(qCls);
+                    for (const cd of snapCls.docs) {
+                        if (assignedClassIdsSet.has(cd.id)) {
+                            purchasedCourseIds.add(cd.id);
+                            return { isAuthorized: true, isRestricted: true, reason: 'class', paidCourses };
+                        }
+                    }
+                }
+            } catch(e) {}
+
+            // 2. Kiểm tra xem học sinh đã dùng QPoint mở khóa câu hỏi này trước đó chưa
+            const qKey = String(q.cccd || q.id || '').trim();
+            const qIdKey = String(q.id || '').trim();
+            const unlockedSet = getUnlockedQuestions(user.uid);
+            if (window.currentUserProfile && Array.isArray(window.currentUserProfile.unlockedQuestions)) {
+                window.currentUserProfile.unlockedQuestions.forEach(id => unlockedSet.add(String(id).trim()));
+            }
+
+            if (unlockedSet.has(qKey) || (qIdKey && unlockedSet.has(qIdKey))) {
+                return { isAuthorized: true, isRestricted: true, reason: 'qpoint_unlocked', paidCourses };
+            }
+
+            // 3. Chưa sở hữu khóa học và chưa mở khóa bằng QPoint
+            return { isAuthorized: false, isRestricted: true, reason: 'need_purchase_or_qpoint', paidCourses };
+        };
+
+        window.closeQpUnlockModal = () => {
+            const modal = document.getElementById('qpointUnlockConfirmModal');
+            if (modal) modal.classList.add('hidden');
+        };
+
+        // Hàm mở khóa câu hỏi bằng QPoint - sử dụng modal xác nhận tuỳ biến thay vì confirm()
+        window.unlockLookupWithQPoint = async (qIdentifier) => {
+            const user = auth.currentUser;
+            if (!user) {
+                if (typeof window.showNotification === 'function') {
+                    window.showNotification('Vui lòng đăng nhập tài khoản để sử dụng QPoint mở khóa!', 'warning');
+                } else if (typeof showToast === 'function') {
+                    showToast('Vui lòng đăng nhập tài khoản để sử dụng QPoint mở khóa!', 'warning');
+                }
+                if (typeof window.openAuthModal === 'function') {
+                    window.openAuthModal();
+                } else {
+                    window.location.href = 'index.html';
+                }
+                return;
+            }
+
+            const qpCost = (window.QP_COSTS && window.QP_COSTS.question_lookup) || 5;
+
+            // Đảm bảo window.QP được khởi tạo
+            if (!window.QP && typeof createQPoint === 'function') {
+                try {
+                    window.QP = createQPoint(db, user.uid, { email: user.email, username: user.username });
+                    window.QP.onChange((bal) => {
+                        document.querySelectorAll('.qp-balance').forEach(el => el.textContent = Number(bal).toLocaleString('vi-VN'));
+                        if (user) user.qpoints = bal;
+                    });
+                } catch(e) {}
+            }
+
+            if (window.QP && !window.QP.loaded) {
+                await window.QP.load().catch(() => {});
+            }
+
+            const curBal = window.QP ? (Number(window.QP.balance) || 0) : 0;
+            const isFree = window.QP ? !!window.QP.free : false;
+            const isSufficient = (curBal >= qpCost) || isFree;
+
+            // Hiển thị Custom Modal xác nhận tuyệt đẹp thay vì confirm()
+            const modal = document.getElementById('qpointUnlockConfirmModal');
+            if (modal) {
+                const qIdEl = document.getElementById('qpModalQuestionId');
+                const costEl = document.getElementById('qpModalCost');
+                const curBalEl = document.getElementById('qpModalCurrentBal');
+                const afterBalEl = document.getElementById('qpModalAfterBal');
+                const afterBalRow = document.getElementById('qpModalAfterBalRow');
+                const shortageNotice = document.getElementById('qpModalShortageNotice');
+                const shortageMsg = document.getElementById('qpModalShortageMsg');
+                const btnGroup = document.getElementById('qpModalBtnGroup');
+                const topupGroup = document.getElementById('qpModalTopupBtnGroup');
+                const confirmBtn = document.getElementById('btnConfirmQpUnlock');
+
+                if (qIdEl) qIdEl.innerText = `#${qIdentifier}`;
+                if (costEl) costEl.innerText = `-${qpCost} QPoint`;
+                if (curBalEl) curBalEl.innerText = `${curBal.toLocaleString('vi-VN')} QPoint`;
+                if (afterBalEl) afterBalEl.innerText = `${Math.max(0, curBal - qpCost).toLocaleString('vi-VN')} QPoint`;
+
+                if (isSufficient) {
+                    shortageNotice?.classList.add('hidden');
+                    afterBalRow?.classList.remove('hidden');
+                    btnGroup?.classList.remove('hidden');
+                    topupGroup?.classList.add('hidden');
+
+                    if (confirmBtn) {
+                        confirmBtn.onclick = async () => {
+                            confirmBtn.disabled = true;
+                            confirmBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang mở...';
+                            try {
+                                await window.executeQPointUnlock(qIdentifier, qpCost);
+                            } finally {
+                                confirmBtn.disabled = false;
+                                confirmBtn.innerHTML = '<i class="fa-solid fa-unlock-keyhole"></i> Xác nhận mở';
+                                window.closeQpUnlockModal();
+                            }
+                        };
+                    }
+                } else {
+                    shortageNotice?.classList.remove('hidden');
+                    if (shortageMsg) shortageMsg.innerText = `Số dư hiện tại chỉ có ${curBal} QPoint (còn thiếu ${qpCost - curBal} QPoint).`;
+                    afterBalRow?.classList.add('hidden');
+                    btnGroup?.classList.add('hidden');
+                    topupGroup?.classList.remove('hidden');
+                }
+
+                modal.classList.remove('hidden');
+                return;
+            }
+
+            // Fallback nếu modal không tìm thấy
+            await window.executeQPointUnlock(qIdentifier, qpCost);
+        };
+
+        // Hàm thực thi trừ điểm và mở khóa câu hỏi
+        window.executeQPointUnlock = async (qIdentifier, qpCost) => {
+            const user = auth.currentUser;
+            if (!user) return;
+
+            try {
+                if (window.QP) {
+                    const res = await window.QP.spend(qpCost, 'question_lookup', {
+                        questionId: qIdentifier,
+                        mapId: currentLookupQuestion?.mapId || null,
+                        subject: currentLookupQuestion?.subject || null
+                    });
+                    if (!res.ok) {
+                        if (res.error === 'insufficient') {
+                            if (typeof window.showNotification === 'function') {
+                                window.showNotification(`Số dư QPoint không đủ! Cần ${qpCost} QPoint.`, 'warning');
+                            }
+                            if (typeof window.openQPointShopModal === 'function') window.openQPointShopModal();
+                        } else {
+                            if (typeof window.showNotification === 'function') {
+                                window.showNotification('Không thể trừ QPoint. Vui lòng kiểm tra kết nối mạng!', 'error');
+                            }
+                        }
+                        return;
+                    }
+                }
+
+                // Ghi nhớ câu hỏi đã mở khóa vào LocalStorage và Firestore
+                saveUnlockedQuestion(user.uid, qIdentifier);
+                if (currentLookupQuestion) {
+                    if (currentLookupQuestion.id && currentLookupQuestion.id !== qIdentifier) {
+                        saveUnlockedQuestion(user.uid, currentLookupQuestion.id);
+                    }
+                    if (currentLookupQuestion.cccd && currentLookupQuestion.cccd !== qIdentifier) {
+                        saveUnlockedQuestion(user.uid, currentLookupQuestion.cccd);
+                    }
+                }
+
+                if (typeof window.showNotification === 'function') {
+                    window.showNotification(`🎉 Mở khóa thành công câu hỏi #${qIdentifier}! (-${qpCost} QPoint)`, 'success');
+                } else if (typeof showToast === 'function') {
+                    showToast(`Mở khóa câu hỏi thành công! (-${qpCost} QPoint)`, 'success');
+                }
+
+                // Tải lại giao diện tra cứu ngay tức thì (giữ nguyên câu hỏi và hiển thị đáp án + lời giải)
+                await window.executeStudentLookup(qIdentifier, false);
+            } catch (err) {
+                console.error("Lỗi mở khóa bằng QPoint:", err);
+                if (typeof window.showNotification === 'function') {
+                    window.showNotification("Đã xảy ra lỗi khi mở khóa bằng QPoint. Vui lòng thử lại!", "error");
+                }
+            }
+        };
+
         window.executeStudentLookup = async (forcedId = null, forceRefresh = true) => {
             const input = document.getElementById('modalLookupInput');
             const qId = String(forcedId || (input ? input.value : '')).trim();
@@ -5555,11 +6137,17 @@
                 }
 
                 currentLookupQuestion = q;
+                const cccdNum = q.cccd || q.id || qId;
+
+                // Kiểm tra phân quyền truy cập câu hỏi theo Khóa học / Sách
+                const requiredCourses = await window.getRequiredCoursesForQuestion(q);
+                const accessResult = await window.checkQuestionLookupAccess(q, requiredCourses);
+                const isAuthorized = accessResult.isAuthorized;
+                const qpCost = (window.QP_COSTS && window.QP_COSTS.question_lookup) || 5;
 
                 // 1. Render Badges
                 const badgesContainer = document.getElementById('lookupBadgesContainer');
                 if (badgesContainer) {
-                    const cccdNum = q.cccd || q.id;
                     const mapId = q.mapId || '';
                     const level = q.level || 'Thông hiểu';
                     const subject = q.subject || 'Toán';
@@ -5594,9 +6182,32 @@
                             </span>
                         `;
                     }
+
+                    if (!isAuthorized) {
+                        badgesHtml += `
+                            <span class="text-xs font-bold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/40 px-2.5 py-1 rounded-lg border border-amber-300 dark:border-amber-700 flex items-center gap-1 shadow-2xs">
+                                <i class="fa-solid fa-lock text-amber-500"></i> Khóa học trả phí
+                            </span>
+                        `;
+                    } else if (accessResult.isRestricted && isAuthorized) {
+                        if (accessResult.reason === 'qpoint_unlocked') {
+                            badgesHtml += `
+                                <span class="text-xs font-bold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/40 px-2.5 py-1 rounded-lg border border-amber-300 dark:border-amber-700 flex items-center gap-1 shadow-2xs">
+                                    <i class="fa-solid fa-coins text-amber-500"></i> Đã mở khóa bằng QPoint
+                                </span>
+                            `;
+                        } else {
+                            badgesHtml += `
+                                <span class="text-xs font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-900/40 px-2.5 py-1 rounded-lg border border-emerald-300 dark:border-emerald-700 flex items-center gap-1 shadow-2xs">
+                                    <i class="fa-solid fa-unlock text-emerald-500"></i> Khóa học của bạn
+                                </span>
+                            `;
+                        }
+                    }
+
                     // Nút làm mới dữ liệu từ máy chủ
                     badgesHtml += `
-                        <button type="button" onclick="window.executeStudentLookup('${cccdNum}', true)" class="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 rounded-lg text-xs font-bold transition-all flex items-center gap-1 shadow-2xs" title="Tải lại từ máy chủ để lấy lời giải và hình vẽ mới nhất">
+                        <button type="button" onclick="window.executeStudentLookup('${cccdNum}', true)" class="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 rounded-lg text-xs font-bold transition-all flex items-center gap-1 shadow-2xs cursor-pointer" title="Tải lại từ máy chủ để lấy lời giải và hình vẽ mới nhất">
                             <i class="fa-solid fa-rotate"></i> Làm mới
                         </button>
                     `;
@@ -5628,122 +6239,314 @@
                 // 3. Render Question Content
                 const contentEl = document.getElementById('lookupQuestionContent');
                 if (contentEl) {
-                    contentEl.innerHTML = formatMathContent(q.content || '');
+                    if (!isAuthorized) {
+                        contentEl.innerHTML = `
+                            <div class="mb-4 p-3.5 sm:p-4 rounded-2xl bg-amber-50/90 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-200 text-xs sm:text-sm font-semibold flex items-center gap-3 shadow-xs">
+                                <div class="w-9 h-9 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0 shadow-sm text-base">
+                                    <i class="fa-solid fa-lock text-white"></i>
+                                </div>
+                                <div class="flex-1">
+                                    <div class="font-bold text-amber-950 dark:text-amber-100">Câu hỏi thuộc khóa học trả phí</div>
+                                    <div class="text-[11px] sm:text-xs text-amber-800 dark:text-amber-300 font-normal mt-0.5">Bạn chưa sở hữu khóa học này. Hãy dùng QPoint để mở khóa xem ngay đáp án & giải chi tiết, hoặc đăng ký mua khóa học trọn gói.</div>
+                                </div>
+                            </div>
+                            <div class="opacity-95">
+                                ${formatMathContent(q.content || '')}
+                            </div>
+                        `;
+                    } else {
+                        contentEl.innerHTML = formatMathContent(q.content || '');
+                    }
                 }
 
                 // 4. Render Answer / Options Section
                 const answerSec = document.getElementById('lookupAnswerSection');
                 if (answerSec) {
-                    const isTf = q.type === 'tf' || q.type === 'dung_sai' || (Array.isArray(q.statements) && q.statements.length > 0);
-                    const isShort = !isTf && (q.type === 'short' || q.type === 'dien_khuyet' || (q.answer !== undefined && q.answer !== null && String(q.answer).trim() !== '' && (!q.options || q.options.length === 0)));
-                    const isEssay = !isTf && !isShort && (q.type === 'essay' || (!q.options || q.options.length === 0));
-
-                    if (isTf) {
-                        const stmts = (Array.isArray(q.statements) && q.statements.length > 0) ? q.statements : (q.options || []).map((t, i) => {
-                            const ansArr = (q.correctAnswer || '').split(',');
-                            return { text: t, isTrue: ansArr[i] === 'D' || ansArr[i] === 'Đ' };
-                        });
-                        let tfHtml = `
-                            <div class="mt-4 space-y-3">
-                                <div class="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                                    <i class="fa-solid fa-list-check text-indigo-500"></i> Các mệnh đề khẳng định (Đúng / Sai):
-                                </div>
-                        `;
-                        stmts.forEach((st, idx) => {
-                            const label = String.fromCharCode(97 + idx); // a, b, c, d
-                            const isCorrectVal = st.correct === true || String(st.correct).toLowerCase() === 'true' || String(st.isTrue).toLowerCase() === 'true' || st.isTrue === true;
-                            tfHtml += `
-                                <div class="p-3.5 md:p-4 rounded-2xl bg-white dark:bg-slate-800 border ${isCorrectVal ? 'border-green-200 dark:border-green-800 ring-1 ring-green-100 dark:ring-green-950/40 bg-green-50/20' : 'border-gray-200 dark:border-slate-700'} shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                                    <div class="flex items-start gap-3 flex-1 min-w-0">
-                                        <span class="w-7 h-7 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 font-black text-xs flex items-center justify-center shrink-0 shadow-2xs">
-                                            ${label}
-                                        </span>
-                                        <div class="text-gray-800 dark:text-gray-200 text-sm md:text-base leading-relaxed math-content font-medium flex-1">
-                                            ${formatMathContent(st.text || '')}
-                                        </div>
-                                    </div>
-                                    <div class="flex items-center gap-2 shrink-0 self-end sm:self-center">
-                                        <span class="px-3.5 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-1.5 shadow-2xs ${isCorrectVal ? 'bg-green-500 text-white shadow-green-200 dark:shadow-none' : 'bg-gray-100 dark:bg-slate-700 text-gray-400 dark:text-slate-400 opacity-60'}">
-                                            <i class="fa-solid fa-check text-[11px]"></i> Đúng
-                                        </span>
-                                        <span class="px-3.5 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-1.5 shadow-2xs ${!isCorrectVal ? 'bg-red-500 text-white shadow-red-200 dark:shadow-none' : 'bg-gray-100 dark:bg-slate-700 text-gray-400 dark:text-slate-400 opacity-60'}">
-                                            <i class="fa-solid fa-xmark text-[11px]"></i> Sai
-                                        </span>
-                                    </div>
-                                </div>
-                            `;
-                        });
-                        tfHtml += `</div>`;
-                        answerSec.innerHTML = tfHtml;
-                    } else if (isShort) {
+                    if (!isAuthorized) {
                         answerSec.innerHTML = `
-                            <div class="mt-4 p-4 rounded-2xl bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-slate-800 dark:to-slate-800 border border-blue-200 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
-                                <div class="flex items-center gap-2.5">
-                                    <div class="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center text-sm shadow-sm">
-                                        <i class="fa-solid fa-key"></i>
+                            <div class="mt-4 p-4 rounded-2xl bg-gradient-to-r from-amber-500/10 via-orange-500/10 to-amber-500/5 dark:from-slate-800 dark:to-slate-800 border border-dashed border-amber-300 dark:border-amber-700/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+                                <div class="flex items-center gap-3 text-gray-700 dark:text-slate-300">
+                                    <div class="w-9 h-9 rounded-xl bg-amber-100 dark:bg-amber-900/50 text-amber-600 dark:text-amber-400 flex items-center justify-center text-sm shadow-2xs shrink-0">
+                                        <i class="fa-solid fa-lock"></i>
                                     </div>
                                     <div>
-                                        <div class="text-xs font-black uppercase tracking-wider text-blue-700 dark:text-blue-300">Đáp án chính xác</div>
-                                        <div class="text-xs text-gray-500 dark:text-slate-400 font-medium">Câu hỏi trả lời ngắn / điền số</div>
+                                        <span class="text-xs sm:text-sm font-bold text-gray-900 dark:text-white">Đáp án câu hỏi đã được bảo vệ</span>
+                                        <p class="text-[11px] text-gray-500 dark:text-slate-400 mt-0.5">Dùng ${qpCost} QPoint hoặc mua khóa học để mở khóa toàn bộ đáp án và lời giải.</p>
                                     </div>
                                 </div>
-                                <div class="px-5 py-2 rounded-xl bg-white dark:bg-slate-900 border border-blue-200 dark:border-blue-900 font-mono font-black text-lg text-blue-900 dark:text-blue-200 shadow-sm math-content self-start sm:self-center">
-                                    ${formatMathContent(String(q.answer || q.correctAnswer || '')) || '—'}
-                                </div>
+                                <button type="button" onclick="window.unlockLookupWithQPoint('${cccdNum}')" class="px-4 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-black text-xs rounded-xl shadow-md shadow-amber-500/25 active:scale-98 transition-all flex items-center justify-center gap-1.5 shrink-0 cursor-pointer">
+                                    <i class="fa-solid fa-coins"></i> Dùng ${qpCost} QPoint mở khóa
+                                </button>
                             </div>
                         `;
-                    } else if (isEssay) {
-                        answerSec.innerHTML = `
-                            <div class="mt-4 p-4 rounded-2xl bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 text-blue-900 dark:text-blue-200 text-xs font-bold flex items-center gap-2">
-                                <i class="fa-solid fa-pen-nib text-blue-600"></i> Câu hỏi tự luận: Xem hướng dẫn các bước thực hiện chi tiết ở phần Lời giải phía dưới.
-                            </div>
-                        `;
-                    } else if (q.options && q.options.length > 0) {
-                        // Trắc nghiệm 4 lựa chọn
-                        let correctIdx = -1;
-                        if (typeof q.correct === 'number') correctIdx = q.correct;
-                        else if (typeof q.correct === 'string') {
-                            const trimmed = q.correct.trim().toUpperCase();
-                            if (['A', 'B', 'C', 'D'].includes(trimmed)) {
-                                correctIdx = trimmed.charCodeAt(0) - 65;
-                            } else if (!isNaN(parseInt(trimmed))) {
-                                correctIdx = parseInt(trimmed);
-                            }
-                        }
+                    } else {
+                        const isTf = q.type === 'tf' || q.type === 'dung_sai' || (Array.isArray(q.statements) && q.statements.length > 0);
+                        const isShort = !isTf && (q.type === 'short' || q.type === 'dien_khuyet' || (q.answer !== undefined && q.answer !== null && String(q.answer).trim() !== '' && (!q.options || q.options.length === 0)));
+                        const isEssay = !isTf && !isShort && (q.type === 'essay' || (!q.options || q.options.length === 0));
 
-                        let optHtml = `<div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">`;
-                        q.options.forEach((opt, idx) => {
-                            const label = String.fromCharCode(65 + idx);
-                            const isTrue = idx === correctIdx;
-                            const cardStyle = isTrue 
-                                ? 'border-green-500 bg-green-50/70 dark:bg-green-900/20 text-green-950 dark:text-white font-bold ring-2 ring-green-400/40 shadow-sm'
-                                : 'border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800 text-gray-700 dark:text-gray-300';
-                            const badgeStyle = isTrue
-                                ? 'bg-green-600 text-white'
-                                : 'bg-gray-200 dark:bg-slate-700 text-gray-600 dark:text-gray-300';
-
-                            optHtml += `
-                                <div class="p-3.5 md:p-4 rounded-2xl border text-sm flex items-center gap-3 transition-all ${cardStyle}">
-                                    <div class="w-8 h-8 rounded-xl flex items-center justify-center font-bold text-xs shrink-0 ${badgeStyle}">
-                                        ${label}
+                        if (isTf) {
+                            const stmts = (Array.isArray(q.statements) && q.statements.length > 0) ? q.statements : (q.options || []).map((t, i) => {
+                                const ansArr = (q.correctAnswer || '').split(',');
+                                return { text: t, isTrue: ansArr[i] === 'D' || ansArr[i] === 'Đ' };
+                            });
+                            let tfHtml = `
+                                <div class="mt-4 space-y-3">
+                                    <div class="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                                        <i class="fa-solid fa-list-check text-indigo-500"></i> Các mệnh đề khẳng định (Đúng / Sai):
                                     </div>
-                                    <div class="text-sm md:text-base math-content break-words flex-1 leading-relaxed">
-                                        ${formatMathContent(opt)}
+                            `;
+                            stmts.forEach((st, idx) => {
+                                const label = String.fromCharCode(97 + idx); // a, b, c, d
+                                const isCorrectVal = st.correct === true || String(st.correct).toLowerCase() === 'true' || String(st.isTrue).toLowerCase() === 'true' || st.isTrue === true;
+                                tfHtml += `
+                                    <div class="p-3.5 md:p-4 rounded-2xl bg-white dark:bg-slate-800 border ${isCorrectVal ? 'border-green-200 dark:border-green-800 ring-1 ring-green-100 dark:ring-green-950/40 bg-green-50/20' : 'border-gray-200 dark:border-slate-700'} shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                                        <div class="flex items-start gap-3 flex-1 min-w-0">
+                                            <span class="w-7 h-7 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 font-black text-xs flex items-center justify-center shrink-0 shadow-2xs">
+                                                ${label}
+                                            </span>
+                                            <div class="text-gray-800 dark:text-gray-200 text-sm md:text-base leading-relaxed math-content font-medium flex-1">
+                                                ${formatMathContent(st.text || '')}
+                                            </div>
+                                        </div>
+                                        <div class="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                                            <span class="px-3.5 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-1.5 shadow-2xs ${isCorrectVal ? 'bg-green-500 text-white shadow-green-200 dark:shadow-none' : 'bg-gray-100 dark:bg-slate-700 text-gray-400 dark:text-slate-400 opacity-60'}">
+                                                <i class="fa-solid fa-check text-[11px]"></i> Đúng
+                                            </span>
+                                            <span class="px-3.5 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-1.5 shadow-2xs ${!isCorrectVal ? 'bg-red-500 text-white shadow-red-200 dark:shadow-none' : 'bg-gray-100 dark:bg-slate-700 text-gray-400 dark:text-slate-400 opacity-60'}">
+                                                <i class="fa-solid fa-xmark text-[11px]"></i> Sai
+                                            </span>
+                                        </div>
+                                    </div>
+                                `;
+                            });
+                            tfHtml += `</div>`;
+                            answerSec.innerHTML = tfHtml;
+                        } else if (isShort) {
+                            answerSec.innerHTML = `
+                                <div class="mt-4 p-4 rounded-2xl bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-slate-800 dark:to-slate-800 border border-blue-200 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
+                                    <div class="flex items-center gap-2.5">
+                                        <div class="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center text-sm shadow-sm">
+                                            <i class="fa-solid fa-key"></i>
+                                        </div>
+                                        <div>
+                                            <div class="text-xs font-black uppercase tracking-wider text-blue-700 dark:text-blue-300">Đáp án chính xác</div>
+                                            <div class="text-xs text-gray-500 dark:text-slate-400 font-medium">Câu hỏi trả lời ngắn / điền số</div>
+                                        </div>
+                                    </div>
+                                    <div class="px-5 py-2 rounded-xl bg-white dark:bg-slate-900 border border-blue-200 dark:border-blue-900 font-mono font-black text-lg text-blue-900 dark:text-blue-200 shadow-sm math-content self-start sm:self-center">
+                                        ${formatMathContent(String(q.answer || q.correctAnswer || '')) || '—'}
                                     </div>
                                 </div>
                             `;
-                        });
-                        optHtml += `</div>`;
-                        answerSec.innerHTML = optHtml;
-                    } else {
-                        answerSec.innerHTML = '';
+                        } else if (isEssay) {
+                            answerSec.innerHTML = `
+                                <div class="mt-4 p-4 rounded-2xl bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 text-blue-900 dark:text-blue-200 text-xs font-bold flex items-center gap-2">
+                                    <i class="fa-solid fa-pen-nib text-blue-600"></i> Câu hỏi tự luận: Xem hướng dẫn các bước thực hiện chi tiết ở phần Lời giải phía dưới.
+                                </div>
+                            `;
+                        } else if (q.options && q.options.length > 0) {
+                            // Trắc nghiệm 4 lựa chọn
+                            let correctIdx = -1;
+                            if (typeof q.correct === 'number') correctIdx = q.correct;
+                            else if (typeof q.correct === 'string') {
+                                const trimmed = q.correct.trim().toUpperCase();
+                                if (['A', 'B', 'C', 'D'].includes(trimmed)) {
+                                    correctIdx = trimmed.charCodeAt(0) - 65;
+                                } else if (!isNaN(parseInt(trimmed))) {
+                                    correctIdx = parseInt(trimmed);
+                                }
+                            }
+
+                            let optHtml = `<div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">`;
+                            q.options.forEach((opt, idx) => {
+                                const label = String.fromCharCode(65 + idx);
+                                const isTrue = idx === correctIdx;
+                                const cardStyle = isTrue 
+                                    ? 'border-green-500 bg-green-50/70 dark:bg-green-900/20 text-green-950 dark:text-white font-bold ring-2 ring-green-400/40 shadow-sm'
+                                    : 'border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800 text-gray-700 dark:text-gray-300';
+                                const badgeStyle = isTrue
+                                    ? 'bg-green-600 text-white'
+                                    : 'bg-gray-200 dark:bg-slate-700 text-gray-600 dark:text-gray-300';
+
+                                optHtml += `
+                                    <div class="p-3.5 md:p-4 rounded-2xl border text-sm flex items-center gap-3 transition-all ${cardStyle}">
+                                        <div class="w-8 h-8 rounded-xl flex items-center justify-center font-bold text-xs shrink-0 ${badgeStyle}">
+                                            ${label}
+                                        </div>
+                                        <div class="text-sm md:text-base math-content break-words flex-1 leading-relaxed">
+                                            ${formatMathContent(opt)}
+                                        </div>
+                                    </div>
+                                `;
+                            });
+                            optHtml += `</div>`;
+                            answerSec.innerHTML = optHtml;
+                        } else {
+                            answerSec.innerHTML = '';
+                        }
                     }
                 }
 
-                // 5. Render Detailed Solution
+                // 5. Render Detailed Solution / Paywall Card
                 const solSec = document.getElementById('lookupSolutionSection');
                 if (solSec) {
-                    if (q.solution && q.solution.trim()) {
+                    if (!isAuthorized) {
+                        const curBal = window.QP ? (Number(window.QP.balance) || 0) : 0;
+                        const isLoggedIn = !!auth.currentUser;
+                        const coursesToDisplay = (accessResult.paidCourses && accessResult.paidCourses.length > 0) ? accessResult.paidCourses : requiredCourses;
+
+                        solSec.innerHTML = `
+                            <div class="p-5 md:p-6 bg-gradient-to-br from-amber-50/90 via-white to-orange-50/70 dark:from-slate-900 dark:via-slate-800 dark:to-slate-900 border border-amber-300/80 dark:border-amber-600/40 rounded-3xl shadow-lg text-left">
+                                <!-- Tiêu đề thông báo quyền truy cập -->
+                                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-amber-200/80 dark:border-slate-700">
+                                    <div class="flex items-center gap-3.5">
+                                        <div class="w-12 h-12 rounded-2xl bg-gradient-to-tr from-amber-500 to-orange-500 !text-white flex items-center justify-center text-xl shadow-md shadow-amber-500/25 shrink-0">
+                                            <i class="fa-solid fa-lock text-white"></i>
+                                        </div>
+                                        <div>
+                                            <h4 class="text-base sm:text-lg font-black text-gray-900 dark:text-white leading-tight">Câu hỏi thuộc Khóa học trả phí</h4>
+                                            <p class="text-xs sm:text-sm text-gray-600 dark:text-slate-300 font-medium mt-0.5">Bạn chưa sở hữu khóa học chứa câu hỏi này. Hãy chọn 1 trong 2 hình thức bên dưới để mở khóa:</p>
+                                        </div>
+                                    </div>
+                                    <span class="text-xs font-bold text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/60 px-3 py-1.5 rounded-xl border border-amber-300 dark:border-amber-700 self-start sm:self-center shrink-0 flex items-center gap-1.5">
+                                        <i class="fa-solid fa-shield-halved text-amber-600 dark:text-amber-400"></i> Quyền lợi học viên
+                                    </span>
+                                </div>
+
+                                <!-- 2 Lựa chọn: Dùng QPoint hoặc Mua Khóa Học -->
+                                <div class="mt-5 grid grid-cols-1 lg:grid-cols-12 gap-5">
+                                    
+                                    <!-- LỰA CHỌN 1: DÙNG QPOINT (Col 5) -->
+                                    <div class="lg:col-span-5 flex flex-col justify-between p-4 sm:p-5 rounded-2xl bg-white dark:bg-slate-900 border-2 border-amber-400/90 dark:border-amber-500/50 shadow-sm hover:border-amber-500 transition-all">
+                                        <div>
+                                            <div class="flex items-center justify-between mb-3">
+                                                <span class="px-2.5 py-1 rounded-lg bg-gradient-to-r from-amber-500 to-orange-500 text-white font-black text-[11px] uppercase tracking-wider flex items-center gap-1 shadow-xs">
+                                                    <i class="fa-solid fa-bolt"></i> Cách 1
+                                                </span>
+                                                <span class="text-xs font-black text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/60 px-2.5 py-1 rounded-lg border border-amber-200 dark:border-amber-800 flex items-center gap-1">
+                                                    <i class="fa-solid fa-coins text-amber-500"></i> ${qpCost} QPoint
+                                                </span>
+                                            </div>
+                                            <h5 class="text-base font-black text-gray-900 dark:text-white mb-1.5">
+                                                Dùng QPoint mở khóa
+                                            </h5>
+                                            <p class="text-xs text-gray-600 dark:text-slate-300 leading-relaxed mb-4">
+                                                Xem ngay toàn bộ lời giải chi tiết và đáp án câu hỏi này. Mở một lần, xem lại mãi mãi trên tài khoản.
+                                            </p>
+
+                                            <div class="p-3.5 rounded-xl bg-amber-50/70 dark:bg-slate-800/80 border border-amber-200/80 dark:border-slate-700 mb-4 space-y-2">
+                                                <div class="flex items-center justify-between text-xs">
+                                                    <span class="text-gray-500 dark:text-slate-400 font-medium">Phí tra cứu:</span>
+                                                    <span class="font-black text-amber-600 dark:text-amber-400">-${qpCost} QPoint</span>
+                                                </div>
+                                                <div class="flex items-center justify-between text-xs pt-1.5 border-t border-amber-200/50 dark:border-slate-700">
+                                                    <span class="text-gray-500 dark:text-slate-400 font-medium">Số dư hiện tại:</span>
+                                                    <span class="font-black text-gray-900 dark:text-white qp-balance">${isLoggedIn ? curBal.toLocaleString('vi-VN') : '—'} QPoint</span>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div class="pt-1">
+                                            ${!isLoggedIn ? `
+                                                <button type="button" onclick="if(window.openAuthModal) window.openAuthModal(); else window.location.href='index.html';" class="w-full py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs sm:text-sm rounded-xl shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-98">
+                                                    <i class="fa-solid fa-right-to-bracket"></i> Đăng nhập để dùng QPoint
+                                                </button>
+                                            ` : (curBal >= qpCost || (window.QP && window.QP.free)) ? `
+                                                <button type="button" onclick="window.unlockLookupWithQPoint('${cccdNum}')" class="w-full py-3 px-4 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-black text-xs sm:text-sm rounded-xl shadow-md shadow-amber-500/25 active:scale-98 transition-all flex items-center justify-center gap-2 cursor-pointer">
+                                                    <i class="fa-solid fa-unlock-keyhole"></i> Mở khóa ngay (-${qpCost} QPoint)
+                                                </button>
+                                            ` : `
+                                                <div class="space-y-2">
+                                                    <button type="button" onclick="window.openQPointShopModal()" class="w-full py-3 px-4 bg-amber-500 hover:bg-amber-600 text-white font-black text-xs sm:text-sm rounded-xl shadow-md shadow-amber-500/25 active:scale-98 transition-all flex items-center justify-center gap-2 cursor-pointer">
+                                                        <i class="fa-solid fa-coins"></i> Nạp QPoint (Còn thiếu ${qpCost - curBal})
+                                                    </button>
+                                                    <p class="text-[11px] text-center text-amber-700 dark:text-amber-300 font-medium">Hoặc đăng ký khóa học trọn gói bên cạnh</p>
+                                                </div>
+                                            `}
+                                        </div>
+                                    </div>
+
+                                    <!-- LỰA CHỌN 2: MUA KHÓA HỌC (Col 7) -->
+                                    <div class="lg:col-span-7 flex flex-col justify-between p-4 sm:p-5 rounded-2xl bg-white dark:bg-slate-900 border border-indigo-200 dark:border-slate-700 shadow-sm hover:border-indigo-400 transition-all">
+                                        <div>
+                                            <div class="flex items-center justify-between mb-3">
+                                                <span class="px-2.5 py-1 rounded-lg bg-indigo-600 text-white font-black text-[11px] uppercase tracking-wider flex items-center gap-1 shadow-xs">
+                                                    <i class="fa-solid fa-graduation-cap"></i> Cách 2
+                                                </span>
+                                                <span class="text-xs font-black text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 px-2.5 py-1 rounded-lg border border-indigo-200 dark:border-indigo-800 flex items-center gap-1">
+                                                    <i class="fa-solid fa-infinity text-indigo-500"></i> Trọn gói vĩnh viễn
+                                                </span>
+                                            </div>
+                                            <h5 class="text-base font-black text-gray-900 dark:text-white mb-1.5">
+                                                Đăng ký Khóa học chứa câu hỏi này
+                                            </h5>
+                                            <p class="text-xs text-gray-600 dark:text-slate-300 leading-relaxed mb-3">
+                                                Sở hữu trọn bộ video, tài liệu, đề thi và tra cứu <strong class="text-gray-900 dark:text-white font-black">không giới hạn</strong> tất cả câu hỏi mà không cần tốn QPoint!
+                                            </p>
+
+                                            <!-- Danh sách khóa học -->
+                                            <div class="space-y-2.5 max-h-[220px] overflow-y-auto pr-1">
+                                                ${coursesToDisplay.map(c => `
+                                                    <div class="p-3 rounded-2xl bg-gray-50/90 dark:bg-slate-800/90 border border-gray-100 dark:border-slate-700 flex items-center gap-3 hover:bg-indigo-50/30 transition-colors">
+                                                        <img src="${c.thumbnail || c.bannerUrl || 'https://via.placeholder.com/80?text=Course'}" class="w-13 h-13 rounded-xl object-cover shrink-0 border border-gray-200 dark:border-slate-700 shadow-2xs" alt="${c.title || ''}" onerror="this.src='https://via.placeholder.com/80?text=Course'">
+                                                        <div class="flex-1 min-w-0">
+                                                            <div class="text-[10px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wider">${c.grade ? ('Khối ' + c.grade) : 'Khóa học'}</div>
+                                                            <div class="text-xs font-black text-gray-900 dark:text-white truncate" title="${c.title || ''}">${c.title || 'Khóa học chuyên sâu'}</div>
+                                                            <div class="mt-0.5 flex items-center gap-2">
+                                                                <span class="text-xs font-black text-rose-600 dark:text-rose-400">
+                                                                    ${c.price ? (Number(c.price).toLocaleString('vi-VN') + ' đ') : 'Miễn phí'}
+                                                                </span>
+                                                                ${c.originalPrice ? `<span class="text-[10px] text-gray-400 line-through">${Number(c.originalPrice).toLocaleString('vi-VN')} đ</span>` : ''}
+                                                            </div>
+                                                        </div>
+                                                        <div class="flex items-center gap-1.5 shrink-0">
+                                                            <button type="button" onclick="window.startCoursePurchaseFromLookup('${c.id}', '${cccdNum}')" class="py-2 px-3.5 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white font-black text-xs rounded-xl shadow-xs active:scale-98 transition-all flex items-center gap-1 cursor-pointer">
+                                                                <i class="fa-solid fa-cart-shopping text-[11px]"></i> Đăng ký
+                                                            </button>
+                                                            ${c.sampleExamId ? `
+                                                                <button type="button" onclick="window.openTrialExam('${c.sampleExamId}', '${c.id}')" class="py-2 px-2.5 bg-gray-100 hover:bg-gray-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-gray-600 dark:text-slate-300 font-bold text-xs rounded-xl transition-all cursor-pointer" title="Thi thử đề mẫu">
+                                                                    <i class="fa-solid fa-play text-[10px]"></i>
+                                                                </button>
+                                                            ` : ''}
+                                                        </div>
+                                                    </div>
+                                                `).join('')}
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                </div>
+
+                                <!-- Chú thích hỗ trợ học sinh & lớp học -->
+                                <div class="mt-4 pt-3 border-t border-amber-200/60 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-gray-500 dark:text-slate-400">
+                                    <div class="flex items-center gap-1.5">
+                                        <i class="fa-solid fa-circle-info text-amber-500 shrink-0"></i>
+                                        <span>Học sinh thuộc lớp học được giáo viên phân công sẽ được tự động mở khóa toàn bộ quyền tra cứu.</span>
+                                    </div>
+                                    ${!auth.currentUser ? `
+                                        <a href="javascript:void(0)" onclick="if(window.openAuthModal) window.openAuthModal(); else window.location.href='index.html';" class="font-bold text-amber-600 dark:text-amber-400 hover:underline shrink-0 flex items-center gap-1">
+                                            <i class="fa-solid fa-right-to-bracket"></i> Đăng nhập tài khoản
+                                        </a>
+                                    ` : ''}
+                                </div>
+                            </div>
+                        `;
+                    } else if (q.solution && q.solution.trim()) {
+                        let unlockedBadge = '';
+                        if (accessResult && accessResult.reason === 'qpoint_unlocked') {
+                            unlockedBadge = `
+                                <span class="ml-auto text-xs font-bold text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/50 px-2.5 py-1 rounded-lg border border-amber-300 dark:border-amber-700 flex items-center gap-1 shadow-2xs">
+                                    <i class="fa-solid fa-coins text-amber-500"></i> Đã mở khóa bằng QPoint
+                                </span>
+                            `;
+                        } else if (accessResult && accessResult.reason === 'purchased') {
+                            unlockedBadge = `
+                                <span class="ml-auto text-xs font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-900/50 px-2.5 py-1 rounded-lg border border-emerald-300 dark:border-emerald-700 flex items-center gap-1 shadow-2xs">
+                                    <i class="fa-solid fa-circle-check text-emerald-500"></i> Khóa học của bạn
+                                </span>
+                            `;
+                        }
+
                         solSec.innerHTML = `
                             <div class="p-4 md:p-5 bg-amber-50/60 dark:bg-slate-800/90 border border-amber-200 dark:border-amber-500/40 rounded-3xl shadow-sm">
                                 <div class="flex items-center gap-2 mb-3 text-amber-800 dark:text-amber-400 font-black text-sm uppercase tracking-wider">
@@ -5751,6 +6554,7 @@
                                         <i class="fa-solid fa-lightbulb"></i>
                                     </div>
                                     <span>Lời giải chi tiết</span>
+                                    ${unlockedBadge}
                                 </div>
                                 <div class="text-gray-800 dark:text-slate-100 text-sm md:text-base leading-relaxed math-content font-medium text-left break-words overflow-x-auto max-w-full">
                                     ${formatMathContent(q.solution)}
@@ -6497,6 +7301,85 @@
         });
     </script>
 
+    <!-- MODAL XÁC NHẬN MỞ KHÓA BẰNG QPOINT -->
+    <div id="qpointUnlockConfirmModal" class="hidden fixed inset-0 z-[150] flex items-center justify-center p-4">
+        <!-- Backdrop -->
+        <div class="absolute inset-0 bg-slate-900/60 dark:bg-black/80 backdrop-blur-sm transition-opacity" onclick="window.closeQpUnlockModal()"></div>
+        <!-- Modal Card -->
+        <div class="relative bg-white dark:bg-slate-900 rounded-3xl max-w-sm sm:max-w-md w-full p-5 sm:p-6 shadow-2xl border border-amber-200/80 dark:border-amber-700/50 scale-100 transition-all overflow-hidden text-left animate-scale-up">
+            <!-- Decorative Glow Background -->
+            <div class="absolute -top-14 -right-14 w-32 h-32 bg-amber-400/20 dark:bg-amber-500/10 rounded-full blur-2xl pointer-events-none"></div>
+            <div class="absolute -bottom-14 -left-14 w-32 h-32 bg-orange-400/20 dark:bg-orange-500/10 rounded-full blur-2xl pointer-events-none"></div>
+
+            <!-- Close button -->
+            <button type="button" onclick="window.closeQpUnlockModal()" class="absolute top-4 right-4 w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-gray-500 dark:text-gray-400 flex items-center justify-center text-sm cursor-pointer transition-colors">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+
+            <!-- Header with icon -->
+            <div class="flex items-center gap-3.5 mb-4">
+                <div class="w-12 h-12 rounded-2xl bg-gradient-to-tr from-amber-500 to-orange-500 text-white flex items-center justify-center text-xl shadow-md shadow-amber-500/25 shrink-0">
+                    <i class="fa-solid fa-coins animate-bounce text-white"></i>
+                </div>
+                <div>
+                    <h3 class="text-base sm:text-lg font-black text-gray-900 dark:text-white leading-tight">Mở khóa Câu hỏi</h3>
+                    <p class="text-xs text-gray-500 dark:text-slate-400 font-medium mt-0.5">Xem toàn bộ đáp án & giải chi tiết</p>
+                </div>
+            </div>
+
+            <!-- Info box -->
+            <div class="p-4 rounded-2xl bg-gradient-to-br from-amber-50/80 to-orange-50/50 dark:from-slate-800 dark:to-amber-950/20 border border-amber-200/70 dark:border-amber-700/40 mb-4 space-y-2.5">
+                <div class="flex items-center justify-between text-xs pb-2 border-b border-amber-200/60 dark:border-slate-700">
+                    <span class="text-gray-500 dark:text-slate-400 font-medium">Mã câu hỏi:</span>
+                    <span id="qpModalQuestionId" class="font-mono font-black text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/60 px-2.5 py-0.5 rounded-lg border border-indigo-200/60 dark:border-indigo-800/60">#...</span>
+                </div>
+                <div class="flex items-center justify-between text-xs">
+                    <span class="text-gray-600 dark:text-slate-300 font-medium">Phí tra cứu:</span>
+                    <span id="qpModalCost" class="font-black text-amber-600 dark:text-amber-400 text-sm">-5 QPoint</span>
+                </div>
+                <div class="flex items-center justify-between text-xs">
+                    <span class="text-gray-600 dark:text-slate-300 font-medium">Số dư hiện tại:</span>
+                    <span id="qpModalCurrentBal" class="font-bold text-gray-800 dark:text-slate-200">20 QPoint</span>
+                </div>
+                <div id="qpModalAfterBalRow" class="flex items-center justify-between text-xs pt-2 border-t border-amber-200/60 dark:border-slate-700">
+                    <span class="text-gray-700 dark:text-slate-300 font-bold">Số dư sau khi mở:</span>
+                    <span id="qpModalAfterBal" class="font-black text-emerald-600 dark:text-emerald-400 text-sm">15 QPoint</span>
+                </div>
+            </div>
+
+            <!-- Warning if insufficient -->
+            <div id="qpModalShortageNotice" class="hidden mb-4 p-3 rounded-xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-800/50 text-xs text-rose-700 dark:text-rose-300 flex items-center gap-2">
+                <i class="fa-solid fa-circle-exclamation text-rose-500 shrink-0"></i>
+                <span id="qpModalShortageMsg">Số dư QPoint hiện tại không đủ. Vui lòng nạp thêm để mở khóa!</span>
+            </div>
+
+            <!-- Guarantee Note -->
+            <div class="flex items-start gap-2 mb-5 p-2.5 rounded-xl bg-blue-50/70 dark:bg-blue-950/30 border border-blue-200/60 dark:border-blue-800/50 text-[11px] text-blue-800 dark:text-blue-300 leading-relaxed">
+                <i class="fa-solid fa-shield-halved text-blue-500 shrink-0 mt-0.5"></i>
+                <span>Câu hỏi được <b>mở khóa vĩnh viễn</b> trên tài khoản của bạn. Mở 1 lần, xem lại bất cứ lúc nào mà không bị trừ thêm điểm.</span>
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="grid grid-cols-2 gap-2.5" id="qpModalBtnGroup">
+                <button type="button" onclick="window.closeQpUnlockModal()" class="py-2.5 px-4 rounded-xl border border-gray-200 dark:border-slate-700 text-gray-700 dark:text-slate-300 font-bold text-xs hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors cursor-pointer">
+                    Để sau
+                </button>
+                <button type="button" id="btnConfirmQpUnlock" class="py-2.5 px-4 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-black text-xs shadow-md shadow-amber-500/25 active:scale-98 transition-all flex items-center justify-center gap-1.5 cursor-pointer">
+                    <i class="fa-solid fa-unlock-keyhole"></i> Xác nhận mở
+                </button>
+            </div>
+            <!-- Alternative button if balance is insufficient -->
+            <div class="grid grid-cols-2 gap-2.5 hidden" id="qpModalTopupBtnGroup">
+                <button type="button" onclick="window.closeQpUnlockModal()" class="py-2.5 px-4 rounded-xl border border-gray-200 dark:border-slate-700 text-gray-700 dark:text-slate-300 font-bold text-xs hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors cursor-pointer">
+                    Đóng
+                </button>
+                <button type="button" onclick="window.closeQpUnlockModal(); if(window.openQPointShopModal) window.openQPointShopModal();" class="py-2.5 px-4 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-black text-xs shadow-md shadow-amber-500/25 active:scale-98 transition-all flex items-center justify-center gap-1.5 cursor-pointer">
+                    <i class="fa-solid fa-coins"></i> Nạp thêm QPoint
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- MODAL TRA CỨU CÂU HỎI & LỜI GIẢI (DÀNH CHO HỌC SINH) -->
     <div id="studentQuestionLookupModal" class="fixed inset-0 z-[100] flex items-center justify-center opacity-0 pointer-events-none transition-opacity duration-300">
         <div class="absolute inset-0 bg-gray-900/60 backdrop-blur-sm" onclick="window.closeQuestionLookupModal()"></div>
@@ -6518,12 +7401,16 @@
             </div>
 
             <!-- Search Bar in Modal -->
-            <div class="p-4 bg-gray-50 dark:bg-slate-900 border-b border-gray-200 dark:border-slate-700 flex gap-2 shrink-0">
+            <div class="p-3.5 sm:p-4 bg-gray-50 dark:bg-slate-900 border-b border-gray-200 dark:border-slate-700 flex gap-2 shrink-0">
                 <div class="relative flex-1">
                     <input type="text" id="modalLookupInput" placeholder="Nhập mã ID câu hỏi (VD: 10000038) hoặc MapID..." class="w-full pl-9 pr-3 py-2.5 bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-600 text-gray-900 dark:text-white rounded-xl font-mono font-bold text-sm outline-none focus:ring-2 focus:ring-indigo-300 dark:focus:ring-indigo-500" onkeydown="if(event.key==='Enter') window.executeStudentLookup()">
                     <i class="fa-solid fa-magnifying-glass absolute left-3 top-3.5 text-gray-400 text-sm"></i>
                 </div>
-                <button id="btnExecuteLookup" onclick="window.executeStudentLookup()" class="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center gap-1.5 shrink-0">
+                <button type="button" onclick="window.openQrScannerModal()" class="px-3 py-2.5 bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-200 dark:bg-blue-950/40 dark:border-blue-800 dark:text-blue-300 font-bold text-xs rounded-xl shadow-xs transition-all flex items-center gap-1.5 shrink-0 cursor-pointer" title="Quét mã QR từ camera">
+                    <i class="fa-solid fa-qrcode text-sm"></i>
+                    <span class="hidden sm:inline">Quét QR</span>
+                </button>
+                <button id="btnExecuteLookup" onclick="window.executeStudentLookup()" class="px-4 sm:px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center gap-1.5 shrink-0 cursor-pointer">
                     <i class="fa-solid fa-search"></i> Tra cứu
                 </button>
             </div>
@@ -6629,6 +7516,86 @@
             </div>
         </div>
     </div>
+
+    <!-- MODAL QUÉT MÃ QR (DÀNH CHO HỌC SINH - MOBILE & DESKTOP) -->
+    <div id="qrScannerModal" class="fixed inset-0 z-[150] flex items-center justify-center opacity-0 pointer-events-none transition-opacity duration-300">
+        <div class="absolute inset-0 bg-gray-900/75 backdrop-blur-sm" onclick="window.closeQrScannerModal()"></div>
+        <div class="modal-content relative bg-white dark:bg-slate-800 w-[95%] max-w-md max-h-[92vh] rounded-3xl shadow-2xl scale-95 transition-transform duration-300 overflow-hidden flex flex-col border border-gray-100 dark:border-slate-700">
+            <!-- Header -->
+            <div class="bg-gradient-to-r from-blue-600 via-indigo-600 to-primary-600 p-4 text-white flex justify-between items-center shrink-0">
+                <div class="flex items-center gap-2.5">
+                    <div class="w-9 h-9 rounded-xl bg-white/20 backdrop-blur-sm flex items-center justify-center text-lg">
+                        <i class="fa-solid fa-qrcode"></i>
+                    </div>
+                    <div>
+                        <h3 class="font-black text-base md:text-lg leading-tight">Quét mã QR</h3>
+                        <p class="text-[11px] text-blue-100 font-medium">Vào đề thi hoặc tra cứu câu hỏi sách in</p>
+                    </div>
+                </div>
+                <button type="button" onclick="window.closeQrScannerModal()" class="w-8 h-8 flex items-center justify-center rounded-full bg-white/20 hover:bg-white/30 text-white transition-colors cursor-pointer">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <!-- Scanner Area -->
+            <div class="p-4 flex-1 flex flex-col items-center justify-center overflow-y-auto">
+                <!-- Video / Viewfinder container -->
+                <div class="relative w-full aspect-square max-w-[320px] bg-slate-950 rounded-2xl overflow-hidden shadow-inner flex items-center justify-center border-2 border-dashed border-indigo-400/50">
+                    <div id="qrReader" class="w-full h-full"></div>
+                    
+                    <!-- Scanner overlay frame -->
+                    <div id="qrScannerFrame" class="pointer-events-none absolute inset-6 border-2 border-emerald-400 rounded-2xl shadow-[0_0_15px_rgba(52,211,153,0.4)] flex flex-col justify-between p-2">
+                        <div class="flex justify-between">
+                            <span class="w-4 h-4 border-t-4 border-l-4 border-emerald-400 -mt-1 -ml-1 rounded-tl"></span>
+                            <span class="w-4 h-4 border-t-4 border-r-4 border-emerald-400 -mt-1 -mr-1 rounded-tr"></span>
+                        </div>
+                        <div class="w-full h-0.5 bg-gradient-to-r from-transparent via-emerald-400 to-transparent animate-pulse"></div>
+                        <div class="flex justify-between">
+                            <span class="w-4 h-4 border-b-4 border-l-4 border-emerald-400 -mb-1 -ml-1 rounded-bl"></span>
+                            <span class="w-4 h-4 border-b-4 border-r-4 border-emerald-400 -mb-1 -mr-1 rounded-br"></span>
+                        </div>
+                    </div>
+
+                    <!-- Placeholder / Camera permission notice -->
+                    <div id="qrCameraLoading" class="absolute inset-0 bg-slate-900 flex flex-col items-center justify-center text-white p-4 text-center">
+                        <div class="w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-3"></div>
+                        <p class="text-xs font-semibold text-slate-300">Đang bật máy ảnh...</p>
+                        <p class="text-[10px] text-slate-400 mt-1">Vui lòng cấp quyền truy cập máy ảnh</p>
+                    </div>
+                </div>
+
+                <!-- Camera Controls & Switch -->
+                <div class="flex items-center justify-between w-full max-w-[320px] mt-3 gap-2">
+                    <button type="button" id="btnToggleCamera" onclick="window.switchQrCamera()" class="flex-1 py-2 px-3 bg-gray-100 hover:bg-gray-200 dark:bg-slate-700 text-gray-700 dark:text-gray-200 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer">
+                        <i class="fa-solid fa-camera-rotate"></i> Đổi máy ảnh
+                    </button>
+                    <label class="flex-1 py-2 px-3 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer border border-indigo-200 dark:border-indigo-800">
+                        <i class="fa-solid fa-image"></i> Chọn ảnh QR
+                        <input type="file" id="qrFileInput" accept="image/*" class="hidden" onchange="window.scanQrFromImageFile(event)">
+                    </label>
+                </div>
+
+                <!-- Status / Last Scanned feedback -->
+                <div id="qrScanStatusMsg" class="mt-3 text-center text-xs text-slate-500 dark:text-slate-400 min-h-[1.5rem]">
+                    Hướng máy ảnh về phía mã QR để quét
+                </div>
+
+                <!-- Divider & Direct Input -->
+                <div class="w-full max-w-[320px] border-t border-gray-100 dark:border-slate-700 pt-3 mt-2">
+                    <div class="text-[11px] font-bold text-gray-500 dark:text-slate-400 mb-1.5 flex items-center justify-between">
+                        <span>Hoặc nhập mã trực tiếp:</span>
+                    </div>
+                    <div class="flex gap-1.5">
+                        <input type="text" id="manualQrInput" placeholder="VD: ex_123, 10000038..." class="flex-1 px-3 py-2 bg-gray-50 dark:bg-slate-900 border border-gray-200 dark:border-slate-700 rounded-xl text-xs font-mono font-bold text-gray-800 dark:text-white outline-none focus:ring-2 focus:ring-blue-400" onkeydown="if(event.key==='Enter') window.submitManualQrCode()">
+                        <button type="button" onclick="window.submitManualQrCode()" class="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition cursor-pointer">
+                            Đi đến
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div id="reattemptModal" class="hidden fixed inset-0 z-[200] bg-gray-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 transform scale-100 transition-all">
             <div class="text-center mb-6">
@@ -7043,6 +8010,261 @@ window.studentQuickLookupCccd = function() {
     } else {
         window.location.href = `practice.html?lookup=${encodeURIComponent(val)}`;
     }
+};
+
+// ============================================================================
+// QUÉT MÃ QR CODE (CAMERA SCANNER & IMAGE UPLOAD & CODE ROUTING)
+// ============================================================================
+let html5QrCodeScanner = null;
+let currentCameraFacingMode = "environment";
+
+window.openQrScannerModal = async function() {
+    const modal = document.getElementById('qrScannerModal');
+    if (!modal) return;
+    modal.classList.remove('opacity-0', 'pointer-events-none', 'hidden');
+    modal.style.opacity = '1';
+    modal.style.pointerEvents = 'auto';
+    modal.style.display = 'flex';
+    const content = modal.querySelector('.modal-content');
+    if (content) {
+        content.classList.remove('scale-95');
+        content.classList.add('scale-100');
+    }
+
+    const statusMsg = document.getElementById('qrScanStatusMsg');
+    const loadingEl = document.getElementById('qrCameraLoading');
+    if (loadingEl) loadingEl.classList.remove('hidden');
+    if (statusMsg) statusMsg.textContent = 'Đang khởi động máy ảnh...';
+
+    // Đảm bảo thư viện Html5Qrcode đã được nạp
+    if (typeof Html5Qrcode === 'undefined') {
+        try {
+            await new Promise((resolve, reject) => {
+                const s = document.createElement('script');
+                s.src = 'html5-qrcode.min.js';
+                s.onload = resolve;
+                s.onerror = () => {
+                    const fallbackScript = document.createElement('script');
+                    fallbackScript.src = 'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js';
+                    fallbackScript.onload = resolve;
+                    fallbackScript.onerror = reject;
+                    document.head.appendChild(fallbackScript);
+                };
+                document.head.appendChild(s);
+            });
+        } catch(e) {
+            console.warn("Could not load Html5Qrcode:", e);
+            if (loadingEl) loadingEl.classList.add('hidden');
+            if (statusMsg) statusMsg.innerHTML = '<span class="text-amber-500 font-bold">Chưa tải được bộ quét QR trực tiếp. Bạn hãy dùng nút "Chọn ảnh QR" hoặc nhập mã bên dưới nhé!</span>';
+            return;
+        }
+    }
+
+    // Kiểm tra hỗ trợ Camera (getUserMedia yêu cầu HTTPS hoặc localhost)
+    const hasMedia = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+    if (!hasMedia) {
+        if (loadingEl) loadingEl.classList.add('hidden');
+        if (statusMsg) {
+            statusMsg.innerHTML = '<span class="text-amber-600 dark:text-amber-400 font-bold text-[11px] leading-tight block"><i class="fa-solid fa-camera mr-1"></i>Trình duyệt chặn Camera khi chạy qua HTTP nội bộ. Vui lòng bấm <b>"Chọn ảnh QR"</b> (chụp ảnh trực tiếp hoặc chọn ảnh) hoặc <b>nhập mã</b> bên dưới nhé!</span>';
+        }
+        return;
+    }
+
+    startQrCamera();
+};
+
+async function startQrCamera() {
+    const loadingEl = document.getElementById('qrCameraLoading');
+    const statusMsg = document.getElementById('qrScanStatusMsg');
+    try {
+        if (!html5QrCodeScanner) {
+            html5QrCodeScanner = new Html5Qrcode("qrReader");
+        }
+        if (html5QrCodeScanner.isScanning) {
+            try { await html5QrCodeScanner.stop(); } catch(e) {}
+        }
+
+        const config = {
+            fps: 10,
+            qrbox: { width: 220, height: 220 },
+            aspectRatio: 1.0
+        };
+
+        await html5QrCodeScanner.start(
+            { facingMode: currentCameraFacingMode },
+            config,
+            (decodedText) => {
+                window.handleQrScanResult(decodedText);
+            },
+            () => {}
+        );
+
+        if (loadingEl) loadingEl.classList.add('hidden');
+        if (statusMsg) statusMsg.textContent = 'Đang quét... Hướng máy ảnh vào mã QR';
+    } catch (err) {
+        console.warn("QR Camera error:", err);
+        if (loadingEl) loadingEl.classList.add('hidden');
+        if (statusMsg) {
+            statusMsg.innerHTML = '<span class="text-amber-600 dark:text-amber-400 font-bold text-[11px] leading-tight block"><i class="fa-solid fa-triangle-exclamation mr-1"></i>Không thể mở camera trực tiếp (chưa cấp quyền hoặc trình duyệt giới hạn). Bạn hãy bấm <b>"Chọn ảnh QR"</b> hoặc <b>nhập mã</b> bên dưới.</span>';
+        }
+    }
+}
+
+window.switchQrCamera = async function() {
+    currentCameraFacingMode = (currentCameraFacingMode === "environment") ? "user" : "environment";
+    if (html5QrCodeScanner && html5QrCodeScanner.isScanning) {
+        const loadingEl = document.getElementById('qrCameraLoading');
+        if (loadingEl) loadingEl.classList.remove('hidden');
+        try {
+            await html5QrCodeScanner.stop();
+        } catch(e) {}
+        startQrCamera();
+    }
+};
+
+window.closeQrScannerModal = async function() {
+    const modal = document.getElementById('qrScannerModal');
+    if (!modal) return;
+    const content = modal.querySelector('.modal-content');
+    if (content) {
+        content.classList.add('scale-95');
+        content.classList.remove('scale-100');
+    }
+    modal.classList.add('opacity-0', 'pointer-events-none');
+    modal.style.opacity = '0';
+    modal.style.pointerEvents = 'none';
+
+    if (html5QrCodeScanner && html5QrCodeScanner.isScanning) {
+        try {
+            await html5QrCodeScanner.stop();
+        } catch(e) {}
+    }
+};
+
+window.scanQrFromImageFile = async function(event) {
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+    const statusMsg = document.getElementById('qrScanStatusMsg');
+    if (statusMsg) statusMsg.textContent = 'Đang phân tích mã QR từ ảnh...';
+
+    // Dừng camera nếu đang bật
+    if (html5QrCodeScanner && html5QrCodeScanner.isScanning) {
+        try { await html5QrCodeScanner.stop(); } catch(e) {}
+    }
+
+    if (typeof Html5Qrcode === 'undefined') {
+        alert("Vui lòng đợi giây lát thư viện đang nạp...");
+        return;
+    }
+
+    try {
+        if (!html5QrCodeScanner) {
+            html5QrCodeScanner = new Html5Qrcode("qrReader");
+        }
+        const decodedText = await html5QrCodeScanner.scanFile(file, true);
+        window.handleQrScanResult(decodedText);
+    } catch (err) {
+        console.warn("Scan file error:", err);
+        if (statusMsg) statusMsg.innerHTML = '<span class="text-red-500 font-bold"><i class="fa-solid fa-circle-xmark mr-1"></i>Không nhận diện được mã QR trong bức ảnh này! Vui lòng chọn ảnh chụp rõ nét hơn hoặc nhập mã trực tiếp.</span>';
+    } finally {
+        if (event.target) event.target.value = '';
+    }
+};
+
+window.submitManualQrCode = function() {
+    const inp = document.getElementById('manualQrInput');
+    const val = (inp ? inp.value : '').trim();
+    if (!val) {
+        alert('Vui lòng nhập mã hoặc liên kết!');
+        return;
+    }
+    window.handleQrScanResult(val);
+};
+
+window.handleQrScanResult = function(rawText) {
+    if (!rawText) return;
+    const text = String(rawText).trim();
+    
+    try {
+        if (navigator.vibrate) navigator.vibrate(100);
+    } catch(e) {}
+
+    window.closeQrScannerModal();
+
+    // 1. Phân tích nếu là URL
+    let parsedUrl = null;
+    try {
+        if (text.startsWith('http://') || text.startsWith('https://')) {
+            parsedUrl = new URL(text);
+        }
+    } catch(e) {}
+
+    if (parsedUrl) {
+        const path = parsedUrl.pathname.toLowerCase();
+        const search = parsedUrl.searchParams;
+
+        if (path.includes('exam.html')) {
+            window.location.href = parsedUrl.href;
+            return;
+        }
+        if (path.includes('homework-player.html')) {
+            window.location.href = parsedUrl.href;
+            return;
+        }
+        if (path.includes('course-player.html')) {
+            window.location.href = parsedUrl.href;
+            return;
+        }
+        if (search.get('lookup') || search.get('cccd')) {
+            const lookupCode = search.get('lookup') || search.get('cccd');
+            if (window.studentOpenLookupModal) {
+                window.studentOpenLookupModal(lookupCode);
+                return;
+            }
+        }
+        if (parsedUrl.origin === window.location.origin) {
+            window.location.href = parsedUrl.href;
+            return;
+        }
+        if (confirm(`Mã QR chứa liên kết ngoài:\n${text}\n\nBạn có muốn mở không?`)) {
+            window.open(text, '_blank');
+        }
+        return;
+    }
+
+    // 2. Nếu là chuỗi text / ID:
+    if (text.startsWith('ex_') || text.startsWith('exam_') || text.startsWith('de_')) {
+        window.location.href = `exam.html?id=${encodeURIComponent(text)}`;
+        return;
+    }
+
+    if (text.startsWith('course_')) {
+        window.location.href = `course-player.html?id=${encodeURIComponent(text)}`;
+        return;
+    }
+
+    // Mã câu hỏi hoặc CCCD sách
+    if (/^\d{6,12}$/.test(text) || /^\d+-\d+-\d+/.test(text) || text.startsWith('cccd_') || text.startsWith('q_')) {
+        if (window.studentOpenLookupModal) {
+            window.studentOpenLookupModal(text);
+            return;
+        } else {
+            window.location.href = `student.html?lookup=${encodeURIComponent(text)}`;
+            return;
+        }
+    }
+
+    // Mã ID linh hoạt (alphanumeric ID): hỏi hướng mở
+    if (/^[A-Za-z0-9_-]{6,40}$/.test(text)) {
+        if (confirm(`Quét được mã: "${text}"\n\n- Bấm OK để VÀO ĐỀ THI với mã này.\n- Bấm Cancel để TRA CỨU CÂU HỎI.`)) {
+            window.location.href = `exam.html?id=${encodeURIComponent(text)}`;
+        } else {
+            if (window.studentOpenLookupModal) window.studentOpenLookupModal(text);
+        }
+        return;
+    }
+
+    alert(`Nội dung mã QR quét được:\n${text}`);
 };
 </script>
 <script src="/sw-register.js?v=32"></script>
