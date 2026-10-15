@@ -905,7 +905,240 @@
         return oleBytes;
     }
 
-    function buildWmf(widthPt = 24, heightPt = 14) {
+    function cleanLatexForDisplay(latex) {
+        let clean = String(latex || '').trim();
+        if (clean.startsWith('$$') && clean.endsWith('$$')) clean = clean.substring(2, clean.length - 2).trim();
+        else if (clean.startsWith('$') && clean.endsWith('$')) clean = clean.substring(1, clean.length - 1).trim();
+        if (clean.startsWith('\\(') && clean.endsWith('\\)')) clean = clean.substring(2, clean.length - 2).trim();
+        if (clean.startsWith('\\[') && clean.endsWith('\\]')) clean = clean.substring(2, clean.length - 2).trim();
+
+        let t = clean;
+        // Xử lý phân số
+        t = t.replace(/\\dfrac\{([^{}]+)\}\{([^{}]+)\}/g, '($1)/($2)');
+        t = t.replace(/\\frac\{([^{}]+)\}\{([^{}]+)\}/g, '($1)/($2)');
+        // Căn thức
+        t = t.replace(/\\sqrt\[(\d+)\]\{([^{}]+)\}/g, '$1√($2)');
+        t = t.replace(/\\sqrt\{([^{}]+)\}/g, '√($1)');
+        // Vector và đường gạch
+        t = t.replace(/\\(vec|overrightarrow)\{([^{}]+)\}/g, 'vec($2)');
+        t = t.replace(/\\(overline|bar)\{([^{}]+)\}/g, '$2');
+        // Font wrappers
+        t = t.replace(/\\(mathbf|mathrm|mathit|text|textbf|textit)\{([^{}]+)\}/g, '$2');
+        // Dấu ngoặc
+        t = t.replace(/\\left\s*([(\[{|])/g, '$1');
+        t = t.replace(/\\right\s*([)\]}|])/g, '$1');
+        t = t.replace(/\\(left|right)\./g, '');
+        // Toán tử và ký hiệu phổ biến
+        t = t.replace(/\\cdot/g, '·');
+        t = t.replace(/\\times/g, '×');
+        t = t.replace(/\\pm/g, '±');
+        t = t.replace(/\\mp/g, '∓');
+        t = t.replace(/\\le(q)?/g, '≤');
+        t = t.replace(/\\ge(q)?/g, '≥');
+        t = t.replace(/\\neq/g, '≠');
+        t = t.replace(/\\approx/g, '≈');
+        t = t.replace(/\\equiv/g, '≡');
+        t = t.replace(/\\in/g, '∈');
+        t = t.replace(/\\notin/g, '∉');
+        t = t.replace(/\\subset/g, '⊂');
+        t = t.replace(/\\cup/g, '∪');
+        t = t.replace(/\\cap/g, '∩');
+        t = t.replace(/\\infty/g, '∞');
+        t = t.replace(/\\Delta/g, 'Δ');
+        t = t.replace(/\\pi/g, 'π');
+        t = t.replace(/\\alpha/g, 'α');
+        t = t.replace(/\\beta/g, 'β');
+        t = t.replace(/\\gamma/g, 'γ');
+        t = t.replace(/\\theta/g, 'θ');
+        t = t.replace(/\\omega/g, 'ω');
+        t = t.replace(/\\lambda/g, 'λ');
+        t = t.replace(/\\mu/g, 'μ');
+        t = t.replace(/\\sigma/g, 'σ');
+        t = t.replace(/\\phi/g, 'φ');
+        t = t.replace(/\\varphi/g, 'φ');
+        t = t.replace(/\\rightarrow/g, '→');
+        t = t.replace(/\\Rightarrow/g, '⇒');
+        t = t.replace(/\\leftrightarrow/g, '↔');
+        t = t.replace(/\\Leftrightarrow/g, '⇔');
+        t = t.replace(/\\(deg|circ)/g, '°');
+        t = t.replace(/\\quad/g, '  ');
+        t = t.replace(/\\,/g, ' ');
+        t = t.replace(/\\;/g, ' ');
+        t = t.replace(/\\!/g, '');
+        // Số mũ Unicode
+        t = t.replace(/\^2\b/g, '²').replace(/\^\{2\}/g, '²');
+        t = t.replace(/\^3\b/g, '³').replace(/\^\{3\}/g, '³');
+        t = t.replace(/\^0\b/g, '⁰').replace(/\^\{0\}/g, '⁰');
+        t = t.replace(/\^1\b/g, '¹').replace(/\^\{1\}/g, '¹');
+        t = t.replace(/\^\{([^}]+)\}/g, '^($1)');
+        t = t.replace(/_\{([^}]+)\}/g, '_($1)');
+        // Xóa backslash dư thừa
+        t = t.replace(/\\[a-zA-Z]+/g, ' ').replace(/\s+/g, ' ').trim();
+        return t || clean || 'formula';
+    }
+
+    function renderFormulaCanvas(latex, defaultWidthPt = 24, defaultHeightPt = 14) {
+        if (typeof document === 'undefined' || !document.createElement) {
+            return null;
+        }
+        try {
+            const dispText = cleanLatexForDisplay(latex);
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return null;
+
+            const scale = 2; // Độ sắc nét 2x cho màn hình Retina & in ấn Word
+            const fontSize = 13 * scale;
+            ctx.font = `italic ${fontSize}px "Times New Roman", "Cambria Math", serif`;
+            const m = ctx.measureText(dispText);
+            const textWidth = Math.ceil(m.width);
+            const padX = 4 * scale;
+            const padY = 2 * scale;
+            const widthPx = Math.max(16 * scale, textWidth + padX * 2);
+            const heightPx = Math.max(14 * scale, Math.ceil(fontSize * 1.25) + padY * 2);
+
+            canvas.width = widthPx;
+            canvas.height = heightPx;
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, widthPx, heightPx);
+            ctx.font = `italic ${fontSize}px "Times New Roman", "Cambria Math", serif`;
+            ctx.fillStyle = '#000000';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(dispText, padX, heightPx / 2);
+
+            const imgData = ctx.getImageData(0, 0, widthPx, heightPx).data;
+            const widthPt = Math.max(10.0, Math.round((widthPx / scale) * 100) / 100);
+            const heightPt = Math.max(13.0, Math.round((heightPx / scale) * 100) / 100);
+            return { imgData, widthPx, heightPx, widthPt, heightPt, dispText };
+        } catch (e) {
+            console.warn('[WMF] Render canvas thất bại, dùng fallback:', e);
+            return null;
+        }
+    }
+
+    function convertRgbaToDib(imgData, widthPx, heightPx) {
+        const rowBytes = (widthPx * 3 + 3) & ~3;
+        const pixelBytes = rowBytes * heightPx;
+        const totalSize = 40 + pixelBytes;
+        const dib = new Uint8Array(totalSize);
+        const dv = new DataView(dib.buffer);
+
+        // BITMAPINFOHEADER (40 bytes)
+        dv.setUint32(0, 40, true);
+        dv.setInt32(4, widthPx, true);
+        dv.setInt32(8, heightPx, true); // Dương = bottom-up DIB
+        dv.setUint16(12, 1, true); // Planes
+        dv.setUint16(14, 24, true); // 24-bit BGR
+        dv.setUint32(16, 0, true); // BI_RGB
+        dv.setUint32(20, pixelBytes, true);
+        dv.setInt32(24, 2835, true); // 72 DPI
+        dv.setInt32(28, 2835, true);
+        dv.setUint32(32, 0, true);
+        dv.setUint32(36, 0, true);
+
+        // Nạp pixel theo thứ tự bottom-up BGR
+        const outOffset = 40;
+        for (let y = heightPx - 1; y >= 0; y--) {
+            const rowStart = outOffset + (heightPx - 1 - y) * rowBytes;
+            for (let x = 0; x < widthPx; x++) {
+                const inIdx = (y * widthPx + x) * 4;
+                const r = imgData[inIdx];
+                const g = imgData[inIdx + 1];
+                const b = imgData[inIdx + 2];
+                const p = rowStart + x * 3;
+                dib[p] = b;
+                dib[p + 1] = g;
+                dib[p + 2] = r;
+            }
+        }
+        return dib;
+    }
+
+    function buildWmfFromDib(dibBytes, widthPx, heightPx, widthPt, heightPt) {
+        const unitsPerPt = 32;
+        const rWmf = Math.max(1, Math.min(32767, Math.round(widthPt * unitsPerPt)));
+        const bWmf = Math.max(1, Math.min(32767, Math.round(heightPt * unitsPerPt)));
+        const inch = unitsPerPt * 72;
+
+        const apmBuf = new Uint8Array(22);
+        const apmDv = new DataView(apmBuf.buffer);
+        apmDv.setUint32(0, 0x9AC6CDD7, true);
+        apmDv.setUint16(4, 0, true);
+        apmDv.setInt16(6, 0, true);
+        apmDv.setInt16(8, 0, true);
+        apmDv.setInt16(10, rWmf, true);
+        apmDv.setInt16(12, bWmf, true);
+        apmDv.setUint16(14, inch, true);
+        apmDv.setUint32(16, 0, true);
+        let csum = 0;
+        for (let o = 0; o < 20; o += 2) csum ^= apmDv.getUint16(o, true);
+        apmDv.setUint16(20, csum, true);
+
+        const paddedDibLen = dibBytes.length + (dibBytes.length % 2);
+        const rop = 0x00CC0020; // SRCCOPY
+        const bltPayloadLen = 20 + paddedDibLen;
+        const bltRecWords = 3 + Math.floor(bltPayloadLen / 2);
+
+        const totalWords = 9 + 4 + 5 + 5 + bltRecWords + 3;
+        const maxRecWords = Math.max(bltRecWords, 8);
+
+        const wmfHdr = new Uint8Array(18);
+        const wDv = new DataView(wmfHdr.buffer);
+        wDv.setUint16(0, 1, true);
+        wDv.setUint16(2, 9, true);
+        wDv.setUint16(4, 0x0300, true);
+        wDv.setUint32(6, totalWords, true);
+        wDv.setUint16(10, 0, true);
+        wDv.setUint32(12, maxRecWords, true);
+        wDv.setUint16(16, 0, true);
+
+        const recordsBuf = new Uint8Array((4 + 5 + 5 + bltRecWords + 3) * 2);
+        const rDv = new DataView(recordsBuf.buffer);
+        let p = 0;
+        // Rec 1: SETMAPMODE (0x0103, 8)
+        rDv.setUint32(p, 4, true); p += 4;
+        rDv.setUint16(p, 0x0103, true); p += 2;
+        rDv.setUint16(p, 8, true); p += 2;
+
+        // Rec 2: SETWINDOWORG (0x020B, 0, 0)
+        rDv.setUint32(p, 5, true); p += 4;
+        rDv.setUint16(p, 0x020B, true); p += 2;
+        rDv.setInt16(p, 0, true); p += 2;
+        rDv.setInt16(p, 0, true); p += 2;
+
+        // Rec 3: SETWINDOWEXT (0x020C, b, r)
+        rDv.setUint32(p, 5, true); p += 4;
+        rDv.setUint16(p, 0x020C, true); p += 2;
+        rDv.setInt16(p, bWmf, true); p += 2;
+        rDv.setInt16(p, rWmf, true); p += 2;
+
+        // Rec 4: DIBSTRETCHBLT (0x0B41)
+        rDv.setUint32(p, bltRecWords, true); p += 4;
+        rDv.setUint16(p, 0x0B41, true); p += 2;
+        rDv.setUint32(p, rop, true); p += 4;
+        rDv.setInt16(p, heightPx, true); p += 2;
+        rDv.setInt16(p, widthPx, true); p += 2;
+        rDv.setInt16(p, 0, true); p += 2;
+        rDv.setInt16(p, 0, true); p += 2;
+        rDv.setInt16(p, bWmf, true); p += 2;
+        rDv.setInt16(p, rWmf, true); p += 2;
+        rDv.setInt16(p, 0, true); p += 2;
+        rDv.setInt16(p, 0, true); p += 2;
+        recordsBuf.set(dibBytes, p);
+        p += paddedDibLen;
+
+        // Rec 5: EOF (0x0000)
+        rDv.setUint32(p, 3, true); p += 4;
+        rDv.setUint16(p, 0x0000, true); p += 2;
+
+        const out = new Uint8Array(22 + 18 + recordsBuf.length);
+        out.set(apmBuf, 0);
+        out.set(wmfHdr, 22);
+        out.set(recordsBuf, 40);
+        return out;
+    }
+
+    function buildWmfPlaceholder(widthPt = 24, heightPt = 14) {
         const padX = 1.0;
         const padY = 0.5;
         const wPt = Math.max(2.0, Math.round((widthPt + 2.0 * padX) * 100) / 100);
@@ -963,6 +1196,17 @@
         out.set(apmBuf, 0);
         out.set(wmfBody, 22);
         return out;
+    }
+
+    function buildWmf(widthPt = 24, heightPt = 14, latex = '') {
+        if (latex) {
+            const rendered = renderFormulaCanvas(latex, widthPt, heightPt);
+            if (rendered && rendered.imgData) {
+                const dib = convertRgbaToDib(rendered.imgData, rendered.widthPx, rendered.heightPx);
+                return buildWmfFromDib(dib, rendered.widthPx, rendered.heightPx, rendered.widthPt, rendered.heightPt);
+            }
+        }
+        return buildWmfPlaceholder(widthPt, heightPt);
     }
 
     function estimateFormulaDimensions(latex) {
@@ -1387,7 +1631,8 @@
         return res;
     }
 
-    function buildCandidateInfoXml() {
+    function buildCandidateInfoXml(examCode = '101') {
+        const cleanCode = String(examCode || '101').trim();
         return `
         <w:tbl>
             <w:tblPr>
@@ -1398,34 +1643,40 @@
                 </w:tblBorders>
             </w:tblPr>
             <w:tblGrid>
-                <w:gridCol w:w="9773"/>
-                <w:gridCol w:w="1000"/>
+                <w:gridCol w:w="8373"/>
+                <w:gridCol w:w="2400"/>
             </w:tblGrid>
             <w:tr>
                 <w:tc>
-                    <w:tcPr><w:tcW w:w="9773" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr>
+                    <w:tcPr><w:tcW w:w="8373" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr>
                     <w:p>
-                        <w:pPr><w:spacing w:before="80" w:after="160"/></w:pPr>
-                        <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:i/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr>
-                            <w:t>Họ và tên thí sinh: ......................................... Số báo danh: .................... Lớp: ..............</w:t>
+                        <w:pPr><w:spacing w:before="60" w:after="30"/></w:pPr>
+                        <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr>
+                            <w:t>Họ, tên thí sinh: .................................................................................................................</w:t>
+                        </w:r>
+                    </w:p>
+                    <w:p>
+                        <w:pPr><w:spacing w:before="30" w:after="100"/></w:pPr>
+                        <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr>
+                            <w:t>Số báo danh: .......................................................................................................................</w:t>
                         </w:r>
                     </w:p>
                 </w:tc>
                 <w:tc>
                     <w:tcPr>
-                        <w:tcW w:w="1000" w:type="dxa"/>
+                        <w:tcW w:w="2400" w:type="dxa"/>
                         <w:tcBorders>
-                            <w:top w:val="single" w:sz="6" w:color="000000"/>
-                            <w:left w:val="single" w:sz="6" w:color="000000"/>
-                            <w:bottom w:val="single" w:sz="6" w:color="000000"/>
-                            <w:right w:val="single" w:sz="6" w:color="000000"/>
+                            <w:top w:val="single" w:sz="8" w:space="0" w:color="000000"/>
+                            <w:left w:val="single" w:sz="8" w:space="0" w:color="000000"/>
+                            <w:bottom w:val="single" w:sz="8" w:space="0" w:color="000000"/>
+                            <w:right w:val="single" w:sz="8" w:space="0" w:color="000000"/>
                         </w:tcBorders>
                         <w:vAlign w:val="center"/>
                     </w:tcPr>
                     <w:p>
-                        <w:pPr><w:jc w:val="center"/><w:spacing w:before="40" w:after="40"/></w:pPr>
-                        <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:sz w:val="18"/><w:szCs w:val="18"/><w:color w:val="888888"/></w:rPr>
-                            <w:t>Phách</w:t>
+                        <w:pPr><w:jc w:val="center"/><w:spacing w:before="60" w:after="60"/></w:pPr>
+                        <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr>
+                            <w:t>Mã đề: ${escapeXml(cleanCode)}</w:t>
                         </w:r>
                     </w:p>
                 </w:tc>
@@ -1454,7 +1705,19 @@
             const oleBytes = buildOleObject(mtefBytes);
 
             const dims = estimateFormulaDimensions(latex);
-            const wmfBytes = buildWmf(dims.widthPt, dims.heightPt);
+            let wmfBytes;
+            let widthPt = dims.widthPt;
+            let heightPt = dims.heightPt;
+
+            const rendered = renderFormulaCanvas(latex, dims.widthPt, dims.heightPt);
+            if (rendered && rendered.imgData) {
+                const dib = convertRgbaToDib(rendered.imgData, rendered.widthPx, rendered.heightPx);
+                widthPt = rendered.widthPt;
+                heightPt = rendered.heightPt;
+                wmfBytes = buildWmfFromDib(dib, rendered.widthPx, rendered.heightPx, widthPt, heightPt);
+            } else {
+                wmfBytes = buildWmf(widthPt, heightPt, latex);
+            }
 
             let wmfRid;
             let wmfTarget;
@@ -1492,10 +1755,10 @@
                 shapeId,
                 objectId,
                 includeShapetype,
-                widthPt: dims.widthPt,
-                heightPt: dims.heightPt,
-                dxaOrig: dims.dxaOrig,
-                dyaOrig: dims.dyaOrig,
+                widthPt,
+                heightPt,
+                dxaOrig: Math.round(widthPt * 20),
+                dyaOrig: Math.round(heightPt * 20),
                 posHalfPts: dims.posHalfPts
             };
 
@@ -1541,50 +1804,50 @@
                     </w:tblBorders>
                 </w:tblPr>
                 <w:tblGrid>
-                    <w:gridCol w:w="4100"/>
-                    <w:gridCol w:w="6673"/>
+                    <w:gridCol w:w="4200"/>
+                    <w:gridCol w:w="6573"/>
                 </w:tblGrid>
                 <w:tr>
-                    <!-- CỘT 1 (BÊN TRÁI 4 DÒNG CHUẨN: 4100 dxa ~ 38%) -->
+                    <!-- CỘT 1 (BÊN TRÁI 4 DÒNG CHUẨN: 4200 dxa ~ 39%) -->
                     <w:tc>
-                        <w:tcPr><w:tcW w:w="4100" w:type="dxa"/></w:tcPr>
+                        <w:tcPr><w:tcW w:w="4200" w:type="dxa"/></w:tcPr>
                         <w:p>
-                            <w:pPr><w:jc w:val="center"/><w:spacing w:after="30"/></w:pPr>
-                            <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr><w:t>${escapeXml(agencyName.toUpperCase())}</w:t></w:r>
+                            <w:pPr><w:jc w:val="center"/><w:spacing w:after="20"/></w:pPr>
+                            <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr><w:t>${escapeXml(agencyName.toUpperCase())}</w:t></w:r>
                         </w:p>
                         <w:p>
-                            <w:pPr><w:jc w:val="center"/><w:spacing w:after="30"/></w:pPr>
+                            <w:pPr><w:jc w:val="center"/><w:pBdr><w:bottom w:val="single" w:sz="6" w:space="1" w:color="000000"/></w:pBdr><w:spacing w:after="40"/></w:pPr>
                             <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr><w:t>${escapeXml(schoolName.toUpperCase())}</w:t></w:r>
                         </w:p>
                         <w:p>
-                            <w:pPr><w:jc w:val="center"/><w:spacing w:after="30"/></w:pPr>
+                            <w:pPr><w:jc w:val="center"/><w:spacing w:before="40" w:after="20"/></w:pPr>
                             <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr><w:t>${escapeXml(examType.toUpperCase())}</w:t></w:r>
                         </w:p>
                         <w:p>
-                            <w:pPr><w:jc w:val="center"/><w:spacing w:after="60"/></w:pPr>
+                            <w:pPr><w:jc w:val="center"/><w:spacing w:after="40"/></w:pPr>
                             <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:i/><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr><w:t>(Đề thi có ${questions.length} câu hỏi)</w:t></w:r>
                         </w:p>
                     </w:tc>
-                    <!-- CỘT 2 (BÊN PHẢI 3 DÒNG CHUẨN: 6673 dxa ~ 62%) -->
+                    <!-- CỘT 2 (BÊN PHẢI 3 DÒNG CHUẨN: 6573 dxa ~ 61%) -->
                     <w:tc>
-                        <w:tcPr><w:tcW w:w="6673" w:type="dxa"/></w:tcPr>
+                        <w:tcPr><w:tcW w:w="6573" w:type="dxa"/></w:tcPr>
                         <w:p>
-                            <w:pPr><w:jc w:val="center"/><w:spacing w:after="30"/></w:pPr>
+                            <w:pPr><w:jc w:val="center"/><w:spacing w:after="20"/></w:pPr>
                             <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr><w:t>${escapeXml(title.toUpperCase())}</w:t></w:r>
                         </w:p>
                         <w:p>
-                            <w:pPr><w:jc w:val="center"/><w:spacing w:after="30"/></w:pPr>
-                            <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr><w:t>MÔN: ${escapeXml(subject.toUpperCase())} ${grade ? '- KHỐI ' + escapeXml(grade) : ''}</w:t></w:r>
+                            <w:pPr><w:jc w:val="center"/><w:spacing w:after="20"/></w:pPr>
+                            <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr><w:t>MÔN THI: ${escapeXml(subject.toUpperCase())}${grade ? ' - KHỐI ' + escapeXml(grade) : ''}</w:t></w:r>
                         </w:p>
                         <w:p>
-                            <w:pPr><w:jc w:val="center"/><w:spacing w:after="60"/></w:pPr>
-                            <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:i/><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr><w:t>Thời gian làm bài: ${duration} phút (Mã đề: ${escapeXml(examCode)})</w:t></w:r>
+                            <w:pPr><w:jc w:val="center"/><w:spacing w:after="40"/></w:pPr>
+                            <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:i/><w:u w:val="single"/><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr><w:t>Thời gian làm bài: ${duration} phút, không kể thời gian phát đề</w:t></w:r>
                         </w:p>
                     </w:tc>
                 </w:tr>
             </w:tbl>`;
             if (includeCandidateInfo) {
-                bodyXml += buildCandidateInfoXml();
+                bodyXml += buildCandidateInfoXml(examCode);
             }
         } else if (headerStyle === 'brand_center') {
             bodyXml += `
@@ -1601,7 +1864,7 @@
                 <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:i/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr><w:t>Môn: ${escapeXml(subject)} | Khối ${escapeXml(grade)} | Thời gian làm bài: ${duration} phút | Mã đề: ${escapeXml(examCode)}</w:t></w:r>
             </w:p>`;
             if (includeCandidateInfo) {
-                bodyXml += buildCandidateInfoXml();
+                bodyXml += buildCandidateInfoXml(examCode);
             }
         } else if (headerStyle === 'compact') {
             bodyXml += `
@@ -1614,7 +1877,7 @@
                 <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:i/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr><w:t>Môn: ${escapeXml(subject)} - Thời gian: ${duration} phút - Mã đề: ${escapeXml(examCode)}</w:t></w:r>
             </w:p>`;
             if (includeCandidateInfo) {
-                bodyXml += buildCandidateInfoXml();
+                bodyXml += buildCandidateInfoXml(examCode);
             }
         }
 
@@ -2537,7 +2800,7 @@
                             <div class="sm:col-span-2 flex items-center justify-between pt-1">
                                 <label class="flex items-center gap-2 cursor-pointer">
                                     <input type="checkbox" id="exportWordCandidateInfo" checked class="rounded text-blue-600 focus:ring-blue-500">
-                                    <span class="text-xs text-gray-700 dark:text-gray-300 font-medium">Khung thông tin học sinh (Họ tên, SBD, Lớp) & Ô phách</span>
+                                    <span class="text-xs text-gray-700 dark:text-gray-300 font-medium">Khung thông tin thí sinh (Họ tên, SBD) &amp; Mã đề thi</span>
                                 </label>
                             </div>
                         </div>
