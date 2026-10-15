@@ -905,161 +905,559 @@
         return oleBytes;
     }
 
-    function cleanLatexForDisplay(latex) {
-        let clean = String(latex || '').trim();
-        if (clean.startsWith('$$') && clean.endsWith('$$')) clean = clean.substring(2, clean.length - 2).trim();
-        else if (clean.startsWith('$') && clean.endsWith('$')) clean = clean.substring(1, clean.length - 1).trim();
-        if (clean.startsWith('\\(') && clean.endsWith('\\)')) clean = clean.substring(2, clean.length - 2).trim();
-        if (clean.startsWith('\\[') && clean.endsWith('\\]')) clean = clean.substring(2, clean.length - 2).trim();
+    // ==========================================
+    // 3. BỘ BỐ CỤC TOÁN HỌC & CANVAS RENDERER CHUẨN TeX2MathType_Pro
+    // ==========================================
+    const BASE_PT = 12.0;
 
-        let t = clean;
-        // Dấu phẩy thập phân kiểu Việt Nam
-        t = t.replace(/\{,\}/g, ',');
-        // Xử lý phân số — hiển thị dạng phân số ngang
-        t = t.replace(/\\dfrac\{([^{}]+)\}\{([^{}]+)\}/g, '($1)/($2)');
-        t = t.replace(/\\frac\{([^{}]+)\}\{([^{}]+)\}/g, '($1)/($2)');
-        // Căn thức
-        t = t.replace(/\\sqrt\[(\d+)\]\{([^{}]+)\}/g, '$1√($2)');
-        t = t.replace(/\\sqrt\{([^{}]+)\}/g, '√($1)');
-        // Vector và đường gạch
-        t = t.replace(/\\(vec|overrightarrow)\{([^{}]+)\}/g, '$2\u20D7');
-        t = t.replace(/\\(overline|bar)\{([^{}]+)\}/g, '$2\u0305');
-        t = t.replace(/\\(widehat|hat)\{([^{}]+)\}/g, '$2\u0302');
-        t = t.replace(/\\(widetilde|tilde)\{([^{}]+)\}/g, '$2\u0303');
-        // Font wrappers
-        t = t.replace(/\\(mathbf|mathrm|mathit|text|textbf|textit|textrm|mbox)\{([^{}]+)\}/g, '$2');
-        // Dấu ngoặc
-        t = t.replace(/\\left\s*([([\{|])/g, '$1');
-        t = t.replace(/\\right\s*([)\]}|])/g, '$1');
-        t = t.replace(/\\(left|right)\./g, '');
-        // Toán tử và ký hiệu phổ biến
-        t = t.replace(/\\cdot/g, '·');
-        t = t.replace(/\\times/g, '×');
-        t = t.replace(/\\div\b/g, '÷');
-        t = t.replace(/\\pm/g, '±');
-        t = t.replace(/\\mp/g, '∓');
-        t = t.replace(/\\le(q(slant)?)?/g, '≤');
-        t = t.replace(/\\ge(q(slant)?)?/g, '≥');
-        t = t.replace(/\\ne(q)?/g, '≠');
-        t = t.replace(/\\approx/g, '≈');
-        t = t.replace(/\\equiv/g, '≡');
-        t = t.replace(/\\sim\b/g, '~');
-        t = t.replace(/\\cong/g, '≅');
-        t = t.replace(/\\perp/g, '⊥');
-        t = t.replace(/\\parallel/g, '∥');
-        t = t.replace(/\\in\b/g, '∈');
-        t = t.replace(/\\notin/g, '∉');
-        t = t.replace(/\\subset(eq)?/g, (m, eq) => eq ? '⊆' : '⊂');
-        t = t.replace(/\\supset(eq)?/g, (m, eq) => eq ? '⊇' : '⊃');
-        t = t.replace(/\\cup/g, '∪');
-        t = t.replace(/\\cap/g, '∩');
-        t = t.replace(/\\setminus/g, '∖');
-        t = t.replace(/\\emptyset/g, '∅');
-        t = t.replace(/\\varnothing/g, '∅');
-        t = t.replace(/\\infty/g, '∞');
-        t = t.replace(/\\forall/g, '∀');
-        t = t.replace(/\\exists/g, '∃');
-        t = t.replace(/\\partial/g, '∂');
-        t = t.replace(/\\nabla/g, '∇');
-        t = t.replace(/\\angle/g, '∠');
-        t = t.replace(/\\triangle/g, '△');
-        t = t.replace(/\\(l?dots|cdots)/g, '…');
-        // Tích phân, tổng, tích
-        t = t.replace(/\\int\b/g, '∫');
-        t = t.replace(/\\sum\b/g, '∑');
-        t = t.replace(/\\prod\b/g, '∏');
-        // Mũi tên
-        t = t.replace(/\\Rightarrow/g, '⇒');
-        t = t.replace(/\\Leftarrow/g, '⇐');
-        t = t.replace(/\\Leftrightarrow/g, '⇔');
-        t = t.replace(/\\rightarrow/g, '→');
-        t = t.replace(/\\leftarrow/g, '←');
-        t = t.replace(/\\to\b/g, '→');
-        // Hy Lạp
-        t = t.replace(/\\Alpha/g, 'Α'); t = t.replace(/\\alpha/g, 'α');
-        t = t.replace(/\\Beta/g, 'Β');  t = t.replace(/\\beta/g, 'β');
-        t = t.replace(/\\Gamma/g, 'Γ'); t = t.replace(/\\gamma/g, 'γ');
-        t = t.replace(/\\Delta/g, 'Δ'); t = t.replace(/\\delta/g, 'δ');
-        t = t.replace(/\\varepsilon/g, 'ε'); t = t.replace(/\\epsilon/g, 'ε');
-        t = t.replace(/\\Theta/g, 'Θ'); t = t.replace(/\\vartheta/g, 'ϑ'); t = t.replace(/\\theta/g, 'θ');
-        t = t.replace(/\\Lambda/g, 'Λ'); t = t.replace(/\\lambda/g, 'λ');
-        t = t.replace(/\\Xi/g, 'Ξ');    t = t.replace(/\\xi/g, 'ξ');
-        t = t.replace(/\\Pi/g, 'Π');    t = t.replace(/\\pi/g, 'π');
-        t = t.replace(/\\Sigma/g, 'Σ'); t = t.replace(/\\sigma/g, 'σ');
-        t = t.replace(/\\Upsilon/g, 'Υ'); t = t.replace(/\\upsilon/g, 'υ');
-        t = t.replace(/\\Phi/g, 'Φ'); t = t.replace(/\\varphi/g, 'φ'); t = t.replace(/\\phi/g, 'ϕ');
-        t = t.replace(/\\Psi/g, 'Ψ');   t = t.replace(/\\psi/g, 'ψ');
-        t = t.replace(/\\Omega/g, 'Ω'); t = t.replace(/\\omega/g, 'ω');
-        t = t.replace(/\\mu/g, 'μ'); t = t.replace(/\\nu/g, 'ν');
-        t = t.replace(/\\zeta/g, 'ζ'); t = t.replace(/\\eta/g, 'η');
-        t = t.replace(/\\iota/g, 'ι'); t = t.replace(/\\kappa/g, 'κ');
-        t = t.replace(/\\rho/g, 'ρ'); t = t.replace(/\\tau/g, 'τ');
-        t = t.replace(/\\chi/g, 'χ');
-        t = t.replace(/\\(deg|circ)/g, '°');
-        t = t.replace(/\\quad/g, '  ');
-        t = t.replace(/\\,/g, ' ');
-        t = t.replace(/\\;/g, ' ');
-        t = t.replace(/\\!/g, '');
-        // Tên hàm
-        t = t.replace(/\\(sin|cos|tan|cot|sec|csc|arcsin|arccos|arctan|ln|log|lg|exp|lim|min|max|gcd|det)\b/g, '$1');
-        // Số mũ Unicode
-        const supMap = {'0':'⁰','1':'¹','2':'²','3':'³','4':'⁴','5':'⁵','6':'⁶','7':'⁷','8':'⁸','9':'⁹',
-            '+':'⁺','-':'⁻','=':'⁼','(':'⁽',')':'⁾','n':'ⁿ','i':'ⁱ'};
-        const subMap = {'0':'₀','1':'₁','2':'₂','3':'₃','4':'₄','5':'₅','6':'₆','7':'₇','8':'₈','9':'₉',
-            '+':'₊','-':'₋','=':'₌','(':'₍',')':'₎'};
-        // Chuyển ^{...} thành Unicode superscript nếu có thể
-        t = t.replace(/\^\{([^}]+)\}/g, (m, content) => {
-            const mapped = content.split('').map(c => supMap[c] || c).join('');
-            return (mapped === content) ? '^(' + content + ')' : mapped;
-        });
-        t = t.replace(/\^([0-9])/g, (m, d) => supMap[d] || d);
-        // Chuyển _{...} thành Unicode subscript nếu có thể
-        t = t.replace(/_\{([^}]+)\}/g, (m, content) => {
-            const mapped = content.split('').map(c => subMap[c] || c).join('');
-            return (mapped === content) ? '_(' + content + ')' : mapped;
-        });
-        t = t.replace(/_([0-9])/g, (m, d) => subMap[d] || d);
-        // Xóa backslash dư thừa
-        t = t.replace(/\\[a-zA-Z]+/g, ' ').replace(/[{}]/g, '').replace(/\s+/g, ' ').trim();
-        return t || clean || 'formula';
+    function getCharMetrics(ch, isItalic, scale) {
+        const pt = BASE_PT * scale;
+        if (ch >= '0' && ch <= '9') {
+            return { w: 6.0 * scale, asc: 0.68 * pt, desc: 0.0, ch, font: `${Math.round(pt)}px "Times New Roman", serif` };
+        }
+        if (ch === '.' || ch === ',') {
+            return { w: 3.5 * scale, asc: 0.35 * pt, desc: (ch === ',' ? 2.2 * scale : 0.0), ch, font: `${Math.round(pt)}px "Times New Roman", serif` };
+        }
+        if (ch === ';' || ch === ':') {
+            return { w: 4.0 * scale, asc: 0.68 * pt, desc: (ch === ';' ? 2.2 * scale : 0.0), ch, font: `${Math.round(pt)}px "Times New Roman", serif` };
+        }
+        if ('()[]'.includes(ch)) {
+            return { w: 4.5 * scale, asc: 0.75 * pt, desc: 2.0 * scale, ch, font: `${Math.round(pt)}px "Times New Roman", serif` };
+        }
+        if (ch === 'm' || ch === 'w' || ch === 'M' || ch === 'W') {
+            return { w: (isItalic ? 8.8 : 9.5) * scale, asc: 0.68 * pt, desc: 0.0, ch, font: `${isItalic ? 'italic ' : ''}${Math.round(pt)}px "Times New Roman", serif` };
+        }
+        if (ch === 'i' || ch === 'l' || ch === 'j' || ch === 't' || ch === 'f') {
+            const desc = ('j'.includes(ch) ? 2.4 * scale : 0.0);
+            return { w: 3.6 * scale, asc: 0.72 * pt, desc, ch, font: `${isItalic ? 'italic ' : ''}${Math.round(pt)}px "Times New Roman", serif` };
+        }
+        if (ch >= 'A' && ch <= 'Z') {
+            return { w: 8.0 * scale, asc: 0.72 * pt, desc: 0.0, ch, font: `${isItalic ? 'italic ' : ''}${Math.round(pt)}px "Times New Roman", serif` };
+        }
+        const desc = ('gjpqy'.includes(ch) ? 2.4 * scale : 0.0);
+        return { w: 5.8 * scale, asc: 0.68 * pt, desc, ch, font: `${isItalic ? 'italic ' : ''}${Math.round(pt)}px "Times New Roman", serif` };
     }
 
-    function renderFormulaCanvas(latex, defaultWidthPt = 24, defaultHeightPt = 14) {
-        if (typeof document === 'undefined' || !document || !document.createElement) {
-            return null;
+    function layoutNodes(nodes, scale = 1.0, inScript = false) {
+        const flatNodes = [];
+        for (const nd of nodes) {
+            if (nd.type === 'group' && nd.body.length === 1) flatNodes.push(nd.body[0]);
+            else flatNodes.push(nd);
         }
-        try {
-            const dispText = cleanLatexForDisplay(latex);
-            const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
-            if (!ctx) return null;
 
-            const scale = 2; // Độ sắc nét 2x cho màn hình Retina & in ấn Word
-            const fontSize = 13 * scale;
-            ctx.font = `italic ${fontSize}px "Times New Roman", "Cambria Math", serif`;
-            const m = ctx.measureText(dispText);
-            const textWidth = Math.ceil(m.width);
-            const padX = 4 * scale;
-            const padY = 2 * scale;
-            const widthPx = Math.max(16 * scale, textWidth + padX * 2);
-            const heightPx = Math.max(14 * scale, Math.ceil(fontSize * 1.25) + padY * 2);
+        const boxes = [];
+        const n = flatNodes.length;
 
-            canvas.width = widthPx;
-            canvas.height = heightPx;
-            ctx.fillStyle = '#ffffff';
-            ctx.fillRect(0, 0, widthPx, heightPx);
-            ctx.font = `italic ${fontSize}px "Times New Roman", "Cambria Math", serif`;
-            ctx.fillStyle = '#000000';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(dispText, padX, heightPx / 2);
+        for (let idx = 0; idx < n; idx++) {
+            const nd = flatNodes[idx];
+            const ntype = nd.type;
 
-            const imgData = ctx.getImageData(0, 0, widthPx, heightPx).data;
-            const widthPt = Math.max(10.0, Math.round((widthPx / scale) * 100) / 100);
-            const heightPt = Math.max(13.0, Math.round((heightPx / scale) * 100) / 100);
-            return { imgData, widthPx, heightPx, widthPt, heightPt, dispText };
-        } catch (e) {
-            console.warn('[WMF] Render canvas thất bại, dùng fallback:', e);
-            return null;
+            if (ntype === 'sym') {
+                const sname = nd.name;
+                const symEntry = SYMBOL_MAP[sname];
+                const symChar = symEntry ? symEntry[0] : sname;
+                const isBin = symEntry ? symEntry[3] : true;
+                const prevType = idx > 0 ? flatNodes[idx - 1].type : null;
+                const prevIsOpen = prevType === null ||
+                    (prevType === 'sym' && SYMBOL_MAP[flatNodes[idx - 1].name] && SYMBOL_MAP[flatNodes[idx - 1].name][3]) ||
+                    (prevType === 'char' && '([,;:='.includes(flatNodes[idx - 1].ch));
+                const useSpace = isBin && !inScript && !( (sname === '+' || sname === '-') && prevIsOpen );
+
+                if (useSpace && idx > 0) {
+                    boxes.push({ width: 3.6 * scale, ascent: 6.0 * scale, descent: 0.0, kind: 'space' });
+                }
+                boxes.push({
+                    width: 8.0 * scale,
+                    ascent: 6.8 * scale,
+                    descent: 0.8 * scale,
+                    kind: 'sym',
+                    char: symChar,
+                    scale
+                });
+                if (useSpace && idx + 1 < n) {
+                    boxes.push({ width: 3.6 * scale, ascent: 6.0 * scale, descent: 0.0, kind: 'space' });
+                }
+                continue;
+            }
+
+            if (ntype === 'space') {
+                boxes.push({ width: 2.4 * scale, ascent: 6.0 * scale, descent: 0.0, kind: 'space' });
+                continue;
+            }
+
+            if (ntype === 'prime') {
+                boxes.push({ width: 3.5 * scale, ascent: 8.5 * scale, descent: 0.0, kind: 'prime', scale });
+                continue;
+            }
+
+            if (ntype === 'char') {
+                const ch = nd.ch;
+                const isItalic = /[a-zA-Z]/.test(ch) && ch.length === 1;
+                const m = getCharMetrics(ch, isItalic, scale);
+                boxes.push({
+                    width: m.w,
+                    ascent: m.asc,
+                    descent: m.desc,
+                    kind: 'char',
+                    ch,
+                    isItalic,
+                    scale
+                });
+                if (ch === ';' && !inScript && idx + 1 < n) {
+                    boxes.push({ width: 3.6 * scale, ascent: 6.0 * scale, descent: 0.0, kind: 'space' });
+                }
+                continue;
+            }
+
+            if (ntype === 'text') {
+                let totalW = 0;
+                for (let c = 0; c < nd.text.length; c++) {
+                    const m = getCharMetrics(nd.text[c], false, scale);
+                    totalW += m.w;
+                }
+                boxes.push({
+                    width: Math.max(3.0 * scale, totalW),
+                    ascent: 8.16 * scale,
+                    descent: 1.0 * scale,
+                    kind: 'text',
+                    text: nd.text,
+                    scale
+                });
+                continue;
+            }
+
+            if (ntype === 'func') {
+                let totalW = 0;
+                for (let c = 0; c < nd.name.length; c++) {
+                    const m = getCharMetrics(nd.name[c], false, scale);
+                    totalW += m.w;
+                }
+                boxes.push({
+                    width: totalW,
+                    ascent: 8.16 * scale,
+                    descent: 0.0,
+                    kind: 'func',
+                    name: nd.name,
+                    scale
+                });
+                if (idx + 1 < n) {
+                    boxes.push({ width: 3.6 * scale, ascent: 6.0 * scale, descent: 0.0, kind: 'space' });
+                }
+                continue;
+            }
+
+            if (ntype === 'lcgreek' || ntype === 'ucgreek') {
+                const sym = (ntype === 'lcgreek' ? (LC_GREEK[nd.name] ? String.fromCharCode(LC_GREEK[nd.name][0]) : nd.name) : (UC_GREEK[nd.name] ? String.fromCharCode(UC_GREEK[nd.name][0]) : nd.name));
+                boxes.push({
+                    width: 7.5 * scale,
+                    ascent: 8.16 * scale,
+                    descent: (ntype === 'lcgreek' && 'βγημρφχψ'.includes(sym) ? 2.4 * scale : 0.0),
+                    kind: 'greek',
+                    char: sym,
+                    scale
+                });
+                continue;
+            }
+
+            if (ntype === 'group') {
+                boxes.push(layoutNodes(nd.body, scale, inScript));
+                continue;
+            }
+
+            if (ntype === 'frac') {
+                const num = layoutNodes(nd.num, scale, true);
+                const den = layoutNodes(nd.den, scale, true);
+                const axis = 3.2 * scale;
+                const barT = 0.55 * scale;
+                const padX = 1.6 * scale;
+                const gap = 2.6 * scale;
+                const w = Math.max(num.width, den.width) + 2.0 * padX;
+                const numY = axis + gap + num.descent;
+                const denY = axis - gap - den.ascent;
+                const asc = numY + num.ascent;
+                const desc = Math.max(0.0, -(denY - den.descent));
+                boxes.push({
+                    width: w,
+                    ascent: asc,
+                    descent: desc,
+                    kind: 'frac',
+                    num, den, axis, barT, w, numY, denY, scale
+                });
+                continue;
+            }
+
+            if (ntype === 'sqrt') {
+                const rad = layoutNodes(nd.rad, scale, true);
+                const deg = nd.deg ? layoutNodes(nd.deg, scale * 0.62, true) : null;
+                const barT = 0.52 * scale;
+                const gapTop = 1.2 * scale;
+                const topY = rad.ascent + gapTop + barT;
+                const botY = -rad.descent - 0.3 * scale;
+                const h = topY - botY;
+                const hookW = 5.6 * scale;
+                let leftPad = 0.4 * scale;
+                if (deg) leftPad = Math.max(leftPad, deg.width - 2.2 * scale);
+                const radX = leftPad + hookW;
+                const totalW = radX + rad.width + 1.0 * scale;
+                const yMid = botY + h * 0.42;
+                const degY = botY + h * 0.55;
+                boxes.push({
+                    width: totalW,
+                    ascent: topY,
+                    descent: Math.max(0.5 * scale, -botY),
+                    kind: 'sqrt',
+                    rad, deg, hookW, leftPad, radX, topY, botY, barT, yMid, degY, scale
+                });
+                continue;
+            }
+
+            if (ntype === 'script') {
+                const subScale = scale * 0.64;
+                const sub = nd.sub ? layoutNodes(nd.sub, subScale, true) : null;
+                const sup = nd.sup ? layoutNodes(nd.sup, subScale, true) : null;
+                const prevAscent = boxes.length > 0 ? boxes[boxes.length - 1].ascent : 7.5 * scale;
+                const prevDescent = boxes.length > 0 ? boxes[boxes.length - 1].descent : 0.0;
+                let w = 0.4 * scale;
+                let asc = prevAscent;
+                let desc = prevDescent;
+                let supY = 0, subY = 0;
+                if (sup) {
+                    supY = Math.max(4.4 * scale, prevAscent - 2.6 * scale);
+                    w = Math.max(w, sup.width + 0.5 * scale);
+                    asc = Math.max(asc, supY + sup.ascent);
+                }
+                if (sub) {
+                    subY = -Math.max(2.3 * scale, prevDescent + 1.0 * scale);
+                    w = Math.max(w, sub.width + 0.5 * scale);
+                    desc = Math.max(desc, -(subY - sub.descent));
+                }
+                boxes.push({
+                    width: w,
+                    ascent: asc,
+                    descent: desc,
+                    kind: 'script',
+                    sub, sup, supY, subY, scale
+                });
+                continue;
+            }
+
+            if (ntype === 'fence') {
+                const inner = layoutNodes(nd.body, scale, inScript);
+                const axis = 3.2 * scale;
+                const halfH = Math.max(inner.ascent - axis, axis + inner.descent, 4.5 * scale) + 0.8 * scale;
+                const topY = axis + halfH;
+                const botY = axis - halfH;
+                const fw = 3.4 * scale;
+                const hasL = nd.left !== '.' && nd.left !== '';
+                const hasR = nd.right !== '.' && nd.right !== '';
+                let totalW = inner.width;
+                if (hasL) totalW += fw + 0.6 * scale;
+                if (hasR) totalW += fw + 0.6 * scale;
+                boxes.push({
+                    width: totalW,
+                    ascent: topY,
+                    descent: Math.max(0.5 * scale, -botY),
+                    kind: 'fence',
+                    left: nd.left, right: nd.right, inner, fw, topY, botY, hasL, hasR, scale
+                });
+                continue;
+            }
+
+            if (ntype === 'hat' || ntype === 'vec' || ntype === 'obar' || ntype === 'arc') {
+                const body = layoutNodes(nd.body, scale, inScript);
+                boxes.push({
+                    width: body.width,
+                    ascent: body.ascent + 2.0 * scale,
+                    descent: body.descent,
+                    kind: 'accent',
+                    accentType: ntype,
+                    body,
+                    scale
+                });
+                continue;
+            }
+
+            if (ntype === 'system') {
+                let maxW = 0;
+                let totalH = 0;
+                const rowBoxes = [];
+                for (const rAst of nd.rows) {
+                    const rb = layoutNodes(rAst, scale, false);
+                    rowBoxes.push(rb);
+                    maxW = Math.max(maxW, rb.width);
+                    totalH += rb.ascent + rb.descent + 3.0 * scale;
+                }
+                const braceW = 5.0 * scale;
+                boxes.push({
+                    width: maxW + braceW,
+                    ascent: totalH * 0.55 + 2.0 * scale,
+                    descent: totalH * 0.45,
+                    kind: 'system',
+                    kindType: nd.kind,
+                    rowBoxes, braceW, scale
+                });
+                continue;
+            }
+        }
+
+        let cursorX = 0;
+        let asc = 8.0 * scale;
+        let desc = 0.0;
+        const positionedBoxes = [];
+        for (const b of boxes) {
+            asc = Math.max(asc, b.ascent);
+            desc = Math.max(desc, b.descent);
+            positionedBoxes.push({ box: b, x: cursorX });
+            cursorX += b.width;
+        }
+
+        return {
+            width: Math.max(2.0 * scale, cursorX),
+            ascent: asc,
+            descent: desc,
+            children: positionedBoxes,
+            kind: 'concat'
+        };
+    }
+
+    function drawNode(box, ctx, x, y, ptScale) {
+        if (!box) return;
+        switch (box.kind) {
+            case 'concat': {
+                if (box.children) {
+                    for (const child of box.children) {
+                        drawNode(child.box, ctx, x + child.x, y, ptScale);
+                    }
+                }
+                break;
+            }
+            case 'char': {
+                const fontSize = Math.round(BASE_PT * box.scale * ptScale);
+                const fontStyle = box.isItalic ? 'italic ' : '';
+                ctx.font = `${fontStyle}${fontSize}px "Times New Roman", serif`;
+                ctx.fillStyle = '#000000';
+                ctx.textBaseline = 'alphabetic';
+                ctx.fillText(box.ch, x * ptScale, y * ptScale);
+                break;
+            }
+            case 'text': {
+                const fontSize = Math.round(BASE_PT * box.scale * ptScale);
+                ctx.font = `normal ${fontSize}px "Times New Roman", serif`;
+                ctx.fillStyle = '#000000';
+                ctx.textBaseline = 'alphabetic';
+                ctx.fillText(box.text, x * ptScale, y * ptScale);
+                break;
+            }
+            case 'func': {
+                const fontSize = Math.round(BASE_PT * box.scale * ptScale);
+                ctx.font = `normal ${fontSize}px "Times New Roman", serif`;
+                ctx.fillStyle = '#000000';
+                ctx.textBaseline = 'alphabetic';
+                ctx.fillText(box.name, x * ptScale, y * ptScale);
+                break;
+            }
+            case 'greek': {
+                const fontSize = Math.round(BASE_PT * box.scale * ptScale);
+                ctx.font = `italic ${fontSize}px "Times New Roman", "Cambria Math", serif`;
+                ctx.fillStyle = '#000000';
+                ctx.textBaseline = 'alphabetic';
+                ctx.fillText(box.char, x * ptScale, y * ptScale);
+                break;
+            }
+            case 'sym': {
+                const fontSize = Math.round(BASE_PT * box.scale * ptScale);
+                ctx.font = `normal ${fontSize}px "Cambria Math", "Symbol", "Times New Roman", serif`;
+                ctx.fillStyle = '#000000';
+                ctx.textBaseline = 'alphabetic';
+                ctx.fillText(box.char, x * ptScale, y * ptScale);
+                break;
+            }
+            case 'prime': {
+                const fontSize = Math.round(BASE_PT * 0.8 * box.scale * ptScale);
+                ctx.font = `italic ${fontSize}px "Times New Roman", serif`;
+                ctx.fillStyle = '#000000';
+                ctx.textBaseline = 'alphabetic';
+                ctx.fillText("′", x * ptScale, (y - 3.5 * box.scale) * ptScale);
+                break;
+            }
+            case 'frac': {
+                const numX = x + (box.width - box.num.width) / 2;
+                drawNode(box.num, ctx, numX, y - box.numY, ptScale);
+
+                const barY = (y - box.axis) * ptScale;
+                const barH = Math.max(1, Math.round(box.barT * ptScale));
+                ctx.fillStyle = '#000000';
+                ctx.fillRect(
+                    Math.round((x + 0.3 * box.scale) * ptScale),
+                    Math.round(barY - barH / 2),
+                    Math.round((box.width - 0.6 * box.scale) * ptScale),
+                    barH
+                );
+
+                const denX = x + (box.width - box.den.width) / 2;
+                drawNode(box.den, ctx, denX, y - box.denY, ptScale);
+                break;
+            }
+            case 'sqrt': {
+                drawNode(box.rad, ctx, x + box.radX, y, ptScale);
+
+                const x0 = (x + box.leftPad) * ptScale;
+                const yMidPx = (y - box.yMid) * ptScale;
+                const xV = (x + box.leftPad + box.hookW * 0.42) * ptScale;
+                const yBotPx = (y - box.botY) * ptScale;
+                const xTop = (x + box.radX) * ptScale;
+                const yTopPx = (y - box.topY) * ptScale;
+                const xEnd = (x + box.width) * ptScale;
+                const barH = Math.max(1, Math.round(box.barT * ptScale));
+
+                ctx.strokeStyle = '#000000';
+                ctx.lineWidth = barH;
+                ctx.beginPath();
+                ctx.moveTo(x0, yMidPx);
+                ctx.lineTo(xV, yBotPx);
+                ctx.lineTo(xTop, yTopPx);
+                ctx.lineTo(xEnd, yTopPx);
+                ctx.stroke();
+
+                if (box.deg) {
+                    drawNode(box.deg, ctx, x + box.leftPad, y - box.degY, ptScale);
+                }
+                break;
+            }
+            case 'script': {
+                if (box.sup) {
+                    drawNode(box.sup, ctx, x + 0.3 * box.scale, y - box.supY, ptScale);
+                }
+                if (box.sub) {
+                    drawNode(box.sub, ctx, x + 0.3 * box.scale, y - box.subY, ptScale);
+                }
+                break;
+            }
+            case 'fence': {
+                const fw = box.fw;
+                let curX = x;
+                if (box.hasL) {
+                    drawDelim(box.left, ctx, curX, y, box.topY, box.botY, fw, ptScale);
+                    curX += fw + 0.6 * box.scale;
+                }
+                drawNode(box.inner, ctx, curX, y, ptScale);
+                if (box.hasR) {
+                    curX += box.inner.width + 0.6 * box.scale;
+                    drawDelim(box.right, ctx, curX, y, box.topY, box.botY, fw, ptScale);
+                }
+                break;
+            }
+            case 'accent': {
+                drawNode(box.body, ctx, x, y, ptScale);
+                const w = box.body.width;
+                const yTopPx = (y - box.body.ascent) * ptScale;
+                if (box.accentType === 'vec') {
+                    ctx.strokeStyle = '#000000';
+                    ctx.lineWidth = Math.max(1, 0.65 * ptScale);
+                    ctx.beginPath();
+                    ctx.moveTo((x + 0.2) * ptScale, yTopPx - 1.2 * box.scale * ptScale);
+                    ctx.lineTo((x + w) * ptScale, yTopPx - 1.2 * box.scale * ptScale);
+                    ctx.lineTo((x + w - 1.8 * box.scale) * ptScale, yTopPx - 2.2 * box.scale * ptScale);
+                    ctx.stroke();
+                } else if (box.accentType === 'obar') {
+                    ctx.fillStyle = '#000000';
+                    ctx.fillRect((x + 0.2) * ptScale, yTopPx - 1.5 * box.scale * ptScale, (w - 0.4) * ptScale, Math.max(1, 0.65 * ptScale));
+                } else if (box.accentType === 'hat') {
+                    ctx.strokeStyle = '#000000';
+                    ctx.lineWidth = Math.max(1, 0.65 * ptScale);
+                    ctx.beginPath();
+                    ctx.moveTo((x + 0.5) * ptScale, yTopPx - 0.8 * box.scale * ptScale);
+                    ctx.lineTo((x + w / 2) * ptScale, yTopPx - 2.5 * box.scale * ptScale);
+                    ctx.lineTo((x + w - 0.5) * ptScale, yTopPx - 0.8 * box.scale * ptScale);
+                    ctx.stroke();
+                } else if (box.accentType === 'arc') {
+                    ctx.strokeStyle = '#000000';
+                    ctx.lineWidth = Math.max(1, 0.65 * ptScale);
+                    ctx.beginPath();
+                    ctx.moveTo((x + 0.5) * ptScale, yTopPx - 0.8 * box.scale * ptScale);
+                    ctx.quadraticCurveTo((x + w / 2) * ptScale, yTopPx - 2.8 * box.scale * ptScale, (x + w - 0.5) * ptScale, yTopPx - 0.8 * box.scale * ptScale);
+                    ctx.stroke();
+                }
+                break;
+            }
+            case 'system': {
+                const topY = box.ascent;
+                const botY = -box.descent;
+                drawDelim(box.kindType === 'heva' ? '{' : '[', ctx, x, y, topY, botY, box.braceW, ptScale);
+                let curRowTop = topY;
+                for (const rb of box.rowBoxes) {
+                    const rowBaseY = curRowTop - rb.ascent;
+                    drawNode(rb, ctx, x + box.braceW + 1.0 * box.scale, y - rowBaseY, ptScale);
+                    curRowTop -= rb.ascent + rb.descent + 3.2 * box.scale;
+                }
+                break;
+            }
+        }
+    }
+
+    function drawDelim(delim, ctx, x, y, topY, botY, fw, ptScale) {
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = Math.max(1, 0.75 * ptScale);
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+
+        const yTopPx = (y - topY) * ptScale;
+        const yBotPx = (y - botY) * ptScale;
+        const yMidPx = (yTopPx + yBotPx) / 2;
+
+        if (delim.includes('(')) {
+            ctx.beginPath();
+            ctx.moveTo((x + fw * 0.8) * ptScale, yTopPx);
+            ctx.bezierCurveTo(
+                (x + fw * 0.05) * ptScale, yTopPx * 0.7 + yMidPx * 0.3,
+                (x + fw * 0.05) * ptScale, yBotPx * 0.7 + yMidPx * 0.3,
+                (x + fw * 0.8) * ptScale, yBotPx
+            );
+            ctx.stroke();
+        } else if (delim.includes(')')) {
+            ctx.beginPath();
+            ctx.moveTo((x + fw * 0.2) * ptScale, yTopPx);
+            ctx.bezierCurveTo(
+                (x + fw * 0.95) * ptScale, yTopPx * 0.7 + yMidPx * 0.3,
+                (x + fw * 0.95) * ptScale, yBotPx * 0.7 + yMidPx * 0.3,
+                (x + fw * 0.2) * ptScale, yBotPx
+            );
+            ctx.stroke();
+        } else if (delim.includes('[')) {
+            ctx.beginPath();
+            ctx.moveTo((x + fw * 0.8) * ptScale, yTopPx);
+            ctx.lineTo((x + fw * 0.2) * ptScale, yTopPx);
+            ctx.lineTo((x + fw * 0.2) * ptScale, yBotPx);
+            ctx.lineTo((x + fw * 0.8) * ptScale, yBotPx);
+            ctx.stroke();
+        } else if (delim.includes(']')) {
+            ctx.beginPath();
+            ctx.moveTo((x + fw * 0.2) * ptScale, yTopPx);
+            ctx.lineTo((x + fw * 0.8) * ptScale, yTopPx);
+            ctx.lineTo((x + fw * 0.8) * ptScale, yBotPx);
+            ctx.lineTo((x + fw * 0.2) * ptScale, yBotPx);
+            ctx.stroke();
+        } else if (delim.includes('|')) {
+            ctx.beginPath();
+            ctx.moveTo((x + fw * 0.5) * ptScale, yTopPx);
+            ctx.lineTo((x + fw * 0.5) * ptScale, yBotPx);
+            ctx.stroke();
+        } else if (delim.includes('{')) {
+            ctx.beginPath();
+            ctx.moveTo((x + fw * 0.8) * ptScale, yTopPx);
+            ctx.quadraticCurveTo((x + fw * 0.35) * ptScale, yTopPx, (x + fw * 0.35) * ptScale, yMidPx - 3 * ptScale);
+            ctx.quadraticCurveTo((x + fw * 0.35) * ptScale, yMidPx, (x + fw * 0.05) * ptScale, yMidPx);
+            ctx.quadraticCurveTo((x + fw * 0.35) * ptScale, yMidPx, (x + fw * 0.35) * ptScale, yMidPx + 3 * ptScale);
+            ctx.quadraticCurveTo((x + fw * 0.35) * ptScale, yBotPx, (x + fw * 0.8) * ptScale, yBotPx);
+            ctx.stroke();
+        } else if (delim.includes('}')) {
+            ctx.beginPath();
+            ctx.moveTo((x + fw * 0.2) * ptScale, yTopPx);
+            ctx.quadraticCurveTo((x + fw * 0.65) * ptScale, yTopPx, (x + fw * 0.65) * ptScale, yMidPx - 3 * ptScale);
+            ctx.quadraticCurveTo((x + fw * 0.65) * ptScale, yMidPx, (x + fw * 0.95) * ptScale, yMidPx);
+            ctx.quadraticCurveTo((x + fw * 0.65) * ptScale, yMidPx, (x + fw * 0.65) * ptScale, yMidPx + 3 * ptScale);
+            ctx.quadraticCurveTo((x + fw * 0.65) * ptScale, yBotPx, (x + fw * 0.2) * ptScale, yBotPx);
+            ctx.stroke();
         }
     }
 
@@ -1245,140 +1643,111 @@
         return out;
     }
 
+    function convertEquationToMathType(latex) {
+        let norm = String(latex || '').trim();
+        if (norm.startsWith('$$') && norm.endsWith('$$')) norm = norm.substring(2, norm.length - 2).trim();
+        else if (norm.startsWith('$') && norm.endsWith('$')) norm = norm.substring(1, norm.length - 1).trim();
+        if (norm.startsWith('\\(') && norm.endsWith('\\)')) norm = norm.substring(2, norm.length - 2).trim();
+        if (norm.startsWith('\\[') && norm.endsWith('\\]')) norm = norm.substring(2, norm.length - 2).trim();
+
+        if (norm.endsWith('\\\\')) norm = norm.substring(0, norm.length - 2).trim();
+        if (norm.startsWith('\\True')) norm = norm.substring(5).trim();
+        norm = norm.replace(/\{,\}/g, ',');
+
+        if (GLOBAL_MTEF_COMPILER.eqCache && GLOBAL_MTEF_COMPILER.eqCache.has(norm)) {
+            return GLOBAL_MTEF_COMPILER.eqCache.get(norm);
+        }
+
+        const tokens = GLOBAL_MTEF_COMPILER.tokenize(norm);
+        const { nodes } = GLOBAL_MTEF_COMPILER.parseExpr(tokens, 0, new Set());
+        const bodyBytes = GLOBAL_MTEF_COMPILER.compileNodes(nodes, false);
+
+        const mtefBytes = concatUint8Arrays([
+            MTEF_HEADER_BYTES,
+            new Uint8Array([0x0a, 0x01, 0x00]),
+            bodyBytes,
+            new Uint8Array([0x00, 0x00])
+        ]);
+
+        const oleBytes = buildOleObject(mtefBytes);
+
+        // Bố cục AST chuẩn TeX2MathType_Pro
+        const box = layoutNodes(nodes, 1.0, false);
+        const ptScale = 3; // 216 DPI sắc nét
+        const rawW = Math.max(2.0, box.width + 2.0);
+        const rawH = Math.max(4.0, box.ascent + box.descent + 1.0);
+
+        const widthPx = Math.max(16, Math.ceil(rawW * ptScale));
+        const heightPx = Math.max(14, Math.ceil(rawH * ptScale));
+
+        const widthPt = widthPx / ptScale;
+        const heightPt = heightPx / ptScale;
+
+        const padX = Math.max(1.0, (widthPt - box.width) / 2);
+        const padY = Math.max(0.5, (heightPt - (box.ascent + box.descent)) / 2);
+
+        const baselineY = box.ascent + padY;
+        const descentFromBottom = heightPt - baselineY;
+        const posHalfPts = -Math.max(1, Math.round(descentFromBottom * 2.0));
+        const dxaOrig = Math.round(widthPt * 20);
+        const dyaOrig = Math.round(heightPt * 20);
+
+        let wmfBytes = null;
+        if (typeof document !== 'undefined' && document && document.createElement) {
+            try {
+                const canvas = document.createElement('canvas');
+                canvas.width = widthPx;
+                canvas.height = heightPx;
+                const ctx = canvas.getContext('2d');
+                if (ctx) {
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillRect(0, 0, widthPx, heightPx);
+                    ctx.fillStyle = '#000000';
+                    ctx.strokeStyle = '#000000';
+                    drawNode(box, ctx, padX, baselineY, ptScale);
+                    const imgData = ctx.getImageData(0, 0, widthPx, heightPx).data;
+                    const dib = convertRgbaToDib(imgData, widthPx, heightPx);
+                    wmfBytes = buildWmfFromDib(dib, widthPx, heightPx, widthPt, heightPt);
+                }
+            } catch (err) {
+                console.warn('[MathType Exporter] Canvas rendering error:', err);
+            }
+        }
+        if (!wmfBytes) {
+            wmfBytes = buildWmfPlaceholder(widthPt, heightPt);
+        }
+
+        const res = {
+            mtefBytes,
+            oleBytes,
+            wmfBytes,
+            widthPt,
+            heightPt,
+            posHalfPts,
+            dxaOrig,
+            dyaOrig
+        };
+
+        if (!GLOBAL_MTEF_COMPILER.eqCache) GLOBAL_MTEF_COMPILER.eqCache = new Map();
+        GLOBAL_MTEF_COMPILER.eqCache.set(norm, res);
+        return res;
+    }
+
     function buildWmf(widthPt = 24, heightPt = 14, latex = '') {
         if (latex) {
-            const rendered = renderFormulaCanvas(latex, widthPt, heightPt);
-            if (rendered && rendered.imgData) {
-                const dib = convertRgbaToDib(rendered.imgData, rendered.widthPx, rendered.heightPx);
-                return buildWmfFromDib(dib, rendered.widthPx, rendered.heightPx, rendered.widthPt, rendered.heightPt);
-            }
+            return convertEquationToMathType(latex).wmfBytes;
         }
         return buildWmfPlaceholder(widthPt, heightPt);
     }
 
     function estimateFormulaDimensions(latex) {
-        let clean = String(latex || '').trim();
-        if (clean.startsWith('$$') && clean.endsWith('$$')) clean = clean.substring(2, clean.length - 2).trim();
-        else if (clean.startsWith('$') && clean.endsWith('$')) clean = clean.substring(1, clean.length - 1).trim();
-        else if (clean.startsWith('\\(') && clean.endsWith('\\)')) clean = clean.substring(2, clean.length - 2).trim();
-        else if (clean.startsWith('\\[') && clean.endsWith('\\]')) clean = clean.substring(2, clean.length - 2).trim();
-        clean = clean.replace(/\{,\}/g, ',');
-
-        // Phân tích cấu trúc công thức (matching Python latex_to_mathtype.py)
-        const hasFrac = /\\(?:d?frac|tfrac|cfrac)\b/.test(clean);
-        const hasSqrt = /\\sqrt\b/.test(clean);
-        const hasSum = /\\sum\b/.test(clean);
-        const hasInt = /\\int\b/.test(clean);
-        const hasSub = /_[\{\\a-zA-Z0-9]/.test(clean);
-        const hasSup = /\^[\{\\a-zA-Z0-9']/.test(clean);
-        const hasSystem = /\\(?:heva|hoac)\b/.test(clean) || /\\begin\{cases\}/.test(clean);
-        const hasPile = /\\begin\{(?:p?matrix|bmatrix|vmatrix|array)\}/.test(clean);
-        const hasAccent = /\\(?:overline|bar|widehat|hat|vec|overrightarrow|widetilde|tilde)\b/.test(clean);
-        const hasArc = /\\(?:wideparen|overparen|arc|widearc|overarc)\b/.test(clean);
-
-        // Đếm chiều sâu lồng nhau của phân số (nested fractions)
-        let fracDepth = 0;
-        if (hasFrac) {
-            let tmpClean = clean;
-            while (/\\(?:d?frac|tfrac|cfrac)\b/.test(tmpClean)) {
-                fracDepth++;
-                tmpClean = tmpClean.replace(/\\(?:d?frac|tfrac|cfrac)\b/, '');
-            }
-        }
-
-        // Đếm hàng trong hệ phương trình / ma trận
-        let systemRows = 1;
-        if (hasSystem || hasPile) {
-            const rowSeps = (clean.match(/\\\\/g) || []).length;
-            systemRows = Math.max(1, rowSeps + 1);
-        }
-
-        // === TÍNH TOÁN KÍCH THƯỚC CHÍNH XÁC THEO PYTHON TeX2MathType_Pro ===
-        // (dựa trên basePt = 12.0 và các hằng số layout của Python)
-        const basePt = 12.0;
-        const baseAsc = 0.68 * basePt;   // 8.16pt - ascent cơ bản của 1 ký tự
-        const baseDesc = 0.0;             // descent cơ bản
-
-        let ascent = baseAsc;
-        let descent = baseDesc;
-
-        if (hasSystem || hasPile) {
-            // Python _layout_pile: mỗi hàng có ascent ~8.16 + gap giữa các hàng
-            const rowH = basePt * 1.2;
-            const totalH = systemRows * rowH;
-            ascent = totalH * 0.55 + 2.0;
-            descent = totalH * 0.45;
-        } else if (hasFrac) {
-            // Python _layout_frac: axis=3.2, gap=2.6, pad_x=1.6
-            const axis = 3.2;
-            const gap = 2.6;
-            const innerAsc = baseAsc;  // ~8.16
-            const innerDesc = 0.0;
-
-            if (fracDepth >= 2) {
-                // Phân số lồng: numerator hoặc denominator cũng có frac
-                ascent = axis + gap + innerDesc + innerAsc + 6.0;
-                descent = Math.max(0, -(axis - gap - innerAsc)) + 5.0;
-            } else {
-                // Python: ascent = axis + gap + num.descent + num.ascent
-                ascent = axis + gap + innerDesc + innerAsc;  // = 3.2 + 2.6 + 0 + 8.16 = 13.96
-                // Python: descent = max(0, -(den_y - den.descent)) where den_y = axis - gap - den.ascent
-                descent = Math.max(0, -(axis - gap - innerAsc));  // = max(0, 7.56) = 7.56
-            }
-        } else if (hasSqrt) {
-            // Python _layout_sqrt: gap_top=1.2, bar_t=0.52
-            const gapTop = 1.2;
-            const barT = 0.52;
-            ascent = baseAsc + gapTop + barT + 1.5;
-            descent = 0.3;
-        } else if (hasAccent || hasArc) {
-            // Python _layout_accent: y_base = body.ascent + 0.8
-            ascent = baseAsc + 0.8 + 2.0;
-            descent = 0.0;
-        }
-
-        // Điều chỉnh cho chỉ số trên/dưới (matching Python _layout_script)
-        if (hasSub && !hasFrac && !hasSystem && !hasPile) {
-            // Python: sub_y = -max(2.3, descent + 1.0)
-            // descent = max(0, -(sub_y - sub.descent)) = max(0, 2.3)
-            descent = Math.max(descent, 2.3);
-        }
-        if (hasSup && !hasFrac && !hasSystem && !hasPile) {
-            // Python: sup_y = max(4.4, prev_ascent - 2.6)
-            // ascent = max(ascent, sup_y + sup.ascent)
-            const supY = Math.max(4.4, ascent - 2.6);
-            const supAsc = baseAsc * 0.64;  // subscale = 0.64
-            ascent = Math.max(ascent, supY + supAsc);
-        }
-
-        // Sum/integral có giới hạn trên dưới
-        if (hasSum || hasInt) {
-            ascent = Math.max(ascent, 13.0);
-            descent = Math.max(descent, 3.5);
-        }
-
-        // === TÍNH KÍCH THƯỚC CUỐI CÙNG (matching Python convert method) ===
-        const padX = 1.0;
-        const padY = 0.5;
-
-        // Width: ước lượng từ độ dài raw characters
-        let rawLen = clean.replace(/\\[a-zA-Z]+/g, 'X').replace(/[{}\s]/g, '').replace(/[_^]/g, '').length;
-        let widthPt = Math.max(2.0, rawLen * 6.0 + 2.0 * padX);
-        if (hasFrac) widthPt = Math.max(widthPt, rawLen * 5.0 + 2.0 * padX + 3.2);
-        widthPt = Math.max(12, Math.min(280, widthPt));
-
-        let heightPt = Math.max(4.0, ascent + descent + 2.0 * padY);
-
-        // posHalfPts: Python formula: -max(1, round((descent + padY) * 2.0))
-        const descentFromBottom = descent + padY;
-        let posHalfPts = -Math.max(1, Math.round(descentFromBottom * 2.0));
-
+        const eq = convertEquationToMathType(latex);
         return {
-            widthPt,
-            heightPt,
-            posHalfPts,
-            dxaOrig: Math.round(widthPt * 20),
-            dyaOrig: Math.round(heightPt * 20)
+            widthPt: eq.widthPt,
+            heightPt: eq.heightPt,
+            posHalfPts: eq.posHalfPts,
+            dxaOrig: eq.dxaOrig,
+            dyaOrig: eq.dyaOrig
         };
     }
 
@@ -1839,40 +2208,16 @@
         }
 
         register(latex) {
-            const mtefBytes = GLOBAL_MTEF_COMPILER.convert(latex);
+            const eq = convertEquationToMathType(latex);
+            const mtefBytes = eq.mtefBytes;
             const mtefHex = Array.from(mtefBytes).map(b => b.toString(16).padStart(2, '0')).join('');
-            const oleBytes = buildOleObject(mtefBytes);
-
-            const dims = estimateFormulaDimensions(latex);
-            let wmfBytes;
-            let widthPt = dims.widthPt;
-            let heightPt = dims.heightPt;
-            let posHalfPts = dims.posHalfPts;
-
-            const rendered = renderFormulaCanvas(latex, dims.widthPt, dims.heightPt);
-            if (rendered && rendered.imgData) {
-                const dib = convertRgbaToDib(rendered.imgData, rendered.widthPx, rendered.heightPx);
-                widthPt = rendered.widthPt;
-                heightPt = rendered.heightPt;
-                wmfBytes = buildWmfFromDib(dib, rendered.widthPx, rendered.heightPx, widthPt, heightPt);
-                // Recalculate posHalfPts based on actual rendered height
-                // Python formula: posHalfPts = -max(1, round((descent + padY) * 2.0))
-                // descent_ratio = descent / (ascent + descent) from original estimate
-                const totalEstH = dims.heightPt;
-                const padY = 0.5;
-                const estDescent = (dims.posHalfPts === 0) ? 0 : Math.abs(dims.posHalfPts) / 2.0 - padY;
-                const estTotal = totalEstH - 2 * padY; // ascent + descent without padding
-                if (estTotal > 0 && estDescent > 0) {
-                    const descentRatio = estDescent / estTotal;
-                    const newDescent = descentRatio * (heightPt - 2 * padY);
-                    posHalfPts = -Math.max(1, Math.round((newDescent + padY) * 2.0));
-                } else {
-                    // Simple formula (only ascent, no descent) — minimal offset
-                    posHalfPts = -2;
-                }
-            } else {
-                wmfBytes = buildWmf(widthPt, heightPt, latex);
-            }
+            const oleBytes = eq.oleBytes;
+            const wmfBytes = eq.wmfBytes;
+            const widthPt = eq.widthPt;
+            const heightPt = eq.heightPt;
+            const posHalfPts = eq.posHalfPts;
+            const dxaOrig = eq.dxaOrig;
+            const dyaOrig = eq.dyaOrig;
 
             let wmfRid;
             let wmfTarget;
@@ -3466,6 +3811,7 @@
         LatexMtefCompiler,
         buildOleObject,
         buildWmf,
+        convertEquationToMathType,
         parseLatexToOmml,
         parseLatexTabular,
         createDocxBlob,
