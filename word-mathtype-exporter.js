@@ -978,7 +978,7 @@
     }
 
     function renderFormulaCanvas(latex, defaultWidthPt = 24, defaultHeightPt = 14) {
-        if (typeof document === 'undefined' || !document.createElement) {
+        if (typeof document === 'undefined' || !document || !document.createElement) {
             return null;
         }
         try {
@@ -1515,7 +1515,8 @@
         s = s.replace(/&lt;/g, '<');
         s = s.replace(/&gt;/g, '>');
         s = s.replace(/&amp;/g, '&');
-        s = s.replace(/<\/?(?:div|span|strong|b|em|i|u|script)[^>]*>/gi, '');
+        // Phải có \b để không vô tình nuốt thẻ <img src="...">
+        s = s.replace(/<\/?(?:div|span|strong|b|em|i|u|script)\b[^>]*>/gi, '');
         // Chuẩn hóa dấu phẩy thập phân {,} -> ,
         s = s.replace(/\{,\}/g, ',');
         return s.trim();
@@ -1524,15 +1525,20 @@
     function parseRunsFromText(rawText, baseBold = false, baseItalic = false, formulaRegistry = null, formulaMode = 'mathtype') {
         if (!rawText) return [];
         const text = String(rawText);
-        const tokens = text.split(/(\\textbf\{[^{}]*\}|\\textit\{[^{}]*\}|\\underline\{[^{}]*\}|\$\$.*?\$\$|\$[^\$]+?\$|\\\[.*?\\\]|\\\(.*?\\\)|<img\s+[^>]*src=["'][^"']+["'][^>]*>|\\includegraphics(?:\[.*?\])?\{[^}]+\})/g);
+        // Hỗ trợ công thức toán nhiều dòng với [\s\S] và bảo toàn thẻ hình ảnh / TikZ
+        const tokens = text.split(/(\\textbf\{[^{}]*\}|\\textit\{[^{}]*\}|\\underline\{[^{}]*\}|\$\$[\s\S]*?\$\$|\$[^\$]+?\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|\<img\s+[^>]*src=["'](?:[^"']+)["'][^>]*\>|\\includegraphics(?:\[.*?\])?\{[^}]+\}|\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\})/g);
         const runs = [];
 
         for (const tok of tokens) {
             if (!tok) continue;
-            // Image tag
+            // Image tag & TikZ block
             const mImg = tok.match(/<img\s+[^>]*src=["']([^"']+)["'][^>]*>/i) || tok.match(/\\includegraphics(?:\[.*?\])?\{([^}]+)\}/i);
             if (mImg) {
                 runs.push({ isImage: true, src: mImg[1] });
+                continue;
+            }
+            if (tok.startsWith('\\begin{tikzpicture}')) {
+                runs.push({ isImage: true, src: tok });
                 continue;
             }
             // Math formula
@@ -1650,15 +1656,9 @@
                 <w:tc>
                     <w:tcPr><w:tcW w:w="8373" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr>
                     <w:p>
-                        <w:pPr><w:spacing w:before="60" w:after="30"/></w:pPr>
+                        <w:pPr><w:spacing w:before="60" w:after="60"/></w:pPr>
                         <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr>
-                            <w:t>Họ, tên thí sinh: .................................................................................................................</w:t>
-                        </w:r>
-                    </w:p>
-                    <w:p>
-                        <w:pPr><w:spacing w:before="30" w:after="100"/></w:pPr>
-                        <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr>
-                            <w:t>Số báo danh: .......................................................................................................................</w:t>
+                            <w:t xml:space="preserve">Họ và tên thí sinh: .................................................... Số báo danh: ................</w:t>
                         </w:r>
                     </w:p>
                 </w:tc>
@@ -1676,7 +1676,7 @@
                     <w:p>
                         <w:pPr><w:jc w:val="center"/><w:spacing w:before="60" w:after="60"/></w:pPr>
                         <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr>
-                            <w:t>Mã đề: ${escapeXml(cleanCode)}</w:t>
+                            <w:t>Mã đề thi ${escapeXml(cleanCode)}</w:t>
                         </w:r>
                     </w:p>
                 </w:tc>
@@ -1816,8 +1816,8 @@
                             <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr><w:t>${escapeXml(agencyName.toUpperCase())}</w:t></w:r>
                         </w:p>
                         <w:p>
-                            <w:pPr><w:jc w:val="center"/><w:pBdr><w:bottom w:val="single" w:sz="6" w:space="1" w:color="000000"/></w:pBdr><w:spacing w:after="40"/></w:pPr>
-                            <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr><w:t>${escapeXml(schoolName.toUpperCase())}</w:t></w:r>
+                            <w:pPr><w:jc w:val="center"/><w:spacing w:after="40"/></w:pPr>
+                            <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:u w:val="single"/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr><w:t>${escapeXml(schoolName.toUpperCase())}</w:t></w:r>
                         </w:p>
                         <w:p>
                             <w:pPr><w:jc w:val="center"/><w:spacing w:before="40" w:after="20"/></w:pPr>
@@ -1913,6 +1913,88 @@
         let currentRoman = 1;
         const romanNumerals = ['I', 'II', 'III', 'IV'];
 
+        // Hàm phân giải và kết xuất đoạn văn có chứa hình ảnh / TikZ thành các paragraph chuẩn Word (hình ở giữa)
+        function renderParagraphsWithImages(rawText, baseIndentDxa = 992, prefixXml = '') {
+            let outXml = '';
+            const cleanText = cleanHtmlToWordText(rawText);
+            const imgRegex = /(<img\s+[^>]*src=["'](?:[^"']+)["'][^>]*>|\\includegraphics(?:\[.*?\])?\{([^}]+)\}|\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\})/gi;
+            const segments = [];
+            let lastIdx = 0;
+            let m;
+            while ((m = imgRegex.exec(cleanText)) !== null) {
+                if (m.index > lastIdx) {
+                    segments.push({ type: 'text', text: cleanText.substring(lastIdx, m.index) });
+                }
+                const mSrc = m[0].match(/src=["']([^"']+)["']/i) || m[0].match(/\\includegraphics(?:\[.*?\])?\{([^}]+)\}/i);
+                const src = mSrc ? mSrc[1] : m[0];
+                segments.push({ type: 'image', src: src, raw: m[0] });
+                lastIdx = m.index + m[0].length;
+            }
+            if (lastIdx < cleanText.length) {
+                segments.push({ type: 'text', text: cleanText.substring(lastIdx) });
+            }
+            if (segments.length === 0) {
+                segments.push({ type: 'text', text: cleanText });
+            }
+
+            let isFirst = true;
+            for (const seg of segments) {
+                if (seg.type === 'text') {
+                    const st = seg.text.trim();
+                    if (!st && !isFirst) continue;
+                    if (isFirst) {
+                        const hangingAttr = prefixXml ? ' w:hanging="992"' : '';
+                        outXml += `
+                        <w:p>
+                          <w:pPr>
+                            <w:ind w:left="${baseIndentDxa}"${hangingAttr}/>
+                            <w:spacing w:before="60" w:after="40" w:line="276" w:lineRule="auto"/>
+                            <w:jc w:val="both"/>
+                          </w:pPr>
+                          ${prefixXml}
+                          ${renderRunsToXml(parseRunsFromText(st, false, false, formulaRegistry, formulaMode), imageMap, formulaRegistry)}
+                        </w:p>`;
+                        isFirst = false;
+                    } else {
+                        outXml += `
+                        <w:p>
+                          <w:pPr>
+                            <w:ind w:left="${baseIndentDxa}"/>
+                            <w:spacing w:before="40" w:after="40" w:line="276" w:lineRule="auto"/>
+                            <w:jc w:val="both"/>
+                          </w:pPr>
+                          ${renderRunsToXml(parseRunsFromText(st, false, false, formulaRegistry, formulaMode), imageMap, formulaRegistry)}
+                        </w:p>`;
+                    }
+                } else if (seg.type === 'image') {
+                    const imgInfo = imageMap[seg.src] || imageMap[seg.raw];
+                    if (imgInfo) {
+                        outXml += `
+                        <w:p>
+                          <w:pPr>
+                            <w:jc w:val="center"/>
+                            <w:spacing w:before="60" w:after="60"/>
+                          </w:pPr>
+                          ${buildDrawingXml(imgInfo.id, imgInfo.rId, imgInfo.cx, imgInfo.cy)}
+                        </w:p>`;
+                    }
+                }
+            }
+
+            if (isFirst && prefixXml) {
+                outXml += `
+                <w:p>
+                  <w:pPr>
+                    <w:ind w:left="${baseIndentDxa}" w:hanging="992"/>
+                    <w:spacing w:before="60" w:after="40" w:line="276" w:lineRule="auto"/>
+                    <w:jc w:val="both"/>
+                  </w:pPr>
+                  ${prefixXml}
+                </w:p>`;
+            }
+            return outXml;
+        }
+
         // Hàm kết xuất đoạn văn hoặc bảng biểu bên trong câu hỏi
         function renderQuestionBlocks(prefixText, rawContent) {
             let outXml = '';
@@ -1924,21 +2006,10 @@
                 const tableCode = tabularMatch[0];
                 const preText = content.substring(0, tabularMatch.index).trim();
                 const postText = content.substring(tabularMatch.index + tableCode.length).trim();
+                const prefixXml = `<w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr><w:t xml:space="preserve">${escapeXml(prefixText)}</w:t></w:r>`;
 
                 // Paragraph trước bảng
-                outXml += `
-                <w:p>
-                  <w:pPr>
-                    <w:ind w:left="992" w:hanging="992"/>
-                    <w:spacing w:before="80" w:after="40" w:line="276" w:lineRule="auto"/>
-                    <w:jc w:val="both"/>
-                  </w:pPr>
-                  <w:r>
-                    <w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr>
-                    <w:t xml:space="preserve">${escapeXml(prefixText)}</w:t>
-                  </w:r>
-                  ${renderRunsToXml(parseRunsFromText(preText, false, false, formulaRegistry, formulaMode), imageMap, formulaRegistry)}
-                </w:p>`;
+                outXml += renderParagraphsWithImages(preText, 992, prefixXml);
 
                 // Bảng biểu
                 const tableData = parseLatexTabular(tableCode);
@@ -1948,34 +2019,44 @@
 
                 // Paragraph sau bảng nếu có
                 if (postText) {
-                    outXml += `
-                    <w:p>
-                      <w:pPr>
-                        <w:ind w:left="992"/>
-                        <w:spacing w:before="40" w:after="40" w:line="276" w:lineRule="auto"/>
-                        <w:jc w:val="both"/>
-                      </w:pPr>
-                      ${renderRunsToXml(parseRunsFromText(postText, false, false, formulaRegistry, formulaMode), imageMap, formulaRegistry)}
-                    </w:p>`;
+                    outXml += renderParagraphsWithImages(postText, 992, '');
                 }
-            } else {
-                // Câu hỏi dạng văn bản thông thường
-                outXml += `
-                <w:p>
-                  <w:pPr>
-                    <w:ind w:left="992" w:hanging="992"/>
-                    <w:spacing w:before="80" w:after="40" w:line="276" w:lineRule="auto"/>
-                    <w:jc w:val="both"/>
-                  </w:pPr>
-                  <w:r>
-                    <w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr>
-                    <w:t xml:space="preserve">${escapeXml(prefixText)}</w:t>
-                  </w:r>
-                  ${renderRunsToXml(parseRunsFromText(content, false, false, formulaRegistry, formulaMode), imageMap, formulaRegistry)}
-                </w:p>`;
+                return outXml;
             }
 
+            // Câu hỏi thông thường (tách hình ảnh và công thức chuẩn chỉnh)
+            const prefixXml = `<w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr><w:t xml:space="preserve">${escapeXml(prefixText)}</w:t></w:r>`;
+            outXml += renderParagraphsWithImages(content, 992, prefixXml);
             return outXml;
+        }
+
+        // Hàm hỗ trợ chèn hình đính kèm của câu hỏi (image, img, imageUrl, images) nếu chưa xuất hiện trong content
+        function renderStandaloneQuestionImages(q) {
+            let res = '';
+            const candidates = [];
+            if (q.image) candidates.push(q.image);
+            if (q.img) candidates.push(q.img);
+            if (q.imageUrl) candidates.push(q.imageUrl);
+            if (q.image_url) candidates.push(q.image_url);
+            if (Array.isArray(q.images)) candidates.push(...q.images);
+
+            const content = String(q.content || '');
+            const added = new Set();
+            candidates.forEach(src => {
+                if (src && !content.includes(src) && !added.has(src) && imageMap[src]) {
+                    added.add(src);
+                    const imgInfo = imageMap[src];
+                    res += `
+                    <w:p>
+                      <w:pPr>
+                        <w:jc w:val="center"/>
+                        <w:spacing w:before="60" w:after="60"/>
+                      </w:pPr>
+                      ${buildDrawingXml(imgInfo.id, imgInfo.rId, imgInfo.cx, imgInfo.cy)}
+                    </w:p>`;
+                }
+            });
+            return res;
         }
 
         // ================= PHẦN I: TRẮC NGHIỆM 4 PHƯƠNG ÁN =================
@@ -1994,11 +2075,8 @@
 
                 bodyXml += renderQuestionBlocks(prefix, q.content);
 
-                // Chèn ảnh đính kèm câu hỏi nếu có
-                if (q.image && imageMap[q.image]) {
-                    const imgInfo = imageMap[q.image];
-                    bodyXml += `<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:before="60" w:after="60"/></w:pPr>${buildDrawingXml(imgInfo.id, imgInfo.rId, imgInfo.cx, imgInfo.cy)}</w:p>`;
-                }
+                // Chèn ảnh đính kèm câu hỏi nếu chưa nằm trong nội dung
+                bodyXml += renderStandaloneQuestionImages(q);
 
                 // Options
                 const opts = Array.isArray(q.options) ? q.options : [];
@@ -2078,11 +2156,8 @@
                     <w:p>
                       <w:pPr><w:ind w:left="992"/><w:spacing w:before="60" w:after="40"/><w:jc w:val="both"/></w:pPr>
                       <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:i/><w:color w:val="1E40AF"/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr><w:t>Lời giải:</w:t></w:r>
-                    </w:p>
-                    <w:p>
-                      <w:pPr><w:ind w:left="992"/><w:spacing w:after="120" w:line="276" w:lineRule="auto"/><w:jc w:val="both"/></w:pPr>
-                      ${renderRunsToXml(parseRunsFromText(solText, false, false, formulaRegistry, formulaMode), imageMap, formulaRegistry)}
                     </w:p>`;
+                    bodyXml += renderParagraphsWithImages(solText, 992, '');
                 }
             });
         }
@@ -2103,10 +2178,8 @@
 
                 bodyXml += renderQuestionBlocks(prefix, q.content);
 
-                if (q.image && imageMap[q.image]) {
-                    const imgInfo = imageMap[q.image];
-                    bodyXml += `<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:before="60" w:after="60"/></w:pPr>${buildDrawingXml(imgInfo.id, imgInfo.rId, imgInfo.cx, imgInfo.cy)}</w:p>`;
-                }
+                // Chèn ảnh đính kèm câu hỏi nếu chưa nằm trong nội dung
+                bodyXml += renderStandaloneQuestionImages(q);
 
                 const statements = Array.isArray(q.statements) ? q.statements : [];
                 const subLabels = ['a', 'b', 'c', 'd'];
@@ -2135,11 +2208,8 @@
                     <w:p>
                       <w:pPr><w:ind w:left="992"/><w:spacing w:before="60" w:after="40"/><w:jc w:val="both"/></w:pPr>
                       <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:i/><w:color w:val="1E40AF"/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr><w:t>Lời giải:</w:t></w:r>
-                    </w:p>
-                    <w:p>
-                      <w:pPr><w:ind w:left="992"/><w:spacing w:after="120" w:line="276" w:lineRule="auto"/><w:jc w:val="both"/></w:pPr>
-                      ${renderRunsToXml(parseRunsFromText(solText, false, false, formulaRegistry, formulaMode), imageMap, formulaRegistry)}
                     </w:p>`;
+                    bodyXml += renderParagraphsWithImages(solText, 992, '');
                 }
             });
         }
@@ -2160,10 +2230,8 @@
 
                 bodyXml += renderQuestionBlocks(prefix, q.content);
 
-                if (q.image && imageMap[q.image]) {
-                    const imgInfo = imageMap[q.image];
-                    bodyXml += `<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:before="60" w:after="60"/></w:pPr>${buildDrawingXml(imgInfo.id, imgInfo.rId, imgInfo.cx, imgInfo.cy)}</w:p>`;
-                }
+                // Chèn ảnh đính kèm câu hỏi nếu chưa nằm trong nội dung
+                bodyXml += renderStandaloneQuestionImages(q);
 
                 // Dòng kẻ chấm cho trả lời ngắn trong đề bài
                 if (mode === 'questions') {
@@ -2194,11 +2262,8 @@
                         <w:p>
                           <w:pPr><w:ind w:left="992"/><w:spacing w:before="40" w:after="40"/><w:jc w:val="both"/></w:pPr>
                           <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:i/><w:color w:val="1E40AF"/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr><w:t>Lời giải:</w:t></w:r>
-                        </w:p>
-                        <w:p>
-                          <w:pPr><w:ind w:left="992"/><w:spacing w:after="120" w:line="276" w:lineRule="auto"/><w:jc w:val="both"/></w:pPr>
-                          ${renderRunsToXml(parseRunsFromText(solText, false, false, formulaRegistry, formulaMode), imageMap, formulaRegistry)}
                         </w:p>`;
+                        bodyXml += renderParagraphsWithImages(solText, 992, '');
                     }
                 }
             });
@@ -2220,10 +2285,8 @@
 
                 bodyXml += renderQuestionBlocks(prefix, q.content);
 
-                if (q.image && imageMap[q.image]) {
-                    const imgInfo = imageMap[q.image];
-                    bodyXml += `<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:before="60" w:after="60"/></w:pPr>${buildDrawingXml(imgInfo.id, imgInfo.rId, imgInfo.cx, imgInfo.cy)}</w:p>`;
-                }
+                // Chèn ảnh đính kèm câu hỏi nếu chưa nằm trong nội dung
+                bodyXml += renderStandaloneQuestionImages(q);
 
                 // Dòng kẻ chấm cho tự luận trong đề bài
                 if (mode === 'questions' && includeDottedLines) {
@@ -2237,11 +2300,8 @@
                     <w:p>
                       <w:pPr><w:ind w:left="992"/><w:spacing w:before="60" w:after="40"/><w:jc w:val="both"/></w:pPr>
                       <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:i/><w:color w:val="1E40AF"/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr><w:t>Lời giải chi tiết:</w:t></w:r>
-                    </w:p>
-                    <w:p>
-                      <w:pPr><w:ind w:left="992"/><w:spacing w:after="120" w:line="276" w:lineRule="auto"/><w:jc w:val="both"/></w:pPr>
-                      ${renderRunsToXml(parseRunsFromText(solText, false, false, formulaRegistry, formulaMode), imageMap, formulaRegistry)}
                     </w:p>`;
+                    bodyXml += renderParagraphsWithImages(solText, 992, '');
                 }
             });
         }
@@ -2442,6 +2502,117 @@
     // ==========================================
     // 10. THU THẬP VÀ XỬ LÝ HÌNH ẢNH TRONG ĐỀ THI
     // ==========================================
+    function getImageDimensions(bytes) {
+        if (!bytes || bytes.length < 24) return { w: 400, h: 300 };
+        // PNG (Signature: 89 50 4E 47 0D 0A 1A 0A)
+        if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4E && bytes[3] === 0x47) {
+            const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+            const w = dv.getUint32(16, false);
+            const h = dv.getUint32(20, false);
+            return { w: w || 400, h: h || 300 };
+        }
+        // JPEG (SOI: FF D8)
+        if (bytes[0] === 0xFF && bytes[1] === 0xD8) {
+            let i = 2;
+            while (i < bytes.length - 8) {
+                if (bytes[i] === 0xFF) {
+                    const marker = bytes[i + 1];
+                    if (marker === 0xC0 || marker === 0xC2) { // SOF0, SOF2
+                        const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+                        const h = dv.getUint16(i + 5, false);
+                        const w = dv.getUint16(i + 7, false);
+                        return { w: w || 400, h: h || 300 };
+                    }
+                    const len = (bytes[i + 2] << 8) | bytes[i + 3];
+                    i += 2 + len;
+                } else {
+                    i++;
+                }
+            }
+        }
+        // GIF (GIF87a or GIF89a)
+        if (bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46) {
+            const w = bytes[6] | (bytes[7] << 8);
+            const h = bytes[8] | (bytes[9] << 8);
+            return { w: w || 400, h: h || 300 };
+        }
+        return { w: 400, h: 300 };
+    }
+
+    async function fetchImageBytes(src) {
+        if (!src) return null;
+        src = String(src).trim();
+
+        // 1. Data URL
+        if (src.startsWith('data:image')) {
+            try {
+                const base64 = src.split(',')[1];
+                const binStr = (typeof atob === 'function')
+                    ? atob(base64)
+                    : (typeof Buffer !== 'undefined' ? Buffer.from(base64, 'base64').toString('binary') : '');
+                if (!binStr) return null;
+                const arr = new Uint8Array(binStr.length);
+                for (let i = 0; i < binStr.length; i++) arr[i] = binStr.charCodeAt(i);
+                return arr;
+            } catch (e) {
+                console.warn('[ImageLoader] Lỗi decode base64:', e);
+                return null;
+            }
+        }
+
+        // 2. HTTP / HTTPS / Đường dẫn tương đối
+        const urlsToTry = [src];
+        if (src.startsWith('http://') || src.startsWith('https://')) {
+            // Cloudflare R2 bucket không bật CORS -> Weserv proxy mở CORS * cho toàn cầu
+            urlsToTry.push(`https://images.weserv.nl/?url=${encodeURIComponent(src)}`);
+            urlsToTry.push(`https://api.allorigins.win/raw?url=${encodeURIComponent(src)}`);
+        }
+
+        for (const url of urlsToTry) {
+            try {
+                const resp = await fetch(url, { mode: 'cors' });
+                if (resp.ok) {
+                    const ab = await resp.arrayBuffer();
+                    if (ab && ab.byteLength > 0) {
+                        return new Uint8Array(ab);
+                    }
+                }
+            } catch (err) {
+                // Thử tiếp proxy dự phòng
+            }
+        }
+
+        // 3. Fallback Canvas DOM (trường hợp ảnh đã nạp sẵn trong cache trình duyệt)
+        if (typeof document !== 'undefined' && document && document.createElement) {
+            try {
+                const img = new Image();
+                img.crossOrigin = 'anonymous';
+                const loadPromise = new Promise((resolve, reject) => {
+                    img.onload = () => resolve(img);
+                    img.onerror = reject;
+                    setTimeout(() => reject(new Error('Timeout')), 5000);
+                });
+                img.src = src;
+                const loadedImg = await loadPromise;
+                const canvas = document.createElement('canvas');
+                canvas.width = loadedImg.naturalWidth || loadedImg.width;
+                canvas.height = loadedImg.naturalHeight || loadedImg.height;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(loadedImg, 0, 0);
+                const dataUrl = canvas.toDataURL('image/png');
+                const base64 = dataUrl.split(',')[1];
+                const binStr = atob(base64);
+                const arr = new Uint8Array(binStr.length);
+                for (let i = 0; i < binStr.length; i++) arr[i] = binStr.charCodeAt(i);
+                return arr;
+            } catch (domErr) {
+                // Bỏ qua nếu canvas bị taint
+            }
+        }
+
+        return null;
+    }
+
     async function collectAndPrepareImages(questions, zip) {
         const imageMap = {};
         let imgCounter = 0;
@@ -2461,56 +2632,116 @@
             return matches;
         };
 
+        const scanTextForTikz = (text) => {
+            if (!text) return [];
+            const matches = [];
+            const tikzRegex = /\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\}/gi;
+            let m;
+            while ((m = tikzRegex.exec(text)) !== null) {
+                matches.push(m[0]);
+            }
+            return matches;
+        };
+
         const allSources = [];
+        const allTikz = [];
+
         (questions || []).forEach(q => {
             if (q.image) allSources.push(q.image);
+            if (q.img) allSources.push(q.img);
+            if (q.imageUrl) allSources.push(q.imageUrl);
+            if (q.image_url) allSources.push(q.image_url);
             if (Array.isArray(q.images)) allSources.push(...q.images);
+
             allSources.push(...scanTextForImages(q.content));
             allSources.push(...scanTextForImages(q.solution || q.explain));
+            allTikz.push(...scanTextForTikz(q.content));
+            allTikz.push(...scanTextForTikz(q.solution || q.explain));
+
             (q.options || []).forEach(opt => {
+                if (typeof opt === 'object') {
+                    if (opt.image) allSources.push(opt.image);
+                    if (opt.img) allSources.push(opt.img);
+                }
                 const optText = typeof opt === 'object' ? (opt.text || '') : opt;
                 allSources.push(...scanTextForImages(optText));
+                allTikz.push(...scanTextForTikz(optText));
             });
+
             (q.statements || []).forEach(st => {
+                if (typeof st === 'object') {
+                    if (st.image) allSources.push(st.image);
+                    if (st.img) allSources.push(st.img);
+                }
                 const stText = typeof st === 'object' ? (st.content || st.text || '') : st;
                 allSources.push(...scanTextForImages(stText));
+                allTikz.push(...scanTextForTikz(stText));
             });
         });
+
+        // Tự động biên dịch TikZ nếu có engine TikZ trên window
+        const uniqueTikz = Array.from(new Set(allTikz.filter(Boolean)));
+        if (uniqueTikz.length > 0 && typeof window !== 'undefined' && typeof window.compileTikZToImage === 'function') {
+            for (const tikzCode of uniqueTikz) {
+                try {
+                    const codeToRun = (typeof window.prepareTikzForCompilation === 'function')
+                        ? window.prepareTikzForCompilation(tikzCode)
+                        : tikzCode;
+                    const renderedUrl = await window.compileTikZToImage(codeToRun);
+                    if (renderedUrl && !renderedUrl.includes('Image+Error')) {
+                        allSources.push(renderedUrl);
+                        // Liên kết cả mã gốc tikzCode với URL ảnh đã render
+                        imageMap[tikzCode] = renderedUrl;
+                    }
+                } catch (tErr) {
+                    console.warn('[TikZ Compiler] Lỗi biên dịch TikZ khi xuất Word:', tErr);
+                }
+            }
+        }
 
         const uniqueSources = Array.from(new Set(allSources.filter(Boolean)));
 
         for (const src of uniqueSources) {
             try {
-                imgCounter++;
-                const imgId = imgCounter;
-                const rId = `rIdImg_${imgId}`;
-                let bytes = null;
+                const bytes = await fetchImageBytes(src);
+                if (bytes && bytes.length > 0) {
+                    imgCounter++;
+                    const imgId = imgCounter;
+                    const rId = `rIdImg_${imgId}`;
 
-                if (src.startsWith('data:image')) {
-                    const base64 = src.split(',')[1];
-                    const binStr = atob(base64);
-                    const arr = new Uint8Array(binStr.length);
-                    for (let i = 0; i < binStr.length; i++) arr[i] = binStr.charCodeAt(i);
-                    bytes = arr;
-                } else if (src.startsWith('http://') || src.startsWith('https://') || src.startsWith('/')) {
-                    const resp = await fetch(src, { mode: 'cors' });
-                    if (resp.ok) {
-                        const blob = await resp.blob();
-                        bytes = new Uint8Array(await blob.arrayBuffer());
+                    // Xác định kích thước tự nhiên của hình ảnh
+                    const dims = getImageDimensions(bytes);
+                    const maxW_emu = 4752000; // ~13.2 cm (vừa vặn chuẩn trang A4 Word có lề 2cm)
+                    const maxH_emu = 3600000; // ~10.0 cm
+                    let cx = Math.round(dims.w * 9525);
+                    let cy = Math.round(dims.h * 9525);
+
+                    if (cx > maxW_emu) {
+                        const sc = maxW_emu / cx;
+                        cx = maxW_emu;
+                        cy = Math.round(cy * sc);
+                    }
+                    if (cy > maxH_emu) {
+                        const sc = maxH_emu / cy;
+                        cy = maxH_emu;
+                        cx = Math.round(cx * sc);
+                    }
+                    cx = Math.max(720000, cx);
+                    cy = Math.max(540000, cy);
+
+                    zip.file(`word/media/image_${imgId}.png`, bytes);
+                    const imgPayload = { id: imgId, rId, cx, cy };
+                    imageMap[src] = imgPayload;
+
+                    // Nếu có mã TikZ trỏ đến URL này, cập nhật cả ánh xạ TikZ
+                    for (const [tCode, rUrl] of Object.entries(imageMap)) {
+                        if (rUrl === src) {
+                            imageMap[tCode] = imgPayload;
+                        }
                     }
                 }
-
-                if (bytes) {
-                    zip.file(`word/media/image_${imgId}.png`, bytes);
-                    imageMap[src] = {
-                        id: imgId,
-                        rId: rId,
-                        cx: 2520000, // ~7.0 cm chuẩn trang Word
-                        cy: 1800000  // ~5.0 cm
-                    };
-                }
             } catch (err) {
-                console.warn('Không thể nạp hình ảnh:', src, err);
+                console.warn('[ImageLoader] Không thể nạp hình ảnh:', src, err);
             }
         }
 
@@ -2562,8 +2793,12 @@
         let relsXml = zip.file('word/_rels/document.xml.rels') ? await zip.file('word/_rels/document.xml.rels').async('text') : '';
         if (relsXml) {
             let extraRels = '';
+            const seenImgRids = new Set();
             Object.values(imageMap).forEach(img => {
-                extraRels += `\n  <Relationship Id="${img.rId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image_${img.id}.png"/>`;
+                if (img && img.rId && !seenImgRids.has(img.rId)) {
+                    seenImgRids.add(img.rId);
+                    extraRels += `\n  <Relationship Id="${img.rId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image_${img.id}.png"/>`;
+                }
             });
             if (options.formulaMode !== 'omml') {
                 formulaRegistry.wmfRidMap.forEach((val) => {
