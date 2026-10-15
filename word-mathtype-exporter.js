@@ -913,67 +913,114 @@
         if (clean.startsWith('\\[') && clean.endsWith('\\]')) clean = clean.substring(2, clean.length - 2).trim();
 
         let t = clean;
-        // Xử lý phân số
+        // Dấu phẩy thập phân kiểu Việt Nam
+        t = t.replace(/\{,\}/g, ',');
+        // Xử lý phân số — hiển thị dạng phân số ngang
         t = t.replace(/\\dfrac\{([^{}]+)\}\{([^{}]+)\}/g, '($1)/($2)');
         t = t.replace(/\\frac\{([^{}]+)\}\{([^{}]+)\}/g, '($1)/($2)');
         // Căn thức
         t = t.replace(/\\sqrt\[(\d+)\]\{([^{}]+)\}/g, '$1√($2)');
         t = t.replace(/\\sqrt\{([^{}]+)\}/g, '√($1)');
         // Vector và đường gạch
-        t = t.replace(/\\(vec|overrightarrow)\{([^{}]+)\}/g, 'vec($2)');
-        t = t.replace(/\\(overline|bar)\{([^{}]+)\}/g, '$2');
+        t = t.replace(/\\(vec|overrightarrow)\{([^{}]+)\}/g, '$2\u20D7');
+        t = t.replace(/\\(overline|bar)\{([^{}]+)\}/g, '$2\u0305');
+        t = t.replace(/\\(widehat|hat)\{([^{}]+)\}/g, '$2\u0302');
+        t = t.replace(/\\(widetilde|tilde)\{([^{}]+)\}/g, '$2\u0303');
         // Font wrappers
-        t = t.replace(/\\(mathbf|mathrm|mathit|text|textbf|textit)\{([^{}]+)\}/g, '$2');
+        t = t.replace(/\\(mathbf|mathrm|mathit|text|textbf|textit|textrm|mbox)\{([^{}]+)\}/g, '$2');
         // Dấu ngoặc
-        t = t.replace(/\\left\s*([(\[{|])/g, '$1');
+        t = t.replace(/\\left\s*([([\{|])/g, '$1');
         t = t.replace(/\\right\s*([)\]}|])/g, '$1');
         t = t.replace(/\\(left|right)\./g, '');
         // Toán tử và ký hiệu phổ biến
         t = t.replace(/\\cdot/g, '·');
         t = t.replace(/\\times/g, '×');
+        t = t.replace(/\\div\b/g, '÷');
         t = t.replace(/\\pm/g, '±');
         t = t.replace(/\\mp/g, '∓');
-        t = t.replace(/\\le(q)?/g, '≤');
-        t = t.replace(/\\ge(q)?/g, '≥');
-        t = t.replace(/\\neq/g, '≠');
+        t = t.replace(/\\le(q(slant)?)?/g, '≤');
+        t = t.replace(/\\ge(q(slant)?)?/g, '≥');
+        t = t.replace(/\\ne(q)?/g, '≠');
         t = t.replace(/\\approx/g, '≈');
         t = t.replace(/\\equiv/g, '≡');
-        t = t.replace(/\\in/g, '∈');
+        t = t.replace(/\\sim\b/g, '~');
+        t = t.replace(/\\cong/g, '≅');
+        t = t.replace(/\\perp/g, '⊥');
+        t = t.replace(/\\parallel/g, '∥');
+        t = t.replace(/\\in\b/g, '∈');
         t = t.replace(/\\notin/g, '∉');
-        t = t.replace(/\\subset/g, '⊂');
+        t = t.replace(/\\subset(eq)?/g, (m, eq) => eq ? '⊆' : '⊂');
+        t = t.replace(/\\supset(eq)?/g, (m, eq) => eq ? '⊇' : '⊃');
         t = t.replace(/\\cup/g, '∪');
         t = t.replace(/\\cap/g, '∩');
+        t = t.replace(/\\setminus/g, '∖');
+        t = t.replace(/\\emptyset/g, '∅');
+        t = t.replace(/\\varnothing/g, '∅');
         t = t.replace(/\\infty/g, '∞');
-        t = t.replace(/\\Delta/g, 'Δ');
-        t = t.replace(/\\pi/g, 'π');
-        t = t.replace(/\\alpha/g, 'α');
-        t = t.replace(/\\beta/g, 'β');
-        t = t.replace(/\\gamma/g, 'γ');
-        t = t.replace(/\\theta/g, 'θ');
-        t = t.replace(/\\omega/g, 'ω');
-        t = t.replace(/\\lambda/g, 'λ');
-        t = t.replace(/\\mu/g, 'μ');
-        t = t.replace(/\\sigma/g, 'σ');
-        t = t.replace(/\\phi/g, 'φ');
-        t = t.replace(/\\varphi/g, 'φ');
-        t = t.replace(/\\rightarrow/g, '→');
+        t = t.replace(/\\forall/g, '∀');
+        t = t.replace(/\\exists/g, '∃');
+        t = t.replace(/\\partial/g, '∂');
+        t = t.replace(/\\nabla/g, '∇');
+        t = t.replace(/\\angle/g, '∠');
+        t = t.replace(/\\triangle/g, '△');
+        t = t.replace(/\\(l?dots|cdots)/g, '…');
+        // Tích phân, tổng, tích
+        t = t.replace(/\\int\b/g, '∫');
+        t = t.replace(/\\sum\b/g, '∑');
+        t = t.replace(/\\prod\b/g, '∏');
+        // Mũi tên
         t = t.replace(/\\Rightarrow/g, '⇒');
-        t = t.replace(/\\leftrightarrow/g, '↔');
+        t = t.replace(/\\Leftarrow/g, '⇐');
         t = t.replace(/\\Leftrightarrow/g, '⇔');
+        t = t.replace(/\\rightarrow/g, '→');
+        t = t.replace(/\\leftarrow/g, '←');
+        t = t.replace(/\\to\b/g, '→');
+        // Hy Lạp
+        t = t.replace(/\\Alpha/g, 'Α'); t = t.replace(/\\alpha/g, 'α');
+        t = t.replace(/\\Beta/g, 'Β');  t = t.replace(/\\beta/g, 'β');
+        t = t.replace(/\\Gamma/g, 'Γ'); t = t.replace(/\\gamma/g, 'γ');
+        t = t.replace(/\\Delta/g, 'Δ'); t = t.replace(/\\delta/g, 'δ');
+        t = t.replace(/\\varepsilon/g, 'ε'); t = t.replace(/\\epsilon/g, 'ε');
+        t = t.replace(/\\Theta/g, 'Θ'); t = t.replace(/\\vartheta/g, 'ϑ'); t = t.replace(/\\theta/g, 'θ');
+        t = t.replace(/\\Lambda/g, 'Λ'); t = t.replace(/\\lambda/g, 'λ');
+        t = t.replace(/\\Xi/g, 'Ξ');    t = t.replace(/\\xi/g, 'ξ');
+        t = t.replace(/\\Pi/g, 'Π');    t = t.replace(/\\pi/g, 'π');
+        t = t.replace(/\\Sigma/g, 'Σ'); t = t.replace(/\\sigma/g, 'σ');
+        t = t.replace(/\\Upsilon/g, 'Υ'); t = t.replace(/\\upsilon/g, 'υ');
+        t = t.replace(/\\Phi/g, 'Φ'); t = t.replace(/\\varphi/g, 'φ'); t = t.replace(/\\phi/g, 'ϕ');
+        t = t.replace(/\\Psi/g, 'Ψ');   t = t.replace(/\\psi/g, 'ψ');
+        t = t.replace(/\\Omega/g, 'Ω'); t = t.replace(/\\omega/g, 'ω');
+        t = t.replace(/\\mu/g, 'μ'); t = t.replace(/\\nu/g, 'ν');
+        t = t.replace(/\\zeta/g, 'ζ'); t = t.replace(/\\eta/g, 'η');
+        t = t.replace(/\\iota/g, 'ι'); t = t.replace(/\\kappa/g, 'κ');
+        t = t.replace(/\\rho/g, 'ρ'); t = t.replace(/\\tau/g, 'τ');
+        t = t.replace(/\\chi/g, 'χ');
         t = t.replace(/\\(deg|circ)/g, '°');
         t = t.replace(/\\quad/g, '  ');
         t = t.replace(/\\,/g, ' ');
         t = t.replace(/\\;/g, ' ');
         t = t.replace(/\\!/g, '');
+        // Tên hàm
+        t = t.replace(/\\(sin|cos|tan|cot|sec|csc|arcsin|arccos|arctan|ln|log|lg|exp|lim|min|max|gcd|det)\b/g, '$1');
         // Số mũ Unicode
-        t = t.replace(/\^2\b/g, '²').replace(/\^\{2\}/g, '²');
-        t = t.replace(/\^3\b/g, '³').replace(/\^\{3\}/g, '³');
-        t = t.replace(/\^0\b/g, '⁰').replace(/\^\{0\}/g, '⁰');
-        t = t.replace(/\^1\b/g, '¹').replace(/\^\{1\}/g, '¹');
-        t = t.replace(/\^\{([^}]+)\}/g, '^($1)');
-        t = t.replace(/_\{([^}]+)\}/g, '_($1)');
+        const supMap = {'0':'⁰','1':'¹','2':'²','3':'³','4':'⁴','5':'⁵','6':'⁶','7':'⁷','8':'⁸','9':'⁹',
+            '+':'⁺','-':'⁻','=':'⁼','(':'⁽',')':'⁾','n':'ⁿ','i':'ⁱ'};
+        const subMap = {'0':'₀','1':'₁','2':'₂','3':'₃','4':'₄','5':'₅','6':'₆','7':'₇','8':'₈','9':'₉',
+            '+':'₊','-':'₋','=':'₌','(':'₍',')':'₎'};
+        // Chuyển ^{...} thành Unicode superscript nếu có thể
+        t = t.replace(/\^\{([^}]+)\}/g, (m, content) => {
+            const mapped = content.split('').map(c => supMap[c] || c).join('');
+            return (mapped === content) ? '^(' + content + ')' : mapped;
+        });
+        t = t.replace(/\^([0-9])/g, (m, d) => supMap[d] || d);
+        // Chuyển _{...} thành Unicode subscript nếu có thể
+        t = t.replace(/_\{([^}]+)\}/g, (m, content) => {
+            const mapped = content.split('').map(c => subMap[c] || c).join('');
+            return (mapped === content) ? '_(' + content + ')' : mapped;
+        });
+        t = t.replace(/_([0-9])/g, (m, d) => subMap[d] || d);
         // Xóa backslash dư thừa
-        t = t.replace(/\\[a-zA-Z]+/g, ' ').replace(/\s+/g, ' ').trim();
+        t = t.replace(/\\[a-zA-Z]+/g, ' ').replace(/[{}]/g, '').replace(/\s+/g, ' ').trim();
         return t || clean || 'formula';
     }
 
@@ -1213,26 +1260,118 @@
         let clean = String(latex || '').trim();
         if (clean.startsWith('$$') && clean.endsWith('$$')) clean = clean.substring(2, clean.length - 2).trim();
         else if (clean.startsWith('$') && clean.endsWith('$')) clean = clean.substring(1, clean.length - 1).trim();
+        else if (clean.startsWith('\\(') && clean.endsWith('\\)')) clean = clean.substring(2, clean.length - 2).trim();
+        else if (clean.startsWith('\\[') && clean.endsWith('\\]')) clean = clean.substring(2, clean.length - 2).trim();
+        clean = clean.replace(/\{,\}/g, ',');
 
-        const isSystem = clean.includes('\\heva') || clean.includes('\\hoac') || clean.includes('\\begin{cases}');
-        const isFrac = clean.includes('\\frac') || clean.includes('\\dfrac');
-        const isBig = isSystem || clean.includes('\\sum') || clean.includes('\\int');
+        // Phân tích cấu trúc công thức (matching Python latex_to_mathtype.py)
+        const hasFrac = /\\(?:d?frac|tfrac|cfrac)\b/.test(clean);
+        const hasSqrt = /\\sqrt\b/.test(clean);
+        const hasSum = /\\sum\b/.test(clean);
+        const hasInt = /\\int\b/.test(clean);
+        const hasSub = /_[\{\\a-zA-Z0-9]/.test(clean);
+        const hasSup = /\^[\{\\a-zA-Z0-9']/.test(clean);
+        const hasSystem = /\\(?:heva|hoac)\b/.test(clean) || /\\begin\{cases\}/.test(clean);
+        const hasPile = /\\begin\{(?:p?matrix|bmatrix|vmatrix|array)\}/.test(clean);
+        const hasAccent = /\\(?:overline|bar|widehat|hat|vec|overrightarrow|widetilde|tilde)\b/.test(clean);
+        const hasArc = /\\(?:wideparen|overparen|arc|widearc|overarc)\b/.test(clean);
 
-        let widthPt = Math.max(12, clean.length * 6.5);
-        if (widthPt > 280) widthPt = 280;
-        let heightPt = 13.5;
-        let posHalfPts = -2;
-
-        if (isSystem) {
-            heightPt = 28.0;
-            posHalfPts = -18;
-        } else if (isFrac) {
-            heightPt = 22.0;
-            posHalfPts = -14;
-        } else if (isBig) {
-            heightPt = 20.0;
-            posHalfPts = -10;
+        // Đếm chiều sâu lồng nhau của phân số (nested fractions)
+        let fracDepth = 0;
+        if (hasFrac) {
+            let tmpClean = clean;
+            while (/\\(?:d?frac|tfrac|cfrac)\b/.test(tmpClean)) {
+                fracDepth++;
+                tmpClean = tmpClean.replace(/\\(?:d?frac|tfrac|cfrac)\b/, '');
+            }
         }
+
+        // Đếm hàng trong hệ phương trình / ma trận
+        let systemRows = 1;
+        if (hasSystem || hasPile) {
+            const rowSeps = (clean.match(/\\\\/g) || []).length;
+            systemRows = Math.max(1, rowSeps + 1);
+        }
+
+        // === TÍNH TOÁN KÍCH THƯỚC CHÍNH XÁC THEO PYTHON TeX2MathType_Pro ===
+        // (dựa trên basePt = 12.0 và các hằng số layout của Python)
+        const basePt = 12.0;
+        const baseAsc = 0.68 * basePt;   // 8.16pt - ascent cơ bản của 1 ký tự
+        const baseDesc = 0.0;             // descent cơ bản
+
+        let ascent = baseAsc;
+        let descent = baseDesc;
+
+        if (hasSystem || hasPile) {
+            // Python _layout_pile: mỗi hàng có ascent ~8.16 + gap giữa các hàng
+            const rowH = basePt * 1.2;
+            const totalH = systemRows * rowH;
+            ascent = totalH * 0.55 + 2.0;
+            descent = totalH * 0.45;
+        } else if (hasFrac) {
+            // Python _layout_frac: axis=3.2, gap=2.6, pad_x=1.6
+            const axis = 3.2;
+            const gap = 2.6;
+            const innerAsc = baseAsc;  // ~8.16
+            const innerDesc = 0.0;
+
+            if (fracDepth >= 2) {
+                // Phân số lồng: numerator hoặc denominator cũng có frac
+                ascent = axis + gap + innerDesc + innerAsc + 6.0;
+                descent = Math.max(0, -(axis - gap - innerAsc)) + 5.0;
+            } else {
+                // Python: ascent = axis + gap + num.descent + num.ascent
+                ascent = axis + gap + innerDesc + innerAsc;  // = 3.2 + 2.6 + 0 + 8.16 = 13.96
+                // Python: descent = max(0, -(den_y - den.descent)) where den_y = axis - gap - den.ascent
+                descent = Math.max(0, -(axis - gap - innerAsc));  // = max(0, 7.56) = 7.56
+            }
+        } else if (hasSqrt) {
+            // Python _layout_sqrt: gap_top=1.2, bar_t=0.52
+            const gapTop = 1.2;
+            const barT = 0.52;
+            ascent = baseAsc + gapTop + barT + 1.5;
+            descent = 0.3;
+        } else if (hasAccent || hasArc) {
+            // Python _layout_accent: y_base = body.ascent + 0.8
+            ascent = baseAsc + 0.8 + 2.0;
+            descent = 0.0;
+        }
+
+        // Điều chỉnh cho chỉ số trên/dưới (matching Python _layout_script)
+        if (hasSub && !hasFrac && !hasSystem && !hasPile) {
+            // Python: sub_y = -max(2.3, descent + 1.0)
+            // descent = max(0, -(sub_y - sub.descent)) = max(0, 2.3)
+            descent = Math.max(descent, 2.3);
+        }
+        if (hasSup && !hasFrac && !hasSystem && !hasPile) {
+            // Python: sup_y = max(4.4, prev_ascent - 2.6)
+            // ascent = max(ascent, sup_y + sup.ascent)
+            const supY = Math.max(4.4, ascent - 2.6);
+            const supAsc = baseAsc * 0.64;  // subscale = 0.64
+            ascent = Math.max(ascent, supY + supAsc);
+        }
+
+        // Sum/integral có giới hạn trên dưới
+        if (hasSum || hasInt) {
+            ascent = Math.max(ascent, 13.0);
+            descent = Math.max(descent, 3.5);
+        }
+
+        // === TÍNH KÍCH THƯỚC CUỐI CÙNG (matching Python convert method) ===
+        const padX = 1.0;
+        const padY = 0.5;
+
+        // Width: ước lượng từ độ dài raw characters
+        let rawLen = clean.replace(/\\[a-zA-Z]+/g, 'X').replace(/[{}\s]/g, '').replace(/[_^]/g, '').length;
+        let widthPt = Math.max(2.0, rawLen * 6.0 + 2.0 * padX);
+        if (hasFrac) widthPt = Math.max(widthPt, rawLen * 5.0 + 2.0 * padX + 3.2);
+        widthPt = Math.max(12, Math.min(280, widthPt));
+
+        let heightPt = Math.max(4.0, ascent + descent + 2.0 * padY);
+
+        // posHalfPts: Python formula: -max(1, round((descent + padY) * 2.0))
+        const descentFromBottom = descent + padY;
+        let posHalfPts = -Math.max(1, Math.round(descentFromBottom * 2.0));
 
         return {
             widthPt,
@@ -1708,6 +1847,7 @@
             let wmfBytes;
             let widthPt = dims.widthPt;
             let heightPt = dims.heightPt;
+            let posHalfPts = dims.posHalfPts;
 
             const rendered = renderFormulaCanvas(latex, dims.widthPt, dims.heightPt);
             if (rendered && rendered.imgData) {
@@ -1715,6 +1855,21 @@
                 widthPt = rendered.widthPt;
                 heightPt = rendered.heightPt;
                 wmfBytes = buildWmfFromDib(dib, rendered.widthPx, rendered.heightPx, widthPt, heightPt);
+                // Recalculate posHalfPts based on actual rendered height
+                // Python formula: posHalfPts = -max(1, round((descent + padY) * 2.0))
+                // descent_ratio = descent / (ascent + descent) from original estimate
+                const totalEstH = dims.heightPt;
+                const padY = 0.5;
+                const estDescent = (dims.posHalfPts === 0) ? 0 : Math.abs(dims.posHalfPts) / 2.0 - padY;
+                const estTotal = totalEstH - 2 * padY; // ascent + descent without padding
+                if (estTotal > 0 && estDescent > 0) {
+                    const descentRatio = estDescent / estTotal;
+                    const newDescent = descentRatio * (heightPt - 2 * padY);
+                    posHalfPts = -Math.max(1, Math.round((newDescent + padY) * 2.0));
+                } else {
+                    // Simple formula (only ascent, no descent) — minimal offset
+                    posHalfPts = -2;
+                }
             } else {
                 wmfBytes = buildWmf(widthPt, heightPt, latex);
             }
@@ -1759,7 +1914,7 @@
                 heightPt,
                 dxaOrig: Math.round(widthPt * 20),
                 dyaOrig: Math.round(heightPt * 20),
-                posHalfPts: dims.posHalfPts
+                posHalfPts
             };
 
             this.entries.push(entry);
@@ -2711,10 +2866,13 @@
 
                     // Xác định kích thước tự nhiên của hình ảnh
                     const dims = getImageDimensions(bytes);
-                    const maxW_emu = 4752000; // ~13.2 cm (vừa vặn chuẩn trang A4 Word có lề 2cm)
-                    const maxH_emu = 3600000; // ~10.0 cm
-                    let cx = Math.round(dims.w * 9525);
-                    let cy = Math.round(dims.h * 9525);
+                    // Scale ảnh xuống ~24% pixel gốc để vừa vặn trong đề thi Word
+                    // (giảm 40% so với phiên bản trước để ảnh không quá to)
+                    const imgScale = 0.24;
+                    const maxW_emu = 1270000; // ~3.5 cm (vừa vặn trong dòng đề thi)
+                    const maxH_emu = 1080000; // ~3.0 cm
+                    let cx = Math.round(dims.w * 9525 * imgScale);
+                    let cy = Math.round(dims.h * 9525 * imgScale);
 
                     if (cx > maxW_emu) {
                         const sc = maxW_emu / cx;
@@ -2726,8 +2884,8 @@
                         cy = maxH_emu;
                         cx = Math.round(cx * sc);
                     }
-                    cx = Math.max(720000, cx);
-                    cy = Math.max(540000, cy);
+                    cx = Math.max(360000, cx);  // min ~1cm
+                    cy = Math.max(270000, cy);  // min ~0.75cm
 
                     zip.file(`word/media/image_${imgId}.png`, bytes);
                     const imgPayload = { id: imgId, rId, cx, cy };
