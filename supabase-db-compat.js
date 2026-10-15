@@ -1,6 +1,6 @@
 // supabase-db-compat.js
 // TOÀN BỘ TẦNG TƯƠNG THÍCH ĐỘC LẬP TỪ FIREBASE SANG SUPABASE POSTGRESQL & REALTIME
-import { supabase, getServerNow, calibrateServerTime, parseDateSafe } from './supabase-client.js?v=26';
+import { supabase, getServerNow, calibrateServerTime, parseDateSafe } from './supabase-client.js?v=27';
 
 export { supabase, getServerNow, calibrateServerTime, parseDateSafe };
 
