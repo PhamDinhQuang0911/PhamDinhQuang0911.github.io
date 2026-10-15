@@ -30,7 +30,10 @@
     </script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Pacifico&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script>/* Áp dark mode ngay để tránh chớp trắng trên mobile */ try { if (localStorage.theme === 'dark' || localStorage.getItem('qmath_theme') === 'dark') document.documentElement.classList.add('dark'); } catch(e) {}</script>
+    <style>
+        * { -webkit-tap-highlight-color: transparent; }
+    </style>
     <script>
     // Kích hoạt ngay thuộc tính mùa trên <html> trước khi DOM render
     (function() {
@@ -474,7 +477,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <script src="latex-exporter.js?v=20261002"></script>
     <script src="system-backup.js?v=20261007"></script>
-    <script src="word-mathtype-exporter.js?v=20261015"></script>
+    <script src="word-mathtype-exporter.js?v=20261015-v2"></script>
     <script>
     window.MathJax = {
         loader: { load: ['[tex]/noerrors'] },
@@ -1233,7 +1236,7 @@
             }
         }
     </style>
-    <link rel="stylesheet" href="/styles.css?v=17">
+    <link rel="stylesheet" href="/styles.css?v=18">
 </head>
 <body class="h-screen flex overflow-hidden text-gray-800 bg-gray-50">
 
@@ -4883,11 +4886,13 @@
                 }
                 viewName = 'home';
             }
+            // Ẩn tất cả view trước rồi mới hiện target (chuẩn student.html, tránh chớp nháy reflow)
+            document.querySelectorAll('.view-section').forEach(el => {
+                el.classList.add('hidden');
+            });
             const target = document.getElementById(`view-${viewName}`);
             if (target) target.classList.remove('hidden');
-            document.querySelectorAll('.view-section').forEach(el => {
-                if (el !== target) el.classList.add('hidden');
-            });
+
             document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
             const activeNav = document.getElementById(`nav-${viewName}`);
             if(activeNav) activeNav.classList.add('active');
@@ -4922,28 +4927,29 @@
                 }
             });
 
-            // Tự động đóng sidebar và quick action sheet trên mobile khi chuyển tab
+            // Tự động đóng sidebar và quick action sheet trên mobile khi chuyển tab (chỉ khi đang mở)
             if (window.innerWidth < 768) {
-                if (window.closeSidebar) window.closeSidebar();
-                if (window.toggleMobileQuickActionSheet) window.toggleMobileQuickActionSheet(false);
+                const sb = document.getElementById('mainSidebar');
+                if (sb && sb.classList.contains('sidebar-open') && window.closeSidebar) {
+                    window.closeSidebar();
+                }
+                const sheet = document.getElementById('mobileQuickActionSheet');
+                if (sheet && !sheet.classList.contains('pointer-events-none') && window.toggleMobileQuickActionSheet) {
+                    window.toggleMobileQuickActionSheet(false);
+                }
             }
-            // Cuộn trang lên đầu khi chuyển tab nếu đang cuộn (smooth như student.html)
-            if (window.scrollY > 0) {
-                window.scrollTo({ top: 0, behavior: 'smooth' });
-            }
-            if (target && target.scrollTop > 0) {
-                target.scrollTop = 0;
-            }
+            // Cuộn trang lên đầu khi chuyển tab mượt mà như student.html
+            window.scrollTo({ top: 0, behavior: 'smooth' });
             const mainArea = document.getElementById('mainScrollArea');
-            if (mainArea && mainArea.scrollTop > 0) {
-                mainArea.scrollTop = 0;
-            }
+            if (mainArea) mainArea.scrollTo({ top: 0, behavior: 'smooth' });
 
             if (pushHistory) {
                 const url = new URL(window.location);
-                url.searchParams.set('view', viewName);
-                url.searchParams.delete('id');
-                history.pushState({ view: viewName }, '', url);
+                if (url.searchParams.get('view') !== viewName) {
+                    url.searchParams.set('view', viewName);
+                    url.searchParams.delete('id');
+                    history.pushState({ view: viewName }, '', url);
+                }
             }
 
             // [TỐI ƯU] Tải Ngân hàng đề ngay khi bấm vào tab này (Cache-First)
