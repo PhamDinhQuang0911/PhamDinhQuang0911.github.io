@@ -3060,6 +3060,95 @@
         return { w: 400, h: 300 };
     }
 
+    async function svgToPngBytes(svgText, scale = 2) {
+        if (typeof document === 'undefined' || !document || !document.createElement) return null;
+        return new Promise((resolve) => {
+            try {
+                let cleanSvg = String(svgText || '').trim();
+                if (!cleanSvg) return resolve(null);
+                // Đảm bảo SVG có viewBox hoặc width/height
+                if (!/viewBox=/i.test(cleanSvg)) {
+                    const wM = cleanSvg.match(/width=["'](\d+(?:\.\d+)?)/i);
+                    const hM = cleanSvg.match(/height=["'](\d+(?:\.\d+)?)/i);
+                    if (wM && hM) {
+                        cleanSvg = cleanSvg.replace(/<svg\b/i, `<svg viewBox="0 0 ${Math.round(parseFloat(wM[1]))} ${Math.round(parseFloat(hM[1]))}" `);
+                    }
+                }
+                const blob = new Blob([cleanSvg], { type: 'image/svg+xml;charset=utf-8' });
+                const url = URL.createObjectURL(blob);
+                const img = new Image();
+                img.onload = () => {
+                    try {
+                        const canvas = document.createElement('canvas');
+                        const nw = img.naturalWidth || 400;
+                        const nh = img.naturalHeight || 300;
+                        canvas.width = Math.round(nw * scale);
+                        canvas.height = Math.round(nh * scale);
+                        const ctx = canvas.getContext('2d');
+                        ctx.imageSmoothingEnabled = true;
+                        ctx.imageSmoothingQuality = 'high';
+                        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                        URL.revokeObjectURL(url);
+                        canvas.toBlob((pngBlob) => {
+                            if (!pngBlob) return resolve(null);
+                            const reader = new FileReader();
+                            reader.onload = () => resolve(new Uint8Array(reader.result));
+                            reader.onerror = () => resolve(null);
+                            reader.readAsArrayBuffer(pngBlob);
+                        }, 'image/png');
+                    } catch(e) {
+                        URL.revokeObjectURL(url);
+                        resolve(null);
+                    }
+                };
+                img.onerror = () => {
+                    URL.revokeObjectURL(url);
+                    resolve(null);
+                };
+                img.src = url;
+            } catch(err) {
+                resolve(null);
+            }
+        });
+    }
+
+    async function imageToPngBytes(srcUrl) {
+        if (typeof document === 'undefined' || !document || !document.createElement) return null;
+        return new Promise((resolve) => {
+            try {
+                const img = new Image();
+                img.crossOrigin = 'anonymous';
+                const timer = setTimeout(() => resolve(null), 6000);
+                img.onload = () => {
+                    clearTimeout(timer);
+                    try {
+                        const canvas = document.createElement('canvas');
+                        canvas.width = img.naturalWidth || img.width || 400;
+                        canvas.height = img.naturalHeight || img.height || 300;
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(img, 0, 0);
+                        canvas.toBlob((blob) => {
+                            if (!blob) return resolve(null);
+                            const r = new FileReader();
+                            r.onload = () => resolve(new Uint8Array(r.result));
+                            r.onerror = () => resolve(null);
+                            r.readAsArrayBuffer(blob);
+                        }, 'image/png');
+                    } catch(e) {
+                        resolve(null);
+                    }
+                };
+                img.onerror = () => {
+                    clearTimeout(timer);
+                    resolve(null);
+                };
+                img.src = srcUrl;
+            } catch(e) {
+                resolve(null);
+            }
+        });
+    }
+
     async function fetchImageBytes(src) {
         if (!src) return null;
         src = String(src).trim();
@@ -3067,6 +3156,14 @@
         // 1. Data URL
         if (src.startsWith('data:image')) {
             try {
+                if (src.startsWith('data:image/svg+xml')) {
+                    const commaIdx = src.indexOf(',');
+                    const svgText = src.includes(';base64,')
+                        ? atob(src.substring(commaIdx + 1))
+                        : decodeURIComponent(src.substring(commaIdx + 1));
+                    const pngBytes = await svgToPngBytes(svgText);
+                    if (pngBytes) return pngBytes;
+                }
                 const base64 = src.split(',')[1];
                 const binStr = (typeof atob === 'function')
                     ? atob(base64)
@@ -3084,18 +3181,47 @@
         // 2. HTTP / HTTPS / Đường dẫn tương đối
         const urlsToTry = [src];
         if (src.startsWith('http://') || src.startsWith('https://')) {
-            // Cloudflare R2 bucket không bật CORS -> Weserv proxy mở CORS * cho toàn cầu
+            // Cloudflare R2 bucket hỗ trợ CORS trực tiếp; proxy dự phòng nếu cần
             urlsToTry.push(`https://images.weserv.nl/?url=${encodeURIComponent(src)}`);
             urlsToTry.push(`https://api.allorigins.win/raw?url=${encodeURIComponent(src)}`);
         }
 
         for (const url of urlsToTry) {
             try {
-                const resp = await fetch(url, { mode: 'cors' });
+                const resp = await fetch(url);
                 if (resp.ok) {
+                    const ct = (resp.headers.get('content-type') || '').toLowerCase();
                     const ab = await resp.arrayBuffer();
                     if (ab && ab.byteLength > 0) {
-                        return new Uint8Array(ab);
+                        const u8 = new Uint8Array(ab);
+                        const snippet = new TextDecoder('utf-8', { fatal: false }).decode(u8.subarray(0, Math.min(250, u8.length)));
+
+                        // Nếu là SVG (từ R2 TikZ render): chuyển đổi sang PNG chuẩn cho Word
+                        if (ct.includes('svg') || snippet.includes('<svg') || (snippet.includes('<?xml') && snippet.includes('<svg')) || url.toLowerCase().includes('.svg')) {
+                            const fullSvg = new TextDecoder('utf-8').decode(u8);
+                            const png = await svgToPngBytes(fullSvg, 2);
+                            if (png && png.length > 0) return png;
+                        }
+
+                        // Kiểm tra Header nhị phân hợp lệ của ảnh
+                        const isPng = u8.length > 8 && u8[0] === 0x89 && u8[1] === 0x50 && u8[2] === 0x4E && u8[3] === 0x47;
+                        const isJpg = u8.length > 3 && u8[0] === 0xFF && u8[1] === 0xD8 && u8[2] === 0xFF;
+                        const isGif = u8.length > 4 && u8[0] === 0x47 && u8[1] === 0x49 && u8[2] === 0x46;
+                        const isWebp = u8.length > 12 && u8[0] === 0x52 && u8[1] === 0x49 && u8[2] === 0x46 && u8[3] === 0x46;
+
+                        if (isPng || isJpg || isGif) {
+                            return u8;
+                        }
+                        if (isWebp) {
+                            const converted = await imageToPngBytes(url);
+                            if (converted) return converted;
+                            return u8;
+                        }
+                        // Không trả về file HTML lỗi (403/404 HTML text giả dạng ảnh)
+                        if (snippet.includes('<html') || snippet.includes('<!doctype') || snippet.includes('Access Denied')) {
+                            continue;
+                        }
+                        return u8;
                     }
                 }
             } catch (err) {
@@ -3104,32 +3230,10 @@
         }
 
         // 3. Fallback Canvas DOM (trường hợp ảnh đã nạp sẵn trong cache trình duyệt)
-        if (typeof document !== 'undefined' && document && document.createElement) {
-            try {
-                const img = new Image();
-                img.crossOrigin = 'anonymous';
-                const loadPromise = new Promise((resolve, reject) => {
-                    img.onload = () => resolve(img);
-                    img.onerror = reject;
-                    setTimeout(() => reject(new Error('Timeout')), 5000);
-                });
-                img.src = src;
-                const loadedImg = await loadPromise;
-                const canvas = document.createElement('canvas');
-                canvas.width = loadedImg.naturalWidth || loadedImg.width;
-                canvas.height = loadedImg.naturalHeight || loadedImg.height;
-                const ctx = canvas.getContext('2d');
-                ctx.drawImage(loadedImg, 0, 0);
-                const dataUrl = canvas.toDataURL('image/png');
-                const base64 = dataUrl.split(',')[1];
-                const binStr = atob(base64);
-                const arr = new Uint8Array(binStr.length);
-                for (let i = 0; i < binStr.length; i++) arr[i] = binStr.charCodeAt(i);
-                return arr;
-            } catch (domErr) {
-                // Bỏ qua nếu canvas bị taint
-            }
-        }
+        try {
+            const fallbackU8 = await imageToPngBytes(src);
+            if (fallbackU8 && fallbackU8.length > 0) return fallbackU8;
+        } catch (domErr) {}
 
         return null;
     }
@@ -3232,11 +3336,10 @@
 
                     // Xác định kích thước tự nhiên của hình ảnh
                     const dims = getImageDimensions(bytes);
-                    // Scale ảnh xuống ~24% pixel gốc để vừa vặn trong đề thi Word
-                    // (giảm 40% so với phiên bản trước để ảnh không quá to)
-                    const imgScale = 0.24;
-                    const maxW_emu = 1270000; // ~3.5 cm (vừa vặn trong dòng đề thi)
-                    const maxH_emu = 1080000; // ~3.0 cm
+                    // Scale ảnh xuống ~15% pixel gốc (giảm ~40% so với trước để ảnh vừa vặn, không bị choán chỗ)
+                    const imgScale = 0.15;
+                    const maxW_emu = 762000; // ~2.0 inches (~5.1 cm)
+                    const maxH_emu = 650000; // ~1.7 inches (~4.3 cm)
                     let cx = Math.round(dims.w * 9525 * imgScale);
                     let cy = Math.round(dims.h * 9525 * imgScale);
 
@@ -3250,8 +3353,8 @@
                         cy = maxH_emu;
                         cx = Math.round(cx * sc);
                     }
-                    cx = Math.max(360000, cx);  // min ~1cm
-                    cy = Math.max(270000, cy);  // min ~0.75cm
+                    cx = Math.max(250000, cx);  // min ~0.7cm
+                    cy = Math.max(180000, cy);  // min ~0.5cm
 
                     zip.file(`word/media/image_${imgId}.png`, bytes);
                     const imgPayload = { id: imgId, rId, cx, cy };
@@ -3371,6 +3474,267 @@
     }
 
     // ==========================================
+    // 11.5. ĐỘNG CƠ XUẤT PYODIDE PYTHON WASM (TeX2MathType Pro)
+    // ==========================================
+    let pyodideExporterWorker = null;
+    let isPyodideExporterReady = false;
+    let pyodideInitPromise = null;
+
+    function getPyodideExporterWorker(onProgress) {
+        if (pyodideExporterWorker && isPyodideExporterReady) {
+            return Promise.resolve(pyodideExporterWorker);
+        }
+        if (pyodideInitPromise) {
+            return pyodideInitPromise;
+        }
+
+        pyodideInitPromise = new Promise((resolve, reject) => {
+            try {
+                if (!pyodideExporterWorker) {
+                    pyodideExporterWorker = new Worker("tex2mathtype-worker.js");
+                }
+                const initTimeout = setTimeout(() => {
+                    if (!isPyodideExporterReady) {
+                        pyodideInitPromise = null;
+                        reject(new Error("Timeout khởi tạo Pyodide (vượt quá 60s)"));
+                    }
+                }, 60000);
+
+                const initHandler = (e) => {
+                    const { type, message, pct, error } = e.data;
+                    if (type === "READY") {
+                        clearTimeout(initTimeout);
+                        isPyodideExporterReady = true;
+                        if (onProgress) onProgress(100, "Động cơ Python TeX2MathType Pro đã sẵn sàng!");
+                        resolve(pyodideExporterWorker);
+                    } else if (type === "PROGRESS") {
+                        if (onProgress) onProgress(pct, message);
+                    } else if (type === "ERROR" && !isPyodideExporterReady) {
+                        clearTimeout(initTimeout);
+                        pyodideInitPromise = null;
+                        reject(new Error(error || "Không thể khởi tạo Python WebAssembly"));
+                    }
+                };
+
+                pyodideExporterWorker.addEventListener("message", initHandler);
+                pyodideExporterWorker.addEventListener("error", (err) => {
+                    clearTimeout(initTimeout);
+                    pyodideInitPromise = null;
+                    reject(err);
+                });
+            } catch(e) {
+                pyodideInitPromise = null;
+                reject(e);
+            }
+        });
+
+        return pyodideInitPromise;
+    }
+
+    function cleanHtmlToLatex(text) {
+        if (!text) return "";
+        let s = String(text);
+        s = s.replace(/<div[^>]*>\s*<img[^>]*src="([^"]+)"[^>]*>\s*<\/div>/gi, '\n\\begin{center}\n\\includegraphics{$1}\n\\end{center}\n');
+        s = s.replace(/<img[^>]*src="([^"]+)"[^>]*>/gi, '\n\\begin{center}\n\\includegraphics{$1}\n\\end{center}\n');
+        s = s.replace(/<br\s*\/?>/gi, '\n');
+        s = s.replace(/<p>([\s\S]*?)<\/p>/gi, '$1\n\n');
+        s = s.replace(/<b>(.*?)<\/b>/gi, '\\textbf{$1}');
+        s = s.replace(/<strong>(.*?)<\/strong>/gi, '\\textbf{$1}');
+        s = s.replace(/<i>(.*?)<\/i>/gi, '\\textit{$1}');
+        s = s.replace(/<em>(.*?)<\/em>/gi, '\\textit{$1}');
+        s = s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+        s = s.replace(/<\/?(?:div|span|script)[^>]*>/gi, '');
+        return s.trim();
+    }
+
+    async function exportExamViaPyodide(exam, customOptions = {}) {
+        if (!exam) throw new Error('Không có dữ liệu đề thi');
+        const questions = exam.questions || [];
+        const baseName = sanitizeFilename(customOptions.examTitle || exam.title || 'De_Thi');
+        const mode = customOptions.mode || 'questions';
+
+        const btnConfirm = document.getElementById('btnConfirmExportWord');
+        const setStatus = (pct, msg) => {
+            if (btnConfirm) {
+                btnConfirm.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> [${pct}%] ${msg}`;
+            }
+        };
+
+        setStatus(5, "Đang tải động cơ Python TeX2MathType Pro...");
+        const worker = await getPyodideExporterWorker(setStatus);
+
+        setStatus(15, "Đang nạp hình ảnh từ kho Cloudflare R2...");
+        // 1. Quét hình ảnh
+        const scanImgs = (txt) => {
+            if (!txt) return [];
+            const res = [];
+            const m1 = txt.matchAll(/<img\s+[^>]*src=["']([^"']+)["'][^>]*>/gi);
+            for (const m of m1) res.push(m[1]);
+            const m2 = txt.matchAll(/\\includegraphics(?:\[.*?\])?\{([^}]+)\}/gi);
+            for (const m of m2) res.push(m[1]);
+            return res;
+        };
+
+        const allSources = [];
+        questions.forEach(q => {
+            if (q.image) allSources.push(q.image);
+            if (q.img) allSources.push(q.img);
+            if (q.imageUrl) allSources.push(q.imageUrl);
+            if (q.image_url) allSources.push(q.image_url);
+            if (Array.isArray(q.images)) allSources.push(...q.images);
+            allSources.push(...scanImgs(q.content));
+            allSources.push(...scanImgs(q.solution || q.explain));
+            (q.options || []).forEach(opt => {
+                if (typeof opt === 'object') {
+                    if (opt.image) allSources.push(opt.image);
+                    if (opt.img) allSources.push(opt.img);
+                    allSources.push(...scanImgs(opt.text));
+                } else {
+                    allSources.push(...scanImgs(opt));
+                }
+            });
+            (q.statements || []).forEach(st => {
+                if (typeof st === 'object') {
+                    if (st.image) allSources.push(st.image);
+                    if (st.img) allSources.push(st.img);
+                    allSources.push(...scanImgs(st.text || st.content));
+                } else {
+                    allSources.push(...scanImgs(st));
+                }
+            });
+        });
+
+        const uniqueSources = Array.from(new Set(allSources.filter(Boolean)));
+        const imagesList = [];
+        const imageMap = {};
+        let imgIdx = 0;
+
+        for (const src of uniqueSources) {
+            try {
+                const bytes = await fetchImageBytes(src);
+                if (bytes && bytes.length > 0) {
+                    imgIdx++;
+                    const fname = `exam_img_${imgIdx}.png`;
+                    imageMap[src] = fname;
+                    imagesList.push({ filename: fname, data: bytes });
+                }
+            } catch(e) {
+                console.warn('[PyodideExport] Không thể nạp ảnh:', src, e);
+            }
+        }
+
+        setStatus(30, "Đang chuẩn hóa đề thi sang LaTeX...");
+        let fullLatex = '';
+        questions.forEach((q, idx) => {
+            let content = q.content || '';
+            for (const [sUrl, fName] of Object.entries(imageMap)) {
+                if (content.includes(sUrl)) content = content.split(sUrl).join(fName);
+            }
+            content = cleanHtmlToLatex(content);
+            const env = q.env || (q.type === 'essay' || q.type === 'tl' ? 'bt' : 'ex');
+            const cccd = q.cccd || q.bankId || q.id || '';
+            
+            fullLatex += `\\begin{${env}}[${cccd}]\n${content}\n`;
+
+            const qCandidates = [q.image, q.img, q.imageUrl, q.image_url];
+            if (Array.isArray(q.images)) qCandidates.push(...q.images);
+            qCandidates.forEach(cand => {
+                if (cand && imageMap[cand] && !content.includes(imageMap[cand])) {
+                    fullLatex += `\\begin{center}\n\\includegraphics{${imageMap[cand]}}\n\\end{center}\n`;
+                }
+            });
+
+            if (q.type === 'tf' || (Array.isArray(q.statements) && q.statements.length > 0)) {
+                const stmts = Array.isArray(q.statements) ? q.statements : q.options;
+                const tfItems = (stmts || []).map(st => {
+                    let stText = typeof st === 'object' ? (st.content || st.text || '') : st;
+                    for (const [sUrl, fName] of Object.entries(imageMap)) {
+                        if (stText.includes(sUrl)) stText = stText.split(sUrl).join(fName);
+                    }
+                    stText = cleanHtmlToLatex(stText);
+                    const isTrue = typeof st === 'object' ? (st.isTrue === true || st.correct === true) : false;
+                    return `\t{${isTrue ? '\\True ' : ''}${stText}}`;
+                }).join('\n');
+                fullLatex += `\\choiceTF\n${tfItems}\n`;
+            } else if (Array.isArray(q.options) && q.options.length > 0) {
+                const correctIdx = typeof q.correct === 'number' ? q.correct : (q.correctAnswer ? ['A','B','C','D'].indexOf(String(q.correctAnswer).trim().toUpperCase()) : -1);
+                const choiceItems = q.options.map((opt, i) => {
+                    let optText = typeof opt === 'object' ? (opt.text || '') : opt;
+                    for (const [sUrl, fName] of Object.entries(imageMap)) {
+                        if (optText.includes(sUrl)) optText = optText.split(sUrl).join(fName);
+                    }
+                    optText = cleanHtmlToLatex(optText);
+                    const isCorrect = (i === correctIdx);
+                    return `\t{${isCorrect ? '\\True ' : ''}${optText}}`;
+                }).join('\n');
+                fullLatex += `\\choice\n${choiceItems}\n`;
+            } else if (q.type === 'short' && (q.answer !== undefined || q.correctAnswer)) {
+                const ans = String(q.answer !== undefined && q.answer !== null ? q.answer : (q.correctAnswer || '')).trim();
+                fullLatex += `\\shortans{${cleanHtmlToLatex(ans)}}\n`;
+            }
+
+            if (q.solution || q.explain) {
+                let sol = q.solution || q.explain || '';
+                for (const [sUrl, fName] of Object.entries(imageMap)) {
+                    if (sol.includes(sUrl)) sol = sol.split(sUrl).join(fName);
+                }
+                sol = cleanHtmlToLatex(sol);
+                fullLatex += `\\loigiai{\n${sol}\n}\n`;
+            }
+
+            fullLatex += `\\end{${env}}\n\n`;
+        });
+
+        setStatus(40, "Đang chuyển đổi MathType OLE trong Python Wasm...");
+
+        return new Promise((resolve, reject) => {
+            const reqId = Date.now();
+            const messageHandler = function (e) {
+                const { type, message, pct, files, error, id } = e.data;
+                if (id && id !== reqId) return;
+
+                if (type === 'PROGRESS') {
+                    setStatus(pct, message);
+                } else if (type === 'SUCCESS') {
+                    worker.removeEventListener('message', messageHandler);
+                    setStatus(100, "Hoàn tất! Đang tải file Word...");
+                    files.forEach(f => {
+                        const blob = new Blob([f.data], {
+                            type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+                        });
+                        let outName = f.filename;
+                        if (mode === 'questions' && (!outName.includes('De_Bai') && !outName.includes('De_Thi'))) {
+                            outName = `${baseName}_De_Bai.docx`;
+                        } else if (mode === 'full' && (!outName.includes('Loi_Giai'))) {
+                            outName = `${baseName}_De_Va_Loi_Giai.docx`;
+                        } else if (files.length === 1 && !outName.includes(baseName)) {
+                            outName = `${baseName}_${f.filename}`;
+                        }
+                        triggerDownload(blob, outName);
+                    });
+                    resolve(files);
+                } else if (type === 'ERROR') {
+                    worker.removeEventListener('message', messageHandler);
+                    reject(new Error(error));
+                }
+            };
+
+            worker.addEventListener('message', messageHandler);
+            worker.postMessage({
+                action: 'CONVERT_TEX',
+                id: reqId,
+                payload: {
+                    text: fullLatex,
+                    standard: customOptions.standard || 'btn_group',
+                    mode: mode,
+                    base_pt: 11.0,
+                    images: imagesList
+                }
+            });
+        });
+    }
+
+    // ==========================================
     // 12. HÀM XUẤT ĐỀ THI RA FILE WORD
     // ==========================================
     async function exportExamToWord(exam, customOptions = {}) {
@@ -3378,7 +3742,19 @@
         const questions = exam.questions || [];
         const baseName = sanitizeFilename(customOptions.examTitle || exam.title || 'De_Thi');
         const mode = customOptions.mode || 'questions';
+        const formulaMode = customOptions.formulaMode || 'mathtype';
 
+        // 1. Nếu chọn MathType: Ưu tiên xử lý bằng Pyodide Python WebAssembly
+        if (formulaMode === 'mathtype') {
+            try {
+                return await exportExamViaPyodide(exam, customOptions);
+            } catch (pyErr) {
+                console.warn('[MathType Exporter] Pyodide gặp sự cố, tự động fallback sang bộ tạo tích hợp:', pyErr);
+                // Fallback nếu người dùng offline hoặc CDN bị lỗi
+            }
+        }
+
+        // 2. Chế độ OMML hoặc fallback built-in docx blob generator
         if (mode === 'both') {
             const blobQ = await createDocxBlob({
                 title: customOptions.examTitle || exam.title || 'Đề thi',
@@ -3420,6 +3796,9 @@
     // 13. GIAO DIỆN MODAL TÙY CHỌN XUẤT WORD
     // ==========================================
     function openExportWordModal(examOrId, preloadedQuestions = null) {
+        // Tải trước động cơ Pyodide trong nền để sẵn sàng ngay khi người dùng bấm xuất
+        try { getPyodideExporterWorker(); } catch(e) {}
+
         let modal = document.getElementById('exportWordModal');
         if (!modal) {
             modal = document.createElement('div');
@@ -3455,8 +3834,8 @@
                             <label class="flex items-start gap-2 p-2.5 rounded-xl border border-blue-300 dark:border-blue-700 bg-white dark:bg-gray-800 hover:bg-blue-50 dark:hover:bg-blue-950/40 cursor-pointer transition">
                                 <input type="radio" name="exportWordFormulaMode" value="mathtype" checked class="mt-0.5 text-blue-600 focus:ring-blue-500">
                                 <div>
-                                    <p class="text-xs font-bold text-blue-700 dark:text-blue-300">✨ MathType 6/7 (DSMT4 OLE)</p>
-                                    <p class="text-[10px] text-gray-500">Chuẩn BTPRO / Thầy Choang. Nhấp đúp mở MathType, tương thích Alt+\\</p>
+                                    <p class="text-xs font-bold text-blue-700 dark:text-blue-300">✨ MathType 6/7 (TeX2MathType Pro Python Wasm)</p>
+                                    <p class="text-[10px] text-gray-500">Động cơ Python chính thức chạy trực tiếp trên trình duyệt (Wasm). Công thức chuẩn OLE2 Equation.DSMT4, cỡ chữ và căn lề hoàn hảo.</p>
                                 </div>
                             </label>
                             <label class="flex items-start gap-2 p-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer transition">
