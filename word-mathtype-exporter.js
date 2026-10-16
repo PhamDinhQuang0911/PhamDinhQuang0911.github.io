@@ -2370,26 +2370,53 @@
         return 'S';
     }
 
+    function cleanShortAnswerRaw(raw) {
+        if (!raw) return '';
+        let s = String(raw).trim();
+        // Bỏ các thẻ HTML in đậm / nghiêng / span
+        s = s.replace(/<\/?(?:b|strong|i|em|span|p|div)\b[^>]*>/gi, '');
+        // Bỏ các lệnh LaTeX \textbf{...}, \mathbf{...}, \text{...}, \mathrm{...}
+        s = s.replace(/\\(?:textbf|mathbf|text|mathrm|textrm|textit)\s*\{([^}]*)\}/gi, '$1');
+        s = s.replace(/\\(?:textbf|mathbf|text|mathrm|textrm|textit)\b/gi, '');
+        // Xóa dấu $ đầu cuối thừa
+        s = s.replace(/^\$+|\$+$/g, '').trim();
+        // Bỏ dấu ngoặc nhọn quanh dấu phẩy hoặc chấm
+        s = s.replace(/\{([.,])\}/g, '$1');
+        return s.trim();
+    }
+
+    function formatShortAnswerForLatex(ans) {
+        if (!ans) return '';
+        let s = cleanShortAnswerRaw(ans);
+        if (!s) return '';
+        // Chuẩn hóa dấu phẩy số thập phân trong LaTeX (0,5 -> 0{,}5)
+        s = s.replace(/(\d+),(\d+)/g, '$1{,}$2');
+        // Nếu là biểu thức toán/số, bọc trong $...$ để chuyển đổi sang MathType
+        if (!s.startsWith('$') && !s.startsWith('\\(') && !s.startsWith('\\[') && /[0-9+\-=*/^_\\,]/.test(s)) {
+            s = `$${s}$`;
+        }
+        return s;
+    }
+
     function getShortAnswerText(q) {
         if (!q) return '';
+        let raw = '';
         if (q.answer !== undefined && q.answer !== null && String(q.answer).trim() !== '') {
-            return String(q.answer).trim();
+            raw = String(q.answer).trim();
+        } else if (q.correctAnswer !== undefined && q.correctAnswer !== null && String(q.correctAnswer).trim() !== '') {
+            raw = String(q.correctAnswer).trim();
+        } else if (q.shortAnswer !== undefined && q.shortAnswer !== null && String(q.shortAnswer).trim() !== '') {
+            raw = String(q.shortAnswer).trim();
+        } else if (q.correct !== undefined && q.correct !== null && String(q.correct).trim() !== '' && q.correct !== -1 && q.correct !== '-1') {
+            raw = String(q.correct).trim();
+        } else {
+            const sol = q.solution || q.explain || '';
+            if (sol) {
+                const m = /(?:đáp\s*số|đáp\s*án|kết\s*quả)\s*[:=]\s*([^\n\r]+)/i.exec(sol);
+                if (m) raw = m[1].replace(/\\loigiai\{?|\}?/g, '').trim();
+            }
         }
-        if (q.correctAnswer !== undefined && q.correctAnswer !== null && String(q.correctAnswer).trim() !== '') {
-            return String(q.correctAnswer).trim();
-        }
-        if (q.shortAnswer !== undefined && q.shortAnswer !== null && String(q.shortAnswer).trim() !== '') {
-            return String(q.shortAnswer).trim();
-        }
-        if (q.correct !== undefined && q.correct !== null && String(q.correct).trim() !== '' && q.correct !== -1 && q.correct !== '-1') {
-            return String(q.correct).trim();
-        }
-        const sol = q.solution || q.explain || '';
-        if (sol) {
-            const m = /(?:đáp\s*số|đáp\s*án|kết\s*quả)\s*[:=]\s*([^\n\r]+)/i.exec(sol);
-            if (m) return m[1].replace(/\\loigiai\{?|\}?/g, '').trim();
-        }
-        return '';
+        return cleanShortAnswerRaw(raw);
     }
 
     // ==========================================
@@ -2864,10 +2891,7 @@
                 const showShortAnswer = (mode === 'full') || underlineCorrect;
 
                 if (showShortAnswer && ansVal) {
-                    let cleanAns = ansVal.trim();
-                    if (!cleanAns.startsWith('$') && !cleanAns.startsWith('\\(') && !cleanAns.startsWith('\\[') && /[0-9+\-=*/^_\\]/.test(cleanAns)) {
-                        cleanAns = `$${cleanAns}$`;
-                    }
+                    const cleanAns = formatShortAnswerForLatex(ansVal);
                     bodyXml += `
                     <w:p>
                       <w:pPr><w:ind w:left="992"/><w:spacing w:before="40" w:after="40"/><w:jc w:val="both"/></w:pPr>
@@ -3078,10 +3102,7 @@
                         }
                         let cellContentXml = '';
                         if (ansVal) {
-                            let cleanAns = ansVal.trim();
-                            if (!cleanAns.startsWith('$') && !cleanAns.startsWith('\\(') && !cleanAns.startsWith('\\[') && /[0-9+\-=*/^_\\]/.test(cleanAns)) {
-                                cleanAns = `$${cleanAns}$`;
-                            }
+                            const cleanAns = formatShortAnswerForLatex(ansVal);
                             cellContentXml = renderRunsToXml(parseRunsFromText(cleanAns, true, false, formulaRegistry, formulaMode), imageMap, formulaRegistry);
                         }
                         bodyXml += `<w:tc><w:tcPr><w:tcW w:w="1795"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/><w:spacing w:before="60" w:after="60"/></w:pPr>${cellContentXml}</w:p></w:tc>`;
@@ -3444,12 +3465,12 @@
                     const imgId = imgCounter;
                     const rId = `rIdImg_${imgId}`;
 
-                    // Kích thước hình ảnh bằng 60% bản trước theo yêu cầu của Thầy (~7.1 cm)
+                    // Kích thước hình ảnh giảm tiếp 15% theo yêu cầu của Thầy (~5.8 - 6.0 cm)
                     const dims = getImageDimensions(bytes);
-                    const maxW_emu = 2700000; // ~7.1 cm (~2.8 inches, 60% trang A4)
-                    const maxH_emu = 2100000; // ~5.5 cm
-                    let cx = Math.round(dims.w * 9525 * 0.6);
-                    let cy = Math.round(dims.h * 9525 * 0.6);
+                    const maxW_emu = 2300000; // ~6.0 cm (~2.36 inches, ~51% trang A4)
+                    const maxH_emu = 1800000; // ~4.7 cm
+                    let cx = Math.round(dims.w * 9525 * 0.51);
+                    let cy = Math.round(dims.h * 9525 * 0.51);
 
                     if (cx > maxW_emu) {
                         const sc = maxW_emu / cx;
@@ -3461,8 +3482,8 @@
                         cy = maxH_emu;
                         cx = Math.round(cx * sc);
                     }
-                    cx = Math.max(720000, cx);  // min ~1.9cm
-                    cy = Math.max(540000, cy);  // min ~1.4cm
+                    cx = Math.max(600000, cx);  // min ~1.5cm
+                    cy = Math.max(450000, cy);  // min ~1.1cm
 
                     zip.file(`word/media/image_${imgId}.png`, bytes);
                     const imgPayload = { id: imgId, rId, cx, cy };
@@ -3611,7 +3632,7 @@
         pyodideInitPromise = new Promise((resolve, reject) => {
             try {
                 if (!pyodideExporterWorker) {
-                    pyodideExporterWorker = new Worker("tex2mathtype-worker.js?v=20261016_V5");
+                    pyodideExporterWorker = new Worker("tex2mathtype-worker.js?v=20261016_V6");
                 }
                 const initTimeout = setTimeout(() => {
                     if (!isPyodideExporterReady) {
@@ -3857,10 +3878,7 @@
             } else if (q.type === 'short' || (q.answer !== undefined && q.answer !== null && String(q.answer).trim() !== '')) {
                 const ans = getShortAnswerText(q);
                 if (ans) {
-                    let ansLatex = cleanHtmlToLatex(ans).trim();
-                    if (!ansLatex.startsWith('$') && !ansLatex.startsWith('\\(') && !ansLatex.startsWith('\\[') && /[0-9+\-=*/^_\\]/.test(ansLatex)) {
-                        ansLatex = `$${ansLatex}$`;
-                    }
+                    const ansLatex = formatShortAnswerForLatex(ans);
                     if (customOptions.underlineCorrect || mode === 'full') {
                         res += `\\textbf{Đáp án: }${ansLatex}\n\n`;
                     }
@@ -3940,13 +3958,7 @@
                     const colAlign = '|' + rQuestions.map(() => 'c|').join('');
                     fullLatex += `\\begin{tabular}{${colAlign}}\n\\hline\n`;
                     fullLatex += rQuestions.map((_, i) => `\\textbf{Câu ${r * colsPerRow + i + 1}}`).join(' & ') + ' \\\\\n\\hline\n';
-                    fullLatex += rQuestions.map(q => {
-                        let ans = getShortAnswerText(q).trim();
-                        if (!ans.startsWith('$') && !ans.startsWith('\\(') && !ans.startsWith('\\[') && /[0-9+\-=*/^_\\]/.test(ans)) {
-                            ans = `$${ans}$`;
-                        }
-                        return ans;
-                    }).join(' & ') + ' \\\\\n\\hline\n';
+                    fullLatex += rQuestions.map(q => formatShortAnswerForLatex(getShortAnswerText(q))).join(' & ') + ' \\\\\n\\hline\n';
                     fullLatex += `\\end{tabular}\n\n`;
                 }
             }
