@@ -1954,17 +1954,17 @@
     function parseLatexTabular(tabularCode) {
         if (!tabularCode) return null;
         // Hỗ trợ tabular* có {width}{col_spec} và tabular/longtable có {col_spec}
-        let startMatch = tabularCode.match(/\\begin\{tabular\*\}\s*(?:\[[^\]]*\])?\s*\{[^}]*\}\s*\{([^}]*)\}/i);
+        let startMatch = tabularCode.match(/\\begin\s*\{tabular\*\}\s*(?:\[[^\]]*\])?\s*\{[^}]*\}\s*\{([^}]*)\}/i);
         if (!startMatch) {
-            startMatch = tabularCode.match(/\\begin\{(?:tabular|longtable)\}\s*(?:\[[^\]]*\])?\s*\{([^}]*)\}/i);
+            startMatch = tabularCode.match(/\\begin\s*\{(?:tabular|longtable)\}\s*(?:\[[^\]]*\])?\s*\{([^}]*)\}/i);
         }
         if (!startMatch) {
-            startMatch = tabularCode.match(/\\begin\{(?:tabular\*?|longtable)\}.*?\{([^}]*)\}/i);
+            startMatch = tabularCode.match(/\\begin\s*\{(?:tabular\*?|longtable)\}.*?\{([^}]*)\}/i);
         }
         if (!startMatch) return null;
 
         const startIdx = startMatch.index + startMatch[0].length;
-        const endMatch = tabularCode.match(/\\end\{(?:tabular\*?|longtable)\}/i);
+        const endMatch = tabularCode.match(/\\end\s*\{(?:tabular\*?|longtable)\}/i);
         const endIdx = endMatch ? endMatch.index : tabularCode.length;
 
         let body = tabularCode.substring(startIdx, endIdx);
@@ -2317,7 +2317,7 @@
             examSubtitle = 'ĐỀ KHẢO SÁT CHẤT LƯỢNG HỌC KỲ',
             subject = 'Toán học',
             grade = '9',
-            examCode = '101',
+            examCode = '1001',
             duration = 90,
             includeCandidateInfo = true,
             includeDottedLines = false,
@@ -2538,15 +2538,17 @@
             const content = cleanHtmlToWordText(rawContent);
 
             // Kiểm tra xem câu hỏi có chứa môi trường tabular hoặc longtable hay không
-            const tabularMatch = content.match(/\\begin\{(?:tabular\*?|longtable)\}[\s\S]*?\\end\{(?:tabular\*?|longtable)\}/i);
+            const tabularMatch = content.match(/\\begin\s*\{(?:tabular\*?|longtable)\}[\s\S]*?\\end\s*\{(?:tabular\*?|longtable)\}/i);
             if (tabularMatch) {
                 const tableCode = tabularMatch[0];
                 const preText = content.substring(0, tabularMatch.index).trim();
                 const postText = content.substring(tabularMatch.index + tableCode.length).trim();
-                const prefixXml = `<w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr><w:t xml:space="preserve">${escapeXml(prefixText)}</w:t></w:r>`;
+                const prefixXml = prefixText ? `<w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr><w:t xml:space="preserve">${escapeXml(prefixText)}</w:t></w:r>` : '';
 
                 // Paragraph trước bảng
-                outXml += renderParagraphsWithImages(preText, 992, prefixXml);
+                if (preText || prefixXml) {
+                    outXml += renderParagraphsWithImages(preText, 992, prefixXml);
+                }
 
                 // Bảng biểu
                 const tableData = parseLatexTabular(tableCode);
@@ -2554,9 +2556,9 @@
                     outXml += buildTableXml(tableData, imageMap, formulaRegistry, formulaMode);
                 }
 
-                // Paragraph sau bảng nếu có
+                // Paragraph sau bảng nếu có (hỗ trợ nhiều bảng liên tiếp)
                 if (postText) {
-                    outXml += renderParagraphsWithImages(postText, 992, '');
+                    outXml += renderQuestionBlocks('', postText);
                 }
                 return outXml;
             }
@@ -2694,7 +2696,7 @@
                       <w:pPr><w:ind w:left="992"/><w:spacing w:before="60" w:after="40"/><w:jc w:val="both"/></w:pPr>
                       <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:i/><w:color w:val="1E40AF"/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr><w:t>Lời giải:</w:t></w:r>
                     </w:p>`;
-                    bodyXml += renderParagraphsWithImages(solText, 992, '');
+                    bodyXml += renderQuestionBlocks('', solText);
                 }
             });
         }
@@ -2746,7 +2748,7 @@
                       <w:pPr><w:ind w:left="992"/><w:spacing w:before="60" w:after="40"/><w:jc w:val="both"/></w:pPr>
                       <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:i/><w:color w:val="1E40AF"/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr><w:t>Lời giải:</w:t></w:r>
                     </w:p>`;
-                    bodyXml += renderParagraphsWithImages(solText, 992, '');
+                    bodyXml += renderQuestionBlocks('', solText);
                 }
             });
         }
@@ -2800,7 +2802,7 @@
                           <w:pPr><w:ind w:left="992"/><w:spacing w:before="40" w:after="40"/><w:jc w:val="both"/></w:pPr>
                           <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:i/><w:color w:val="1E40AF"/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr><w:t>Lời giải:</w:t></w:r>
                         </w:p>`;
-                        bodyXml += renderParagraphsWithImages(solText, 992, '');
+                        bodyXml += renderQuestionBlocks('', solText);
                     }
                 }
             });
@@ -2838,7 +2840,7 @@
                       <w:pPr><w:ind w:left="992"/><w:spacing w:before="60" w:after="40"/><w:jc w:val="both"/></w:pPr>
                       <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:i/><w:color w:val="1E40AF"/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr><w:t>Lời giải chi tiết:</w:t></w:r>
                     </w:p>`;
-                    bodyXml += renderParagraphsWithImages(solText, 992, '');
+                    bodyXml += renderQuestionBlocks('', solText);
                 }
             });
         }
@@ -3507,7 +3509,7 @@
         pyodideInitPromise = new Promise((resolve, reject) => {
             try {
                 if (!pyodideExporterWorker) {
-                    pyodideExporterWorker = new Worker("tex2mathtype-worker.js?v=20261016_5");
+                    pyodideExporterWorker = new Worker("tex2mathtype-worker.js?v=20261016_V3");
                 }
                 const initTimeout = setTimeout(() => {
                     if (!isPyodideExporterReady) {
@@ -3878,7 +3880,7 @@
             modal.id = 'exportWordModal';
             modal.className = 'fixed inset-0 z-[160] bg-gray-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 transition-opacity';
             modal.innerHTML = `
-            <div class="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl max-w-4xl w-full p-4 sm:p-6 border border-gray-200 dark:border-gray-800 max-h-[92vh] flex flex-col">
+            <div class="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-800 p-4 sm:p-6 flex flex-col" style="width: 95vw; max-width: 1050px; max-height: 90vh;">
                 <!-- Header Modal -->
                 <div class="flex items-center justify-between pb-3 border-b border-gray-200 dark:border-gray-800 shrink-0">
                     <div class="flex items-center gap-2.5">
@@ -3897,23 +3899,23 @@
 
                 <!-- Body Modal (Scrollable, 2 Cột trên màn hình ngang) -->
                 <div class="py-4 overflow-y-auto flex-1 pr-1 custom-scrollbar">
-                    <div class="grid grid-cols-1 md:grid-cols-12 gap-4">
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 16px;">
                         
-                        <!-- CỘT TRÁI (5 Cột): Định dạng & Chế độ xuất -->
-                        <div class="md:col-span-5 space-y-3.5">
+                        <!-- CỘT TRÁI: Định dạng & Chế độ xuất -->
+                        <div class="space-y-3.5" style="min-width: 0;">
                             <!-- 1. Định dạng công thức Toán -->
                             <div class="p-3 bg-gray-50/70 dark:bg-gray-800/60 rounded-xl border border-gray-200 dark:border-gray-700/80 space-y-2">
                                 <label class="block text-xs font-bold text-gray-700 dark:text-gray-200">
                                     1. Định dạng công thức
                                 </label>
-                                <div class="grid grid-cols-1 gap-2">
-                                    <label class="flex items-center gap-2.5 p-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-gray-400 dark:hover:border-gray-500 cursor-pointer transition">
+                                <div class="grid grid-cols-2 gap-2">
+                                    <label class="flex items-center justify-center gap-2 p-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-gray-400 dark:hover:border-gray-500 cursor-pointer transition">
                                         <input type="radio" name="exportWordFormulaMode" value="mathtype" checked class="text-primary-600 focus:ring-primary-500">
                                         <span class="text-xs font-bold text-gray-800 dark:text-gray-100">Xuất MathType</span>
                                     </label>
-                                    <label class="flex items-center gap-2.5 p-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-gray-400 dark:hover:border-gray-500 cursor-pointer transition">
+                                    <label class="flex items-center justify-center gap-2 p-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-gray-400 dark:hover:border-gray-500 cursor-pointer transition">
                                         <input type="radio" name="exportWordFormulaMode" value="omml" class="text-primary-600 focus:ring-primary-500">
-                                        <span class="text-xs font-bold text-gray-800 dark:text-gray-100">Xuất Word Equation (OMML)</span>
+                                        <span class="text-xs font-bold text-gray-800 dark:text-gray-100">Xuất OMML</span>
                                     </label>
                                 </div>
                             </div>
@@ -3973,8 +3975,8 @@
                             </div>
                         </div>
 
-                        <!-- CỘT PHẢI (7 Cột): Cấu hình Khung Tiêu Đề Đề Thi -->
-                        <div class="md:col-span-7 space-y-3.5">
+                        <!-- CỘT PHẢI: Cấu hình Khung Tiêu Đề Đề Thi -->
+                        <div class="space-y-3.5" style="min-width: 0;">
                             <div class="p-3.5 bg-gray-50/70 dark:bg-gray-800/60 rounded-xl border border-gray-200 dark:border-gray-700/80 space-y-3">
                                 <div class="flex items-center justify-between">
                                     <label class="text-xs font-bold text-gray-800 dark:text-gray-200 flex items-center gap-1.5">

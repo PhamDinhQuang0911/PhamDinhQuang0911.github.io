@@ -653,7 +653,7 @@ ${daInputs}
             modal.id = 'examMixerModal';
             modal.className = 'fixed inset-0 z-[170] bg-gray-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 transition-opacity';
             modal.innerHTML = `
-            <div class="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl max-w-4xl w-full p-4 sm:p-6 border border-gray-200 dark:border-gray-800 max-h-[92vh] flex flex-col">
+            <div class="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-800 p-4 sm:p-6 flex flex-col" style="width: 95vw; max-width: 1100px; max-height: 90vh;">
                 <!-- Header Modal -->
                 <div class="flex items-center justify-between pb-3 border-b border-gray-200 dark:border-gray-800 shrink-0">
                     <div class="flex items-center gap-2.5">
@@ -708,10 +708,10 @@ ${daInputs}
                     </div>
 
                     <!-- 2. Bố cục 2 Cột: Cấu hình Trộn đề & Khung Tiêu Đề -->
-                    <div class="grid grid-cols-1 md:grid-cols-12 gap-4">
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 16px;">
                         
-                        <!-- CỘT TRÁI (6 Cột): Cấu hình Trộn -->
-                        <div class="md:col-span-6 space-y-3.5">
+                        <!-- CỘT TRÁI: Cấu hình Trộn -->
+                        <div class="space-y-3.5" style="min-width: 0;">
                             <div class="p-3.5 bg-gray-50/70 dark:bg-gray-800/60 rounded-xl border border-gray-200 dark:border-gray-700/80 space-y-3">
                                 <label class="text-xs font-bold text-gray-800 dark:text-gray-200 flex items-center gap-1.5">
                                     <i class="fa-solid fa-sliders text-gray-600 dark:text-gray-300"></i> Cấu hình khi trộn
@@ -774,8 +774,8 @@ ${daInputs}
                             </div>
                         </div>
 
-                        <!-- CỘT PHẢI (6 Cột): Cấu hình Tiêu đề đề thi -->
-                        <div class="md:col-span-6 space-y-3.5">
+                        <!-- CỘT PHẢI: Cấu hình Tiêu đề đề thi -->
+                        <div class="space-y-3.5" style="min-width: 0;">
                             <div class="p-3.5 bg-gray-50/70 dark:bg-gray-800/60 rounded-xl border border-gray-200 dark:border-gray-700/80 space-y-3">
                                 <div class="flex items-center justify-between">
                                     <label class="text-xs font-bold text-gray-800 dark:text-gray-200 flex items-center gap-1.5">

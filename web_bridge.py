@@ -96,10 +96,10 @@ def convert_tex_to_docx_bytes(latex_text: str,
         pt = clean_true_commands(pt, mode)
 
         # Tháo bỏ vỏ \begin{table} và chuyển \caption thành in đậm nếu có
-        pt = re.sub(r'\\caption\{([^}]*)\}', r'\n\n\\textbf{\1}\n\n', pt)
-        pt = re.sub(r'\\begin\{table\}(?:\[[^\]]*\])?', '\n\n', pt)
-        pt = re.sub(r'\\end\{table\}', '\n\n', pt)
-        pt = re.sub(r'\\begin\{center\}\s*(\\begin\{(?:tabular\*?|longtable)\}.*?\\end\{(?:tabular\*?|longtable)\})\s*\\end\{center\}', r'\1', pt, flags=re.DOTALL)
+        pt = re.sub(r'\\caption\s*\{([^}]*)\}', r'\n\n\\textbf{\1}\n\n', pt)
+        pt = re.sub(r'\\begin\s*\{table\}(?:\[[^\]]*\])?', '\n\n', pt)
+        pt = re.sub(r'\\end\s*\{table\}', '\n\n', pt)
+        pt = re.sub(r'\\begin\s*\{center\}\s*(\\begin\s*\{(?:tabular\*?|longtable)\}.*?\\end\s*\{(?:tabular\*?|longtable)\})\s*\\end\s*\{center\}', r'\1', pt, flags=re.DOTALL | re.IGNORECASE)
 
         # Trích xuất các bảng tabular & longtable trước khi gọi replace_double_slash
         tabular_blocks = []
@@ -108,7 +108,7 @@ def convert_tex_to_docx_bytes(latex_text: str,
             tabular_blocks.append(m.group(0))
             return f"\n\n[[TABULAR_{t_idx}]]\n\n"
 
-        tabular_pattern = re.compile(r'\\begin\{(?:tabular\*?|longtable)\}.*?\\end\{(?:tabular\*?|longtable)\}', re.DOTALL)
+        tabular_pattern = re.compile(r'\\begin\s*\{(?:tabular\*?|longtable)\}.*?\\end\s*\{(?:tabular\*?|longtable)\}', re.DOTALL | re.IGNORECASE)
         pt = tabular_pattern.sub(_extract_tabular, pt)
 
         pt = replace_double_slash(pt)
