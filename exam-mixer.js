@@ -874,7 +874,10 @@
         renderMixedQuestion(q, newQNum, answersAccumulator, keepUnderlines = false) {
             let qElements = q.elements.map(e => ({ ...e }));
 
-            // Cắt phần Lời giải nếu có cụm "Lời giải." / "Lời giải:" (trừ phần đáp án trả lời ngắn)
+            // Khi xuất đề thi cho học sinh (!keepUnderlines):
+            // 1. Cắt bỏ hoàn toàn từ phần Lời giải trở đi (cho mọi câu hỏi kể cả câu trả lời ngắn)
+            // 2. Cắt bỏ hoàn toàn các paragraph/element chứa Đáp án / Đáp số / ĐS / Kết quả
+            // 3. Nếu cụm Đáp án/Đáp số nằm ở cuối một paragraph câu hỏi, cắt bỏ khỏi XML
             if (!keepUnderlines) {
                 let solStartIdx = -1;
                 for (let i = 0; i < qElements.length; i++) {
@@ -886,17 +889,22 @@
                 }
 
                 if (solStartIdx !== -1) {
-                    if (q.type === 'short') {
-                        // Trả lời ngắn: giữ lại câu hỏi trước Lời giải và giữ lại dòng Đáp án/Đáp số nếu có
-                        const beforeSol = qElements.slice(0, solStartIdx);
-                        const solAndAfter = qElements.slice(solStartIdx);
-                        const ansElements = solAndAfter.filter(e => /^(?:Đáp\s*án|Đáp\s*số|ĐS|Kết\s*quả)\s*[:=]/i.test(e.text.trim()));
-                        qElements = [...beforeSol, ...ansElements];
-                    } else {
-                        // Trắc nghiệm 4 PA hoặc Đúng/Sai: cắt toàn bộ từ Lời giải trở đi
-                        qElements = qElements.slice(0, solStartIdx);
-                    }
+                    qElements = qElements.slice(0, solStartIdx);
                 }
+
+                // Lọc bỏ triệt để các phần tử/paragraph chứa đáp án/đáp số trong đề học sinh
+                qElements = qElements.filter(e => {
+                    const tr = (e.text || '').trim();
+                    return !/^\s*(?:[-–•*]\s*)?(?:Đáp\s*án|Đáp\s*số|ĐS|Kết\s*quả)\s*[:=.]/i.test(tr) &&
+                           !/^\s*(?:[-–•*]\s*)?(?:Đáp\s*án|Đáp\s*số|ĐS|Kết\s*quả)\b/i.test(tr);
+                });
+
+                // Cắt bỏ cụm đáp án nếu vô tình nằm ở cuối paragraph câu hỏi
+                qElements.forEach(e => {
+                    if (/(?:Đáp\s*án|Đáp\s*số|ĐS|Kết\s*quả)\s*[:=.]/i.test(e.text || '')) {
+                        e.xml = e.xml.replace(/(<w:t\b[^>]*>)([\s\S]*?)(?:[-–•*]\s*)?(?:Đáp\s*án|Đáp\s*số|ĐS|Kết\s*quả)\s*[:=.][\s\S]*?(<\/w:t>)/gi, '$1$2$3');
+                    }
+                });
             }
 
             let firstXml = qElements[0].xml;
@@ -1809,6 +1817,20 @@
         // CÁC HÀM XUẤT EXCEL THUẦN OPENXML (PORT TỪ MIXER_CORE.PY)
         // =======================================================
         static async buildNativeXlsx(rows) {
+            if (typeof XLSX !== 'undefined') {
+                const cleanRows = rows.map(r => r.map(c => {
+                    if (typeof c === 'string' && c.startsWith("'")) {
+                        return c.substring(1);
+                    }
+                    return c;
+                }));
+                const wb = XLSX.utils.book_new();
+                const ws = XLSX.utils.aoa_to_sheet(cleanRows);
+                XLSX.utils.book_append_sheet(wb, ws, "Sheet1");
+                const outBuf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+                return new Uint8Array(outBuf);
+            }
+
             const zip = new JSZip();
             const ct = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
                 '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>' +
@@ -1819,7 +1841,7 @@
             const wb = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" ' +
                 'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets></workbook>');
             const wb_rels = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
-                '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/package/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>');
+                '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>');
 
             const sd = ['<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>'];
             for (let rIdx = 0; rIdx < rows.length; rIdx++) {
@@ -1834,7 +1856,7 @@
                     }
                     let rawVal = row[cIdx];
                     if (rawVal === null || rawVal === undefined) rawVal = "";
-                    let vS = String(rawVal).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                    let vS = String(rawVal).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
                     if (vS.startsWith("'")) {
                         vS = vS.substring(1);
@@ -1981,10 +2003,10 @@
                 });
             }
 
-            // Chia khối QM (tối đa 3 mã đề / mã QR)
+            // Chia khối QM (tối đa 8 mã đề / mã QR tương tự TNMaker)
             const qmChunks = [];
-            for (let i = 0; i < qmList.length; i += 3) {
-                const chunk = qmList.slice(i, i + 3);
+            for (let i = 0; i < qmList.length; i += 8) {
+                const chunk = qmList.slice(i, i + 8);
                 const jsonStr = JSON.stringify(chunk);
                 qmChunks.push({
                     madeList: chunk.map(c => c[0]),
