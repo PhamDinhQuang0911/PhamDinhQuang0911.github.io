@@ -622,6 +622,10 @@
             const youngMixBlob = await ExamMixerEngine.buildYoungMixXlsx(matrixData);
             dapAnFolder.file("DapAn_YoungMix.xlsx", youngMixBlob);
 
+            const shouldExportTex = this.config.output_format === 'tex' || this.config.output_format === 'both';
+            const shouldExportWord = this.config.output_format === 'word' || this.config.output_format === 'both';
+            const headerCfg = this.config.header || {};
+
             // =======================================================
             // 2. XUẤT MÃ QR ĐÁP ÁN (TNMaker, QM Chấm Thi, UnT)
             // =======================================================
@@ -633,8 +637,10 @@
             qrFolder.file("QR_QM_ChamThi.json", JSON.stringify(qrData.qmList, null, 2));
             qrFolder.file("QR_UnT.txt", qrData.untList.join('\n---\n'));
 
-            // File LaTeX sinh lệnh \qrcode
-            qrFolder.file("MaQR_ChamThi.tex", ExamMixerEngine.buildMaQrTex(qrData));
+            // File LaTeX sinh lệnh \qrcode (chỉ xuất nếu chọn TeX hoặc Both)
+            if (shouldExportTex) {
+                qrFolder.file("MaQR_ChamThi.tex", ExamMixerEngine.buildMaQrTex(qrData));
+            }
 
             // Trang HTML xem & in mã QR trực quan cực đẹp (100% offline)
             const qrViewerHtml = ExamMixerEngine.buildQrViewerHtml(this.config.header?.title || "Đề thi", matrixData, qrData);
@@ -653,104 +659,162 @@
             }
 
             // =======================================================
-            // 3. XUẤT HƯỚNG DẪN GIẢI & FILE MAIN TEX
+            // 3. XUẤT HƯỚNG DẪN GIẢI & FILE MAIN TEX (KHI CHỌN TEX HOẶC BOTH)
             // =======================================================
-            dapAnFolder.file("HuongDanGiai.tex", ExamMixerEngine.buildHuongDanGiaiTex(matrixData, cacDeDaTron, deGocBlocks));
-            zip.file("Main_de_bai.tex", this.buildMainTex(maDeList, this.config.header, false));
-            zip.file("Main_dap_an.tex", this.buildMainTex(maDeList, this.config.header, true));
+            if (shouldExportTex) {
+                dapAnFolder.file("HuongDanGiai.tex", ExamMixerEngine.buildHuongDanGiaiTex(matrixData, cacDeDaTron, deGocBlocks));
+                zip.file("Main_de_bai.tex", this.buildMainTex(maDeList, this.config.header, false));
+                zip.file("Main_dap_an.tex", this.buildMainTex(maDeList, this.config.header, true));
 
-            // =======================================================
-            // 4. XUẤT ĐỀ GỐC VÀ CÁC MÃ ĐỀ THI (.TEX)
-            // =======================================================
-            const headerCfg = this.config.header || {};
-            let deGocTex = `\\newpage\n\\setcounter{page}{1}\n\\madethi{GỐC}\n\\setcounter{ex}{0}\\setcounter{bt}{0}\n\n`;
-            deGocTex += deGocBlocks.join('\n\n') + `\n\n\\begin{center}\\bf\n----- HẾT -----\n\\end{center}\n\\label{GOC}\n`;
-            deThiFolder.file("De_Goc.tex", deGocTex.replace(/DPSpercent/g, '\\%'));
+                let deGocTex = `\\newpage\n\\setcounter{page}{1}\n\\madethi{GỐC}\n\\setcounter{ex}{0}\\setcounter{bt}{0}\n\n`;
+                deGocTex += deGocBlocks.join('\n\n') + `\n\n\\begin{center}\\bf\n----- HẾT -----\n\\end{center}\n\\label{GOC}\n`;
+                deThiFolder.file("De_Goc.tex", deGocTex.replace(/DPSpercent/g, '\\%'));
 
-            for (const maDe of maDeList) {
-                const blocks = cacDeDaTron[maDe];
-                let texFile = `\\newpage\n\\setcounter{page}{1}\n\\madethi{${maDe}}\n\\setcounter{ex}{0}\\setcounter{bt}{0}\n\n`;
-                texFile += blocks.join('\n\n') + `\n\n\\begin{center}\\bf\n----- HẾT -----\n\\end{center}\n\\label{${maDe}}\n`;
-                deThiFolder.file(`De_${maDe}.tex`, texFile.replace(/DPSpercent/g, '\\%'));
+                for (const maDe of maDeList) {
+                    const blocks = cacDeDaTron[maDe];
+                    let texFile = `\\newpage\n\\setcounter{page}{1}\n\\madethi{${maDe}}\n\\setcounter{ex}{0}\\setcounter{bt}{0}\n\n`;
+                    texFile += blocks.join('\n\n') + `\n\n\\begin{center}\\bf\n----- HẾT -----\n\\end{center}\n\\label{${maDe}}\n`;
+                    deThiFolder.file(`De_${maDe}.tex`, texFile.replace(/DPSpercent/g, '\\%'));
+                }
             }
 
             // =======================================================
-            // 5. XUẤT CÁC FILE WORD (.DOCX) NẾU ĐƯỢC CHỌN
+            // 4. XUẤT CÁC FILE WORD (.DOCX) NẾU ĐƯỢC CHỌN
             // =======================================================
-            const shouldExportWord = this.config.output_format === 'word' || this.config.output_format === 'both';
             const createDocx = window.createDocxBlob || (window.WordMathTypeExporter && window.WordMathTypeExporter.createDocxBlob);
+            const parseLatex = (window.QuestionImporter && window.QuestionImporter.parseLatexExamString) || window.parseLatexExamString;
 
-            if (shouldExportWord && typeof createDocx === 'function') {
-                report(80, "Đang xuất file Word (.docx) Đề Gốc...");
-
-                const makeHeaderConfig = (code) => ({
-                    style: headerCfg.style || 'standard_gov',
-                    agency: headerCfg.agency || 'SỞ GD&ĐT HÀ NỘI',
-                    school: headerCfg.school || 'TRƯỜNG THPT TRẦN QUANG KHẢI',
-                    exam_type: headerCfg.examType || '(ĐỀ CHÍNH THỨC)',
-                    title: headerCfg.title || 'ĐỀ THI',
-                    subject: headerCfg.subject || 'TOÁN HỌC',
-                    grade: headerCfg.grade || '9',
-                    duration: headerCfg.duration || 90,
-                    exam_code: code,
-                    candidate_info: headerCfg.candidateInfo !== false
-                });
-
-                // Xuất file Word Đề Gốc
-                try {
-                    const gocCfg = makeHeaderConfig("GỐC");
-                    const fullGocTex = deGocBlocks.join('\n\n').replace(/DPSpercent/g, '\\%');
-                    const blobGoc = await createDocx({
-                        title: `${headerCfg.title || 'De_Thi'}_Goc`,
-                        questions: fullGocTex,
-                        mode: 'questions',
-                        options: {
-                            headerStyle: gocCfg.style,
-                            agencyName: gocCfg.agency,
-                            schoolName: gocCfg.school,
-                            examType: gocCfg.exam_type,
-                            examTitle: gocCfg.title,
-                            subject: gocCfg.subject,
-                            grade: gocCfg.grade,
-                            duration: gocCfg.duration,
-                            examCode: "GỐC",
-                            includeCandidateInfo: gocCfg.candidate_info
-                        }
-                    });
-                    deThiFolder.file("De_Goc.docx", blobGoc);
-                } catch (gErr) {
-                    console.warn("[Mixer] Lỗi xuất Word Đề Gốc:", gErr);
-                }
-
-                // Xuất file Word cho từng mã đề thi con
-                for (let i = 0; i < maDeList.length; i++) {
-                    const maDe = maDeList[i];
-                    report(82 + Math.floor((i / maDeList.length) * 14), `Đang tạo file Word mã ${maDe}...`);
-                    const examBlocks = cacDeDaTron[maDe];
-                    const fullLatexExam = examBlocks.join('\n\n').replace(/DPSpercent/g, '\\%');
-                    const hConfig = makeHeaderConfig(maDe);
-
+            const toDocxBuffer = async (data) => {
+                if (!data) return null;
+                if (data instanceof Uint8Array || data instanceof ArrayBuffer) return data;
+                if (typeof data.arrayBuffer === 'function') {
                     try {
-                        const blobDocx = await createDocx({
-                            title: `${headerCfg.title || 'De_Thi'}_${maDe}`,
-                            questions: fullLatexExam,
+                        return await data.arrayBuffer();
+                    } catch (e) {
+                        return data;
+                    }
+                }
+                return data;
+            };
+
+            if (shouldExportWord) {
+                if (typeof createDocx !== 'function') {
+                    console.warn("[Mixer] Không tìm thấy hàm createDocxBlob để tạo file Word!");
+                } else {
+                    report(80, "Đang xuất file Word (.docx) Đề Gốc...");
+
+                    const makeHeaderConfig = (code) => ({
+                        style: headerCfg.style || 'standard_gov',
+                        agency: headerCfg.agency || 'SỞ GD&ĐT HÀ NỘI',
+                        school: headerCfg.school || 'TRƯỜNG THPT TRẦN QUANG KHẢI',
+                        exam_type: headerCfg.examType || '(ĐỀ CHÍNH THỨC)',
+                        title: headerCfg.title || 'ĐỀ THI',
+                        subject: headerCfg.subject || 'TOÁN HỌC',
+                        grade: headerCfg.grade || '9',
+                        duration: headerCfg.duration || 90,
+                        exam_code: code,
+                        candidate_info: headerCfg.candidateInfo !== false
+                    });
+
+                    // 4.1. Xuất file Word Đề Gốc
+                    let parsedGocQuestions = null;
+                    try {
+                        const gocCfg = makeHeaderConfig("GỐC");
+                        const fullGocTex = deGocBlocks.join('\n\n').replace(/DPSpercent/g, '\\%');
+                        parsedGocQuestions = (typeof parseLatex === 'function') ? parseLatex(fullGocTex) : fullGocTex;
+
+                        const blobGoc = await createDocx({
+                            title: `${headerCfg.title || 'De_Thi'}_Goc`,
+                            questions: parsedGocQuestions,
                             mode: 'questions',
                             options: {
-                                headerStyle: hConfig.style,
-                                agencyName: hConfig.agency,
-                                schoolName: hConfig.school,
-                                examType: hConfig.exam_type,
-                                examTitle: hConfig.title,
-                                subject: hConfig.subject,
-                                grade: hConfig.grade,
-                                duration: hConfig.duration,
-                                examCode: maDe,
-                                includeCandidateInfo: hConfig.candidate_info
+                                headerStyle: gocCfg.style,
+                                agencyName: gocCfg.agency,
+                                schoolName: gocCfg.school,
+                                examType: gocCfg.exam_type,
+                                examTitle: gocCfg.title,
+                                subject: gocCfg.subject,
+                                grade: gocCfg.grade,
+                                duration: gocCfg.duration,
+                                examCode: "GỐC",
+                                includeCandidateInfo: gocCfg.candidate_info,
+                                returnType: 'uint8array'
                             }
                         });
-                        deThiFolder.file(`De_${maDe}.docx`, blobDocx);
-                    } catch (wErr) {
-                        console.warn(`[Mixer] Lỗi tạo Word mã ${maDe}:`, wErr);
+                        const docxDataGoc = await toDocxBuffer(blobGoc);
+                        if (docxDataGoc) {
+                            deThiFolder.file("De_Goc.docx", docxDataGoc);
+                        }
+                    } catch (gErr) {
+                        console.error("[Mixer] Lỗi xuất Word Đề Gốc:", gErr);
+                    }
+
+                    // 4.2. Xuất Lời giải chi tiết Đề Gốc dạng Word (.docx) vào dap_an/
+                    try {
+                        if (parsedGocQuestions) {
+                            const gocCfg = makeHeaderConfig("GỐC");
+                            const blobHDG = await createDocx({
+                                title: `${headerCfg.title || 'Huong_Dan_Giai'}_De_Goc`,
+                                questions: parsedGocQuestions,
+                                mode: 'full',
+                                options: {
+                                    headerStyle: gocCfg.style,
+                                    agencyName: gocCfg.agency,
+                                    schoolName: gocCfg.school,
+                                    examType: gocCfg.exam_type,
+                                    examTitle: `${gocCfg.exam_title || gocCfg.title || 'ĐỀ THI'} - HƯỚNG DẪN GIẢI`,
+                                    subject: gocCfg.subject,
+                                    grade: gocCfg.grade,
+                                    duration: gocCfg.duration,
+                                    examCode: "GỐC",
+                                    includeCandidateInfo: false,
+                                    returnType: 'uint8array'
+                                }
+                            });
+                            const docxDataHDG = await toDocxBuffer(blobHDG);
+                            if (docxDataHDG) {
+                                dapAnFolder.file("HuongDanGiai.docx", docxDataHDG);
+                            }
+                        }
+                    } catch (hdgErr) {
+                        console.warn("[Mixer] Không thể tạo HuongDanGiai.docx:", hdgErr);
+                    }
+
+                    // 4.3. Xuất file Word cho từng mã đề thi con
+                    for (let i = 0; i < maDeList.length; i++) {
+                        const maDe = maDeList[i];
+                        report(82 + Math.floor((i / maDeList.length) * 14), `Đang tạo file Word mã ${maDe}...`);
+                        const examBlocks = cacDeDaTron[maDe];
+                        const fullLatexExam = examBlocks.join('\n\n').replace(/DPSpercent/g, '\\%');
+                        const parsedExamQuestions = (typeof parseLatex === 'function') ? parseLatex(fullLatexExam) : fullLatexExam;
+                        const hConfig = makeHeaderConfig(maDe);
+
+                        try {
+                            const blobDocx = await createDocx({
+                                title: `${headerCfg.title || 'De_Thi'}_${maDe}`,
+                                questions: parsedExamQuestions,
+                                mode: 'questions',
+                                options: {
+                                    headerStyle: hConfig.style,
+                                    agencyName: hConfig.agency,
+                                    schoolName: hConfig.school,
+                                    examType: hConfig.exam_type,
+                                    examTitle: hConfig.title,
+                                    subject: hConfig.subject,
+                                    grade: hConfig.grade,
+                                    duration: hConfig.duration,
+                                    examCode: maDe,
+                                    includeCandidateInfo: hConfig.candidate_info,
+                                    returnType: 'uint8array'
+                                }
+                            });
+                            const docxData = await toDocxBuffer(blobDocx);
+                            if (docxData) {
+                                deThiFolder.file(`De_${maDe}.docx`, docxData);
+                            }
+                        } catch (wErr) {
+                            console.error(`[Mixer] Lỗi tạo Word mã ${maDe}:`, wErr);
+                        }
                     }
                 }
             }
@@ -1545,6 +1609,15 @@ ${inputs}
         if (statusBox) {
             statusBox.textContent = `Đã chọn file: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
             statusBox.classList.remove('hidden');
+        }
+        const ext = file.name.split('.').pop().toLowerCase();
+        const outputFmt = document.getElementById('mixerOutputFormat');
+        if (outputFmt) {
+            if (ext === 'docx') {
+                outputFmt.value = 'word';
+            } else if (ext === 'tex') {
+                outputFmt.value = 'tex';
+            }
         }
     };
 

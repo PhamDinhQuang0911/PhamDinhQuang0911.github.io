@@ -3288,8 +3288,9 @@
 
         const allSources = [];
         const allTikz = [];
+        const qList = Array.isArray(questions) ? questions : [];
 
-        (questions || []).forEach(q => {
+        qList.forEach(q => {
             if (q.image) allSources.push(q.image);
             if (q.img) allSources.push(q.img);
             if (q.imageUrl) allSources.push(q.imageUrl);
@@ -3401,6 +3402,17 @@
             throw new Error('Thư viện JSZip chưa được tải!');
         }
 
+        let questionList = questions;
+        if (typeof questionList === 'string') {
+            const parseFn = (window.QuestionImporter && window.QuestionImporter.parseLatexExamString) || window.parseLatexExamString;
+            if (typeof parseFn === 'function') {
+                questionList = parseFn(questionList);
+            }
+        }
+        if (!Array.isArray(questionList)) {
+            questionList = [];
+        }
+
         let zip;
         if (typeof DEFAULT_DOCX_BASE64 !== 'undefined' && DEFAULT_DOCX_BASE64) {
             zip = await JSZip.loadAsync(DEFAULT_DOCX_BASE64, { base64: true });
@@ -3411,12 +3423,12 @@
         const formulaRegistry = new DocxFormulaRegistry();
 
         // 1. Nạp và xử lý toàn bộ hình ảnh
-        const imageMap = await collectAndPrepareImages(questions, zip);
+        const imageMap = await collectAndPrepareImages(questionList, zip);
 
         // 2. Tạo nội dung document.xml (đồng thời thu thập các công thức MathType)
         const docXml = buildDocumentXml({
             title,
-            questions,
+            questions: questionList,
             mode,
             options,
             imageMap,
@@ -3470,7 +3482,8 @@
             }
         }
 
-        return await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+        const zipType = (options && options.returnType) ? options.returnType : (typeof Blob !== 'undefined' ? 'blob' : 'uint8array');
+        return await zip.generateAsync({ type: zipType, compression: 'DEFLATE' });
     }
 
     function triggerDownload(blob, filename) {
