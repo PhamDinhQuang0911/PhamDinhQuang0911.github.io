@@ -2390,7 +2390,7 @@
             bodyXml += `
             <w:p>
                 <w:pPr><w:jc w:val="center"/><w:spacing w:after="40"/></w:pPr>
-                <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:sz w:val="26"/><w:szCs w:val="26"/><w:color w:val="1E40AF"/></w:rPr><w:t>${escapeXml(schoolName.toUpperCase())}</w:t></w:r>
+                <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:sz w:val="26"/><w:szCs w:val="26"/></w:rPr><w:t>${escapeXml(schoolName.toUpperCase())}</w:t></w:r>
             </w:p>
             <w:p>
                 <w:pPr><w:jc w:val="center"/><w:spacing w:after="40"/></w:pPr>
@@ -2437,14 +2437,21 @@
             }
         });
 
-        const renderSectionHeader = (roman, titleText, descText) => `
+        const renderSectionHeader = (fullText) => `
         <w:p>
-          <w:pPr><w:spacing w:before="240" w:after="60"/></w:pPr>
-          <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:sz w:val="26"/><w:szCs w:val="26"/><w:color w:val="1E40AF"/></w:rPr><w:t>PHẦN ${roman}. ${escapeXml(titleText.toUpperCase())}</w:t></w:r>
-        </w:p>
-        <w:p>
-          <w:pPr><w:spacing w:after="120"/></w:pPr>
-          <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:i/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr><w:t>${escapeXml(descText)}</w:t></w:r>
+          <w:pPr>
+            <w:spacing w:before="240" w:after="80" w:line="276" w:lineRule="auto"/>
+            <w:jc w:val="both"/>
+          </w:pPr>
+          <w:r>
+            <w:rPr>
+              <w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/>
+              <w:b/>
+              <w:sz w:val="24"/>
+              <w:szCs w:val="24"/>
+            </w:rPr>
+            <w:t xml:space="preserve">${escapeXml(fullText)}</w:t>
+          </w:r>
         </w:p>`;
 
         let currentRoman = 1;
@@ -2601,16 +2608,14 @@
         // ================= PHẦN I: TRẮC NGHIỆM 4 PHƯƠNG ÁN =================
         if (part1.length > 0) {
             bodyXml += renderSectionHeader(
-                romanNumerals[currentRoman - 1],
-                'CÂU TRẮC NGHIỆM NHIỀU PHƯƠNG ÁN LỰA CHỌN',
-                `Thí sinh trả lời từ câu 1 đến câu ${part1.length}. Mỗi câu hỏi thí sinh chỉ chọn một phương án.`
+                `PHẦN ${romanNumerals[currentRoman - 1]}. Câu trắc nghiệm nhiều phương án lựa chọn. Thí sinh trả lời từ câu 1 đến câu ${part1.length}. Mỗi câu hỏi thí sinh chỉ chọn một phương án.`
             );
             currentRoman++;
 
             part1.forEach((q, pIdx) => {
                 const qNum = pIdx + 1;
                 const cccdTag = (includeCccd && (q.cccd || q.bankId || q.id)) ? `[${q.cccd || q.bankId || q.id}] ` : '';
-                const prefix = `${cccdTag}Câu ${qNum}. `;
+                const prefix = `${cccdTag}Câu ${qNum}: `;
 
                 bodyXml += renderQuestionBlocks(prefix, q.content);
 
@@ -2694,7 +2699,7 @@
                     bodyXml += `
                     <w:p>
                       <w:pPr><w:ind w:left="992"/><w:spacing w:before="60" w:after="40"/><w:jc w:val="both"/></w:pPr>
-                      <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:i/><w:color w:val="1E40AF"/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr><w:t>Lời giải:</w:t></w:r>
+                      <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:i/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr><w:t>Lời giải:</w:t></w:r>
                     </w:p>`;
                     bodyXml += renderQuestionBlocks('', solText);
                 }
@@ -2704,16 +2709,14 @@
         // ================= PHẦN II: TRẮC NGHIỆM ĐÚNG / SAI =================
         if (part2.length > 0) {
             bodyXml += renderSectionHeader(
-                romanNumerals[currentRoman - 1],
-                'CÂU TRẮC NGHIỆM ĐÚNG SAI',
-                `Thí sinh trả lời từ câu 1 đến câu ${part2.length}. Trong mỗi ý a), b), c), d) ở mỗi câu, thí sinh chọn đúng hoặc sai.`
+                `PHẦN ${romanNumerals[currentRoman - 1]}. Câu trắc nghiệm đúng sai. Thí sinh trả lời từ câu 1 đến câu ${part2.length}. Trong mỗi ý a), b), c), d) ở mỗi câu, thí sinh chọn đúng hoặc sai.`
             );
             currentRoman++;
 
             part2.forEach((q, pIdx) => {
                 const qNum = pIdx + 1;
                 const cccdTag = (includeCccd && (q.cccd || q.bankId || q.id)) ? `[${q.cccd || q.bankId || q.id}] ` : '';
-                const prefix = `${cccdTag}Câu ${qNum}. `;
+                const prefix = `${cccdTag}Câu ${qNum}: `;
 
                 bodyXml += renderQuestionBlocks(prefix, q.content);
 
@@ -2746,7 +2749,7 @@
                     bodyXml += `
                     <w:p>
                       <w:pPr><w:ind w:left="992"/><w:spacing w:before="60" w:after="40"/><w:jc w:val="both"/></w:pPr>
-                      <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:i/><w:color w:val="1E40AF"/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr><w:t>Lời giải:</w:t></w:r>
+                      <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:i/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr><w:t>Lời giải:</w:t></w:r>
                     </w:p>`;
                     bodyXml += renderQuestionBlocks('', solText);
                 }
@@ -2756,16 +2759,14 @@
         // ================= PHẦN III: TRẢ LỜI NGẮN =================
         if (part3.length > 0) {
             bodyXml += renderSectionHeader(
-                romanNumerals[currentRoman - 1],
-                'CÂU TRẮC NGHIỆM TRẢ LỜI NGẮN',
-                `Thí sinh trả lời từ câu 1 đến câu ${part3.length}. Thí sinh điền kết quả vào ô tương ứng trên đề thi.`
+                `PHẦN ${romanNumerals[currentRoman - 1]}. Câu trắc nghiệm trả lời ngắn. Thí sinh trả lời từ câu 1 đến câu ${part3.length}.`
             );
             currentRoman++;
 
             part3.forEach((q, pIdx) => {
                 const qNum = pIdx + 1;
                 const cccdTag = (includeCccd && (q.cccd || q.bankId || q.id)) ? `[${q.cccd || q.bankId || q.id}] ` : '';
-                const prefix = `${cccdTag}Câu ${qNum}. `;
+                const prefix = `${cccdTag}Câu ${qNum}: `;
 
                 bodyXml += renderQuestionBlocks(prefix, q.content);
 
@@ -2800,7 +2801,7 @@
                         bodyXml += `
                         <w:p>
                           <w:pPr><w:ind w:left="992"/><w:spacing w:before="40" w:after="40"/><w:jc w:val="both"/></w:pPr>
-                          <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:i/><w:color w:val="1E40AF"/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr><w:t>Lời giải:</w:t></w:r>
+                          <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:i/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr><w:t>Lời giải:</w:t></w:r>
                         </w:p>`;
                         bodyXml += renderQuestionBlocks('', solText);
                     }
@@ -2811,16 +2812,14 @@
         // ================= PHẦN IV: TỰ LUẬN =================
         if (part4.length > 0) {
             bodyXml += renderSectionHeader(
-                romanNumerals[currentRoman - 1],
-                'TỰ LUẬN',
-                `Thí sinh trình bày chi tiết lời giải từ câu 1 đến câu ${part4.length}.`
+                `PHẦN ${romanNumerals[currentRoman - 1]}. Tự luận. Thí sinh trình bày chi tiết lời giải từ câu 1 đến câu ${part4.length}.`
             );
             currentRoman++;
 
             part4.forEach((q, pIdx) => {
                 const qNum = pIdx + 1;
                 const cccdTag = (includeCccd && (q.cccd || q.bankId || q.id)) ? `[${q.cccd || q.bankId || q.id}] ` : '';
-                const prefix = `${cccdTag}Câu ${qNum}. `;
+                const prefix = `${cccdTag}Câu ${qNum}: `;
 
                 bodyXml += renderQuestionBlocks(prefix, q.content);
 
@@ -2838,7 +2837,7 @@
                     bodyXml += `
                     <w:p>
                       <w:pPr><w:ind w:left="992"/><w:spacing w:before="60" w:after="40"/><w:jc w:val="both"/></w:pPr>
-                      <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:i/><w:color w:val="1E40AF"/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr><w:t>Lời giải chi tiết:</w:t></w:r>
+                      <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:i/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr><w:t>Lời giải chi tiết:</w:t></w:r>
                     </w:p>`;
                     bodyXml += renderQuestionBlocks('', solText);
                 }
@@ -2850,7 +2849,7 @@
             bodyXml += `
             <w:p>
               <w:pPr><w:spacing w:before="360" w:after="100"/><w:jc w:val="center"/></w:pPr>
-              <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:sz w:val="26"/><w:szCs w:val="26"/><w:color w:val="1E40AF"/></w:rPr><w:t>BẢNG ĐÁP ÁN TỔNG HỢP</w:t></w:r>
+              <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:sz w:val="26"/><w:szCs w:val="26"/></w:rPr><w:t>BẢNG ĐÁP ÁN TỔNG HỢP</w:t></w:r>
             </w:p>`;
 
             // Bảng đáp án Phần I (mỗi hàng 10 câu)
@@ -2896,7 +2895,7 @@
                             const correctIdx = typeof q.correct === 'number' ? q.correct : (q.correctAnswer ? ['A','B','C','D'].indexOf(String(q.correctAnswer).trim().toUpperCase()) : -1);
                             ansChar = correctIdx >= 0 ? ['A','B','C','D'][correctIdx] : '';
                         }
-                        bodyXml += `<w:tc><w:tcPr><w:tcW w:w="1077" w:type="dxa"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/><w:spacing w:before="60" w:after="60"/></w:pPr><w:r><w:rPr><w:b/><w:color w:val="1E40AF"/><w:sz w:val="24"/></w:rPr><w:t>${ansChar}</w:t></w:r></w:p></w:tc>`;
+                        bodyXml += `<w:tc><w:tcPr><w:tcW w:w="1077" w:type="dxa"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/><w:spacing w:before="60" w:after="60"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="24"/></w:rPr><w:t>${ansChar}</w:t></w:r></w:p></w:tc>`;
                     }
                     bodyXml += `</w:tr>`;
                 }
@@ -3698,8 +3697,31 @@
         }
 
         setStatus(30, "Đang chuẩn hóa đề thi sang LaTeX...");
-        let fullLatex = '';
+        
+        // Phân loại câu hỏi thành 4 phần chuẩn Bộ GD&ĐT 2025
+        const p1List = [];
+        const p2List = [];
+        const p3List = [];
+        const p4List = [];
+
         questions.forEach((q, idx) => {
+            const type = (q.type || '').toLowerCase();
+            if (type === 'tf' || type === 'true_false' || (Array.isArray(q.statements) && q.statements.length > 0)) {
+                p2List.push({ ...q, globalIdx: idx + 1 });
+            } else if (type === 'short' || type === 'tl_short' || (q.answer !== undefined && q.answer !== null && !Array.isArray(q.options) && String(q.answer).trim() !== '')) {
+                p3List.push({ ...q, globalIdx: idx + 1 });
+            } else if (type === 'essay' || type === 'tl') {
+                p4List.push({ ...q, globalIdx: idx + 1 });
+            } else {
+                p1List.push({ ...q, globalIdx: idx + 1 });
+            }
+        });
+
+        let currentRomanPy = 1;
+        const romanNumeralsPy = ['I', 'II', 'III', 'IV'];
+
+        const formatQuestionLatex = (q) => {
+            let res = '';
             let content = q.content || '';
             for (const [sUrl, fName] of Object.entries(imageMap)) {
                 if (content.includes(sUrl)) content = content.split(sUrl).join(fName);
@@ -3708,13 +3730,13 @@
             const env = q.env || (q.type === 'essay' || q.type === 'tl' ? 'bt' : 'ex');
             const cccd = q.cccd || q.bankId || q.id || '';
             
-            fullLatex += `\\begin{${env}}[${cccd}]\n${content}\n`;
+            res += `\\begin{${env}}[${cccd}]\n${content}\n`;
 
             const qCandidates = [q.image, q.img, q.imageUrl, q.image_url];
             if (Array.isArray(q.images)) qCandidates.push(...q.images);
             qCandidates.forEach(cand => {
                 if (cand && imageMap[cand] && !content.includes(imageMap[cand])) {
-                    fullLatex += `\\begin{center}\n\\includegraphics{${imageMap[cand]}}\n\\end{center}\n`;
+                    res += `\\begin{center}\n\\includegraphics{${imageMap[cand]}}\n\\end{center}\n`;
                 }
             });
 
@@ -3729,7 +3751,7 @@
                     const isTrue = typeof st === 'object' ? (st.isTrue === true || st.correct === true) : false;
                     return `\t{${isTrue ? '\\True ' : ''}${stText}}`;
                 }).join('\n');
-                fullLatex += `\\choiceTF\n${tfItems}\n`;
+                res += `\\choiceTF\n${tfItems}\n`;
             } else if (Array.isArray(q.options) && q.options.length > 0) {
                 const correctIdx = typeof q.correct === 'number' ? q.correct : (q.correctAnswer ? ['A','B','C','D'].indexOf(String(q.correctAnswer).trim().toUpperCase()) : -1);
                 const choiceItems = q.options.map((opt, i) => {
@@ -3741,10 +3763,10 @@
                     const isCorrect = (i === correctIdx);
                     return `\t{${isCorrect ? '\\True ' : ''}${optText}}`;
                 }).join('\n');
-                fullLatex += `\\choice\n${choiceItems}\n`;
+                res += `\\choice\n${choiceItems}\n`;
             } else if (q.type === 'short' && (q.answer !== undefined || q.correctAnswer)) {
                 const ans = String(q.answer !== undefined && q.answer !== null ? q.answer : (q.correctAnswer || '')).trim();
-                fullLatex += `\\shortans{${cleanHtmlToLatex(ans)}}\n`;
+                res += `\\shortans{${cleanHtmlToLatex(ans)}}\n`;
             }
 
             if (q.solution || q.explain) {
@@ -3753,11 +3775,34 @@
                     if (sol.includes(sUrl)) sol = sol.split(sUrl).join(fName);
                 }
                 sol = cleanHtmlToLatex(sol);
-                fullLatex += `\\loigiai{\n${sol}\n}\n`;
+                res += `\\loigiai{\n${sol}\n}\n`;
             }
 
-            fullLatex += `\\end{${env}}\n\n`;
-        });
+            res += `\\end{${env}}\n\n`;
+            return res;
+        };
+
+        let fullLatex = '';
+        if (p1List.length > 0) {
+            fullLatex += `\n\\textbf{PHẦN ${romanNumeralsPy[currentRomanPy - 1]}. Câu trắc nghiệm nhiều phương án lựa chọn. Thí sinh trả lời từ câu 1 đến câu ${p1List.length}. Mỗi câu hỏi thí sinh chỉ chọn một phương án.}\n\n`;
+            currentRomanPy++;
+            p1List.forEach(q => { fullLatex += formatQuestionLatex(q); });
+        }
+        if (p2List.length > 0) {
+            fullLatex += `\n\\textbf{PHẦN ${romanNumeralsPy[currentRomanPy - 1]}. Câu trắc nghiệm đúng sai. Thí sinh trả lời từ câu 1 đến câu ${p2List.length}. Trong mỗi ý a), b), c), d) ở mỗi câu, thí sinh chọn đúng hoặc sai.}\n\n`;
+            currentRomanPy++;
+            p2List.forEach(q => { fullLatex += formatQuestionLatex(q); });
+        }
+        if (p3List.length > 0) {
+            fullLatex += `\n\\textbf{PHẦN ${romanNumeralsPy[currentRomanPy - 1]}. Câu trắc nghiệm trả lời ngắn. Thí sinh trả lời từ câu 1 đến câu ${p3List.length}.}\n\n`;
+            currentRomanPy++;
+            p3List.forEach(q => { fullLatex += formatQuestionLatex(q); });
+        }
+        if (p4List.length > 0) {
+            fullLatex += `\n\\textbf{PHẦN ${romanNumeralsPy[currentRomanPy - 1]}. Tự luận. Thí sinh trình bày chi tiết lời giải từ câu 1 đến câu ${p4List.length}.}\n\n`;
+            currentRomanPy++;
+            p4List.forEach(q => { fullLatex += formatQuestionLatex(q); });
+        }
 
         setStatus(40, "Đang chuyển đổi MathType OLE trong Python Wasm...");
 

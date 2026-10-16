@@ -428,6 +428,40 @@
             }
             if (currentQ) currentSec.questions.push(currentQ);
 
+            // Chuẩn hóa tiêu đề các Phần theo chuẩn Bộ GD&ĐT 2025 (Chữ màu đen, 1 dòng, in đậm toàn bộ)
+            const hasMultipleSections = sections.length > 1;
+            if (hasMultipleSections) {
+                if (!sections[0].titleEl && sections[1] && sections[1].titleEl && /PHẦN\s+(?:II|2)/i.test(sections[1].titleEl.text)) {
+                    const p1Count = sections[0].questions.length;
+                    const p1Text = `PHẦN I. Câu trắc nghiệm nhiều phương án lựa chọn. Thí sinh trả lời từ câu 1 đến câu ${p1Count}. Mỗi câu hỏi thí sinh chỉ chọn một phương án.`;
+                    const p1Xml = `<w:p><w:pPr><w:spacing w:before="240" w:after="80" w:line="276" w:lineRule="auto"/><w:jc w:val="both"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr><w:t xml:space="preserve">${p1Text}</w:t></w:r></w:p>`;
+                    sections[0].titleEl = { tag: 'w:p', xml: p1Xml, text: p1Text };
+                }
+
+                sections.forEach((sec) => {
+                    if (!sec.titleEl) return;
+                    const tText = sec.titleEl.text.trim();
+                    const qCount = sec.questions.length;
+                    let normText = '';
+                    if (/PHẦN\s+(?:I\b|1\b)/i.test(tText)) {
+                        normText = `PHẦN I. Câu trắc nghiệm nhiều phương án lựa chọn. Thí sinh trả lời từ câu 1 đến câu ${qCount}. Mỗi câu hỏi thí sinh chỉ chọn một phương án.`;
+                    } else if (/PHẦN\s+(?:II\b|2\b)/i.test(tText)) {
+                        normText = `PHẦN II. Câu trắc nghiệm đúng sai. Thí sinh trả lời từ câu 1 đến câu ${qCount}. Trong mỗi ý a), b), c), d) ở mỗi câu, thí sinh chọn đúng hoặc sai.`;
+                    } else if (/PHẦN\s+(?:III\b|3\b)/i.test(tText)) {
+                        normText = `PHẦN III. Câu trắc nghiệm trả lời ngắn. Thí sinh trả lời từ câu 1 đến câu ${qCount}.`;
+                    } else if (/PHẦN\s+(?:IV\b|4\b)/i.test(tText)) {
+                        normText = `PHẦN IV. Tự luận. Thí sinh trình bày chi tiết lời giải từ câu 1 đến câu ${qCount}.`;
+                    }
+
+                    if (normText) {
+                        sec.titleEl.xml = `<w:p><w:pPr><w:spacing w:before="240" w:after="80" w:line="276" w:lineRule="auto"/><w:jc w:val="both"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr><w:t xml:space="preserve">${normText}</w:t></w:r></w:p>`;
+                        sec.titleEl.text = normText;
+                    } else {
+                        sec.titleEl.xml = sec.titleEl.xml.replace(/<w:color\b[^>]*\/>/g, '').replace(/<w:color\b[^>]*>[\s\S]*?<\/w:color>/g, '');
+                    }
+                });
+            }
+
             let totalQ = 0;
             sections.forEach(sec => {
                 sec.questions.forEach(q => {
@@ -573,6 +607,7 @@
             let globalQIndex = 0;
             const answers = { p1: [], p2: [], p3: [] };
             const mixedSectionsXml = [];
+            const hasMultipleSections = parsed.sections.length > 1;
 
             for (const sec of parsed.sections) {
                 if (sec.titleEl) mixedSectionsXml.push(sec.titleEl.xml);
@@ -597,9 +632,11 @@
                     questionsToProcess = finalOrder;
                 }
 
+                let secQIndex = 0;
                 for (const q of questionsToProcess) {
+                    secQIndex++;
                     globalQIndex++;
-                    const newQNum = globalQIndex;
+                    const newQNum = hasMultipleSections ? secQIndex : globalQIndex;
                     const mixedQXml = this.renderMixedQuestion(q, newQNum, answers, false);
                     mixedSectionsXml.push(mixedQXml);
                 }
@@ -626,10 +663,10 @@
             if (/(<w:t\b[^>]*>)(?:\[(?:NB|TH|VD|VDC|\w+)\]\s*)?(?:##\s*)?(?:Câu|Bài|Question)\s*\d+([:.\s(])/i.test(firstXml)) {
                 firstXml = firstXml.replace(
                     /(<w:t\b[^>]*>)(?:\[(?:NB|TH|VD|VDC|\w+)\]\s*)?(?:##\s*)?(?:Câu|Bài|Question)\s*\d+([:.\s(])/i,
-                    `$1Câu ${newQNum}$2`
+                    `$1Câu ${newQNum}: `
                 );
             } else {
-                firstXml = firstXml.replace(/(<w:t\b[^>]*>)\s*\d+([:.\s(])/, `$1${newQNum}$2`);
+                firstXml = firstXml.replace(/(<w:t\b[^>]*>)\s*\d+([:.\s(])/, `$1${newQNum}: `);
             }
             firstXml = firstXml.replace(/(<w:t\b[^>]*>)##\s*/i, '$1');
             qElements[0].xml = firstXml;
@@ -777,14 +814,18 @@
         buildExamXml(parsed, options = {}) {
             let globalQIndex = 0;
             const sectionsXml = [];
+            const hasMultipleSections = parsed.sections.length > 1;
 
             for (const sec of parsed.sections) {
                 if (sec.titleEl) sectionsXml.push(sec.titleEl.xml);
                 if (sec.introElements) sec.introElements.forEach(e => sectionsXml.push(e.xml));
 
+                let secQIndex = 0;
                 for (const q of sec.questions) {
+                    secQIndex++;
                     globalQIndex++;
-                    sectionsXml.push(this.renderMixedQuestion(q, globalQIndex, null, options.keepUnderlines));
+                    const newQNum = hasMultipleSections ? secQIndex : globalQIndex;
+                    sectionsXml.push(this.renderMixedQuestion(q, newQNum, null, options.keepUnderlines));
                 }
             }
 
@@ -2354,6 +2395,7 @@ ${inputs}
     };
 
     // Exports
+    window.DocxDirectMixer = DocxDirectMixer;
     window.ExamMixerEngine = ExamMixerEngine;
     window.openExamMixerModal = openExamMixerModal;
     window.closeExamMixerModal = closeExamMixerModal;
