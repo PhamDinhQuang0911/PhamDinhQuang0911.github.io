@@ -2816,15 +2816,14 @@
                     const stText = cleanHtmlToWordText(typeof st === 'object' ? (st.content || st.text || '') : st);
                     const charAns = getTfAnswerChar(q, sIdx);
                     const isTrue = (charAns === 'Đ');
-                    const shouldShowAns = (mode === 'full') || underlineCorrect;
-                    const ansLabel = shouldShowAns ? (isTrue ? ' [ĐÚNG]' : ' [SAI]') : '';
+                    const shouldUnderline = ((mode === 'full') || underlineCorrect) && isTrue;
+                    const uTag = shouldUnderline ? '<w:u w:val="single"/>' : '';
 
                     bodyXml += `
                     <w:p>
                       <w:pPr><w:ind w:left="992"/><w:spacing w:after="40" w:line="276" w:lineRule="auto"/><w:jc w:val="both"/></w:pPr>
-                      <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr><w:t xml:space="preserve">${subLabels[sIdx]}) </w:t></w:r>
+                      <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/>${uTag}<w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr><w:t xml:space="preserve">${subLabels[sIdx]}) </w:t></w:r>
                       ${renderRunsToXml(parseRunsFromText(stText, false, false, formulaRegistry, formulaMode), imageMap, formulaRegistry)}
-                      ${ansLabel ? `<w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr><w:t xml:space="preserve">${ansLabel}</w:t></w:r>` : ''}
                     </w:p>`;
                 });
 
@@ -2865,11 +2864,15 @@
                 const showShortAnswer = (mode === 'full') || underlineCorrect;
 
                 if (showShortAnswer && ansVal) {
+                    let cleanAns = ansVal.trim();
+                    if (!cleanAns.startsWith('$') && !cleanAns.startsWith('\\(') && !cleanAns.startsWith('\\[') && /[0-9+\-=*/^_\\]/.test(cleanAns)) {
+                        cleanAns = `$${cleanAns}$`;
+                    }
                     bodyXml += `
                     <w:p>
                       <w:pPr><w:ind w:left="992"/><w:spacing w:before="40" w:after="40"/><w:jc w:val="both"/></w:pPr>
                       <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr><w:t xml:space="preserve">Đáp án: </w:t></w:r>
-                      <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr><w:t>${escapeXml(ansVal)}</w:t></w:r>
+                      ${renderRunsToXml(parseRunsFromText(cleanAns, true, false, formulaRegistry, formulaMode), imageMap, formulaRegistry)}
                     </w:p>`;
                 } else if (mode === 'questions') {
                     if (includeDottedLines && (dottedLinesScope === 'essay_short' || dottedLinesScope === 'all')) {
@@ -3073,7 +3076,15 @@
                         if (qIdx < totalP3) {
                             ansVal = getShortAnswerText(part3[qIdx]);
                         }
-                        bodyXml += `<w:tc><w:tcPr><w:tcW w:w="1795"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/><w:spacing w:before="60" w:after="60"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr><w:t>${escapeXml(ansVal)}</w:t></w:r></w:p></w:tc>`;
+                        let cellContentXml = '';
+                        if (ansVal) {
+                            let cleanAns = ansVal.trim();
+                            if (!cleanAns.startsWith('$') && !cleanAns.startsWith('\\(') && !cleanAns.startsWith('\\[') && /[0-9+\-=*/^_\\]/.test(cleanAns)) {
+                                cleanAns = `$${cleanAns}$`;
+                            }
+                            cellContentXml = renderRunsToXml(parseRunsFromText(cleanAns, true, false, formulaRegistry, formulaMode), imageMap, formulaRegistry);
+                        }
+                        bodyXml += `<w:tc><w:tcPr><w:tcW w:w="1795"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/><w:spacing w:before="60" w:after="60"/></w:pPr>${cellContentXml}</w:p></w:tc>`;
                     }
                     bodyXml += `</w:tr>`;
                 }
@@ -3433,14 +3444,12 @@
                     const imgId = imgCounter;
                     const rId = `rIdImg_${imgId}`;
 
-                    // Xác định kích thước tự nhiên của hình ảnh
+                    // Xác định kích thước tự nhiên của hình ảnh (chuẩn vừa xinh như phiên bản cũ)
                     const dims = getImageDimensions(bytes);
-                    // Scale ảnh xuống ~15% pixel gốc (giảm ~40% so với trước để ảnh vừa vặn, không bị choán chỗ)
-                    const imgScale = 0.15;
-                    const maxW_emu = 762000; // ~2.0 inches (~5.1 cm)
-                    const maxH_emu = 650000; // ~1.7 inches (~4.3 cm)
-                    let cx = Math.round(dims.w * 9525 * imgScale);
-                    let cy = Math.round(dims.h * 9525 * imgScale);
+                    const maxW_emu = 4500000; // ~11.8 cm (chuẩn vừa vặn trang Word A4 lề 2cm)
+                    const maxH_emu = 3500000; // ~9.2 cm
+                    let cx = Math.round(dims.w * 9525);
+                    let cy = Math.round(dims.h * 9525);
 
                     if (cx > maxW_emu) {
                         const sc = maxW_emu / cx;
@@ -3452,8 +3461,8 @@
                         cy = maxH_emu;
                         cx = Math.round(cx * sc);
                     }
-                    cx = Math.max(250000, cx);  // min ~0.7cm
-                    cy = Math.max(180000, cy);  // min ~0.5cm
+                    cx = Math.max(1200000, cx);  // min ~3.1cm
+                    cy = Math.max(900000, cy);   // min ~2.3cm
 
                     zip.file(`word/media/image_${imgId}.png`, bytes);
                     const imgPayload = { id: imgId, rId, cx, cy };
@@ -3602,7 +3611,7 @@
         pyodideInitPromise = new Promise((resolve, reject) => {
             try {
                 if (!pyodideExporterWorker) {
-                    pyodideExporterWorker = new Worker("tex2mathtype-worker.js?v=20261016_V3");
+                    pyodideExporterWorker = new Worker("tex2mathtype-worker.js?v=20261016_V4");
                 }
                 const initTimeout = setTimeout(() => {
                     if (!isPyodideExporterReady) {
@@ -3823,13 +3832,13 @@
 
             if (q.type === 'tf' || (Array.isArray(q.statements) && q.statements.length > 0)) {
                 const stmts = Array.isArray(q.statements) ? q.statements : q.options;
-                const tfItems = (stmts || []).map(st => {
+                const tfItems = (stmts || []).map((st, sIdx) => {
                     let stText = typeof st === 'object' ? (st.content || st.text || '') : st;
                     for (const [sUrl, fName] of Object.entries(imageMap)) {
                         if (stText.includes(sUrl)) stText = stText.split(sUrl).join(fName);
                     }
                     stText = cleanHtmlToLatex(stText);
-                    const isTrue = typeof st === 'object' ? (st.isTrue === true || st.correct === true) : false;
+                    const isTrue = (getTfAnswerChar(q, sIdx) === 'Đ');
                     return `\t{${isTrue ? '\\True ' : ''}${stText}}`;
                 }).join('\n');
                 res += `\\choiceTF\n${tfItems}\n`;
@@ -3848,10 +3857,13 @@
             } else if (q.type === 'short' || (q.answer !== undefined && q.answer !== null && String(q.answer).trim() !== '')) {
                 const ans = getShortAnswerText(q);
                 if (ans) {
-                    if (customOptions.underlineCorrect || mode === 'full') {
-                        res += `\\textbf{Đáp án: ${cleanHtmlToLatex(ans)}}\n\n`;
+                    let ansLatex = cleanHtmlToLatex(ans).trim();
+                    if (!ansLatex.startsWith('$') && !ansLatex.startsWith('\\(') && !ansLatex.startsWith('\\[') && /[0-9+\-=*/^_\\]/.test(ansLatex)) {
+                        ansLatex = `$${ansLatex}$`;
                     }
-                    res += `\\shortans{${cleanHtmlToLatex(ans)}}\n`;
+                    if (customOptions.underlineCorrect || mode === 'full') {
+                        res += `\\textbf{Đáp án: }${ansLatex}\n\n`;
+                    }
                 }
             }
 
@@ -3978,7 +3990,8 @@
                 grade: customOptions.grade || '9',
                 duration: customOptions.duration || 90,
                 exam_code: customOptions.examCode || '1001',
-                candidate_info: customOptions.includeCandidateInfo !== false
+                candidate_info: customOptions.includeCandidateInfo !== false,
+                underline_correct: customOptions.underlineCorrect === true
             };
 
             worker.addEventListener('message', messageHandler);
@@ -4007,8 +4020,8 @@
         const mode = customOptions.mode || 'questions';
         const formulaMode = customOptions.formulaMode || 'mathtype';
 
-        // 1. Chỉ gọi Pyodide khi người dùng cấu hình rõ ràng usePyodide: true
-        if (customOptions.usePyodide === true && formulaMode === 'mathtype') {
+        // 1. Nếu chọn MathType: Ưu tiên xử lý bằng Pyodide Python WebAssembly (chuẩn TeX2MathType Pro)
+        if (formulaMode === 'mathtype') {
             try {
                 return await exportExamViaPyodide(exam, customOptions);
             } catch (pyErr) {

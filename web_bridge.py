@@ -84,6 +84,10 @@ def convert_tex_to_docx_bytes(latex_text: str,
         report(base_pct, f"[{task_label}] Đang chuẩn hóa câu hỏi và phương án...")
         
         pt = pt_base
+        underline_correct = False
+        if header_config and isinstance(header_config, dict):
+            underline_correct = bool(header_config.get('underline_correct', False))
+
         if mode == 'questions':
             pt = remove_solutions(pt)
             pt = replace_shortans_commands(pt, 'questions')
@@ -92,8 +96,9 @@ def convert_tex_to_docx_bytes(latex_text: str,
             pt = replace_shortans_commands(pt, 'full')
             
         pt = replace_ex_and_lists(pt)
-        pt = replace_choice_commands(pt, mode, word_standard=standard)
-        pt = clean_true_commands(pt, mode)
+        choice_mode = 'full' if (underline_correct or mode != 'questions') else 'questions'
+        pt = replace_choice_commands(pt, choice_mode, word_standard=standard)
+        pt = clean_true_commands(pt, choice_mode)
 
         # Tháo bỏ vỏ \begin{table} và chuyển \caption thành in đậm nếu có
         pt = re.sub(r'\\caption\s*\{([^}]*)\}', r'\n\n\\textbf{\1}\n\n', pt)
