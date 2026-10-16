@@ -4061,9 +4061,9 @@
 
                 <!-- Footer Modal -->
                 <div class="flex items-center justify-end gap-2.5 pt-3 border-t border-gray-200 dark:border-gray-800 shrink-0">
-                    <button type="button" onclick="window.closeExportWordModal()" class="px-3.5 py-2 text-xs font-bold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-xl transition cursor-pointer">Hủy</button>
-                    <button type="button" id="btnConfirmExportWord" class="px-5 py-2 btn-season-primary text-white text-xs font-bold rounded-xl transition shadow-sm flex items-center gap-1.5 cursor-pointer">
-                        <i class="fa-solid fa-download"></i> Tải file Word (.docx)
+                    <button type="button" onclick="window.closeExportWordModal()" class="px-4 py-2.5 text-xs font-bold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-xl transition cursor-pointer">Hủy</button>
+                    <button type="button" id="btnConfirmExportWord" class="px-6 py-2.5 bg-primary-600 hover:bg-primary-700 text-white text-xs font-bold rounded-xl transition shadow-md flex items-center gap-2 cursor-pointer" style="background-color: var(--primary-color, #ea580c); color: #ffffff;">
+                        <i class="fa-solid fa-file-arrow-down"></i> Tải file Word (.docx)
                     </button>
                 </div>
             </div>`;
@@ -4198,7 +4198,7 @@
                     alert('Lỗi xuất file Word: ' + err.message);
                 } finally {
                     btnConfirm.disabled = false;
-                    btnConfirm.innerHTML = '<i class="fa-solid fa-download"></i> Tải file Word (.docx)';
+                    btnConfirm.innerHTML = '<i class="fa-solid fa-file-arrow-down"></i> Tải file Word (.docx)';
                 }
             };
         }
