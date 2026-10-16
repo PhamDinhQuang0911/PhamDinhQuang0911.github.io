@@ -37,7 +37,8 @@ def convert_tex_to_docx_bytes(latex_text: str,
                               export_mode: str = 'full',
                               base_pt: float = 11.0,
                               images_dir: str = '/home/pyodide/images',
-                              progress_cb=None) -> list:
+                              progress_cb=None,
+                              header_config: dict = None) -> list:
     """
     Chuyển đổi chuỗi LaTeX sang 1 hoặc 2 file DOCX MathType OLE.
     
@@ -98,16 +99,16 @@ def convert_tex_to_docx_bytes(latex_text: str,
         pt = re.sub(r'\\caption\{([^}]*)\}', r'\n\n\\textbf{\1}\n\n', pt)
         pt = re.sub(r'\\begin\{table\}(?:\[[^\]]*\])?', '\n\n', pt)
         pt = re.sub(r'\\end\{table\}', '\n\n', pt)
-        pt = re.sub(r'\\begin\{center\}\s*(\\begin\{tabular\}.*?\\end\{tabular\})\s*\\end\{center\}', r'\1', pt, flags=re.DOTALL)
+        pt = re.sub(r'\\begin\{center\}\s*(\\begin\{(?:tabular\*?|longtable)\}.*?\\end\{(?:tabular\*?|longtable)\})\s*\\end\{center\}', r'\1', pt, flags=re.DOTALL)
 
-        # Trích xuất các bảng tabular trước khi gọi replace_double_slash
+        # Trích xuất các bảng tabular & longtable trước khi gọi replace_double_slash
         tabular_blocks = []
         def _extract_tabular(m):
             t_idx = len(tabular_blocks)
             tabular_blocks.append(m.group(0))
             return f"\n\n[[TABULAR_{t_idx}]]\n\n"
 
-        tabular_pattern = re.compile(r'\\begin\{tabular\}.*?\\end\{tabular\}', re.DOTALL)
+        tabular_pattern = re.compile(r'\\begin\{(?:tabular\*?|longtable)\}.*?\\end\{(?:tabular\*?|longtable)\}', re.DOTALL)
         pt = tabular_pattern.sub(_extract_tabular, pt)
 
         pt = replace_double_slash(pt)
@@ -121,7 +122,8 @@ def convert_tex_to_docx_bytes(latex_text: str,
             pt,
             word_standard=standard,
             temp_img_dir=images_dir,
-            tabular_blocks=tabular_blocks
+            tabular_blocks=tabular_blocks,
+            header_config=header_config
         )
         doc.save(sk_path)
         

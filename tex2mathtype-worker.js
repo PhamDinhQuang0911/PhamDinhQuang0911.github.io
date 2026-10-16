@@ -31,8 +31,8 @@ async function initPyodideWorker() {
         await micropip.install(["python-docx", "fonttools", "olefile"]);
 
         postProgress(75, "Đang tải mã nguồn TeX2MathType Pro...");
-        // Tải gói core zip từ cùng thư mục web
-        const zipResponse = await fetch("tex2mathtype_core.zip");
+        // Tải gói core zip từ cùng thư mục web kèm cache buster
+        const zipResponse = await fetch("tex2mathtype_core.zip?v=" + Date.now());
         if (!zipResponse.ok) {
             throw new Error(`Không tải được tex2mathtype_core.zip (HTTP ${zipResponse.status})`);
         }
@@ -82,7 +82,7 @@ self.onmessage = async function(e) {
 
     if (action === "CONVERT_TEX") {
         try {
-            const { text, standard, mode, base_pt } = payload;
+            const { text, standard, mode, base_pt, header_config } = payload;
             const ptSize = parseFloat(base_pt) || 11.0;
             
             // Đăng ký callback báo tiến trình từ Python sang JS Worker
@@ -90,11 +90,12 @@ self.onmessage = async function(e) {
                 postProgress(pct, msg);
             });
 
-            // Chuyển chuỗi TeX vào Python
+            // Chuyển chuỗi TeX và Header vào Python
             pyodide.globals.set("input_latex_text", text);
             pyodide.globals.set("input_standard", standard);
             pyodide.globals.set("input_mode", mode);
             pyodide.globals.set("input_base_pt", ptSize);
+            pyodide.globals.set("input_header_config", header_config ? JSON.stringify(header_config) : null);
 
             // Ghi nhận các file hình ảnh đính kèm vào /home/pyodide/images
             try { pyodide.FS.mkdir("/home/pyodide/images"); } catch(e) {}
@@ -110,14 +111,16 @@ self.onmessage = async function(e) {
             postProgress(5, "Bắt đầu chuyển đổi LaTeX sang Word MathType...");
 
             await pyodide.runPythonAsync(`
-import web_bridge
+import web_bridge, json
+hdr_cfg = json.loads(input_header_config) if input_header_config else None
 converted_list = web_bridge.convert_tex_to_docx_bytes(
     latex_text=input_latex_text,
     standard=input_standard,
     export_mode=input_mode,
     base_pt=input_base_pt,
     images_dir='/home/pyodide/images',
-    progress_cb=report_progress_to_js
+    progress_cb=report_progress_to_js,
+    header_config=hdr_cfg
 )
             `);
 

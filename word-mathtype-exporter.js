@@ -1953,24 +1953,40 @@
     // ==========================================
     function parseLatexTabular(tabularCode) {
         if (!tabularCode) return null;
-        const startMatch = tabularCode.match(/\\begin\{tabular\}\s*\{([^}]*)\}/i);
+        // Hỗ trợ tabular* có {width}{col_spec} và tabular/longtable có {col_spec}
+        let startMatch = tabularCode.match(/\\begin\{tabular\*\}\s*(?:\[[^\]]*\])?\s*\{[^}]*\}\s*\{([^}]*)\}/i);
+        if (!startMatch) {
+            startMatch = tabularCode.match(/\\begin\{(?:tabular|longtable)\}\s*(?:\[[^\]]*\])?\s*\{([^}]*)\}/i);
+        }
+        if (!startMatch) {
+            startMatch = tabularCode.match(/\\begin\{(?:tabular\*?|longtable)\}.*?\{([^}]*)\}/i);
+        }
         if (!startMatch) return null;
 
         const startIdx = startMatch.index + startMatch[0].length;
-        const endIdx = tabularCode.indexOf('\\end{tabular}', startIdx);
-        if (endIdx === -1) return null;
+        const endMatch = tabularCode.match(/\\end\{(?:tabular\*?|longtable)\}/i);
+        const endIdx = endMatch ? endMatch.index : tabularCode.length;
 
-        const body = tabularCode.substring(startIdx, endIdx);
+        let body = tabularCode.substring(startIdx, endIdx);
+        // Tự động chuẩn hóa lỗi người dùng quên gõ '\\' trước \hline
+        body = body.replace(/([^\n\\])\s*\n\s*\\hline/gi, '$1 \\\\\n\\hline');
+        body = body.replace(/([^\n\\])\s*\\hline/gi, '$1 \\\\\n\\hline');
+
         // Tách các hàng bằng \\
-        const rawRows = body.split(/\\\\/).map(r => r.trim()).filter(Boolean);
+        const rawRows = body.split(/\\\\(?:\s*\[[^\]]*\])?/).map(r => r.trim()).filter(Boolean);
         const rows = [];
 
         for (const rawRow of rawRows) {
-            // Lọc bỏ các lệnh \hline, \cline{...}
-            let cleanedRow = rawRow.replace(/\\hline/g, '').replace(/\\cline\{[^}]*\}/g, '').trim();
+            // Lọc bỏ các lệnh \hline, \cline{...}, \toprule, etc.
+            let cleanedRow = rawRow.replace(/\\(hline|toprule|midrule|bottomrule)/g, '').replace(/\\cline\{[^}]*\}/g, '').trim();
             if (!cleanedRow) continue;
             // Tách các ô bằng dấu &
-            const cells = cleanedRow.split('&').map(c => c.trim().replace(/\{,\}/g, ','));
+            const cells = cleanedRow.split('&').map(c => {
+                let cell = c.trim().replace(/\{,\}/g, ',');
+                const mCol = cell.match(/\\multicolumn\{\d+\}\{[^}]*\}\{(.*?)\}/i);
+                if (mCol) cell = mCol[1];
+                return cell;
+            });
             rows.push(cells);
         }
 
@@ -2521,8 +2537,8 @@
             let outXml = '';
             const content = cleanHtmlToWordText(rawContent);
 
-            // Kiểm tra xem câu hỏi có chứa môi trường \begin{tabular} hay không
-            const tabularMatch = content.match(/\\begin\{tabular\}[\s\S]*?\\end\{tabular\}/i);
+            // Kiểm tra xem câu hỏi có chứa môi trường tabular hoặc longtable hay không
+            const tabularMatch = content.match(/\\begin\{(?:tabular\*?|longtable)\}[\s\S]*?\\end\{(?:tabular\*?|longtable)\}/i);
             if (tabularMatch) {
                 const tableCode = tabularMatch[0];
                 const preText = content.substring(0, tabularMatch.index).trim();
@@ -3491,7 +3507,7 @@
         pyodideInitPromise = new Promise((resolve, reject) => {
             try {
                 if (!pyodideExporterWorker) {
-                    pyodideExporterWorker = new Worker("tex2mathtype-worker.js");
+                    pyodideExporterWorker = new Worker("tex2mathtype-worker.js?v=20261016_5");
                 }
                 const initTimeout = setTimeout(() => {
                     if (!isPyodideExporterReady) {
@@ -3762,6 +3778,19 @@
                 }
             };
 
+            const headerConfig = {
+                style: customOptions.headerStyle || 'standard_gov',
+                agency: customOptions.agencyName || 'SỞ GD&ĐT HÀ NỘI',
+                school: customOptions.schoolName || 'TRƯỜNG THPT TRẦN QUANG KHẢI',
+                exam_type: customOptions.examType || '(ĐỀ CHÍNH THỨC)',
+                title: customOptions.examTitle || exam.title || 'ĐỀ THI',
+                subject: customOptions.subject || 'TOÁN HỌC',
+                grade: customOptions.grade || '9',
+                duration: customOptions.duration || 90,
+                exam_code: customOptions.examCode || '1001',
+                candidate_info: customOptions.includeCandidateInfo !== false
+            };
+
             worker.addEventListener('message', messageHandler);
             worker.postMessage({
                 action: 'CONVERT_TEX',
@@ -3771,7 +3800,8 @@
                     standard: customOptions.standard || 'btn_group',
                     mode: mode,
                     base_pt: 11.0,
-                    images: imagesList
+                    images: imagesList,
+                    header_config: headerConfig
                 }
             });
         });
@@ -3848,16 +3878,16 @@
             modal.id = 'exportWordModal';
             modal.className = 'fixed inset-0 z-[160] bg-gray-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 transition-opacity';
             modal.innerHTML = `
-            <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-xl w-full p-4 sm:p-6 border border-gray-100 dark:border-gray-700 max-h-[92vh] flex flex-col">
+            <div class="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl max-w-4xl w-full p-4 sm:p-6 border border-gray-200 dark:border-gray-800 max-h-[92vh] flex flex-col">
                 <!-- Header Modal -->
-                <div class="flex items-center justify-between pb-3 border-b border-gray-100 dark:border-gray-700 shrink-0">
+                <div class="flex items-center justify-between pb-3 border-b border-gray-200 dark:border-gray-800 shrink-0">
                     <div class="flex items-center gap-2.5">
-                        <span class="w-9 h-9 rounded-xl bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 flex items-center justify-center text-lg">
+                        <span class="w-9 h-9 rounded-xl bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 flex items-center justify-center text-lg">
                             <i class="fa-solid fa-file-word"></i>
                         </span>
                         <div>
-                            <h3 class="font-bold text-gray-800 dark:text-gray-100 text-sm sm:text-base">Xuất Word MathType (Chuẩn BTPRO)</h3>
-                            <p class="text-[11px] text-gray-400">MathType 6/7 OLE chuẩn BTPRO / OMML, Căn lề A4, Kẻ bảng, Dòng kẻ chấm</p>
+                            <h3 class="font-bold text-gray-800 dark:text-gray-100 text-sm sm:text-base">Tùy chọn Xuất file Word (.docx)</h3>
+                            <p class="text-[11px] text-gray-500 dark:text-gray-400">Công thức MathType / Equation, Tùy biến khung tiêu đề đề thi &amp; Bảng đáp án</p>
                         </div>
                     </div>
                     <button type="button" onclick="window.closeExportWordModal()" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 p-1.5 rounded-lg text-lg">
@@ -3865,175 +3895,172 @@
                     </button>
                 </div>
 
-                <!-- Body Modal (Scrollable) -->
-                <div class="py-3.5 space-y-4 overflow-y-auto flex-1 pr-1 custom-scrollbar">
-                    
-                    <!-- 1. Định dạng công thức Toán -->
-                    <div class="p-3 bg-blue-50/50 dark:bg-blue-950/20 rounded-xl border border-blue-200 dark:border-blue-900/40 space-y-2">
-                        <label class="block text-xs font-bold text-blue-900 dark:text-blue-200">
-                            📐 1. Định dạng công thức Toán trong Word
-                        </label>
-                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                            <label class="flex items-start gap-2 p-2.5 rounded-xl border border-blue-300 dark:border-blue-700 bg-white dark:bg-gray-800 hover:bg-blue-50 dark:hover:bg-blue-950/40 cursor-pointer transition">
-                                <input type="radio" name="exportWordFormulaMode" value="mathtype" checked class="mt-0.5 text-blue-600 focus:ring-blue-500">
-                                <div>
-                                    <p class="text-xs font-bold text-blue-700 dark:text-blue-300">✨ MathType 6/7 (TeX2MathType Pro Python Wasm)</p>
-                                    <p class="text-[10px] text-gray-500">Động cơ Python chính thức chạy trực tiếp trên trình duyệt (Wasm). Công thức chuẩn OLE2 Equation.DSMT4, cỡ chữ và căn lề hoàn hảo.</p>
+                <!-- Body Modal (Scrollable, 2 Cột trên màn hình ngang) -->
+                <div class="py-4 overflow-y-auto flex-1 pr-1 custom-scrollbar">
+                    <div class="grid grid-cols-1 md:grid-cols-12 gap-4">
+                        
+                        <!-- CỘT TRÁI (5 Cột): Định dạng & Chế độ xuất -->
+                        <div class="md:col-span-5 space-y-3.5">
+                            <!-- 1. Định dạng công thức Toán -->
+                            <div class="p-3 bg-gray-50/70 dark:bg-gray-800/60 rounded-xl border border-gray-200 dark:border-gray-700/80 space-y-2">
+                                <label class="block text-xs font-bold text-gray-700 dark:text-gray-200">
+                                    1. Định dạng công thức
+                                </label>
+                                <div class="grid grid-cols-1 gap-2">
+                                    <label class="flex items-center gap-2.5 p-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-gray-400 dark:hover:border-gray-500 cursor-pointer transition">
+                                        <input type="radio" name="exportWordFormulaMode" value="mathtype" checked class="text-primary-600 focus:ring-primary-500">
+                                        <span class="text-xs font-bold text-gray-800 dark:text-gray-100">Xuất MathType</span>
+                                    </label>
+                                    <label class="flex items-center gap-2.5 p-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-gray-400 dark:hover:border-gray-500 cursor-pointer transition">
+                                        <input type="radio" name="exportWordFormulaMode" value="omml" class="text-primary-600 focus:ring-primary-500">
+                                        <span class="text-xs font-bold text-gray-800 dark:text-gray-100">Xuất Word Equation (OMML)</span>
+                                    </label>
                                 </div>
-                            </label>
-                            <label class="flex items-start gap-2 p-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer transition">
-                                <input type="radio" name="exportWordFormulaMode" value="omml" class="mt-0.5 text-blue-600 focus:ring-blue-500">
-                                <div>
-                                    <p class="text-xs font-bold text-gray-800 dark:text-gray-200">Word Equation (OMML)</p>
-                                    <p class="text-[10px] text-gray-500">Công thức mặc định của Word, không yêu cầu cài MathType</p>
-                                </div>
-                            </label>
-                        </div>
-                    </div>
+                            </div>
 
-                    <!-- 2. Chế độ xuất file -->
-                    <div>
-                        <label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1.5">2. Chế độ xuất file</label>
-                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                            <label class="flex items-center gap-2 p-2.5 rounded-xl border border-gray-200 dark:border-gray-700 hover:bg-blue-50/50 dark:hover:bg-blue-950/20 cursor-pointer transition">
-                                <input type="radio" name="exportWordMode" value="questions" checked class="text-blue-600 focus:ring-blue-500">
-                                <div>
-                                    <p class="text-xs font-bold text-gray-800 dark:text-gray-200">📝 Chỉ Đề bài</p>
-                                    <p class="text-[10px] text-gray-400">Cho học sinh làm</p>
+                            <!-- 2. Chế độ xuất file -->
+                            <div class="p-3 bg-gray-50/70 dark:bg-gray-800/60 rounded-xl border border-gray-200 dark:border-gray-700/80 space-y-2">
+                                <label class="block text-xs font-bold text-gray-700 dark:text-gray-200">2. Nội dung xuất</label>
+                                <div class="grid grid-cols-3 gap-1.5">
+                                    <label class="flex flex-col items-center justify-center text-center p-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-gray-400 dark:hover:border-gray-500 cursor-pointer transition">
+                                        <input type="radio" name="exportWordMode" value="questions" checked class="text-primary-600 focus:ring-primary-500 mb-1">
+                                        <span class="text-xs font-bold text-gray-800 dark:text-gray-200">Đề bài</span>
+                                        <span class="text-[10px] text-gray-400">Không giải</span>
+                                    </label>
+                                    <label class="flex flex-col items-center justify-center text-center p-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-gray-400 dark:hover:border-gray-500 cursor-pointer transition">
+                                        <input type="radio" name="exportWordMode" value="full" class="text-primary-600 focus:ring-primary-500 mb-1">
+                                        <span class="text-xs font-bold text-gray-800 dark:text-gray-200">Có lời giải</span>
+                                        <span class="text-[10px] text-gray-400">Đầy đủ</span>
+                                    </label>
+                                    <label class="flex flex-col items-center justify-center text-center p-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-gray-400 dark:hover:border-gray-500 cursor-pointer transition">
+                                        <input type="radio" name="exportWordMode" value="both" class="text-primary-600 focus:ring-primary-500 mb-1">
+                                        <span class="text-xs font-bold text-gray-800 dark:text-gray-200">Cả 2 bản</span>
+                                        <span class="text-[10px] text-gray-400">2 file Word</span>
+                                    </label>
                                 </div>
-                            </label>
-                            <label class="flex items-center gap-2 p-2.5 rounded-xl border border-gray-200 dark:border-gray-700 hover:bg-blue-50/50 dark:hover:bg-blue-950/20 cursor-pointer transition">
-                                <input type="radio" name="exportWordMode" value="full" class="text-blue-600 focus:ring-blue-500">
-                                <div>
-                                    <p class="text-xs font-bold text-gray-800 dark:text-gray-200">📘 Có lời giải</p>
-                                    <p class="text-[10px] text-gray-400">Gạch chân ĐA đúng</p>
-                                </div>
-                            </label>
-                            <label class="flex items-center gap-2 p-2.5 rounded-xl border border-gray-200 dark:border-gray-700 hover:bg-blue-50/50 dark:hover:bg-blue-950/20 cursor-pointer transition">
-                                <input type="radio" name="exportWordMode" value="both" class="text-blue-600 focus:ring-blue-500">
-                                <div>
-                                    <p class="text-xs font-bold text-gray-800 dark:text-gray-200">📦 Xuất cả 2 bản</p>
-                                    <p class="text-[10px] text-gray-400">Tải cả 2 file</p>
-                                </div>
-                            </label>
-                        </div>
-                    </div>
+                            </div>
 
-                    <!-- 3. Tùy chọn Mẫu Tiêu đề (Header) -->
-                    <div class="p-3 bg-gray-50 dark:bg-gray-900/50 rounded-xl border border-gray-200 dark:border-gray-700 space-y-3">
-                        <div class="flex items-center justify-between">
-                            <label class="text-xs font-bold text-gray-800 dark:text-gray-200 flex items-center gap-1.5">
-                                <i class="fa-solid fa-heading text-blue-600"></i> 3. Mẫu tiêu đề đề thi (Header)
-                            </label>
-                            <select id="exportWordHeaderStyle" class="text-xs font-bold px-2.5 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 outline-none cursor-pointer">
-                                <option value="standard_gov" selected>🏛️ Mẫu 1: Chuẩn Sở / Bộ GD (2 cột chính thức)</option>
-                                <option value="brand_center">⭐ Mẫu 2: Trung tâm / QMath (Trang trọng)</option>
-                                <option value="compact">📄 Mẫu 3: Tiêu đề Rút gọn (Đơn giản)</option>
-                                <option value="none">🚫 Mẫu 4: Không tiêu đề (Bắt đầu từ Câu 1)</option>
-                            </select>
-                        </div>
-
-                        <!-- Các trường thông tin cho phép chỉnh sửa -->
-                        <div id="exportWordHeaderFieldsArea" class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-2 border-t border-gray-200 dark:border-gray-700">
-                            <div>
-                                <label class="block text-[11px] font-bold text-gray-600 dark:text-gray-400 mb-0.5">Cơ quan chủ quản (Dòng 1 trái)</label>
-                                <input type="text" id="exportWordAgencyName" value="SỞ GD&ĐT HÀ NỘI" class="w-full px-2.5 py-1.5 text-xs border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 outline-none">
-                            </div>
-                            <div>
-                                <label class="block text-[11px] font-bold text-gray-600 dark:text-gray-400 mb-0.5">Tên trường / Đơn vị (Dòng 2 trái)</label>
-                                <input type="text" id="exportWordSchoolName" value="TRƯỜNG THPT TRẦN QUANG KHẢI" class="w-full px-2.5 py-1.5 text-xs border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 outline-none">
-                            </div>
-                            <div>
-                                <label class="block text-[11px] font-bold text-gray-600 dark:text-gray-400 mb-0.5">Loại đề thi (Dòng 3 trái)</label>
-                                <input type="text" id="exportWordExamType" value="(ĐỀ CHÍNH THỨC)" class="w-full px-2.5 py-1.5 text-xs border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 outline-none">
-                            </div>
-                            <div>
-                                <label class="block text-[11px] font-bold text-gray-600 dark:text-gray-400 mb-0.5">Tên đề thi (Dòng 1 phải)</label>
-                                <input type="text" id="exportWordTitleInput" class="w-full px-2.5 py-1.5 text-xs border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 outline-none">
-                            </div>
-                            <div class="grid grid-cols-3 gap-1.5">
-                                <div>
-                                    <label class="block text-[11px] font-bold text-gray-600 dark:text-gray-400 mb-0.5">Môn thi</label>
-                                    <input type="text" id="exportWordSubject" value="TOÁN HỌC" class="w-full px-2 py-1.5 text-xs border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 outline-none">
-                                </div>
-                                <div>
-                                    <label class="block text-[11px] font-bold text-gray-600 dark:text-gray-400 mb-0.5">Khối</label>
-                                    <input type="text" id="exportWordGrade" value="9" class="w-full px-2 py-1.5 text-xs border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 outline-none">
-                                </div>
-                                <div>
-                                    <div class="flex items-center justify-between mb-0.5">
-                                        <label class="text-[11px] font-bold text-gray-600 dark:text-gray-400">Mã đề</label>
-                                        <div class="inline-flex rounded-md shadow-2xs" role="group">
-                                            <button type="button" id="btnExamCode3Digits" onclick="window.setWordExamCodeDigits(3)" class="px-1.5 py-0.5 text-[10px] font-bold rounded-l-md border border-purple-600 bg-purple-600 text-white cursor-pointer transition-colors">3 số</button>
-                                            <button type="button" id="btnExamCode4Digits" onclick="window.setWordExamCodeDigits(4)" class="px-1.5 py-0.5 text-[10px] font-bold rounded-r-md border border-l-0 border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 cursor-pointer transition-colors">4 số</button>
-                                        </div>
+                            <!-- 3. Tùy chọn Dòng kẻ chấm -->
+                            <div class="p-3 bg-gray-50/70 dark:bg-gray-800/60 rounded-xl border border-gray-200 dark:border-gray-700/80 space-y-2">
+                                <label class="flex items-center gap-2 cursor-pointer select-none">
+                                    <input type="checkbox" id="exportWordIncludeDottedLines" class="rounded text-primary-600 focus:ring-primary-500">
+                                    <span class="text-xs font-bold text-gray-800 dark:text-gray-200">
+                                        Dòng kẻ chấm làm bài / nháp
+                                    </span>
+                                </label>
+                                <div id="exportWordDottedOptions" class="hidden grid grid-cols-1 gap-2 pt-1 border-t border-gray-200 dark:border-gray-700">
+                                    <div class="flex items-center justify-between">
+                                        <span class="text-xs text-gray-600 dark:text-gray-400">Số dòng mỗi câu:</span>
+                                        <input type="number" id="exportWordDottedCount" value="4" min="1" max="30" class="w-16 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 font-bold text-center">
                                     </div>
-                                    <input type="text" id="exportWordExamCode" value="101" class="w-full px-2 py-1.5 text-xs border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 outline-none">
+                                    <select id="exportWordDottedScope" class="w-full text-xs px-2.5 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 outline-none">
+                                        <option value="essay_short" selected>Chỉ Trả lời ngắn & Tự luận</option>
+                                        <option value="all">Tất cả các câu hỏi</option>
+                                    </select>
                                 </div>
                             </div>
-                            <div class="flex items-center justify-between pt-3">
-                                <div class="flex items-center gap-1.5">
-                                    <span class="text-[11px] text-gray-500">Thời gian:</span>
-                                    <input type="number" id="exportWordDuration" value="90" class="w-16 px-2 py-1 text-xs border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-center font-bold">
-                                    <span class="text-[11px] text-gray-500">phút</span>
-                                </div>
-                            </div>
-                            <div class="sm:col-span-2 flex items-center justify-between pt-1">
+
+                            <!-- 4. Tùy chọn bổ sung -->
+                            <div class="p-3 bg-gray-50/70 dark:bg-gray-800/60 rounded-xl border border-gray-200 dark:border-gray-700/80 space-y-2">
                                 <label class="flex items-center gap-2 cursor-pointer">
-                                    <input type="checkbox" id="exportWordCandidateInfo" checked class="rounded text-blue-600 focus:ring-blue-500">
-                                    <span class="text-xs text-gray-700 dark:text-gray-300 font-medium">Khung thông tin thí sinh (Họ tên, SBD) &amp; Mã đề thi</span>
+                                    <input type="checkbox" id="exportWordIncludeAnswerTable" checked class="rounded text-primary-600 focus:ring-primary-500">
+                                    <span class="text-xs text-gray-700 dark:text-gray-300 font-medium">Bảng đáp án tổng hợp ở cuối</span>
+                                </label>
+                                <label class="flex items-center gap-2 cursor-pointer">
+                                    <input type="checkbox" id="exportWordIncludeCccd" class="rounded text-primary-600 focus:ring-primary-500">
+                                    <span class="text-xs text-gray-700 dark:text-gray-300 font-medium">Hiển thị mã ID / CCCD câu hỏi</span>
                                 </label>
                             </div>
                         </div>
-                    </div>
 
-                    <!-- 4. Tùy chọn Dòng kẻ chấm (Dotted Lines) -->
-                    <div class="p-3 bg-amber-50/50 dark:bg-amber-950/20 rounded-xl border border-amber-200/80 dark:border-amber-900/50 space-y-2.5">
-                        <div class="flex items-center justify-between">
-                            <label class="flex items-center gap-2 cursor-pointer select-none">
-                                <input type="checkbox" id="exportWordIncludeDottedLines" class="rounded text-amber-600 focus:ring-amber-500">
-                                <span class="text-xs font-bold text-amber-900 dark:text-amber-200">
-                                    ✍️ 4. Thêm dòng kẻ chấm để học sinh làm bài / nháp trên đề
-                                </span>
-                            </label>
-                        </div>
-                        <div id="exportWordDottedOptions" class="hidden grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-2 border-t border-amber-200/60 dark:border-amber-900/40">
-                            <div class="flex items-center gap-2">
-                                <span class="text-xs text-gray-700 dark:text-gray-300">Số dòng chấm mỗi câu:</span>
-                                <input type="number" id="exportWordDottedCount" value="4" min="1" max="30" class="w-16 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 font-bold text-center">
+                        <!-- CỘT PHẢI (7 Cột): Cấu hình Khung Tiêu Đề Đề Thi -->
+                        <div class="md:col-span-7 space-y-3.5">
+                            <div class="p-3.5 bg-gray-50/70 dark:bg-gray-800/60 rounded-xl border border-gray-200 dark:border-gray-700/80 space-y-3">
+                                <div class="flex items-center justify-between">
+                                    <label class="text-xs font-bold text-gray-800 dark:text-gray-200 flex items-center gap-1.5">
+                                        <i class="fa-solid fa-heading text-gray-600 dark:text-gray-300"></i> Khung tiêu đề đề thi (Header)
+                                    </label>
+                                    <select id="exportWordHeaderStyle" class="text-xs font-bold px-2.5 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 outline-none cursor-pointer">
+                                        <option value="standard_gov" selected>🏛️ Mẫu 1: Chuẩn Sở / Bộ GD (2 cột)</option>
+                                        <option value="brand_center">⭐ Mẫu 2: Trung tâm / QMath (Trang trọng)</option>
+                                        <option value="compact">📄 Mẫu 3: Tiêu đề Rút gọn</option>
+                                        <option value="none">🚫 Mẫu 4: Không tiêu đề (Từ Câu 1)</option>
+                                    </select>
+                                </div>
+
+                                <!-- Các trường thông tin Header -->
+                                <div id="exportWordHeaderFieldsArea" class="space-y-2.5 pt-2 border-t border-gray-200 dark:border-gray-700">
+                                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                        <div>
+                                            <label class="block text-[11px] font-bold text-gray-600 dark:text-gray-400 mb-0.5">Cơ quan chủ quản (Dòng 1 trái)</label>
+                                            <input type="text" id="exportWordAgencyName" value="SỞ GD&ĐT HÀ NỘI" class="w-full px-2.5 py-1.5 text-xs border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 outline-none">
+                                        </div>
+                                        <div>
+                                            <label class="block text-[11px] font-bold text-gray-600 dark:text-gray-400 mb-0.5">Tên trường / Đơn vị (Dòng 2 trái)</label>
+                                            <input type="text" id="exportWordSchoolName" value="TRƯỜNG THPT TRẦN QUANG KHẢI" class="w-full px-2.5 py-1.5 text-xs border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 outline-none">
+                                        </div>
+                                    </div>
+
+                                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                        <div>
+                                            <label class="block text-[11px] font-bold text-gray-600 dark:text-gray-400 mb-0.5">Tên đề thi (Dòng 1 phải)</label>
+                                            <input type="text" id="exportWordTitleInput" class="w-full px-2.5 py-1.5 text-xs border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 outline-none">
+                                        </div>
+                                        <div>
+                                            <label class="block text-[11px] font-bold text-gray-600 dark:text-gray-400 mb-0.5">Loại đề thi (Dòng 3 trái)</label>
+                                            <input type="text" id="exportWordExamType" value="(ĐỀ CHÍNH THỨC)" class="w-full px-2.5 py-1.5 text-xs border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 outline-none">
+                                        </div>
+                                    </div>
+
+                                    <div class="grid grid-cols-3 gap-2">
+                                        <div>
+                                            <label class="block text-[11px] font-bold text-gray-600 dark:text-gray-400 mb-0.5">Môn thi</label>
+                                            <input type="text" id="exportWordSubject" value="TOÁN HỌC" class="w-full px-2 py-1.5 text-xs border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 outline-none">
+                                        </div>
+                                        <div>
+                                            <label class="block text-[11px] font-bold text-gray-600 dark:text-gray-400 mb-0.5">Khối</label>
+                                            <input type="text" id="exportWordGrade" value="9" class="w-full px-2 py-1.5 text-xs border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 outline-none">
+                                        </div>
+                                        <div>
+                                            <label class="block text-[11px] font-bold text-gray-600 dark:text-gray-400 mb-0.5">Thời gian</label>
+                                            <div class="flex items-center gap-1">
+                                                <input type="number" id="exportWordDuration" value="90" class="w-full px-2 py-1.5 text-xs border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-center font-bold text-gray-800 dark:text-gray-200 outline-none">
+                                                <span class="text-[11px] text-gray-400">ph</span>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Mã đề thi gọn gàng (Mặc định 4 số) -->
+                                    <div class="pt-2 border-t border-gray-200 dark:border-gray-700">
+                                        <div class="flex items-center justify-between">
+                                            <label class="text-[11px] font-bold text-gray-700 dark:text-gray-300">Mã đề thi (Mặc định 4 chữ số)</label>
+                                            <div class="flex items-center gap-2">
+                                                <input type="text" id="exportWordExamCode" value="1001" maxlength="6" class="w-24 px-2 py-1.5 text-xs font-bold border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-center text-gray-800 dark:text-gray-200 outline-none focus:ring-1 focus:ring-primary-500">
+                                                <div class="inline-flex rounded-lg border border-gray-300 dark:border-gray-600 p-0.5 bg-gray-100 dark:bg-gray-800 text-[11px]" role="group">
+                                                    <button type="button" id="btnExamCode3Digits" onclick="window.setWordExamCodeDigits(3)" class="px-2 py-1 font-medium rounded-md transition-all text-gray-600 dark:text-gray-400 cursor-pointer">3 số</button>
+                                                    <button type="button" id="btnExamCode4Digits" onclick="window.setWordExamCodeDigits(4)" class="px-2 py-1 font-bold rounded-md transition-all bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 shadow-xs cursor-pointer">4 số</button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="pt-1">
+                                        <label class="flex items-center gap-2 cursor-pointer">
+                                            <input type="checkbox" id="exportWordCandidateInfo" checked class="rounded text-primary-600 focus:ring-primary-500">
+                                            <span class="text-xs text-gray-700 dark:text-gray-300 font-medium">Khung thông tin thí sinh (Họ tên, SBD) &amp; Ô Mã đề thi</span>
+                                        </label>
+                                    </div>
+                                </div>
                             </div>
-                            <div>
-                                <select id="exportWordDottedScope" class="w-full text-xs px-2.5 py-1 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 outline-none">
-                                    <option value="essay_short" selected>Chỉ câu Trả lời ngắn & Tự luận (Khuyên dùng)</option>
-                                    <option value="all">Tất cả các câu hỏi</option>
-                                </select>
-                            </div>
                         </div>
-                    </div>
 
-                    <!-- 5. Tùy chọn bổ sung khác -->
-                    <div class="space-y-2 pt-1 border-t border-gray-100 dark:border-gray-700">
-                        <label class="flex items-center gap-2 cursor-pointer">
-                            <input type="checkbox" id="exportWordIncludeAnswerTable" checked class="rounded text-blue-600 focus:ring-blue-500">
-                            <span class="text-xs text-gray-700 dark:text-gray-300 font-medium">Bổ sung Bảng đáp án tổng hợp ở cuối tài liệu</span>
-                        </label>
-                        <label class="flex items-center gap-2 cursor-pointer">
-                            <input type="checkbox" id="exportWordIncludeCccd" class="rounded text-blue-600 focus:ring-blue-500">
-                            <span class="text-xs text-gray-700 dark:text-gray-300 font-medium">Hiển thị mã định danh CCCD / ID câu hỏi</span>
-                        </label>
-                    </div>
-
-                    <!-- Lời khuyên MathType -->
-                    <div class="p-3 bg-blue-50/60 dark:bg-blue-950/30 rounded-xl border border-blue-200 dark:border-blue-900/50 text-[11px] text-blue-800 dark:text-blue-300 flex items-start gap-2">
-                        <i class="fa-solid fa-circle-check mt-0.5 text-blue-600"></i>
-                        <span>Định dạng <b>MathType 6/7 OLE (Equation.DSMT4)</b> tạo trực tiếp file nhúng OLE2 chuẩn BTPRO. Bạn có thể nhấp đúp trực tiếp vào công thức trong Word để mở MathType hoặc dùng phím tắt <b>Alt+\\</b> mà không gặp bất kỳ lỗi font hay mất công thức nào!</span>
                     </div>
                 </div>
 
                 <!-- Footer Modal -->
-                <div class="flex items-center justify-end gap-2.5 pt-3 border-t border-gray-100 dark:border-gray-700 shrink-0">
-                    <button type="button" onclick="window.closeExportWordModal()" class="px-3.5 py-2 text-xs font-bold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl transition cursor-pointer">Hủy</button>
-                    <button type="button" id="btnConfirmExportWord" class="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl transition shadow-sm flex items-center gap-1.5 cursor-pointer">
+                <div class="flex items-center justify-end gap-2.5 pt-3 border-t border-gray-200 dark:border-gray-800 shrink-0">
+                    <button type="button" onclick="window.closeExportWordModal()" class="px-3.5 py-2 text-xs font-bold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-xl transition cursor-pointer">Hủy</button>
+                    <button type="button" id="btnConfirmExportWord" class="px-5 py-2 btn-season-primary text-white text-xs font-bold rounded-xl transition shadow-sm flex items-center gap-1.5 cursor-pointer">
                         <i class="fa-solid fa-download"></i> Tải file Word (.docx)
                     </button>
                 </div>
@@ -4091,8 +4118,8 @@
             durInput.value = examObj.duration;
         }
         const codeInput = document.getElementById('exportWordExamCode');
-        if (codeInput && examObj && examObj.examCode) {
-            codeInput.value = examObj.examCode;
+        if (codeInput) {
+            codeInput.value = examObj && examObj.examCode ? examObj.examCode : '1001';
         }
 
         const btnConfirm = document.getElementById('btnConfirmExportWord');
@@ -4131,7 +4158,7 @@
                     const subj = document.getElementById('exportWordSubject')?.value || 'TOÁN HỌC';
                     const grd = document.getElementById('exportWordGrade')?.value || '9';
                     const dur = parseInt(document.getElementById('exportWordDuration')?.value || 90);
-                    const code = document.getElementById('exportWordExamCode')?.value || '101';
+                    const code = document.getElementById('exportWordExamCode')?.value || '1001';
                     const cInfo = document.getElementById('exportWordCandidateInfo')?.checked !== false;
 
                     const hasDotted = document.getElementById('exportWordIncludeDottedLines')?.checked === true;
@@ -4263,23 +4290,24 @@
         closeExportWordModal
     };
 
-        window.setWordExamCodeDigits = function(digits) {
+    window._wordExamCodeDigits = 4;
+    window.setWordExamCodeDigits = function(digits) {
         const input = document.getElementById('exportWordExamCode');
         const b3 = document.getElementById('btnExamCode3Digits');
         const b4 = document.getElementById('btnExamCode4Digits');
         window._wordExamCodeDigits = digits;
         if (b3 && b4) {
             if (digits === 3) {
-                b3.className = "px-1.5 py-0.5 text-[10px] font-bold rounded-l-md border border-purple-600 bg-purple-600 text-white cursor-pointer transition-colors";
-                b4.className = "px-1.5 py-0.5 text-[10px] font-bold rounded-r-md border border-l-0 border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 cursor-pointer transition-colors";
+                b3.className = "px-2 py-1 font-bold rounded-md transition-all bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 shadow-xs cursor-pointer";
+                b4.className = "px-2 py-1 font-medium rounded-md transition-all text-gray-600 dark:text-gray-400 cursor-pointer";
             } else {
-                b4.className = "px-1.5 py-0.5 text-[10px] font-bold rounded-r-md border border-purple-600 bg-purple-600 text-white cursor-pointer transition-colors";
-                b3.className = "px-1.5 py-0.5 text-[10px] font-bold rounded-l-md border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 cursor-pointer transition-colors";
+                b4.className = "px-2 py-1 font-bold rounded-md transition-all bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 shadow-xs cursor-pointer";
+                b3.className = "px-2 py-1 font-medium rounded-md transition-all text-gray-600 dark:text-gray-400 cursor-pointer";
             }
         }
         if (input) {
-            let val = input.value.trim() || '101';
-            let num = parseInt(val.replace(/\D/g, ''), 10) || 101;
+            let val = input.value.trim() || (digits === 4 ? '1001' : '101');
+            let num = parseInt(val.replace(/\D/g, ''), 10) || (digits === 4 ? 1001 : 101);
             input.value = String(num).padStart(digits, '0');
         }
     };
