@@ -3444,12 +3444,12 @@
                     const imgId = imgCounter;
                     const rId = `rIdImg_${imgId}`;
 
-                    // Xác định kích thước tự nhiên của hình ảnh (chuẩn vừa xinh như phiên bản cũ)
+                    // Kích thước hình ảnh bằng 60% bản trước theo yêu cầu của Thầy (~7.1 cm)
                     const dims = getImageDimensions(bytes);
-                    const maxW_emu = 4500000; // ~11.8 cm (chuẩn vừa vặn trang Word A4 lề 2cm)
-                    const maxH_emu = 3500000; // ~9.2 cm
-                    let cx = Math.round(dims.w * 9525);
-                    let cy = Math.round(dims.h * 9525);
+                    const maxW_emu = 2700000; // ~7.1 cm (~2.8 inches, 60% trang A4)
+                    const maxH_emu = 2100000; // ~5.5 cm
+                    let cx = Math.round(dims.w * 9525 * 0.6);
+                    let cy = Math.round(dims.h * 9525 * 0.6);
 
                     if (cx > maxW_emu) {
                         const sc = maxW_emu / cx;
@@ -3461,8 +3461,8 @@
                         cy = maxH_emu;
                         cx = Math.round(cx * sc);
                     }
-                    cx = Math.max(1200000, cx);  // min ~3.1cm
-                    cy = Math.max(900000, cy);   // min ~2.3cm
+                    cx = Math.max(720000, cx);  // min ~1.9cm
+                    cy = Math.max(540000, cy);  // min ~1.4cm
 
                     zip.file(`word/media/image_${imgId}.png`, bytes);
                     const imgPayload = { id: imgId, rId, cx, cy };
@@ -3611,7 +3611,7 @@
         pyodideInitPromise = new Promise((resolve, reject) => {
             try {
                 if (!pyodideExporterWorker) {
-                    pyodideExporterWorker = new Worker("tex2mathtype-worker.js?v=20261016_V4");
+                    pyodideExporterWorker = new Worker("tex2mathtype-worker.js?v=20261016_V5");
                 }
                 const initTimeout = setTimeout(() => {
                     if (!isPyodideExporterReady) {
@@ -3904,7 +3904,7 @@
 
         // Bổ sung bảng đáp án tổng hợp ở cuối đề (Pyodide LaTeX)
         if (customOptions.includeAnswerTable && (p1List.length > 0 || p2List.length > 0 || p3List.length > 0)) {
-            fullLatex += `\n\n\\begin{center}\n\\textbf{\\large BẢNG ĐÁP ÁN TỔNG HỢP}\n\\end{center}\n\n`;
+            fullLatex += `\n\n\\begin{center}\n\\textbf{BẢNG ĐÁP ÁN TỔNG HỢP}\n\\end{center}\n\n`;
             if (p1List.length > 0) {
                 fullLatex += `\\textbf{Phần I: Trắc nghiệm 4 phương án}\n\n`;
                 const colsPerRow = 10;
@@ -3940,7 +3940,13 @@
                     const colAlign = '|' + rQuestions.map(() => 'c|').join('');
                     fullLatex += `\\begin{tabular}{${colAlign}}\n\\hline\n`;
                     fullLatex += rQuestions.map((_, i) => `\\textbf{Câu ${r * colsPerRow + i + 1}}`).join(' & ') + ' \\\\\n\\hline\n';
-                    fullLatex += rQuestions.map(q => `\\textbf{${getShortAnswerText(q)}}`).join(' & ') + ' \\\\\n\\hline\n';
+                    fullLatex += rQuestions.map(q => {
+                        let ans = getShortAnswerText(q).trim();
+                        if (!ans.startsWith('$') && !ans.startsWith('\\(') && !ans.startsWith('\\[') && /[0-9+\-=*/^_\\]/.test(ans)) {
+                            ans = `$${ans}$`;
+                        }
+                        return ans;
+                    }).join(' & ') + ' \\\\\n\\hline\n';
                     fullLatex += `\\end{tabular}\n\n`;
                 }
             }
