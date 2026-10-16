@@ -955,7 +955,7 @@
             if (ntype === 'sym') {
                 const sname = nd.name;
                 const symEntry = SYMBOL_MAP[sname];
-                const symChar = symEntry ? symEntry[0] : sname;
+                const symChar = symEntry ? String.fromCharCode(symEntry[1]) : sname;
                 const isBin = symEntry ? symEntry[3] : true;
                 const prevType = idx > 0 ? flatNodes[idx - 1].type : null;
                 const prevIsOpen = prevType === null ||
@@ -966,10 +966,26 @@
                 if (useSpace && idx > 0) {
                     boxes.push({ width: 3.6 * scale, ascent: 6.0 * scale, descent: 0.0, kind: 'space' });
                 }
+                let w = 7.5 * scale;
+                let asc = 6.8 * scale;
+                let desc = 0.8 * scale;
+                if (sname === 'circ' || sname === 'degree') {
+                    w = 4.5 * scale;
+                    asc = 8.5 * scale;
+                    desc = 0.0;
+                } else if (sname === 'cdot') {
+                    w = 4.0 * scale;
+                    asc = 4.5 * scale;
+                    desc = 0.0;
+                } else if (sname === 'int' || sname === 'sum' || sname === 'prod') {
+                    w = 9.0 * scale;
+                    asc = 10.0 * scale;
+                    desc = 3.0 * scale;
+                }
                 boxes.push({
-                    width: 8.0 * scale,
-                    ascent: 6.8 * scale,
-                    descent: 0.8 * scale,
+                    width: w,
+                    ascent: asc,
+                    descent: desc,
                     kind: 'sym',
                     char: symChar,
                     scale
@@ -1911,7 +1927,7 @@
                     continue;
                 }
                 if (SYMBOL_MAP[cmd]) {
-                    out += `<m:r><m:t>${escapeXml(cmd)}</m:t></m:r>`;
+                    out += `<m:r><m:t>${escapeXml(String.fromCharCode(SYMBOL_MAP[cmd][1]))}</m:t></m:r>`;
                     i = end;
                     continue;
                 }
@@ -2027,6 +2043,11 @@
         s = s.replace(/<\/?(?:div|span|strong|b|em|i|u|script)\b[^>]*>/gi, '');
         // Chuẩn hóa dấu phẩy thập phân {,} -> ,
         s = s.replace(/\{,\}/g, ',');
+        // Chuẩn hóa dấu ngoặc kép / đơn kiểu LaTeX
+        s = s.replace(/\\lq\\lq/g, '“').replace(/\\rq\\rq/g, '”');
+        s = s.replace(/\\lq/g, '‘').replace(/\\rq/g, '’');
+        s = s.replace(/``/g, '“').replace(/''/g, '”');
+        s = s.replace(/\\quad/g, '  ').replace(/\\qquad/g, '    ');
         return s.trim();
     }
 
