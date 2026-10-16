@@ -88,7 +88,14 @@
 
     function cleanShortAnswer(rawAns) {
         if (!rawAns) return "";
-        return rawAns.replace(/[\$\s\~]|\\,|\\;/g, '').replace(/\{,\}/g, ',').replace(/\./g, ',').trim();
+        let s = String(rawAns).trim();
+        s = s.replace(/<\/?(?:b|strong|i|em|span|p|div)\b[^>]*>/gi, '');
+        s = s.replace(/\\(?:textbf|mathbf|text|mathrm|textrm|textit)\s*\{([^}]*)\}/gi, '$1');
+        s = s.replace(/\\(?:textbf|mathbf|text|mathrm|textrm|textit)\b/gi, '');
+        s = s.replace(/^\$+|\$+$/g, '').trim();
+        s = s.replace(/\{([.,])\}/g, '$1');
+        s = s.replace(/[\$\s\~]|\\,|\\;/g, '').replace(/\{,\}/g, ',').replace(/\./g, ',').trim();
+        return s;
     }
 
     /**
@@ -359,6 +366,148 @@
             };
         }
 
+        hasUnderlineOrHighlight(xml) {
+            if (!xml) return false;
+            const hasU = /<w:u\b(?![^>]*w:val="none")[^>]*\/>|<w:u\b(?![^>]*w:val="none")[^>]*>[\s\S]*?<\/w:u>/i.test(xml);
+            const hasH = /<w:highlight\b(?![^>]*w:val="none")[^>]*\/>|<w:highlight\b(?![^>]*w:val="none")[^>]*>[\s\S]*?<\/w:highlight>/i.test(xml);
+            return hasU || hasH;
+        }
+
+        buildExamHeaderXml(examCode, titleSuffix = '') {
+            const h = this.config.header || {};
+            const meta = this.detectedHeaderMeta || {};
+            const agency = (h.agency || meta.agency || 'SỞ GD&ĐT HÀ NỘI').trim();
+            const school = (h.school || meta.school || 'TRƯỜNG THPT TRẦN QUANG KHẢI').trim();
+            let title = (h.title || meta.title || 'KIỂM TRA HỌC KỲ I').trim();
+            if (titleSuffix) title += titleSuffix;
+            const examType = (h.examType || '(ĐỀ CHÍNH THỨC)').trim();
+            const subject = (h.subject || meta.subject || 'TOÁN HỌC').trim();
+            const grade = h.grade ? String(h.grade).trim() : (meta.grade || '');
+            const duration = h.duration || meta.duration || 90;
+            const cleanCode = String(examCode || '1001').trim();
+
+            const escapeXml = (str) => {
+                if (!str) return '';
+                return String(str)
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;')
+                    .replace(/'/g, '&apos;');
+            };
+
+            const gradeText = grade ? ` - KHỐI ${escapeXml(grade)}` : '';
+
+            return `
+            <w:tbl>
+                <w:tblPr>
+                    <w:tblW w:w="10773" w:type="dxa"/>
+                    <w:tblBorders>
+                        <w:top w:val="none"/><w:left w:val="none"/><w:bottom w:val="none"/><w:right w:val="none"/>
+                        <w:insideH w:val="none"/><w:insideV w:val="none"/>
+                    </w:tblBorders>
+                </w:tblPr>
+                <w:tblGrid>
+                    <w:gridCol w:w="4400"/>
+                    <w:gridCol w:w="6373"/>
+                </w:tblGrid>
+                <w:tr>
+                    <!-- CỘT 1 (BÊN TRÁI: SỞ / TRƯỜNG / LOẠI ĐỀ) -->
+                    <w:tc>
+                        <w:tcPr><w:tcW w:w="4400" w:type="dxa"/></w:tcPr>
+                        <w:p>
+                            <w:pPr><w:jc w:val="center"/><w:spacing w:after="20"/></w:pPr>
+                            <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr><w:t>${escapeXml(agency.toUpperCase())}</w:t></w:r>
+                        </w:p>
+                        <w:p>
+                            <w:pPr><w:jc w:val="center"/><w:spacing w:after="40"/></w:pPr>
+                            <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:u w:val="single"/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr><w:t>${escapeXml(school.toUpperCase())}</w:t></w:r>
+                        </w:p>
+                        <w:p>
+                            <w:pPr><w:jc w:val="center"/><w:spacing w:before="40" w:after="20"/></w:pPr>
+                            <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr><w:t>${escapeXml(examType.toUpperCase())}</w:t></w:r>
+                        </w:p>
+                    </w:tc>
+                    <!-- CỘT 2 (BÊN PHẢI: TÊN ĐỀ / MÔN / THỜI GIAN) -->
+                    <w:tc>
+                        <w:tcPr><w:tcW w:w="6373" w:type="dxa"/></w:tcPr>
+                        <w:p>
+                            <w:pPr><w:jc w:val="center"/><w:spacing w:after="20"/></w:pPr>
+                            <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr><w:t>${escapeXml(title.toUpperCase())}</w:t></w:r>
+                        </w:p>
+                        <w:p>
+                            <w:pPr><w:jc w:val="center"/><w:spacing w:after="20"/></w:pPr>
+                            <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr><w:t>MÔN THI: ${escapeXml(subject.toUpperCase())}${gradeText}</w:t></w:r>
+                        </w:p>
+                        <w:p>
+                            <w:pPr><w:jc w:val="center"/><w:spacing w:after="40"/></w:pPr>
+                            <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:i/><w:u w:val="single"/><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr><w:t>Thời gian làm bài: ${duration} phút, không kể thời gian phát đề</w:t></w:r>
+                        </w:p>
+                    </w:tc>
+                </w:tr>
+            </w:tbl>
+            <!-- BẢNG KHUNG HỌ TÊN VÀ Ô MÃ ĐỀ ĐÓNG KHUNG -->
+            <w:tbl>
+                <w:tblPr>
+                    <w:tblW w:w="10773" w:type="dxa"/>
+                    <w:tblBorders>
+                        <w:top w:val="none"/><w:left w:val="none"/><w:bottom w:val="none"/><w:right w:val="none"/>
+                        <w:insideH w:val="none"/><w:insideV w:val="none"/>
+                    </w:tblBorders>
+                </w:tblPr>
+                <w:tblGrid>
+                    <w:gridCol w:w="8173"/>
+                    <w:gridCol w:w="2600"/>
+                </w:tblGrid>
+                <w:tr>
+                    <w:tc>
+                        <w:tcPr><w:tcW w:w="8173" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr>
+                        <w:p>
+                            <w:pPr><w:spacing w:before="60" w:after="60"/></w:pPr>
+                            <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr>
+                                <w:t xml:space="preserve">Họ và tên thí sinh: .................................................... Số báo danh: ................</w:t>
+                            </w:r>
+                        </w:p>
+                    </w:tc>
+                    <w:tc>
+                        <w:tcPr>
+                            <w:tcW w:w="2600" w:type="dxa"/>
+                            <w:tcBorders>
+                                <w:top w:val="single" w:sz="8" w:space="0" w:color="000000"/>
+                                <w:left w:val="single" w:sz="8" w:space="0" w:color="000000"/>
+                                <w:bottom w:val="single" w:sz="8" w:space="0" w:color="000000"/>
+                                <w:right w:val="single" w:sz="8" w:space="0" w:color="000000"/>
+                            </w:tcBorders>
+                            <w:vAlign w:val="center"/>
+                        </w:tcPr>
+                        <w:p>
+                            <w:pPr><w:jc w:val="center"/><w:spacing w:before="60" w:after="60"/></w:pPr>
+                            <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr>
+                                <w:t>Mã đề ${escapeXml(cleanCode)}</w:t>
+                            </w:r>
+                        </w:p>
+                    </w:tc>
+                </w:tr>
+            </w:tbl>
+            <w:p><w:pPr><w:spacing w:before="0" w:after="80"/></w:pPr></w:p>`;
+        }
+
+        buildExamFooterXml() {
+            return `
+            <w:p>
+                <w:pPr><w:jc w:val="center"/><w:spacing w:before="240" w:after="80"/></w:pPr>
+                <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr>
+                    <w:t xml:space="preserve">------------------- HẾT -------------------</w:t>
+                </w:r>
+            </w:p>
+            <w:p>
+                <w:pPr><w:jc w:val="center"/><w:spacing w:before="0" w:after="160"/></w:pPr>
+                <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:i/><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr>
+                    <w:t>Thí sinh không được sử dụng tài liệu. Cán bộ coi thi không giải thích gì thêm.</w:t>
+                </w:r>
+            </w:p>`;
+        }
+
         parseDocx(docXml) {
             const bodyMatch = docXml.match(/([\s\S]*?<w:body>)([\s\S]*?)(<w:sectPr\b[\s\S]*?<\/w:body>[\s\S]*)/);
             if (!bodyMatch) throw new Error("Cấu trúc file Word không đúng chuẩn (không tìm thấy <w:body>)");
@@ -381,11 +530,63 @@
             const qStartRegex = /^(?:\[(?:NB|TH|VD|VDC|\w+)\]\s*)?(?:##\s*)?(?:Câu|Bài|Question)\s*(\d+)[:.\s]/i;
             const secStartRegex = /^\s*(?:PHẦN|Phần)\s+(I{1,3}|IV|[1-4])[:.\s]/i;
 
+            const isEndOfExam = (text) => {
+                const t = text.trim();
+                if (!t) return false;
+                if (/^[-_\s*~—–]*H(?:Ế|ế|E|e)T[-_\s*~—–]*$/i.test(t)) return true;
+                if (/^(?:-{2,}|_{2,}|\*{2,})\s*H(?:Ế|ế|E|e)T\s*(?:-{2,}|_{2,}|\*{2,})$/i.test(t)) return true;
+                if (/^\(?\s*H(?:Ế|ế|E|e)T\s*\)?$/i.test(t)) return true;
+                if (/^\s*(?:HẾT|Hết)\s*[\.\-—–]*\s*(?:Thí\s*sinh|Cán\s*bộ|Giám\s*thị)/i.test(t)) return true;
+                return false;
+            };
+
             let firstContentIdx = elements.findIndex(e => qStartRegex.test(e.text.trim()) || secStartRegex.test(e.text.trim()));
             if (firstContentIdx === -1) firstContentIdx = 0;
 
             const headerElements = elements.slice(0, firstContentIdx);
-            const mainElements = elements.slice(firstContentIdx);
+            const rawMainElements = elements.slice(firstContentIdx);
+
+            // Trích xuất metadata từ header cũ nếu có để làm giá trị mặc định cho tiêu đề mới
+            const meta = {};
+            headerElements.forEach(e => {
+                const t = e.text.trim();
+                if (/SỞ\s+GD|PHÒNG\s+GD|BỘ\s+GD/i.test(t)) {
+                    const m = t.match(/((?:SỞ|PHÒNG|BỘ)\s+GD[^\n\r]+)/i);
+                    if (m && !meta.agency) meta.agency = m[1].trim();
+                }
+                if (/TRƯỜNG\s+THPT|TRƯỜNG\s+THCS|TRƯỜNG\s+TIỂU\s+HỌC/i.test(t)) {
+                    const m = t.match(/(TRƯỜNG\s+(?:THPT|THCS|TIỂU\s+HỌC)[^\n\r]+)/i);
+                    if (m && !meta.school) meta.school = m[1].trim();
+                }
+                if (/MÔN(?:\s+THI)?\s*[:\s]*([^\n\r\-–]+)/i.test(t)) {
+                    const m = t.match(/MÔN(?:\s+THI)?\s*[:\s]*([^\n\r\-–]+)/i);
+                    if (m && !meta.subject) meta.subject = m[1].trim();
+                }
+                if (/Thời\s*gian\s*(?:làm\s*bài)?\s*[:\s]*(\d+)\s*phút/i.test(t)) {
+                    const m = t.match(/Thời\s*gian\s*(?:làm\s*bài)?\s*[:\s]*(\d+)\s*phút/i);
+                    if (m && !meta.duration) meta.duration = parseInt(m[1], 10);
+                }
+            });
+            this.detectedHeaderMeta = meta;
+
+            // Tách các phần tử sau chữ HẾT vào footerElements (không trộn vào câu hỏi)
+            const mainElements = [];
+            const footerElements = [];
+            let examEnded = false;
+
+            for (const el of rawMainElements) {
+                const trimmed = el.text.trim();
+                if (examEnded) {
+                    footerElements.push(el);
+                    continue;
+                }
+                if (isEndOfExam(trimmed)) {
+                    examEnded = true;
+                    footerElements.push(el);
+                    continue;
+                }
+                mainElements.push(el);
+            }
 
             const sections = [];
             let currentSec = { titleEl: null, questions: [] };
@@ -470,34 +671,39 @@
                 });
             });
 
-            return { preBody, headerElements, sections, postBody, totalQuestions: totalQ };
+            return { preBody, headerElements, sections, footerElements, postBody, totalQuestions: totalQ };
         }
 
         analyzeQuestion(q) {
             const fullText = q.elements.map(e => e.text).join('\n');
 
+            // 1. Kiểm tra câu trắc nghiệm Đúng / Sai (Part II)
             if (/Đ(úng)?,?\s*S(ai)?/i.test(fullText) || /khẳng định sau/i.test(fullText) || /mỗi ý a\), b\), c\), d\)/i.test(fullText)) {
                 q.type = 'tf';
                 q.tfStatements = [];
+                q.correctTf = {};
                 q.elements.forEach((el, idx) => {
                     const tr = el.text.trim();
-                    if (/^[a-d][.)]\s*/i.test(tr)) {
-                        q.tfStatements.push({ elIdx: idx, letter: tr[0].toLowerCase() });
-                    }
-                });
-                const tfMatches = fullText.match(/[a-d][.)]\s*(ĐÚNG|SAI|Đ|S)/gi) || [];
-                q.correctTf = {};
-                tfMatches.forEach(m => {
-                    const parts = m.split(/[.)\s]+/);
-                    if (parts.length >= 2) {
-                        const lettr = parts[0].toLowerCase();
-                        const val = parts[1].toUpperCase().startsWith('Đ') ? 'Đ' : 'S';
-                        q.correctTf[lettr] = val;
+                    const m = tr.match(/^([a-d])[.)]\s*(.*)/i);
+                    if (m) {
+                        const letter = m[1].toLowerCase();
+                        q.tfStatements.push({ elIdx: idx, letter });
+                        const content = m[2];
+                        const valMatch = content.match(/\b(ĐÚNG|SAI|Đ|S)\b/i) || content.match(/\((Đ|S|Đúng|Sai)\)/i);
+                        if (valMatch) {
+                            q.correctTf[letter] = valMatch[1].toUpperCase().startsWith('Đ') ? 'Đ' : 'S';
+                        } else if (this.hasUnderlineOrHighlight(el.xml)) {
+                            // Gạch chân hoặc highlight -> ĐÚNG
+                            q.correctTf[letter] = 'Đ';
+                        } else {
+                            q.correctTf[letter] = 'S';
+                        }
                     }
                 });
                 return;
             }
 
+            // 2. Kiểm tra câu trắc nghiệm 4 phương án A, B, C, D (Part I)
             let optType = null;
             let optElIdx = -1;
 
@@ -538,9 +744,22 @@
                 q.optElIdx = optElIdx;
                 q.correctAnswer = this.detectOriginalAnswer(q);
             } else {
+                // 3. Câu trả lời ngắn (Part III)
                 q.type = 'short';
-                const dsMatch = fullText.match(/(?:ĐS|Đáp số|Đáp án)[:.\s]*([^\n]+)/i);
-                q.correctAnswer = dsMatch ? dsMatch[1].trim() : '';
+                let rawAns = '';
+                for (const el of q.elements) {
+                    const tr = el.text.trim();
+                    const m = tr.match(/^(?:Đáp\s*án|Đáp\s*số|ĐS|Kết\s*quả)\s*[:=]\s*(.+)/i);
+                    if (m) {
+                        rawAns = m[1].trim();
+                        break;
+                    }
+                }
+                if (!rawAns) {
+                    const dsMatch = fullText.match(/(?:Đáp\s*án|Đáp\s*số|ĐS|Kết\s*quả)\s*[:=]\s*([^\n\r]+)/i);
+                    if (dsMatch) rawAns = dsMatch[1].trim();
+                }
+                q.correctAnswer = cleanShortAnswer(rawAns);
             }
         }
 
@@ -549,7 +768,7 @@
                 const tblXml = q.elements[q.optElIdx].xml;
                 const cells = tblXml.match(/<w:tc\b[\s\S]*?<\/w:tc>/g) || [];
                 for (let i = 0; i < cells.length; i++) {
-                    if (cells[i].includes('<w:u ') || cells[i].includes('<w:u/>')) {
+                    if (this.hasUnderlineOrHighlight(cells[i])) {
                         return ['A', 'B', 'C', 'D'][i] || 'A';
                     }
                 }
@@ -564,14 +783,14 @@
                     if (optMatch) {
                         currentBucket = optMatch[1].toUpperCase().charCodeAt(0) - 65;
                     }
-                    if (currentBucket >= 0 && (r.includes('<w:u ') || r.includes('<w:u/>'))) {
+                    if (currentBucket >= 0 && currentBucket <= 3 && this.hasUnderlineOrHighlight(r)) {
                         return ['A', 'B', 'C', 'D'][currentBucket];
                     }
                 }
             } else if (q.optType === '4_paras') {
                 for (let i = 0; i < 4; i++) {
                     const pXml = q.elements[q.optElIdx + i].xml;
-                    if (pXml.includes('<w:u ') || pXml.includes('<w:u/>')) {
+                    if (this.hasUnderlineOrHighlight(pXml)) {
                         return ['A', 'B', 'C', 'D'][i];
                     }
                 }
@@ -642,22 +861,43 @@
                 }
             }
 
-            const headerXml = parsed.headerElements.map(e => {
-                let x = e.xml;
-                if (/Mã\s*đề\s*[:.\s]*\w+/i.test(x)) {
-                    x = x.replace(/(Mã\s*đề\s*[:.\s]*)(\w+)/i, `$1${maDe}`);
-                }
-                return x;
-            }).join('');
+            // Tạo khung tiêu đề mới hoàn toàn, loại bỏ khung tiêu đề cũ để không bao giờ bị lặp mã đề
+            const headerXml = this.buildExamHeaderXml(maDe);
+            const footerXml = this.buildExamFooterXml();
 
             return {
-                docXml: parsed.preBody + headerXml + mixedSectionsXml.join('') + parsed.postBody,
+                docXml: parsed.preBody + headerXml + mixedSectionsXml.join('') + footerXml + parsed.postBody,
                 answers
             };
         }
 
         renderMixedQuestion(q, newQNum, answersAccumulator, keepUnderlines = false) {
-            const qElements = q.elements.map(e => ({ ...e }));
+            let qElements = q.elements.map(e => ({ ...e }));
+
+            // Cắt phần Lời giải nếu có cụm "Lời giải." / "Lời giải:" (trừ phần đáp án trả lời ngắn)
+            if (!keepUnderlines) {
+                let solStartIdx = -1;
+                for (let i = 0; i < qElements.length; i++) {
+                    const tr = qElements[i].text.trim();
+                    if (/^(?:Lời\s*giải|Hướng\s*dẫn\s*giải|HDG)[:.\s]/i.test(tr) || /^Lời\s*giải\b/i.test(tr)) {
+                        solStartIdx = i;
+                        break;
+                    }
+                }
+
+                if (solStartIdx !== -1) {
+                    if (q.type === 'short') {
+                        // Trả lời ngắn: giữ lại câu hỏi trước Lời giải và giữ lại dòng Đáp án/Đáp số nếu có
+                        const beforeSol = qElements.slice(0, solStartIdx);
+                        const solAndAfter = qElements.slice(solStartIdx);
+                        const ansElements = solAndAfter.filter(e => /^(?:Đáp\s*án|Đáp\s*số|ĐS|Kết\s*quả)\s*[:=]/i.test(e.text.trim()));
+                        qElements = [...beforeSol, ...ansElements];
+                    } else {
+                        // Trắc nghiệm 4 PA hoặc Đúng/Sai: cắt toàn bộ từ Lời giải trở đi
+                        qElements = qElements.slice(0, solStartIdx);
+                    }
+                }
+            }
 
             let firstXml = qElements[0].xml;
             if (/(<w:t\b[^>]*>)(?:\[(?:NB|TH|VD|VDC|\w+)\]\s*)?(?:##\s*)?(?:Câu|Bài|Question)\s*\d+([:.\s(])/i.test(firstXml)) {
@@ -687,30 +927,33 @@
 
                 if (q.optType === 'table') {
                     const targetEl = qElements[q.optElIdx];
-                    targetEl.xml = this.permuteTableCells(targetEl.xml, perm, keepUnderlines);
+                    if (targetEl) targetEl.xml = this.permuteTableCells(targetEl.xml, perm, keepUnderlines);
                 } else if (q.optType === 'single_para') {
                     const targetEl = qElements[q.optElIdx];
-                    targetEl.xml = this.permuteSingleParaRuns(targetEl.xml, perm, keepUnderlines);
+                    if (targetEl) targetEl.xml = this.permuteSingleParaRuns(targetEl.xml, perm, keepUnderlines);
                 } else if (q.optType === '4_paras') {
                     const paras = [
                         qElements[q.optElIdx],
                         qElements[q.optElIdx + 1],
                         qElements[q.optElIdx + 2],
                         qElements[q.optElIdx + 3]
-                    ];
-                    const labels = ['A', 'B', 'C', 'D'];
-                    const reordered = [];
-                    for (let i = 0; i < 4; i++) {
-                        const oldP = paras[perm[i]];
-                        let pXml = oldP.xml;
-                        if (!keepUnderlines) {
-                            pXml = pXml.replace(/<w:u\b[^>]*\/>/g, '').replace(/<w:u\b[^>]*>[\s\S]*?<\/w:u>/g, '');
+                    ].filter(Boolean);
+                    if (paras.length === 4) {
+                        const labels = ['A', 'B', 'C', 'D'];
+                        const reordered = [];
+                        for (let i = 0; i < 4; i++) {
+                            const oldP = paras[perm[i]];
+                            let pXml = oldP.xml;
+                            if (!keepUnderlines) {
+                                pXml = pXml.replace(/<w:u\b[^>]*\/>/g, '').replace(/<w:u\b[^>]*>[\s\S]*?<\/w:u>/g, '');
+                                pXml = pXml.replace(/<w:highlight\b[^>]*\/>/g, '').replace(/<w:highlight\b[^>]*>[\s\S]*?<\/w:highlight>/g, '');
+                            }
+                            pXml = pXml.replace(/(<w:t\b[^>]*>)\s*([A-D])\s*([.:])/, `$1${labels[i]}$3`);
+                            reordered.push({ ...oldP, xml: pXml });
                         }
-                        pXml = pXml.replace(/(<w:t\b[^>]*>)\s*([A-D])\s*([.:])/, `$1${labels[i]}$3`);
-                        reordered.push({ ...oldP, xml: pXml });
-                    }
-                    for (let i = 0; i < 4; i++) {
-                        qElements[q.optElIdx + i] = reordered[i];
+                        for (let i = 0; i < 4; i++) {
+                            qElements[q.optElIdx + i] = reordered[i];
+                        }
                     }
                 }
 
@@ -721,9 +964,54 @@
                 });
 
             } else if (q.type === 'tf') {
-                const tfStr = ['a', 'b', 'c', 'd'].map(k => (q.correctTf && q.correctTf[k]) || 'Đ').join('');
-                if (answersAccumulator && answersAccumulator.p2) {
-                    answersAccumulator.p2.push(tfStr);
+                let perm = [0, 1, 2, 3];
+                if (this.config.dao_y_tf && q.tfStatements && q.tfStatements.length === 4) {
+                    perm = this.shuffleArray([0, 1, 2, 3]);
+                    const oldStatements = q.tfStatements.map(s => qElements[s.elIdx]).filter(Boolean);
+                    if (oldStatements.length === 4) {
+                        const tfLabels = ['a', 'b', 'c', 'd'];
+                        const newTfAnswers = {};
+                        for (let i = 0; i < 4; i++) {
+                            const srcStmtIdx = perm[i];
+                            const origLetter = q.tfStatements[srcStmtIdx].letter;
+                            const origAns = (q.correctTf && q.correctTf[origLetter]) || 'Đ';
+                            const targetLetter = tfLabels[i];
+                            newTfAnswers[targetLetter] = origAns;
+
+                            const origEl = oldStatements[srcStmtIdx];
+                            let elXml = origEl.xml;
+                            if (!keepUnderlines) {
+                                elXml = elXml.replace(/<w:u\b[^>]*\/>/g, '').replace(/<w:u\b[^>]*>[\s\S]*?<\/w:u>/g, '');
+                                elXml = elXml.replace(/<w:highlight\b[^>]*\/>/g, '').replace(/<w:highlight\b[^>]*>[\s\S]*?<\/w:highlight>/g, '');
+                            }
+                            elXml = elXml.replace(/(<w:t\b[^>]*>)\s*([a-d])\s*([.)])/i, `$1${targetLetter}$3`);
+                            qElements[q.tfStatements[i].elIdx] = { ...origEl, xml: elXml };
+                        }
+                        const tfStr = ['a', 'b', 'c', 'd'].map(k => newTfAnswers[k] || 'Đ').join('');
+                        if (answersAccumulator && answersAccumulator.p2) {
+                            answersAccumulator.p2.push(tfStr);
+                        }
+                    } else {
+                        const tfStr = ['a', 'b', 'c', 'd'].map(k => (q.correctTf && q.correctTf[k]) || 'Đ').join('');
+                        if (answersAccumulator && answersAccumulator.p2) {
+                            answersAccumulator.p2.push(tfStr);
+                        }
+                    }
+                } else {
+                    const tfStr = ['a', 'b', 'c', 'd'].map(k => (q.correctTf && q.correctTf[k]) || 'Đ').join('');
+                    if (answersAccumulator && answersAccumulator.p2) {
+                        answersAccumulator.p2.push(tfStr);
+                    }
+                    if (!keepUnderlines && q.tfStatements) {
+                        q.tfStatements.forEach(s => {
+                            if (qElements[s.elIdx]) {
+                                let x = qElements[s.elIdx].xml;
+                                x = x.replace(/<w:u\b[^>]*\/>/g, '').replace(/<w:u\b[^>]*>[\s\S]*?<\/w:u>/g, '');
+                                x = x.replace(/<w:highlight\b[^>]*\/>/g, '').replace(/<w:highlight\b[^>]*>[\s\S]*?<\/w:highlight>/g, '');
+                                qElements[s.elIdx].xml = x;
+                            }
+                        });
+                    }
                 }
             } else {
                 if (answersAccumulator && answersAccumulator.p3) {
@@ -745,6 +1033,7 @@
                 let cXml = cells[perm[i]];
                 if (!keepUnderlines) {
                     cXml = cXml.replace(/<w:u\b[^>]*\/>/g, '').replace(/<w:u\b[^>]*>[\s\S]*?<\/w:u>/g, '');
+                    cXml = cXml.replace(/<w:highlight\b[^>]*\/>/g, '').replace(/<w:highlight\b[^>]*>[\s\S]*?<\/w:highlight>/g, '');
                 }
                 cXml = cXml.replace(/(<w:t\b[^>]*>)\s*([A-D])\s*([.:])/, `$1${labels[i]}$3`);
                 newCells.push(cXml);
@@ -788,6 +1077,7 @@
                     let rXml = r;
                     if (!keepUnderlines) {
                         rXml = rXml.replace(/<w:u\b[^>]*\/>/g, '').replace(/<w:u\b[^>]*>[\s\S]*?<\/w:u>/g, '');
+                        rXml = rXml.replace(/<w:highlight\b[^>]*\/>/g, '').replace(/<w:highlight\b[^>]*>[\s\S]*?<\/w:highlight>/g, '');
                     }
                     if (!labelUpdated && /<w:t\b[^>]*>[\s\S]*?[A-D][.:\s]/.test(rXml)) {
                         rXml = rXml.replace(/(<w:t\b[^>]*>)\s*([A-D])\s*([.:])/, `$1${labels[i]}$3`);
@@ -829,15 +1119,13 @@
                 }
             }
 
-            const headerXml = parsed.headerElements.map(e => {
-                let x = e.xml;
-                if (/Mã\s*đề\s*[:.\s]*\w+/i.test(x) && options.examCode) {
-                    x = x.replace(/(Mã\s*đề\s*[:.\s]*)(\w+)/i, `$1${options.examCode}`);
-                }
-                return x;
-            }).join('');
+            // Tạo khung tiêu đề mới hoàn toàn, loại bỏ khung tiêu đề cũ
+            const headerXml = this.buildExamHeaderXml(options.examCode || 'GỐC', options.titleSuffix || '');
+            const footerXml = (options.keepUnderlines && parsed.footerElements && parsed.footerElements.length > 0)
+                ? parsed.footerElements.map(e => e.xml).join('')
+                : this.buildExamFooterXml();
 
-            return parsed.preBody + headerXml + sectionsXml.join('') + parsed.postBody;
+            return parsed.preBody + headerXml + sectionsXml.join('') + footerXml + parsed.postBody;
         }
 
         shuffleArray(arr) {
