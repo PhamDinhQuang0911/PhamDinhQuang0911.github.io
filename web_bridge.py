@@ -7,6 +7,7 @@ và trả về dữ liệu file .docx (MathType OLE) dạng nhị phân.
 import os
 import io
 import sys
+import re
 import tempfile
 import traceback
 
@@ -92,6 +93,23 @@ def convert_tex_to_docx_bytes(latex_text: str,
         pt = replace_ex_and_lists(pt)
         pt = replace_choice_commands(pt, mode, word_standard=standard)
         pt = clean_true_commands(pt, mode)
+
+        # Tháo bỏ vỏ \begin{table} và chuyển \caption thành in đậm nếu có
+        pt = re.sub(r'\\caption\{([^}]*)\}', r'\n\n\\textbf{\1}\n\n', pt)
+        pt = re.sub(r'\\begin\{table\}(?:\[[^\]]*\])?', '\n\n', pt)
+        pt = re.sub(r'\\end\{table\}', '\n\n', pt)
+        pt = re.sub(r'\\begin\{center\}\s*(\\begin\{tabular\}.*?\\end\{tabular\})\s*\\end\{center\}', r'\1', pt, flags=re.DOTALL)
+
+        # Trích xuất các bảng tabular trước khi gọi replace_double_slash
+        tabular_blocks = []
+        def _extract_tabular(m):
+            t_idx = len(tabular_blocks)
+            tabular_blocks.append(m.group(0))
+            return f"\n\n[[TABULAR_{t_idx}]]\n\n"
+
+        tabular_pattern = re.compile(r'\\begin\{tabular\}.*?\\end\{tabular\}', re.DOTALL)
+        pt = tabular_pattern.sub(_extract_tabular, pt)
+
         pt = replace_double_slash(pt)
         
         report(base_pct + 10, f"[{task_label}] Đang tạo khung tài liệu Word...")
@@ -99,7 +117,12 @@ def convert_tex_to_docx_bytes(latex_text: str,
         sk_path = os.path.join(tmp_dir, f"skeleton_{mode}.docx")
         out_path = os.path.join(tmp_dir, f"out_{mode}.docx")
         
-        doc = build_blank_skeleton_docx(pt, word_standard=standard, temp_img_dir=images_dir)
+        doc = build_blank_skeleton_docx(
+            pt,
+            word_standard=standard,
+            temp_img_dir=images_dir,
+            tabular_blocks=tabular_blocks
+        )
         doc.save(sk_path)
         
         report(base_pct + 20, f"[{task_label}] Đang chuyển đổi công thức sang MathType OLE...")
