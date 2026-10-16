@@ -4279,6 +4279,8 @@
     };
 
     // Xuất các API ra window
+    window.createDocxBlob = createDocxBlob;
+    window.exportExamToWord = exportExamToWord;
     window.WordMathTypeExporter = {
         LatexMtefCompiler,
         buildOleObject,

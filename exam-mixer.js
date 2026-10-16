@@ -331,14 +331,128 @@
         }
 
         /**
-         * Chạy tiến trình trộn đề
+         * Bộ phân tích file Word DOCX siêu tốc độc lập qua JSZip (30ms)
+         */
+        async parseDocxInput(arrayBuffer, report) {
+            report(8, "Đang mở cấu trúc tệp Word DOCX...");
+            if (typeof JSZip === 'undefined') {
+                throw new Error("Thư viện JSZip chưa được tải trên trang.");
+            }
+
+            let zip;
+            try {
+                zip = await JSZip.loadAsync(arrayBuffer);
+            } catch (zErr) {
+                throw new Error("Không thể mở tệp Word DOCX: " + (zErr.message || zErr.toString()));
+            }
+
+            const docFile = zip.file("word/document.xml");
+            if (!docFile) {
+                throw new Error("Tệp DOCX không hợp lệ (không tìm thấy word/document.xml).");
+            }
+
+            report(12, "Đang trích xuất nội dung văn bản và công thức...");
+            const docXml = await docFile.async("text");
+
+            // Phân tích các đoạn paragraph <w:p>
+            const pRegex = /<w:p\b[^>]*>([\s\S]*?)<\/w:p>/g;
+            const lines = [];
+            let pMatch;
+
+            while ((pMatch = pRegex.exec(docXml)) !== null) {
+                const pXml = pMatch[1];
+                const rRegex = /<w:r\b[^>]*>([\s\S]*?)<\/w:r>/g;
+                let line = '';
+                let rMatch;
+
+                while ((rMatch = rRegex.exec(pXml)) !== null) {
+                    const rXml = rMatch[1];
+                    const isUnderlined = /<w:u\b[^>]*\/>|<w:u\b[^>]*val=[\"'](?!none)[^\"']+[\"']/i.test(rXml);
+
+                    const tRegex = /<w:t\b[^>]*>([\s\S]*?)<\/w:t>/g;
+                    let tMatch;
+                    while ((tMatch = tRegex.exec(rXml)) !== null) {
+                        const text = tMatch[1];
+                        if (isUnderlined) {
+                            const labelM = text.trim().match(/^([A-Da-d])\s*[\.\)]?$/);
+                            if (labelM) {
+                                line += ` [[WORD_UNDERLINE_${labelM[1].toUpperCase()}]] `;
+                            }
+                        }
+                        line += text;
+                    }
+                }
+
+                // Trích xuất công thức OpenXML Math <m:t> nếu có
+                const mtRegex = /<m:t\b[^>]*>([\s\S]*?)<\/m:t>/g;
+                let mtMatch;
+                while ((mtMatch = mtRegex.exec(pXml)) !== null) {
+                    line += mtMatch[1];
+                }
+
+                line = line
+                    .replace(/&amp;/g, '&')
+                    .replace(/&lt;/g, '<')
+                    .replace(/&gt;/g, '>')
+                    .replace(/&quot;/g, '"')
+                    .replace(/&apos;/g, "'");
+
+                if (line.trim()) lines.push(line.trim());
+            }
+
+            const rawDocText = lines.join('\n');
+            report(15, `Đã trích xuất ${lines.length} dòng dữ liệu từ Word.`);
+
+            // 1. Nếu văn bản Word đã chứa sẵn mã LaTeX \begin{ex} hoặc \begin{bt}
+            if (rawDocText.includes('\\begin{ex}') || rawDocText.includes('\\begin{bt}')) {
+                report(18, "Phát hiện mã nguồn LaTeX trực tiếp trong file Word!");
+                return { texContent: rawDocText, parsedQuestions: [] };
+            }
+
+            // 2. Nhận diện các câu hỏi trắc nghiệm (Câu 1. / Bài 1.)
+            const parseFn = window.parseWordQuestions || (window.QuestionImporter && window.QuestionImporter.parseWordQuestions);
+            if (typeof parseFn === 'function') {
+                const questions = parseFn(rawDocText);
+                if (questions && questions.length > 0) {
+                    report(18, `Nhận diện thành công ${questions.length} câu hỏi từ file Word!`);
+                    const tex = this.convertQuestionsArrayToTex(questions);
+                    return { texContent: tex, parsedQuestions: questions };
+                }
+            }
+
+            // 3. Dự phòng Mammoth nhẹ nhàng nếu JSZip chưa tách đủ cấu trúc
+            if (window.mammoth) {
+                report(16, "Đang phân tích cấu trúc bổ sung qua Mammoth...");
+                try {
+                    const mRes = await window.mammoth.convertToHtml({ arrayBuffer }, {
+                        styleMap: ['u => u'],
+                        ignoreEmptyParagraphs: true
+                    });
+                    const htmlText = window.wordHtmlToImportText ? window.wordHtmlToImportText(mRes.value) : mRes.value.replace(/<[^>]+>/g, '\n');
+                    if (typeof parseFn === 'function') {
+                        const mQuestions = parseFn(htmlText);
+                        if (mQuestions && mQuestions.length > 0) {
+                            report(18, `Nhận diện thành công ${mQuestions.length} câu hỏi qua Mammoth!`);
+                            return { texContent: this.convertQuestionsArrayToTex(mQuestions), parsedQuestions: mQuestions };
+                        }
+                    }
+                } catch (mErr) {
+                    console.warn("[Mixer] Fallback Mammoth:", mErr);
+                }
+            }
+
+            throw new Error("Không thể trích xuất câu hỏi từ file Word. Đảm bảo file Word có cấu trúc 'Câu 1.' hoặc chứa mã nguồn '\\begin{ex}'.");
+        }
+
+        /**
+         * Chạy tiến trình trộn đề hoàn chỉnh
          */
         async mix(progressCallback = null) {
             const report = (pct, msg) => {
                 if (typeof progressCallback === 'function') progressCallback(pct, msg);
             };
 
-            report(5, "Đang khởi tạo dữ liệu đề gốc...");
+            report(5, "Đang khởi tạo dữ liệu đề thi...");
 
             let texContent = "";
             let parsedQuestions = [];
@@ -347,16 +461,19 @@
                 texContent = this.inputData;
             } else if (Array.isArray(this.inputData)) {
                 parsedQuestions = this.inputData;
-                // Chuyển danh sách câu hỏi thành TeX
                 texContent = this.convertQuestionsArrayToTex(parsedQuestions);
-            } else if (this.inputData instanceof ArrayBuffer || this.inputData instanceof Blob) {
-                report(10, "Đang phân tích file Word DOCX...");
-                if (window.QuestionImporter && typeof window.QuestionImporter.parseWordFile === 'function') {
-                    parsedQuestions = await window.QuestionImporter.parseWordFile(this.inputData);
-                    texContent = this.convertQuestionsArrayToTex(parsedQuestions);
+            } else if (this.inputData instanceof ArrayBuffer || this.inputData instanceof Blob || (typeof ArrayBuffer !== 'undefined' && ArrayBuffer.isView(this.inputData))) {
+                let buf;
+                if (this.inputData instanceof Blob) {
+                    buf = await this.inputData.arrayBuffer();
+                } else if (typeof ArrayBuffer !== 'undefined' && ArrayBuffer.isView(this.inputData)) {
+                    buf = this.inputData.buffer.slice(this.inputData.byteOffset, this.inputData.byteOffset + this.inputData.byteLength);
                 } else {
-                    throw new Error("Không tìm thấy bộ phân tích Word (QuestionImporter).");
+                    buf = this.inputData;
                 }
+                const parsedResult = await this.parseDocxInput(buf, report);
+                texContent = parsedResult.texContent;
+                parsedQuestions = parsedResult.parsedQuestions;
             }
 
             // Chuẩn hóa và trích xuất các khối câu hỏi {ex} và {bt}
@@ -387,16 +504,48 @@
                 else degocCh.push(ex);
             }
 
+            // 1. Chuẩn bị Đề Gốc (mã đề GỐC tham chiếu)
+            const deGocBlocks = [];
+            if (degocCh.length > 0) {
+                deGocBlocks.push(`\\subsection{Câu trắc nghiệm nhiều phương án lựa chọn}\n\\noindent \\textit{Thí sinh trả lời từ câu 1 đến câu ${degocCh.length}. Mỗi câu hỏi, thí sinh chỉ chọn một phương án trả lời.}\n\n\\setcounter{ex}{0}\n` +
+                    degocCh.map(ex => `\\begin{ex}${ex}\\end{ex}`).join('\n\n'));
+            }
+            if (degocTF.length > 0) {
+                deGocBlocks.push(`\\subsection{Câu trắc nghiệm Đúng/Sai}\n\\noindent \\textit{Thí sinh trả lời từ câu 1 đến câu ${degocTF.length}. Trong mỗi ý a), b), c), d) ở mỗi câu, thí sinh chọn đúng hoặc sai.}\n\n\\setcounter{ex}{0}\n` +
+                    degocTF.map(ex => `\\begin{ex}${ex}\\end{ex}`).join('\n\n'));
+            }
+            if (degocSh.length > 0) {
+                deGocBlocks.push(`\\subsection{Câu trắc nghiệm trả lời ngắn}\n\\noindent \\textit{Thí sinh trả lời từ câu 1 đến câu ${degocSh.length}.}\n\n\\setcounter{ex}{0}\n` +
+                    degocSh.map(ex => `\\begin{ex}${ex}\\end{ex}`).join('\n\n'));
+            }
+            if (btBlocks.length > 0) {
+                deGocBlocks.push(`\\subsection{Bài tập tự luận}\n\\setcounter{bt}{0}\n` +
+                    btBlocks.map(bt => `\\begin{bt}${bt}\\end{bt}`).join('\n\n'));
+            }
+
+            const ansP1Goc = degocCh.map(ex => getAnswerChoice(ex));
+            const ansP2Goc = degocTF.map(ex => getAnswerChoiceTF(ex));
+            const ansP3RawGoc = degocSh.map(ex => getAnswerShortRaw(ex));
+
+            const gocMatrixItem = {
+                made: 'GOC',
+                isGoc: true,
+                p1: ansP1Goc,
+                p2: ansP2Goc,
+                p3_raw: ansP3RawGoc,
+                p3: ansP3RawGoc.map(r => cleanShortAnswer(r))
+            };
+
             const maDeList = this.config.ma_de_list || ['1001', '1002', '1003', '1004'];
             const cacDeDaTron = {};
-            const matrixData = [];
+            const matrixData = [gocMatrixItem];
             const totalExams = maDeList.length;
 
             report(20, `Bắt đầu trộn ${totalExams} mã đề thi...`);
 
             for (let idx = 0; idx < totalExams; idx++) {
                 const maDe = maDeList[idx];
-                const pct = 20 + Math.floor((idx / totalExams) * 50);
+                const pct = 20 + Math.floor((idx / totalExams) * 45);
                 report(pct, `Đang trộn đề mã ${maDe} (${idx + 1}/${totalExams})...`);
 
                 let currCh = [...degocCh];
@@ -420,13 +569,14 @@
                     currTf = currTf.map(ex => shuffleOptionsInQuestion(ex));
                 }
 
-                // 4. Thu thập đáp án ma trận
+                // 4. Thu thập đáp án mã đề
                 const ansP1 = currCh.map(ex => getAnswerChoice(ex));
                 const ansP2 = currTf.map(ex => getAnswerChoiceTF(ex));
                 const ansP3Raw = currSh.map(ex => getAnswerShortRaw(ex));
 
                 matrixData.push({
                     made: maDe,
+                    isGoc: false,
                     p1: ansP1,
                     p2: ansP2,
                     p3_raw: ansP3Raw,
@@ -455,86 +605,159 @@
                 cacDeDaTron[maDe] = orderedBlocks;
             }
 
-            report(75, "Đang tạo bảng ma trận đáp án và file đóng gói ZIP...");
+            report(68, "Đang tạo bảng đáp án Excel SmartTest & YoungMix...");
 
-            // Tạo gói ZIP xuất ra cho người dùng
+            // Khởi tạo ZIP đóng gói
             const zip = new JSZip();
+            const deThiFolder = zip.folder("de_thi");
+            const dapAnFolder = zip.folder("dap_an");
+            const qrFolder = zip.folder("qr_code");
 
-            // 1. Xuất file Excel ma trận đáp án
-            const xlsxBlob = this.buildMasterAnswerExcel(matrixData);
-            zip.file("Bang_Dap_An_Tong_Hop.xlsx", xlsxBlob);
+            // =======================================================
+            // 1. XUẤT CÁC BẢNG ĐÁP ÁN EXCEL CHUẨN LIVETEXX
+            // =======================================================
+            const smartTestBlob = await ExamMixerEngine.buildSmartTestXlsx(matrixData);
+            dapAnFolder.file("DapAn_SmartTest.xlsx", smartTestBlob);
 
-            // 2. Xuất các file LaTeX (.tex) cho từng mã đề
-            const dataFolder = zip.folder("data");
+            const youngMixBlob = await ExamMixerEngine.buildYoungMixXlsx(matrixData);
+            dapAnFolder.file("DapAn_YoungMix.xlsx", youngMixBlob);
+
+            // =======================================================
+            // 2. XUẤT MÃ QR ĐÁP ÁN (TNMaker, QM Chấm Thi, UnT)
+            // =======================================================
+            report(74, "Đang tạo mã QR cho TNMaker & app QM Chấm thi...");
+            const qrData = ExamMixerEngine.buildQrData(matrixData);
+
+            // File chuỗi text / JSON
+            qrFolder.file("QR_TNMaker.txt", qrData.tnmChunks.map(c => `// Mã đề: ${c.madeList.join(', ')}\n${c.qrString}`).join('\n\n'));
+            qrFolder.file("QR_QM_ChamThi.json", JSON.stringify(qrData.qmList, null, 2));
+            qrFolder.file("QR_UnT.txt", qrData.untList.join('\n---\n'));
+
+            // File LaTeX sinh lệnh \qrcode
+            qrFolder.file("MaQR_ChamThi.tex", ExamMixerEngine.buildMaQrTex(qrData));
+
+            // Trang HTML xem & in mã QR trực quan cực đẹp (100% offline)
+            const qrViewerHtml = ExamMixerEngine.buildQrViewerHtml(this.config.header?.title || "Đề thi", matrixData, qrData);
+            qrFolder.file("Xem_Ma_QR.html", qrViewerHtml);
+
+            // Sinh ảnh PNG mã QR cho từng mã đề nếu có thư viện QRCode
+            if (typeof QRCode !== 'undefined') {
+                for (const chunk of qrData.tnmChunks) {
+                    const blobPng = await ExamMixerEngine.generateQrPngBlob(chunk.qrString, 300, 300);
+                    if (blobPng) qrFolder.file(`TNMaker_De_${chunk.madeList.join('_')}.png`, blobPng);
+                }
+                for (const chunk of qrData.qmChunks) {
+                    const blobPng = await ExamMixerEngine.generateQrPngBlob(chunk.qrString, 300, 300);
+                    if (blobPng) qrFolder.file(`QM_De_${chunk.madeList.join('_')}.png`, blobPng);
+                }
+            }
+
+            // =======================================================
+            // 3. XUẤT HƯỚNG DẪN GIẢI & FILE MAIN TEX
+            // =======================================================
+            dapAnFolder.file("HuongDanGiai.tex", ExamMixerEngine.buildHuongDanGiaiTex(matrixData, cacDeDaTron, deGocBlocks));
+            zip.file("Main_de_bai.tex", this.buildMainTex(maDeList, this.config.header, false));
+            zip.file("Main_dap_an.tex", this.buildMainTex(maDeList, this.config.header, true));
+
+            // =======================================================
+            // 4. XUẤT ĐỀ GỐC VÀ CÁC MÃ ĐỀ THI (.TEX)
+            // =======================================================
             const headerCfg = this.config.header || {};
+            let deGocTex = `\\newpage\n\\setcounter{page}{1}\n\\madethi{GỐC}\n\\setcounter{ex}{0}\\setcounter{bt}{0}\n\n`;
+            deGocTex += deGocBlocks.join('\n\n') + `\n\n\\begin{center}\\bf\n----- HẾT -----\n\\end{center}\n\\label{GOC}\n`;
+            deThiFolder.file("De_Goc.tex", deGocTex.replace(/DPSpercent/g, '\\%'));
 
             for (const maDe of maDeList) {
                 const blocks = cacDeDaTron[maDe];
                 let texFile = `\\newpage\n\\setcounter{page}{1}\n\\madethi{${maDe}}\n\\setcounter{ex}{0}\\setcounter{bt}{0}\n\n`;
-                texFile += blocks.join('\n\n');
-                texFile += `\n\n\\begin{center}\\bf\n----- HẾT -----\n\\end{center}\n\\label{${maDe}}\n`;
-                dataFolder.file(`${maDe}.tex`, texFile.replace(/DPSpercent/g, '\\%'));
+                texFile += blocks.join('\n\n') + `\n\n\\begin{center}\\bf\n----- HẾT -----\n\\end{center}\n\\label{${maDe}}\n`;
+                deThiFolder.file(`De_${maDe}.tex`, texFile.replace(/DPSpercent/g, '\\%'));
             }
 
-            // File Main đề bài và đáp án
-            zip.file("Main_de_bai.tex", this.buildMainTex(maDeList, headerCfg, false));
-            zip.file("Main_dap_an.tex", this.buildMainTex(maDeList, headerCfg, true));
-            zip.file("BangDapAn.tex", this.buildBangDapAnTex(matrixData));
+            // =======================================================
+            // 5. XUẤT CÁC FILE WORD (.DOCX) NẾU ĐƯỢC CHỌN
+            // =======================================================
+            const shouldExportWord = this.config.output_format === 'word' || this.config.output_format === 'both';
+            const createDocx = window.createDocxBlob || (window.WordMathTypeExporter && window.WordMathTypeExporter.createDocxBlob);
 
-            // 3. Nếu người dùng chọn xuất Word (.docx): Tạo file Word cho từng mã đề
-            if (this.config.output_format === 'word' || this.config.output_format === 'both') {
-                report(85, "Đang xuất các file Word (.docx) từng mã đề...");
-                const wordFolder = zip.folder("docx");
+            if (shouldExportWord && typeof createDocx === 'function') {
+                report(80, "Đang xuất file Word (.docx) Đề Gốc...");
 
+                const makeHeaderConfig = (code) => ({
+                    style: headerCfg.style || 'standard_gov',
+                    agency: headerCfg.agency || 'SỞ GD&ĐT HÀ NỘI',
+                    school: headerCfg.school || 'TRƯỜNG THPT TRẦN QUANG KHẢI',
+                    exam_type: headerCfg.examType || '(ĐỀ CHÍNH THỨC)',
+                    title: headerCfg.title || 'ĐỀ THI',
+                    subject: headerCfg.subject || 'TOÁN HỌC',
+                    grade: headerCfg.grade || '9',
+                    duration: headerCfg.duration || 90,
+                    exam_code: code,
+                    candidate_info: headerCfg.candidateInfo !== false
+                });
+
+                // Xuất file Word Đề Gốc
+                try {
+                    const gocCfg = makeHeaderConfig("GỐC");
+                    const fullGocTex = deGocBlocks.join('\n\n').replace(/DPSpercent/g, '\\%');
+                    const blobGoc = await createDocx({
+                        title: `${headerCfg.title || 'De_Thi'}_Goc`,
+                        questions: fullGocTex,
+                        mode: 'questions',
+                        options: {
+                            headerStyle: gocCfg.style,
+                            agencyName: gocCfg.agency,
+                            schoolName: gocCfg.school,
+                            examType: gocCfg.exam_type,
+                            examTitle: gocCfg.title,
+                            subject: gocCfg.subject,
+                            grade: gocCfg.grade,
+                            duration: gocCfg.duration,
+                            examCode: "GỐC",
+                            includeCandidateInfo: gocCfg.candidate_info
+                        }
+                    });
+                    deThiFolder.file("De_Goc.docx", blobGoc);
+                } catch (gErr) {
+                    console.warn("[Mixer] Lỗi xuất Word Đề Gốc:", gErr);
+                }
+
+                // Xuất file Word cho từng mã đề thi con
                 for (let i = 0; i < maDeList.length; i++) {
                     const maDe = maDeList[i];
-                    report(85 + Math.floor((i / maDeList.length) * 12), `Đang tạo file Word mã ${maDe}...`);
+                    report(82 + Math.floor((i / maDeList.length) * 14), `Đang tạo file Word mã ${maDe}...`);
                     const examBlocks = cacDeDaTron[maDe];
                     const fullLatexExam = examBlocks.join('\n\n').replace(/DPSpercent/g, '\\%');
+                    const hConfig = makeHeaderConfig(maDe);
 
                     try {
-                        const hConfig = {
-                            style: headerCfg.style || 'standard_gov',
-                            agency: headerCfg.agency || 'SỞ GD&ĐT HÀ NỘI',
-                            school: headerCfg.school || 'TRƯỜNG THPT TRẦN QUANG KHẢI',
-                            exam_type: headerCfg.examType || '(ĐỀ CHÍNH THỨC)',
-                            title: headerCfg.title || 'ĐỀ THI',
-                            subject: headerCfg.subject || 'TOÁN HỌC',
-                            grade: headerCfg.grade || '9',
-                            duration: headerCfg.duration || 90,
-                            exam_code: maDe,
-                            candidate_info: headerCfg.candidateInfo !== false
-                        };
-
-                        if (window.exportExamToWord) {
-                            // Tạo docx blob bằng JS exporter hoặc Pyodide
-                            const blobDocx = await window.createDocxBlob({
-                                title: `${headerCfg.title || 'De_Thi'}_${maDe}`,
-                                questions: fullLatexExam,
-                                mode: 'questions',
-                                options: {
-                                    headerStyle: hConfig.style,
-                                    agencyName: hConfig.agency,
-                                    schoolName: hConfig.school,
-                                    examType: hConfig.exam_type,
-                                    examTitle: hConfig.title,
-                                    subject: hConfig.subject,
-                                    grade: hConfig.grade,
-                                    duration: hConfig.duration,
-                                    examCode: maDe,
-                                    includeCandidateInfo: hConfig.candidate_info
-                                }
-                            });
-                            wordFolder.file(`De_${maDe}.docx`, blobDocx);
-                        }
+                        const blobDocx = await createDocx({
+                            title: `${headerCfg.title || 'De_Thi'}_${maDe}`,
+                            questions: fullLatexExam,
+                            mode: 'questions',
+                            options: {
+                                headerStyle: hConfig.style,
+                                agencyName: hConfig.agency,
+                                schoolName: hConfig.school,
+                                examType: hConfig.exam_type,
+                                examTitle: hConfig.title,
+                                subject: hConfig.subject,
+                                grade: hConfig.grade,
+                                duration: hConfig.duration,
+                                examCode: maDe,
+                                includeCandidateInfo: hConfig.candidate_info
+                            }
+                        });
+                        deThiFolder.file(`De_${maDe}.docx`, blobDocx);
                     } catch (wErr) {
-                        console.warn(`[Mixer] Không thể tạo file Word cho mã ${maDe}:`, wErr);
+                        console.warn(`[Mixer] Lỗi tạo Word mã ${maDe}:`, wErr);
                     }
                 }
             }
 
-            report(98, "Đang nén file ZIP...");
-            const finalZipBlob = await zip.generateAsync({ type: "blob" });
+            report(97, "Đang đóng gói file ZIP hoàn chỉnh...");
+            const zipType = typeof Blob !== 'undefined' ? "blob" : "nodebuffer";
+            const finalZipBlob = await zip.generateAsync({ type: zipType });
             report(100, "Hoàn tất trộn đề thi!");
 
             return {
@@ -565,81 +788,457 @@
             }).join('\n\n');
         }
 
-        buildMasterAnswerExcel(matrixData) {
-            // Dùng SheetJS nếu có, hoặc tạo OpenXML thuần
-            if (typeof XLSX !== 'undefined') {
-                const wb = XLSX.utils.book_new();
+        // =======================================================
+        // CÁC HÀM XUẤT EXCEL THUẦN OPENXML (PORT TỪ MIXER_CORE.PY)
+        // =======================================================
+        static async buildNativeXlsx(rows) {
+            const zip = new JSZip();
+            const ct = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+                '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>' +
+                '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' +
+                '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>');
+            const rels = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+                '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>');
+            const wb = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" ' +
+                'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets></workbook>');
+            const wb_rels = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+                '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/package/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>');
 
-                // Sheet 1: Ma trận đáp án
-                const maxQ = Math.max(...matrixData.map(d => d.p1.length + d.p2.length + d.p3.length), 0);
-                const headerRow = ["Câu \\ Mã đề", ...matrixData.map(d => d.made)];
-                const rows = [headerRow];
-
-                for (let q = 0; q < maxQ; q++) {
-                    const row = [`Câu ${q + 1}`];
-                    for (const d of matrixData) {
-                        const totalList = [...d.p1, ...d.p2.map(s => s.split('').join('.')), ...d.p3];
-                        row.push(q < totalList.length ? totalList[q] : "");
+            const sd = ['<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>'];
+            for (let rIdx = 0; rIdx < rows.length; rIdx++) {
+                const row = rows[rIdx];
+                sd.push(`<row r="${rIdx + 1}">`);
+                for (let cIdx = 0; cIdx < row.length; cIdx++) {
+                    let colLetter = "";
+                    let temp = cIdx;
+                    while (temp >= 0) {
+                        colLetter = String.fromCharCode(65 + (temp % 26)) + colLetter;
+                        temp = Math.floor(temp / 26) - 1;
                     }
-                    rows.push(row);
-                }
+                    let rawVal = row[cIdx];
+                    if (rawVal === null || rawVal === undefined) rawVal = "";
+                    let vS = String(rawVal).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-                const ws1 = XLSX.utils.aoa_to_sheet(rows);
-                XLSX.utils.book_append_sheet(wb, ws1, "Ma Trận Đáp Án");
+                    if (vS.startsWith("'")) {
+                        vS = vS.substring(1);
+                        sd.push(`<c r="${colLetter}${rIdx + 1}" t="inlineStr"><is><t>${vS}</t></is></c>`);
+                    } else if (vS !== "" && !isNaN(vS) && !vS.startsWith("=") && (!vS.startsWith("0") || vS === "0")) {
+                        sd.push(`<c r="${colLetter}${rIdx + 1}" t="n"><v>${vS}</v></c>`);
+                    } else {
+                        sd.push(`<c r="${colLetter}${rIdx + 1}" t="inlineStr"><is><t>${vS}</t></is></c>`);
+                    }
+                }
+                sd.push('</row>');
+            }
+            sd.push('</sheetData></worksheet>');
 
-                // Sheet 2: Định dạng SmartTest
-                const stRows = [["Câu\\Mã đề", ...matrixData.map(d => d.made)]];
-                for (let q = 0; q < 40; q++) {
-                    stRows.push([q + 1, ...matrixData.map(d => (q < d.p1.length ? d.p1[q] : ""))]);
-                }
-                for (let q = 0; q < 8; q++) {
-                    stRows.push([q + 1, ...matrixData.map(d => (q < d.p2.length ? d.p2[q] : ""))]);
-                }
-                for (let q = 0; q < 8; q++) {
-                    stRows.push([q + 1, ...matrixData.map(d => (q < d.p3.length ? d.p3[q] : ""))]);
-                }
-                const ws2 = XLSX.utils.aoa_to_sheet(stRows);
-                XLSX.utils.book_append_sheet(wb, ws2, "SmartTest");
+            zip.file('[Content_Types].xml', ct);
+            zip.file('_rels/.rels', rels);
+            zip.file('xl/workbook.xml', wb);
+            zip.file('xl/_rels/workbook.xml.rels', wb_rels);
+            zip.file('xl/worksheets/sheet1.xml', sd.join(''));
 
-                const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-                return new Blob([wbout], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+            return await zip.generateAsync({
+                type: 'uint8array',
+                mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            });
+        }
+
+        static async buildSmartTestXlsx(matrixData) {
+            const stRows = [["Câu\\Mã đề", ...matrixData.map(d => `'${d.made}`)]];
+            const maxP1 = Math.max(40, ...matrixData.map(d => d.p1.length));
+            for (let q = 0; q < maxP1; q++) {
+                stRows.push([q + 1, ...matrixData.map(d => (q < d.p1.length ? d.p1[q] : ""))]);
+            }
+            const maxP2 = Math.max(8, ...matrixData.map(d => d.p2.length));
+            for (let q = 0; q < maxP2; q++) {
+                stRows.push([q + 1, ...matrixData.map(d => (q < d.p2.length ? d.p2[q].replace(/D/g, 'Đ') : ""))]);
+            }
+            const maxP3 = Math.max(8, ...matrixData.map(d => d.p3.length));
+            for (let q = 0; q < maxP3; q++) {
+                stRows.push([q + 1, ...matrixData.map(d => (q < d.p3.length ? d.p3[q] : ""))]);
+            }
+            return await ExamMixerEngine.buildNativeXlsx(stRows);
+        }
+
+        static async buildYoungMixXlsx(matrixData) {
+            const maxP1 = Math.max(40, ...matrixData.map(d => d.p1.length));
+            const maxP2 = Math.max(8, ...matrixData.map(d => d.p2.length));
+            const maxP3 = Math.max(8, ...matrixData.map(d => d.p3.length));
+
+            const ymHeader = ["Đề\\câu"];
+            for (let q = 1; q <= maxP1; q++) ymHeader.push(q);
+            for (let q = 1; q <= maxP2; q++) {
+                ymHeader.push(`${q}a`, `${q}b`, `${q}c`, `${q}d`);
+            }
+            for (let q = 1; q <= maxP3; q++) ymHeader.push(q);
+
+            const ymRows = [ymHeader];
+            for (const d of matrixData) {
+                const row = [`'${d.made}`];
+                for (let i = 0; i < maxP1; i++) {
+                    row.push(i < d.p1.length ? d.p1[i] : "");
+                }
+                for (let q = 0; q < maxP2; q++) {
+                    if (q < d.p2.length) {
+                        const tf = d.p2[q].replace(/D/g, 'Đ');
+                        for (let c = 0; c < 4; c++) {
+                            row.push(c < tf.length ? tf[c] : "");
+                        }
+                    } else {
+                        row.push("", "", "", "");
+                    }
+                }
+                for (let i = 0; i < maxP3; i++) {
+                    row.push(i < d.p3.length ? d.p3[i] : "");
+                }
+                ymRows.append ? ymRows.append(row) : ymRows.push(row);
+            }
+            return await ExamMixerEngine.buildNativeXlsx(ymRows);
+        }
+
+        // =======================================================
+        // CÁC HÀM TẠO DỮ LIỆU VÀ GIAO DIỆN MÃ QR
+        // =======================================================
+        static buildQrData(matrixData) {
+            const untList = [];
+            const tnmList = [];
+            const qmList = [];
+
+            // Lấy các mã đề thi con (hoặc cả đề gốc nếu chỉ có 1 đề)
+            const targetCodes = matrixData.filter(d => !d.isGoc || matrixData.length === 1);
+
+            for (const d of targetCodes) {
+                // 1. Chuẩn UnT
+                let unt = `${d.made}\n`;
+                if (d.p1 && d.p1.length > 0) unt += d.p1.join('');
+                if (d.p2 && d.p2.length > 0) unt += '\n' + d.p2.map(s => s.replace(/D/g, 'Đ')).join('');
+                if (d.p3_raw && d.p3_raw.length > 0) {
+                    const cleanSh = d.p3_raw.map(ans => cleanShortAnswer(ans));
+                    unt += '\n' + cleanSh.join('|');
+                }
+                untList.push(unt);
+
+                // 2. Chuẩn TNMaker: "made":"p1#p2_with_Đ#p3_clean"
+                let tnm = `"${d.made}":"`;
+                if (d.p1 && d.p1.length > 0) tnm += d.p1.join('');
+                if (d.p2 && d.p2.length > 0) tnm += '#' + d.p2.map(s => s.replace(/D/g, 'Đ')).join('_');
+                if (d.p3_raw && d.p3_raw.length > 0) {
+                    const cleanSh = d.p3_raw.map(ans => cleanShortAnswer(ans));
+                    tnm += '#' + cleanSh.join('_');
+                }
+                tnm += '"';
+                tnmList.push({ made: d.made, pair: tnm });
+
+                // 3. Chuẩn QM Chấm Thi: [made, ans1, ans2...]
+                const qm = [String(d.made)];
+                if (d.p1) qm.push(...d.p1);
+                if (d.p2) {
+                    for (const tf of d.p2) {
+                        const normTf = tf.replace(/Đ/g, 'D');
+                        for (let c = 0; c < normTf.length; c++) qm.push(normTf[c]);
+                    }
+                }
+                if (d.p3_raw) {
+                    for (const ans of d.p3_raw) {
+                        const cleanAns = cleanShortAnswer(ans);
+                        const num = parseFloat(cleanAns.replace(',', '.'));
+                        if (!isNaN(num) && Number.isFinite(num)) {
+                            qm.push(Number.isInteger(num) ? parseInt(num, 10) : num);
+                        } else {
+                            qm.push(cleanAns);
+                        }
+                    }
+                }
+                qmList.push(qm);
             }
 
-            // Fallback CSV nếu không có SheetJS
-            let csv = "Cau\\Ma de," + matrixData.map(d => d.made).join(",") + "\n";
-            return new Blob([csv], { type: "text/csv;charset=utf-8;" });
+            // Chia khối TNMaker (tối đa 8 mã đề / mã QR)
+            const tnmChunks = [];
+            for (let i = 0; i < tnmList.length; i += 8) {
+                const chunk = tnmList.slice(i, i + 8);
+                const jsonStr = '{' + chunk.map(c => c.pair).join(',') + ',"success":true,"type":6}';
+                tnmChunks.push({
+                    madeList: chunk.map(c => c.made),
+                    qrString: jsonStr
+                });
+            }
+
+            // Chia khối QM (tối đa 3 mã đề / mã QR)
+            const qmChunks = [];
+            for (let i = 0; i < qmList.length; i += 3) {
+                const chunk = qmList.slice(i, i + 3);
+                const jsonStr = JSON.stringify(chunk);
+                qmChunks.push({
+                    madeList: chunk.map(c => c[0]),
+                    qrString: jsonStr
+                });
+            }
+
+            return { untList, tnmList, tnmChunks, qmList, qmChunks };
+        }
+
+        static buildMaQrTex(qrData) {
+            let tex = `\\documentclass[12pt,a4paper]{article}
+\\usepackage[utf8]{inputenc}
+\\usepackage[vietnamese]{babel}
+\\usepackage{geometry}
+\\usepackage{qrcode}
+\\geometry{top=1.5cm, bottom=1.8cm, left=1.5cm, right=1.5cm}
+\\begin{document}
+
+\\begin{center}
+{\\Large\\bfseries MÃ QR CODE CHẤM THI TỰ ĐỘNG}
+\\end{center}
+\\vspace{0.5cm}
+`;
+
+            // TNMaker QR
+            if (qrData.tnmChunks && qrData.tnmChunks.length > 0) {
+                tex += `\\section*{1. Mã QR dành cho ứng dụng chấm trắc nghiệm TNMaker}\n\\begin{center}\n`;
+                for (const chunk of qrData.tnmChunks) {
+                    const escaped = chunk.qrString.replace(/\\/g, '\\\\').replace(/\{/g, '\\{').replace(/\}/g, '\\}');
+                    tex += `{\\bf Mã đề: ${chunk.madeList.join(', ')}}\\\\[2mm]\n`;
+                    tex += `\\qrcode[height=1.8in]{${escaped}}\\vspace{6mm}\\\\\n`;
+                }
+                tex += `\\end{center}\n\\newpage\n`;
+            }
+
+            // QM Chấm thi QR
+            if (qrData.qmChunks && qrData.qmChunks.length > 0) {
+                tex += `\\section*{2. Mã QR dành cho ứng dụng chấm thi QM}\n\\begin{center}\n`;
+                for (const chunk of qrData.qmChunks) {
+                    const escaped = chunk.qrString.replace(/\\/g, '\\\\').replace(/\{/g, '\\{').replace(/\}/g, '\\}');
+                    tex += `{\\bf Mã đề: ${chunk.madeList.join(', ')}}\\\\[2mm]\n`;
+                    tex += `\\qrcode[height=1.6in]{${escaped}}\\vspace{6mm}\\\\\n`;
+                }
+                tex += `\\end{center}\n\\newpage\n`;
+            }
+
+            // UnT QR
+            if (qrData.untList && qrData.untList.length > 0) {
+                tex += `\\section*{3. Mã QR dành cho ứng dụng chấm thi UnT}\n\\begin{center}\n`;
+                for (let i = 0; i < qrData.untList.length; i += 4) {
+                    const chunk = qrData.untList.slice(i, i + 4);
+                    tex += `\\qrcode[height=1.8in]{${chunk.join('\n')}}\\vspace{6mm}\\\\\n`;
+                }
+                tex += `\\end{center}\n`;
+            }
+
+            tex += `\\end{document}`;
+            return tex;
+        }
+
+        static buildHuongDanGiaiTex(matrixData, cacDeDaTron, deGocBlocks) {
+            let tex = `\\documentclass[12pt,a4paper]{article}
+\\usepackage[utf8]{inputenc}
+\\usepackage[vietnamese]{babel}
+\\usepackage{amsmath,amssymb,geometry}
+\\usepackage[book]{ex_test}
+\\geometry{top=1.5cm, bottom=1.8cm, left=1.5cm, right=1.5cm}
+\\begin{document}
+`;
+            for (const d of matrixData) {
+                const made = d.made;
+                const isGoc = d.isGoc;
+                tex += `\\newpage\n\\setcounter{page}{1}\n\\begin{center}\\bfseries\\large\n\\fbox{HƯỚNG DẪN GIẢI CHI TIẾT - ${isGoc ? 'ĐỀ GỐC' : `MÃ ĐỀ ${made}`}}\n\\end{center}\n`;
+                tex += `\\setcounter{section}{0}\\setcounter{subsection}{0}\\setcounter{subsubsection}{0}\\setcounter{ex}{0}\\setcounter{bt}{0}\n\n`;
+
+                const blocks = isGoc ? deGocBlocks : (cacDeDaTron[made] || []);
+                tex += blocks.join('\n\n') + `\n\n\\begin{center}\\bf\n----- HẾT -----\n\\end{center}\n`;
+            }
+            tex += `\\end{document}`;
+            return tex.replace(/DPSpercent/g, '\\%');
+        }
+
+        static buildQrViewerHtml(title, matrixData, qrData) {
+            const tnmJson = JSON.stringify(qrData.tnmChunks);
+            const qmJson = JSON.stringify(qrData.qmChunks);
+            const untJson = JSON.stringify(qrData.untList);
+
+            return `<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mã QR Chấm Thi - ${title}</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <style>
+        :root { --primary: #ea580c; --primary-hover: #c2410c; --bg: #f8fafc; --card: #ffffff; --text: #1e293b; --border: #e2e8f0; }
+        @media (prefers-color-scheme: dark) {
+            :root { --bg: #0f172a; --card: #1e293b; --text: #f8fafc; --border: #334155; }
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
+        body { background: var(--bg); color: var(--text); padding: 24px; min-height: 100vh; }
+        .container { max-width: 1000px; margin: 0 auto; }
+        .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 2px solid var(--border); }
+        .title { font-size: 22px; font-weight: 800; color: var(--primary); }
+        .sub { font-size: 13px; opacity: 0.7; margin-top: 4px; }
+        .btn-print { background: var(--primary); color: #fff; border: none; padding: 10px 18px; border-radius: 10px; font-weight: 700; cursor: pointer; transition: 0.2s; display: inline-flex; align-items: center; gap: 8px; font-size: 13px; }
+        .btn-print:hover { background: var(--primary-hover); }
+        .tabs { display: flex; gap: 8px; margin-bottom: 20px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+        .tab-btn { padding: 8px 16px; border-radius: 8px; border: 1px solid var(--border); background: var(--card); color: var(--text); font-weight: 700; font-size: 13px; cursor: pointer; transition: 0.2s; }
+        .tab-btn.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; }
+        .qr-card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 20px; text-align: center; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
+        .qr-code-box { display: inline-flex; justify-content: center; align-items: center; padding: 14px; background: #ffffff; border-radius: 12px; margin: 12px 0; border: 1px solid #cbd5e1; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        .qr-label { font-size: 16px; font-weight: 800; margin-bottom: 6px; }
+        .qr-desc { font-size: 11px; opacity: 0.7; word-break: break-all; max-height: 48px; overflow: hidden; margin-bottom: 12px; font-family: monospace; }
+        .btn-dl { background: #f1f5f9; color: #334155; border: 1px solid #cbd5e1; padding: 6px 12px; border-radius: 8px; font-size: 11px; font-weight: 700; cursor: pointer; transition: 0.2s; }
+        .btn-dl:hover { background: #e2e8f0; }
+        @media print {
+            body { background: #fff !important; color: #000 !important; padding: 0 !important; }
+            .header, .tabs, .btn-print, .btn-dl { display: none !important; }
+            .grid { grid-template-columns: repeat(2, 1fr) !important; gap: 30px !important; }
+            .qr-card { border: 1px solid #000 !important; box-shadow: none !important; page-break-inside: avoid; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div>
+                <h1 class="title">MÃ QR CODE CHẤM THI TỰ ĐỘNG</h1>
+                <p class="sub">${title} | Hỗ trợ TNMaker, QM Chấm Thi &amp; UnT</p>
+            </div>
+            <button class="btn-print" onclick="window.print()">🖨️ In Mã QR Ra Giấy</button>
+        </div>
+
+        <div class="tabs">
+            <button class="tab-btn active" id="btnTabTnm" onclick="switchTab('tnm')">📱 App TNMaker</button>
+            <button class="tab-btn" id="btnTabQm" onclick="switchTab('qm')">📱 App QM Chấm Thi</button>
+            <button class="tab-btn" id="btnTabUnt" onclick="switchTab('unt')">📱 App UnT</button>
+        </div>
+
+        <div id="tabContentTnm" class="grid"></div>
+        <div id="tabContentQm" class="grid" style="display:none;"></div>
+        <div id="tabContentUnt" class="grid" style="display:none;"></div>
+    </div>
+
+    <script>
+        const tnmData = ${tnmJson};
+        const qmData = ${qmJson};
+        const untData = ${untJson};
+
+        function switchTab(tab) {
+            document.getElementById('btnTabTnm').className = tab === 'tnm' ? 'tab-btn active' : 'tab-btn';
+            document.getElementById('btnTabQm').className = tab === 'qm' ? 'tab-btn active' : 'tab-btn';
+            document.getElementById('btnTabUnt').className = tab === 'unt' ? 'tab-btn active' : 'tab-btn';
+
+            document.getElementById('tabContentTnm').style.display = tab === 'tnm' ? 'grid' : 'none';
+            document.getElementById('tabContentQm').style.display = tab === 'qm' ? 'grid' : 'none';
+            document.getElementById('tabContentUnt').style.display = tab === 'unt' ? 'grid' : 'none';
+        }
+
+        function renderQrItem(container, title, text) {
+            const card = document.createElement('div');
+            card.className = 'qr-card';
+
+            const h3 = document.createElement('div');
+            h3.className = 'qr-label';
+            h3.textContent = title;
+            card.appendChild(h3);
+
+            const desc = document.createElement('div');
+            desc.className = 'qr-desc';
+            desc.textContent = text;
+            card.appendChild(desc);
+
+            const qrBox = document.createElement('div');
+            qrBox.className = 'qr-code-box';
+            card.appendChild(qrBox);
+
+            const dlBtn = document.createElement('button');
+            dlBtn.className = 'btn-dl';
+            dlBtn.textContent = '📥 Tải ảnh PNG';
+            dlBtn.onclick = () => {
+                const canvas = qrBox.querySelector('canvas');
+                if (canvas) {
+                    const a = document.createElement('a');
+                    a.download = title.replace(/[^a-zA-Z0-9_]/g, '_') + '.png';
+                    a.href = canvas.toDataURL('image/png');
+                    a.click();
+                }
+            };
+            card.appendChild(dlBtn);
+            container.appendChild(card);
+
+            try {
+                new QRCode(qrBox, {
+                    text: text,
+                    width: 200,
+                    height: 200,
+                    correctLevel: QRCode.CorrectLevel.M
+                });
+            } catch (err) {
+                console.error("Lỗi vẽ QR:", err);
+            }
+        }
+
+        window.onload = function() {
+            // 1. TNMaker
+            const cTnm = document.getElementById('tabContentTnm');
+            tnmData.forEach((chunk, idx) => {
+                renderQrItem(cTnm, 'TNMaker: Mã đề ' + chunk.madeList.join(', '), chunk.qrString);
+            });
+
+            // 2. QM Chấm thi
+            const cQm = document.getElementById('tabContentQm');
+            qmData.forEach((chunk, idx) => {
+                renderQrItem(cQm, 'App QM: Mã đề ' + chunk.madeList.join(', '), chunk.qrString);
+            });
+
+            // 3. UnT
+            const cUnt = document.getElementById('tabContentUnt');
+            untData.forEach((untStr, idx) => {
+                const lines = untStr.split('\\n');
+                renderQrItem(cUnt, 'App UnT: Mã đề ' + (lines[0] || (idx+1)), untStr);
+            });
+        };
+    </script>
+</body>
+</html>`;
+        }
+
+        static async generateQrPngBlob(text, width = 300, height = 300) {
+            if (typeof QRCode === 'undefined') return null;
+            const tempDiv = document.createElement('div');
+            tempDiv.style.position = 'fixed';
+            tempDiv.style.left = '-9999px';
+            tempDiv.style.top = '-9999px';
+            document.body.appendChild(tempDiv);
+
+            try {
+                new QRCode(tempDiv, {
+                    text: text,
+                    width: width,
+                    height: height,
+                    correctLevel: QRCode.CorrectLevel.M
+                });
+
+                await new Promise(r => setTimeout(r, 40));
+                const canvas = tempDiv.querySelector('canvas');
+                if (canvas) {
+                    return await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+                }
+            } catch (e) {
+                console.warn("[Mixer] Lỗi tạo ảnh QR PNG:", e);
+            } finally {
+                if (tempDiv.parentNode) tempDiv.parentNode.removeChild(tempDiv);
+            }
+            return null;
         }
 
         buildMainTex(maDeList, headerCfg, isDapAn = false) {
-            const inputs = maDeList.map(md => `\\input{data/${md}}`).join('\n');
-            const daInputs = isDapAn ? "\n\\newpage\n\\input{BangDapAn}\n" : "";
+            const inputs = maDeList.map(md => `\\input{de_thi/De_${md}}`).join('\n');
+            const daInputs = isDapAn ? "\n\\newpage\n\\input{dap_an/HuongDanGiai}\n" : "";
             return `\\documentclass[12pt,a4paper]{article}
 \\usepackage{amsmath,amssymb,geometry}
 \\usepackage[book]{ex_test}
 \\geometry{top=1.5cm, bottom=1.8cm, left=1.5cm, right=1.5cm}
 \\begin{document}
 ${inputs}
-${daInputs}
 \\end{document}`;
-        }
-
-        buildBangDapAnTex(matrixData) {
-            if (!matrixData || matrixData.length === 0) return "";
-            const maxQ = Math.max(...matrixData.map(d => d.p1.length + d.p2.length + d.p3.length), 0);
-            let tex = "\\centerline{\\Large\\textbf{BẢNG ĐÁP ÁN CÁC MÃ ĐỀ THI}}\n\\vspace{0.3cm}\n\\begin{center}\n";
-            tex += "\\begin{tabular}{|c|" + "c|".repeat(matrixData.length) + "}\n\\hline\n";
-            tex += "\\textbf{Câu} & " + matrixData.map(d => `\\textbf{${d.made}}`).join(' & ') + " \\\\\n\\hline\n";
-
-            for (let q = 0; q < maxQ; q++) {
-                const cells = [String(q + 1)];
-                for (const d of matrixData) {
-                    const totalList = [...d.p1, ...d.p2.map(s => s.split('').join('.')), ...d.p3];
-                    cells.push(q < totalList.length ? totalList[q] : "");
-                }
-                tex += cells.join(' & ') + " \\\\\n\\hline\n";
-            }
-            tex += "\\end{tabular}\n\\end{center}\n";
-            return tex;
         }
     }
 
@@ -662,7 +1261,7 @@ ${daInputs}
                         </span>
                         <div>
                             <h3 class="font-bold text-gray-800 dark:text-gray-100 text-sm sm:text-base">Trộn Đề Thi Chuyên Nghiệp (TeX &amp; Word)</h3>
-                            <p class="text-[11px] text-gray-500 dark:text-gray-400">Đảo câu hỏi, đảo phương án, phân nhóm ID6, xuất ma trận đáp án Excel &amp; file Word/TeX</p>
+                            <p class="text-[11px] text-gray-500 dark:text-gray-400">Đảo câu hỏi, đảo phương án, phân nhóm ID6, xuất Đề gốc &amp; Đề con, Excel SmartTest/YoungMix &amp; Mã QR chấm thi</p>
                         </div>
                     </div>
                     <button type="button" onclick="window.closeExamMixerModal()" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 p-1.5 rounded-lg text-lg">
@@ -833,9 +1432,9 @@ ${daInputs}
                                     <div class="pt-2 border-t border-gray-200 dark:border-gray-700">
                                         <label class="block text-[11px] font-bold text-gray-600 dark:text-gray-400 mb-1">Định dạng file xuất trong gói ZIP</label>
                                         <select id="mixerOutputFormat" class="w-full text-xs font-bold px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 outline-none">
-                                            <option value="both" selected>📦 Đầy đủ: Word (.docx) + LaTeX (.tex) + Excel ma trận</option>
-                                            <option value="word">📄 File Word (.docx) + Excel ma trận</option>
-                                            <option value="tex">📐 File LaTeX (.tex) + Excel ma trận</option>
+                                            <option value="both" selected>📦 Đầy đủ: Word (.docx) + TeX + Excel SmartTest/YoungMix + Mã QR</option>
+                                            <option value="word">📄 File Word (.docx) + Excel SmartTest/YoungMix + Mã QR</option>
+                                            <option value="tex">📐 File LaTeX (.tex) + Excel SmartTest/YoungMix + Mã QR</option>
                                         </select>
                                     </div>
                                 </div>
