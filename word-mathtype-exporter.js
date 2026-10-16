@@ -2305,6 +2305,94 @@
     }
 
     // ==========================================
+    // CÁC HÀM TIỆN ÍCH TRÍCH XUẤT ĐÁP ÁN CHUẨN XÁC
+    // ==========================================
+    function getChoiceCorrectLetter(q) {
+        if (!q) return '';
+        if (typeof q.correctAnswer === 'string' && /^[A-D]$/i.test(q.correctAnswer.trim())) {
+            return q.correctAnswer.trim().toUpperCase();
+        }
+        if (q.correct !== undefined && q.correct !== null && q.correct !== -1 && q.correct !== '-1') {
+            const num = parseInt(q.correct);
+            if (!isNaN(num) && num >= 0 && num < 4) {
+                return ['A', 'B', 'C', 'D'][num];
+            }
+        }
+        if (typeof q.answer === 'string' && /^[A-D]$/i.test(q.answer.trim())) {
+            return q.answer.trim().toUpperCase();
+        }
+        if (Array.isArray(q.options)) {
+            for (let i = 0; i < q.options.length && i < 4; i++) {
+                const opt = q.options[i];
+                if (typeof opt === 'object' && opt !== null) {
+                    if (opt.isCorrect === true || opt.correct === true) {
+                        return ['A', 'B', 'C', 'D'][i];
+                    }
+                } else if (typeof opt === 'string' && opt.includes('\\True')) {
+                    return ['A', 'B', 'C', 'D'][i];
+                }
+            }
+        }
+        const sol = q.solution || q.explain || '';
+        if (sol) {
+            const m = /(?:chọn|đáp\s*án|phương\s*án)\s*[:\-]?\s*([ABCD])\b/i.exec(sol);
+            if (m) return m[1].toUpperCase();
+        }
+        return '';
+    }
+
+    function getChoiceCorrectIndex(q) {
+        const letter = getChoiceCorrectLetter(q);
+        if (letter) {
+            const idx = ['A', 'B', 'C', 'D'].indexOf(letter);
+            if (idx !== -1) return idx;
+        }
+        return -1;
+    }
+
+    function getTfAnswerChar(q, sIdx) {
+        const key = ['a', 'b', 'c', 'd'][sIdx];
+        if (q && q.correctTf && q.correctTf[key]) {
+            const v = String(q.correctTf[key]).trim().toUpperCase();
+            return (v === 'D' || v === 'Đ' || v === 'TRUE' || v === 'T') ? 'Đ' : 'S';
+        }
+        const stmts = Array.isArray(q.statements) ? q.statements : (Array.isArray(q.options) ? q.options : []);
+        const st = stmts[sIdx];
+        if (st) {
+            if (typeof st === 'object' && st !== null) {
+                const isTrue = (st.correct === true || st.isCorrect === true || st.isTrue === true || st.answer === 'Đ' || st.answer === 'D' || st.answer === true);
+                return isTrue ? 'Đ' : 'S';
+            }
+            if (typeof st === 'string') {
+                if (st.includes('\\True')) return 'Đ';
+            }
+        }
+        return 'S';
+    }
+
+    function getShortAnswerText(q) {
+        if (!q) return '';
+        if (q.answer !== undefined && q.answer !== null && String(q.answer).trim() !== '') {
+            return String(q.answer).trim();
+        }
+        if (q.correctAnswer !== undefined && q.correctAnswer !== null && String(q.correctAnswer).trim() !== '') {
+            return String(q.correctAnswer).trim();
+        }
+        if (q.shortAnswer !== undefined && q.shortAnswer !== null && String(q.shortAnswer).trim() !== '') {
+            return String(q.shortAnswer).trim();
+        }
+        if (q.correct !== undefined && q.correct !== null && String(q.correct).trim() !== '' && q.correct !== -1 && q.correct !== '-1') {
+            return String(q.correct).trim();
+        }
+        const sol = q.solution || q.explain || '';
+        if (sol) {
+            const m = /(?:đáp\s*số|đáp\s*án|kết\s*quả)\s*[:=]\s*([^\n\r]+)/i.exec(sol);
+            if (m) return m[1].replace(/\\loigiai\{?|\}?/g, '').trim();
+        }
+        return '';
+    }
+
+    // ==========================================
     // 9. XÂY DỰNG TOÀN BỘ FILE WORD XML (BTPRO)
     // ==========================================
     function buildDocumentXml({ title, questions, mode = 'questions', options = {}, imageMap = {}, formulaRegistry = null }) {
@@ -2324,7 +2412,8 @@
             dottedLinesCount = 4,
             dottedLinesScope = 'essay_short', // 'essay_short' hoặc 'all'
             includeAnswerTable = true,
-            includeCccd = false
+            includeCccd = false,
+            underlineCorrect = false
         } = options;
 
         let bodyXml = '';
@@ -2628,7 +2717,8 @@
                     const letters = ['A', 'B', 'C', 'D'];
                     const cleanOpts = opts.map(o => cleanHtmlToWordText(typeof o === 'object' ? (o.text || '') : o));
                     const maxLen = Math.max(...cleanOpts.map(o => o.length));
-                    const correctIdx = typeof q.correct === 'number' ? q.correct : (q.correctAnswer ? ['A','B','C','D'].indexOf(String(q.correctAnswer).trim().toUpperCase()) : -1);
+                    const correctIdx = getChoiceCorrectIndex(q);
+                    const shouldUnderline = underlineCorrect || (mode === 'full');
 
                     if (cleanOpts.length === 4 && maxLen <= 24) {
                         bodyXml += `
@@ -2645,8 +2735,7 @@
                         cleanOpts.forEach((optText, oIdx) => {
                             if (oIdx > 0) bodyXml += `<w:r><w:tab/></w:r>`;
                             const isCorrect = (oIdx === correctIdx);
-                            const isTeacherMode = (mode === 'full');
-                            const bTag = isTeacherMode && isCorrect ? '<w:b/><w:u w:val="single"/>' : '<w:b/>';
+                            const bTag = (shouldUnderline && isCorrect) ? '<w:b/><w:u w:val="single"/>' : '<w:b/>';
                             bodyXml += `
                             <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/>${bTag}<w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr><w:t xml:space="preserve">${letters[oIdx]}. </w:t></w:r>
                             ${renderRunsToXml(parseRunsFromText(optText, false, false, formulaRegistry, formulaMode), imageMap, formulaRegistry)}`;
@@ -2665,8 +2754,7 @@
                                 const oIdx = row * 2 + col;
                                 if (col > 0) bodyXml += `<w:r><w:tab/></w:r>`;
                                 const isCorrect = (oIdx === correctIdx);
-                                const isTeacherMode = (mode === 'full');
-                                const bTag = isTeacherMode && isCorrect ? '<w:b/><w:u w:val="single"/>' : '<w:b/>';
+                                const bTag = (shouldUnderline && isCorrect) ? '<w:b/><w:u w:val="single"/>' : '<w:b/>';
                                 bodyXml += `
                                 <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/>${bTag}<w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr><w:t xml:space="preserve">${letters[oIdx]}. </w:t></w:r>
                                 ${renderRunsToXml(parseRunsFromText(cleanOpts[oIdx], false, false, formulaRegistry, formulaMode), imageMap, formulaRegistry)}`;
@@ -2676,8 +2764,7 @@
                     } else {
                         cleanOpts.forEach((optText, oIdx) => {
                             const isCorrect = (oIdx === correctIdx);
-                            const isTeacherMode = (mode === 'full');
-                            const bTag = isTeacherMode && isCorrect ? '<w:b/><w:u w:val="single"/>' : '<w:b/>';
+                            const bTag = (shouldUnderline && isCorrect) ? '<w:b/><w:u w:val="single"/>' : '<w:b/>';
                             bodyXml += `
                             <w:p>
                               <w:pPr><w:ind w:left="992"/><w:spacing w:after="40" w:line="276" w:lineRule="auto"/></w:pPr>
@@ -2727,16 +2814,17 @@
                 const subLabels = ['a', 'b', 'c', 'd'];
                 statements.forEach((st, sIdx) => {
                     const stText = cleanHtmlToWordText(typeof st === 'object' ? (st.content || st.text || '') : st);
-                    const isTrue = typeof st === 'object' ? (st.correct === true || st.isCorrect === true || st.answer === 'Đ' || st.answer === true) : false;
-                    const ansLabel = (mode === 'full') ? (isTrue ? ' [ĐÚNG]' : ' [SAI]') : '';
-                    const ansColor = isTrue ? '059669' : 'DC2626';
+                    const charAns = getTfAnswerChar(q, sIdx);
+                    const isTrue = (charAns === 'Đ');
+                    const shouldShowAns = (mode === 'full') || underlineCorrect;
+                    const ansLabel = shouldShowAns ? (isTrue ? ' [ĐÚNG]' : ' [SAI]') : '';
 
                     bodyXml += `
                     <w:p>
                       <w:pPr><w:ind w:left="992"/><w:spacing w:after="40" w:line="276" w:lineRule="auto"/><w:jc w:val="both"/></w:pPr>
                       <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr><w:t xml:space="preserve">${subLabels[sIdx]}) </w:t></w:r>
                       ${renderRunsToXml(parseRunsFromText(stText, false, false, formulaRegistry, formulaMode), imageMap, formulaRegistry)}
-                      ${ansLabel ? `<w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:color w:val="${ansColor}"/><w:sz w:val="22"/></w:rPr><w:t xml:space="preserve">${ansLabel}</w:t></w:r>` : ''}
+                      ${ansLabel ? `<w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr><w:t xml:space="preserve">${ansLabel}</w:t></w:r>` : ''}
                     </w:p>`;
                 });
 
@@ -2749,7 +2837,7 @@
                     bodyXml += `
                     <w:p>
                       <w:pPr><w:ind w:left="992"/><w:spacing w:before="60" w:after="40"/><w:jc w:val="both"/></w:pPr>
-                      <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:i/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr><w:t>Lời giải:</w:t></w:r>
+                      <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:i/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr><w:t>Lời giải chi tiết:</w:t></w:r>
                     </w:p>`;
                     bodyXml += renderQuestionBlocks('', solText);
                 }
@@ -2773,38 +2861,38 @@
                 // Chèn ảnh đính kèm câu hỏi nếu chưa nằm trong nội dung
                 bodyXml += renderStandaloneQuestionImages(q);
 
-                // Dòng kẻ chấm cho trả lời ngắn trong đề bài
-                if (mode === 'questions') {
-                    if (includeDottedLines) {
-                        bodyXml += `<w:p><w:pPr><w:ind w:left="992"/><w:spacing w:before="40" w:after="40"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:i/><w:color w:val="666666"/></w:rPr><w:t>Đáp số: ....................................................................................................................................</w:t></w:r></w:p>`;
+                const ansVal = getShortAnswerText(q);
+                const showShortAnswer = (mode === 'full') || underlineCorrect;
+
+                if (showShortAnswer && ansVal) {
+                    bodyXml += `
+                    <w:p>
+                      <w:pPr><w:ind w:left="992"/><w:spacing w:before="40" w:after="40"/><w:jc w:val="both"/></w:pPr>
+                      <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr><w:t xml:space="preserve">Đáp án: </w:t></w:r>
+                      <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr><w:t>${escapeXml(ansVal)}</w:t></w:r>
+                    </w:p>`;
+                } else if (mode === 'questions') {
+                    if (includeDottedLines && (dottedLinesScope === 'essay_short' || dottedLinesScope === 'all')) {
+                        bodyXml += `<w:p><w:pPr><w:ind w:left="992"/><w:spacing w:before="40" w:after="40"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:i/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr><w:t>Đáp án: ....................................................................................................................................</w:t></w:r></w:p>`;
                         bodyXml += buildDottedLinesXml(dottedLinesCount);
                     } else {
                         bodyXml += `
                         <w:p>
                           <w:pPr><w:ind w:left="992"/><w:spacing w:before="40" w:after="60"/></w:pPr>
-                          <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:sz w:val="24"/></w:rPr><w:t>Đáp số: </w:t></w:r>
-                          <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:u w:val="single"/><w:sz w:val="24"/></w:rPr><w:t xml:space="preserve">                          </w:t></w:r>
+                          <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr><w:t>Đáp án: </w:t></w:r>
+                          <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:u w:val="single"/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr><w:t xml:space="preserve">                          </w:t></w:r>
                         </w:p>`;
                     }
                 }
 
-                if (mode === 'full') {
-                    const ansVal = q.answer || q.shortAnswer || q.correctAnswer || '';
+                if (mode === 'full' && (q.solution || q.explain)) {
+                    const solText = cleanHtmlToWordText(q.solution || q.explain);
                     bodyXml += `
                     <w:p>
-                      <w:pPr><w:ind w:left="992"/><w:spacing w:before="40" w:after="40"/></w:pPr>
-                      <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:color w:val="059669"/><w:sz w:val="24"/></w:rPr><w:t>Đáp số: </w:t></w:r>
-                      <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:u w:val="single"/><w:color w:val="059669"/><w:sz w:val="24"/></w:rPr><w:t>${escapeXml(ansVal)}</w:t></w:r>
+                      <w:pPr><w:ind w:left="992"/><w:spacing w:before="60" w:after="40"/><w:jc w:val="both"/></w:pPr>
+                      <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:i/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr><w:t>Lời giải chi tiết:</w:t></w:r>
                     </w:p>`;
-                    if (q.solution || q.explain) {
-                        const solText = cleanHtmlToWordText(q.solution || q.explain);
-                        bodyXml += `
-                        <w:p>
-                          <w:pPr><w:ind w:left="992"/><w:spacing w:before="40" w:after="40"/><w:jc w:val="both"/></w:pPr>
-                          <w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:b/><w:i/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr><w:t>Lời giải:</w:t></w:r>
-                        </w:p>`;
-                        bodyXml += renderQuestionBlocks('', solText);
-                    }
+                    bodyXml += renderQuestionBlocks('', solText);
                 }
             });
         }
@@ -2891,11 +2979,9 @@
                         const qIdx = r * colsPerRow + c;
                         let ansChar = '';
                         if (qIdx < totalP1) {
-                            const q = part1[qIdx];
-                            const correctIdx = typeof q.correct === 'number' ? q.correct : (q.correctAnswer ? ['A','B','C','D'].indexOf(String(q.correctAnswer).trim().toUpperCase()) : -1);
-                            ansChar = correctIdx >= 0 ? ['A','B','C','D'][correctIdx] : '';
+                            ansChar = getChoiceCorrectLetter(part1[qIdx]);
                         }
-                        bodyXml += `<w:tc><w:tcPr><w:tcW w:w="1077" w:type="dxa"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/><w:spacing w:before="60" w:after="60"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="24"/></w:rPr><w:t>${ansChar}</w:t></w:r></w:p></w:tc>`;
+                        bodyXml += `<w:tc><w:tcPr><w:tcW w:w="1077" w:type="dxa"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/><w:spacing w:before="60" w:after="60"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr><w:t>${ansChar}</w:t></w:r></w:p></w:tc>`;
                     }
                     bodyXml += `</w:tr>`;
                 }
@@ -2904,7 +2990,7 @@
 
             // Đáp án Phần II (Đúng/Sai)
             if (part2.length > 0) {
-                bodyXml += `<w:p><w:pPr><w:spacing w:before="160" w:after="40"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="22"/></w:rPr><w:t>Phần II: Đáp án Đúng/Sai</w:t></w:r></w:p>`;
+                bodyXml += `<w:p><w:pPr><w:spacing w:before="160" w:after="40"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr><w:t>Phần II: Đáp án Đúng/Sai</w:t></w:r></w:p>`;
                 bodyXml += `
                 <w:tbl>
                   <w:tblPr>
@@ -2927,23 +3013,19 @@
                     <w:gridCol w:w="2155"/>
                   </w:tblGrid>
                   <w:tr>
-                    <w:tc><w:tcPr><w:tcW w:w="2154"/><w:shd w:fill="F3F4F6"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t>Câu</w:t></w:r></w:p></w:tc>
-                    <w:tc><w:tcPr><w:tcW w:w="2154"/><w:shd w:fill="F3F4F6"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t>Ý a)</w:t></w:r></w:p></w:tc>
-                    <w:tc><w:tcPr><w:tcW w:w="2155"/><w:shd w:fill="F3F4F6"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t>Ý b)</w:t></w:r></w:p></w:tc>
-                    <w:tc><w:tcPr><w:tcW w:w="2155"/><w:shd w:fill="F3F4F6"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t>Ý c)</w:t></w:r></w:p></w:tc>
-                    <w:tc><w:tcPr><w:tcW w:w="2155"/><w:shd w:fill="F3F4F6"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t>Ý d)</w:t></w:r></w:p></w:tc>
+                    <w:tc><w:tcPr><w:tcW w:w="2154"/><w:shd w:fill="F3F4F6"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr><w:t>Câu</w:t></w:r></w:p></w:tc>
+                    <w:tc><w:tcPr><w:tcW w:w="2154"/><w:shd w:fill="F3F4F6"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr><w:t>Ý a)</w:t></w:r></w:p></w:tc>
+                    <w:tc><w:tcPr><w:tcW w:w="2155"/><w:shd w:fill="F3F4F6"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr><w:t>Ý b)</w:t></w:r></w:p></w:tc>
+                    <w:tc><w:tcPr><w:tcW w:w="2155"/><w:shd w:fill="F3F4F6"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr><w:t>Ý c)</w:t></w:r></w:p></w:tc>
+                    <w:tc><w:tcPr><w:tcW w:w="2155"/><w:shd w:fill="F3F4F6"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr><w:t>Ý d)</w:t></w:r></w:p></w:tc>
                   </w:tr>`;
 
                 part2.forEach((q, pIdx) => {
-                    const st = Array.isArray(q.statements) ? q.statements : [];
                     bodyXml += `<w:tr><w:trPr><w:cantSplit/></w:trPr>`;
-                    bodyXml += `<w:tc><w:tcPr><w:tcW w:w="2154"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t>Câu ${pIdx + 1}</w:t></w:r></w:p></w:tc>`;
+                    bodyXml += `<w:tc><w:tcPr><w:tcW w:w="2154"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr><w:t>Câu ${pIdx + 1}</w:t></w:r></w:p></w:tc>`;
                     for (let sIdx = 0; sIdx < 4; sIdx++) {
-                        const sObj = st[sIdx];
-                        const isTrue = typeof sObj === 'object' ? (sObj.correct === true || sObj.isCorrect === true || sObj.answer === 'Đ' || sObj.answer === true) : false;
-                        const charAns = sObj ? (isTrue ? 'Đ' : 'S') : '';
-                        const colorAns = isTrue ? '059669' : 'DC2626';
-                        bodyXml += `<w:tc><w:tcPr><w:tcW w:w="2155"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:b/><w:color w:val="${colorAns}"/><w:sz w:val="24"/></w:rPr><w:t>${charAns}</w:t></w:r></w:p></w:tc>`;
+                        const charAns = getTfAnswerChar(q, sIdx);
+                        bodyXml += `<w:tc><w:tcPr><w:tcW w:w="2155"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr><w:t>${charAns}</w:t></w:r></w:p></w:tc>`;
                     }
                     bodyXml += `</w:tr>`;
                 });
@@ -2956,7 +3038,7 @@
                 const colsPerRow = 6;
                 const rowsCount = Math.ceil(totalP3 / colsPerRow);
 
-                bodyXml += `<w:p><w:pPr><w:spacing w:before="160" w:after="40"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="22"/></w:rPr><w:t>Phần III: Đáp án Trả lời ngắn</w:t></w:r></w:p>`;
+                bodyXml += `<w:p><w:pPr><w:spacing w:before="160" w:after="40"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr><w:t>Phần III: Đáp án Trả lời ngắn</w:t></w:r></w:p>`;
                 bodyXml += `
                 <w:tbl>
                   <w:tblPr>
@@ -2980,7 +3062,7 @@
                     for (let c = 0; c < colsPerRow; c++) {
                         const qIdx = r * colsPerRow + c;
                         const label = qIdx < totalP3 ? `Câu ${qIdx + 1}` : '';
-                        bodyXml += `<w:tc><w:tcPr><w:tcW w:w="1795"/><w:shd w:fill="F3F4F6"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/><w:spacing w:before="40" w:after="40"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="20"/></w:rPr><w:t>${label}</w:t></w:r></w:p></w:tc>`;
+                        bodyXml += `<w:tc><w:tcPr><w:tcW w:w="1795"/><w:shd w:fill="F3F4F6"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/><w:spacing w:before="40" w:after="40"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr><w:t>${label}</w:t></w:r></w:p></w:tc>`;
                     }
                     bodyXml += `</w:tr>`;
 
@@ -2989,10 +3071,9 @@
                         const qIdx = r * colsPerRow + c;
                         let ansVal = '';
                         if (qIdx < totalP3) {
-                            const q = part3[qIdx];
-                            ansVal = q.answer || q.shortAnswer || q.correctAnswer || '';
+                            ansVal = getShortAnswerText(part3[qIdx]);
                         }
-                        bodyXml += `<w:tc><w:tcPr><w:tcW w:w="1795"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/><w:spacing w:before="60" w:after="60"/></w:pPr><w:r><w:rPr><w:b/><w:color w:val="059669"/><w:sz w:val="22"/></w:rPr><w:t>${escapeXml(ansVal)}</w:t></w:r></w:p></w:tc>`;
+                        bodyXml += `<w:tc><w:tcPr><w:tcW w:w="1795"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/><w:spacing w:before="60" w:after="60"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr><w:t>${escapeXml(ansVal)}</w:t></w:r></w:p></w:tc>`;
                     }
                     bodyXml += `</w:tr>`;
                 }
@@ -3753,7 +3834,7 @@
                 }).join('\n');
                 res += `\\choiceTF\n${tfItems}\n`;
             } else if (Array.isArray(q.options) && q.options.length > 0) {
-                const correctIdx = typeof q.correct === 'number' ? q.correct : (q.correctAnswer ? ['A','B','C','D'].indexOf(String(q.correctAnswer).trim().toUpperCase()) : -1);
+                const correctIdx = getChoiceCorrectIndex(q);
                 const choiceItems = q.options.map((opt, i) => {
                     let optText = typeof opt === 'object' ? (opt.text || '') : opt;
                     for (const [sUrl, fName] of Object.entries(imageMap)) {
@@ -3764,9 +3845,14 @@
                     return `\t{${isCorrect ? '\\True ' : ''}${optText}}`;
                 }).join('\n');
                 res += `\\choice\n${choiceItems}\n`;
-            } else if (q.type === 'short' && (q.answer !== undefined || q.correctAnswer)) {
-                const ans = String(q.answer !== undefined && q.answer !== null ? q.answer : (q.correctAnswer || '')).trim();
-                res += `\\shortans{${cleanHtmlToLatex(ans)}}\n`;
+            } else if (q.type === 'short' || (q.answer !== undefined && q.answer !== null && String(q.answer).trim() !== '')) {
+                const ans = getShortAnswerText(q);
+                if (ans) {
+                    if (customOptions.underlineCorrect || mode === 'full') {
+                        res += `\\textbf{Đáp án: ${cleanHtmlToLatex(ans)}}\n\n`;
+                    }
+                    res += `\\shortans{${cleanHtmlToLatex(ans)}}\n`;
+                }
             }
 
             if (q.solution || q.explain) {
@@ -3802,6 +3888,50 @@
             fullLatex += `\n\\textbf{PHẦN ${romanNumeralsPy[currentRomanPy - 1]}. Tự luận. Thí sinh trình bày chi tiết lời giải từ câu 1 đến câu ${p4List.length}.}\n\n`;
             currentRomanPy++;
             p4List.forEach(q => { fullLatex += formatQuestionLatex(q); });
+        }
+
+        // Bổ sung bảng đáp án tổng hợp ở cuối đề (Pyodide LaTeX)
+        if (customOptions.includeAnswerTable && (p1List.length > 0 || p2List.length > 0 || p3List.length > 0)) {
+            fullLatex += `\n\n\\begin{center}\n\\textbf{\\large BẢNG ĐÁP ÁN TỔNG HỢP}\n\\end{center}\n\n`;
+            if (p1List.length > 0) {
+                fullLatex += `\\textbf{Phần I: Trắc nghiệm 4 phương án}\n\n`;
+                const colsPerRow = 10;
+                const rows = Math.ceil(p1List.length / colsPerRow);
+                for (let r = 0; r < rows; r++) {
+                    const rQuestions = p1List.slice(r * colsPerRow, (r + 1) * colsPerRow);
+                    const colAlign = '|' + rQuestions.map(() => 'c|').join('');
+                    fullLatex += `\\begin{tabular}{${colAlign}}\n\\hline\n`;
+                    fullLatex += rQuestions.map((_, i) => `\\textbf{Câu ${r * colsPerRow + i + 1}}`).join(' & ') + ' \\\\\n\\hline\n';
+                    fullLatex += rQuestions.map(q => `\\textbf{${getChoiceCorrectLetter(q)}}`).join(' & ') + ' \\\\\n\\hline\n';
+                    fullLatex += `\\end{tabular}\n\n`;
+                }
+            }
+            if (p2List.length > 0) {
+                fullLatex += `\\textbf{Phần II: Đáp án Đúng/Sai}\n\n`;
+                fullLatex += `\\begin{tabular}{|c|c|c|c|c|}\n\\hline\n`;
+                fullLatex += `\\textbf{Câu} & \\textbf{Ý a)} & \\textbf{Ý b)} & \\textbf{Ý c)} & \\textbf{Ý d)} \\\\\n\\hline\n`;
+                p2List.forEach((q, idx) => {
+                    const a = getTfAnswerChar(q, 0);
+                    const b = getTfAnswerChar(q, 1);
+                    const c = getTfAnswerChar(q, 2);
+                    const d = getTfAnswerChar(q, 3);
+                    fullLatex += `\\textbf{Câu ${idx + 1}} & \\textbf{${a}} & \\textbf{${b}} & \\textbf{${c}} & \\textbf{${d}} \\\\\n\\hline\n`;
+                });
+                fullLatex += `\\end{tabular}\n\n`;
+            }
+            if (p3List.length > 0) {
+                fullLatex += `\\textbf{Phần III: Đáp án Trả lời ngắn}\n\n`;
+                const colsPerRow = 6;
+                const rows = Math.ceil(p3List.length / colsPerRow);
+                for (let r = 0; r < rows; r++) {
+                    const rQuestions = p3List.slice(r * colsPerRow, (r + 1) * colsPerRow);
+                    const colAlign = '|' + rQuestions.map(() => 'c|').join('');
+                    fullLatex += `\\begin{tabular}{${colAlign}}\n\\hline\n`;
+                    fullLatex += rQuestions.map((_, i) => `\\textbf{Câu ${r * colsPerRow + i + 1}}`).join(' & ') + ' \\\\\n\\hline\n';
+                    fullLatex += rQuestions.map(q => `\\textbf{${getShortAnswerText(q)}}`).join(' & ') + ' \\\\\n\\hline\n';
+                    fullLatex += `\\end{tabular}\n\n`;
+                }
+            }
         }
 
         setStatus(40, "Đang chuyển đổi MathType OLE trong Python Wasm...");
@@ -3877,8 +4007,8 @@
         const mode = customOptions.mode || 'questions';
         const formulaMode = customOptions.formulaMode || 'mathtype';
 
-        // 1. Nếu chọn MathType: Ưu tiên xử lý bằng Pyodide Python WebAssembly
-        if (formulaMode === 'mathtype') {
+        // 1. Chỉ gọi Pyodide khi người dùng cấu hình rõ ràng usePyodide: true
+        if (customOptions.usePyodide === true && formulaMode === 'mathtype') {
             try {
                 return await exportExamViaPyodide(exam, customOptions);
             } catch (pyErr) {
@@ -4025,6 +4155,10 @@
                                 <label class="flex items-center gap-2 cursor-pointer">
                                     <input type="checkbox" id="exportWordIncludeAnswerTable" checked class="rounded text-primary-600 focus:ring-primary-500">
                                     <span class="text-xs text-gray-700 dark:text-gray-300 font-medium">Bảng đáp án tổng hợp ở cuối</span>
+                                </label>
+                                <label class="flex items-center gap-2 cursor-pointer">
+                                    <input type="checkbox" id="exportWordUnderlineCorrect" class="rounded text-primary-600 focus:ring-primary-500">
+                                    <span class="text-xs text-gray-700 dark:text-gray-300 font-medium">Gạch chân chữ cái đứng đầu phương án đúng (A, B, C, D)</span>
                                 </label>
                                 <label class="flex items-center gap-2 cursor-pointer">
                                     <input type="checkbox" id="exportWordIncludeCccd" class="rounded text-primary-600 focus:ring-primary-500">
@@ -4226,6 +4360,7 @@
                     const dotScope = document.getElementById('exportWordDottedScope')?.value || 'essay_short';
 
                     const incTable = document.getElementById('exportWordIncludeAnswerTable')?.checked !== false;
+                    const underCorrect = document.getElementById('exportWordUnderlineCorrect')?.checked === true;
                     const incCccd = document.getElementById('exportWordIncludeCccd')?.checked === true;
 
                     await exportExamToWord(fullExam, {
@@ -4245,6 +4380,7 @@
                         dottedLinesCount: dotCount,
                         dottedLinesScope: dotScope,
                         includeAnswerTable: incTable,
+                        underlineCorrect: underCorrect,
                         includeCccd: incCccd
                     });
 
