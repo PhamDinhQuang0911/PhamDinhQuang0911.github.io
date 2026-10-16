@@ -261,11 +261,564 @@
     }
 
     // =======================================================
+    // 2.5. ĐỘNG CƠ TRỘN FILE WORD TRỰC TIẾP (DOCX DIRECT MIXER)
+    // BẢO TOÀN 100% TOÀN BỘ CÔNG THỨC MATHTYPE OLE VÀ OMML
+    // KHÔNG CHUYỂN QUA LATEX ĐỂ TRÁNH MẤT/HỎNG CÔNG THỨC
+    // =======================================================
+    class DocxDirectMixer {
+        constructor(docxBuffer, config = {}) {
+            this.docxBuffer = docxBuffer;
+            this.config = {
+                so_de: config.so_de || 4,
+                ma_de_list: config.ma_de_list || ['1001', '1002', '1003', '1004'],
+                dao_cau: config.dao_cau !== false,
+                dao_pa: config.dao_pa !== false,
+                dao_y_tf: config.dao_y_tf !== false,
+                phannhom: config.phannhom || 'Không phân nhóm',
+                header: config.header || {},
+                ...config
+            };
+        }
+
+        async mix(onProgress = () => {}) {
+            onProgress(10, "Đang mở cấu trúc tệp Word DOCX gốc...");
+            const srcZip = await JSZip.loadAsync(this.docxBuffer);
+            const docXml = await srcZip.file('word/document.xml').async('text');
+
+            onProgress(15, "Đang phân tích cấu trúc các câu hỏi và công thức MathType...");
+            const parsed = this.parseDocx(docXml);
+
+            const maDeList = this.config.ma_de_list;
+            const totalExams = maDeList.length;
+            const outExams = {};
+            const matrixData = [];
+
+            // 1. Phân tích đáp án đề gốc
+            const gocAnswers = this.extractExamAnswers(parsed.sections);
+            matrixData.push({
+                made: "GỐC",
+                isGoc: true,
+                p1: gocAnswers.p1,
+                p2: gocAnswers.p2,
+                p3: gocAnswers.p3,
+                p3_raw: gocAnswers.p3
+            });
+
+            // 2. Tạo đề gốc De_Goc.docx (chuẩn hóa mã đề, gỡ gạch chân đáp án để phát cho học sinh)
+            onProgress(22, "Đang tạo file Word Đề Gốc...");
+            const gocDocXml = this.buildExamXml(parsed, {
+                examCode: "GỐC",
+                shuffleQuestions: false,
+                shuffleOptions: false,
+                keepUnderlines: false
+            });
+            const gocZip = await JSZip.loadAsync(this.docxBuffer);
+            gocZip.file('word/document.xml', gocDocXml);
+            outExams["De_Goc.docx"] = await gocZip.generateAsync({ type: 'uint8array' });
+
+            // 3. Tạo file HuongDanGiai.docx (giữ nguyên vị trí đề gốc, giữ lại lời giải và gạch chân đáp án đúng)
+            onProgress(26, "Đang tạo file Lời giải chi tiết Đề Gốc...");
+            const hdgDocXml = this.buildExamXml(parsed, {
+                examCode: "GỐC",
+                shuffleQuestions: false,
+                shuffleOptions: false,
+                keepUnderlines: true,
+                titleSuffix: " - HƯỚNG DẪN GIẢI"
+            });
+            const hdgZip = await JSZip.loadAsync(this.docxBuffer);
+            hdgZip.file('word/document.xml', hdgDocXml);
+            const huongDanGiai = await hdgZip.generateAsync({ type: 'uint8array' });
+
+            // 4. Trộn từng mã đề thi con
+            for (let idx = 0; idx < totalExams; idx++) {
+                const maDe = maDeList[idx];
+                const pct = 30 + Math.floor((idx / totalExams) * 45);
+                onProgress(pct, `Đang trộn đề Word mã ${maDe} (${idx + 1}/${totalExams})...`);
+
+                const mixed = this.buildMixedExam(parsed, maDe);
+                const childZip = await JSZip.loadAsync(this.docxBuffer);
+                childZip.file('word/document.xml', mixed.docXml);
+                outExams[`De_${maDe}.docx`] = await childZip.generateAsync({ type: 'uint8array' });
+
+                matrixData.push({
+                    made: maDe,
+                    isGoc: false,
+                    p1: mixed.answers.p1,
+                    p2: mixed.answers.p2,
+                    p3: mixed.answers.p3,
+                    p3_raw: mixed.answers.p3
+                });
+            }
+
+            return {
+                exams: outExams,
+                huongDanGiai,
+                matrixData,
+                maDeList,
+                totalQuestions: parsed.totalQuestions
+            };
+        }
+
+        parseDocx(docXml) {
+            const bodyMatch = docXml.match(/([\s\S]*?<w:body>)([\s\S]*?)(<w:sectPr\b[\s\S]*?<\/w:body>[\s\S]*)/);
+            if (!bodyMatch) throw new Error("Cấu trúc file Word không đúng chuẩn (không tìm thấy <w:body>)");
+
+            const preBody = bodyMatch[1];
+            const bodyContent = bodyMatch[2];
+            const postBody = bodyMatch[3];
+
+            const elementRegex = /<(w:p|w:tbl)\b[^>]*>[\s\S]*?<\/\1>/g;
+            let match;
+            const elements = [];
+            while ((match = elementRegex.exec(bodyContent)) !== null) {
+                const xml = match[0];
+                const text = (xml.match(/<w:t\b[^>]*>([\s\S]*?)<\/w:t>/g) || [])
+                    .map(t => t.replace(/<[^>]+>/g, ''))
+                    .join('');
+                elements.push({ tag: match[1], xml, text });
+            }
+
+            const qStartRegex = /^(?:\[(?:NB|TH|VD|VDC|\w+)\]\s*)?(?:##\s*)?(?:Câu|Bài|Question)\s*(\d+)[:.\s]/i;
+            const secStartRegex = /^\s*(?:PHẦN|Phần)\s+(I{1,3}|IV|[1-4])[:.\s]/i;
+
+            let firstContentIdx = elements.findIndex(e => qStartRegex.test(e.text.trim()) || secStartRegex.test(e.text.trim()));
+            if (firstContentIdx === -1) firstContentIdx = 0;
+
+            const headerElements = elements.slice(0, firstContentIdx);
+            const mainElements = elements.slice(firstContentIdx);
+
+            const sections = [];
+            let currentSec = { titleEl: null, questions: [] };
+            sections.push(currentSec);
+
+            let currentQ = null;
+            let qCounter = 0;
+
+            for (const el of mainElements) {
+                const trimmed = el.text.trim();
+
+                if (secStartRegex.test(trimmed)) {
+                    if (currentQ) {
+                        currentSec.questions.push(currentQ);
+                        currentQ = null;
+                    }
+                    currentSec = { titleEl: el, questions: [] };
+                    sections.push(currentSec);
+                    continue;
+                }
+
+                if (qStartRegex.test(trimmed)) {
+                    if (currentQ) {
+                        currentSec.questions.push(currentQ);
+                    }
+                    qCounter++;
+                    currentQ = {
+                        id: qCounter,
+                        originalNum: (trimmed.match(qStartRegex) || [])[1] || qCounter,
+                        elements: [el],
+                        type: 'choice',
+                        isLocked: trimmed.includes('##')
+                    };
+                } else if (currentQ) {
+                    currentQ.elements.push(el);
+                } else {
+                    if (!currentSec.introElements) currentSec.introElements = [];
+                    currentSec.introElements.push(el);
+                }
+            }
+            if (currentQ) currentSec.questions.push(currentQ);
+
+            let totalQ = 0;
+            sections.forEach(sec => {
+                sec.questions.forEach(q => {
+                    totalQ++;
+                    this.analyzeQuestion(q);
+                });
+            });
+
+            return { preBody, headerElements, sections, postBody, totalQuestions: totalQ };
+        }
+
+        analyzeQuestion(q) {
+            const fullText = q.elements.map(e => e.text).join('\n');
+
+            if (/Đ(úng)?,?\s*S(ai)?/i.test(fullText) || /khẳng định sau/i.test(fullText) || /mỗi ý a\), b\), c\), d\)/i.test(fullText)) {
+                q.type = 'tf';
+                q.tfStatements = [];
+                q.elements.forEach((el, idx) => {
+                    const tr = el.text.trim();
+                    if (/^[a-d][.)]\s*/i.test(tr)) {
+                        q.tfStatements.push({ elIdx: idx, letter: tr[0].toLowerCase() });
+                    }
+                });
+                const tfMatches = fullText.match(/[a-d][.)]\s*(ĐÚNG|SAI|Đ|S)/gi) || [];
+                q.correctTf = {};
+                tfMatches.forEach(m => {
+                    const parts = m.split(/[.)\s]+/);
+                    if (parts.length >= 2) {
+                        const lettr = parts[0].toLowerCase();
+                        const val = parts[1].toUpperCase().startsWith('Đ') ? 'Đ' : 'S';
+                        q.correctTf[lettr] = val;
+                    }
+                });
+                return;
+            }
+
+            let optType = null;
+            let optElIdx = -1;
+
+            q.elements.forEach((el, idx) => {
+                if (el.tag === 'w:tbl') {
+                    const cells = el.xml.match(/<w:tc\b[\s\S]*?<\/w:tc>/g) || [];
+                    const cellTexts = cells.map(c => (c.match(/<w:t\b[^>]*>([\s\S]*?)<\/w:t>/g) || []).map(t => t.replace(/<[^>]+>/g, '')).join(''));
+                    if (cellTexts.some(t => /^\s*A\./.test(t)) && cellTexts.some(t => /^\s*B\./.test(t))) {
+                        optType = 'table';
+                        optElIdx = idx;
+                    }
+                } else if (el.tag === 'w:p') {
+                    const t = el.text;
+                    if (/A\..*?B\..*?C\..*?D\./.test(t)) {
+                        optType = 'single_para';
+                        optElIdx = idx;
+                    }
+                }
+            });
+
+            if (!optType) {
+                for (let i = 0; i <= q.elements.length - 4; i++) {
+                    const t0 = q.elements[i].text.trim();
+                    const t1 = q.elements[i+1].text.trim();
+                    const t2 = q.elements[i+2].text.trim();
+                    const t3 = q.elements[i+3].text.trim();
+                    if (/^A\./.test(t0) && /^B\./.test(t1) && /^C\./.test(t2) && /^D\./.test(t3)) {
+                        optType = '4_paras';
+                        optElIdx = i;
+                        break;
+                    }
+                }
+            }
+
+            if (optType) {
+                q.type = 'choice';
+                q.optType = optType;
+                q.optElIdx = optElIdx;
+                q.correctAnswer = this.detectOriginalAnswer(q);
+            } else {
+                q.type = 'short';
+                const dsMatch = fullText.match(/(?:ĐS|Đáp số|Đáp án)[:.\s]*([^\n]+)/i);
+                q.correctAnswer = dsMatch ? dsMatch[1].trim() : '';
+            }
+        }
+
+        detectOriginalAnswer(q) {
+            if (q.optType === 'table') {
+                const tblXml = q.elements[q.optElIdx].xml;
+                const cells = tblXml.match(/<w:tc\b[\s\S]*?<\/w:tc>/g) || [];
+                for (let i = 0; i < cells.length; i++) {
+                    if (cells[i].includes('<w:u ') || cells[i].includes('<w:u/>')) {
+                        return ['A', 'B', 'C', 'D'][i] || 'A';
+                    }
+                }
+            } else if (q.optType === 'single_para') {
+                const pXml = q.elements[q.optElIdx].xml;
+                const runRegex = /<w:r\b[\s\S]*?<\/w:r>/g;
+                const runs = pXml.match(runRegex) || [];
+                let currentBucket = -1;
+                for (const r of runs) {
+                    const text = (r.match(/<w:t\b[^>]*>([\s\S]*?)<\/w:t>/g) || []).map(t => t.replace(/<[^>]+>/g, '')).join('').trim();
+                    const optMatch = text.match(/^([A-D])\s*[.:]/) || (r.includes('<w:b/>') && text.match(/^([A-D])$/));
+                    if (optMatch) {
+                        currentBucket = optMatch[1].toUpperCase().charCodeAt(0) - 65;
+                    }
+                    if (currentBucket >= 0 && (r.includes('<w:u ') || r.includes('<w:u/>'))) {
+                        return ['A', 'B', 'C', 'D'][currentBucket];
+                    }
+                }
+            } else if (q.optType === '4_paras') {
+                for (let i = 0; i < 4; i++) {
+                    const pXml = q.elements[q.optElIdx + i].xml;
+                    if (pXml.includes('<w:u ') || pXml.includes('<w:u/>')) {
+                        return ['A', 'B', 'C', 'D'][i];
+                    }
+                }
+            }
+
+            const fullText = q.elements.map(e => e.text).join(' ');
+            const chonMatch = fullText.match(/Chọn\s+([A-D])/i);
+            if (chonMatch) return chonMatch[1].toUpperCase();
+
+            return 'A';
+        }
+
+        extractExamAnswers(sections) {
+            const p1 = [];
+            const p2 = [];
+            const p3 = [];
+            sections.forEach(sec => {
+                sec.questions.forEach(q => {
+                    if (q.type === 'choice') {
+                        p1.push(q.correctAnswer || 'A');
+                    } else if (q.type === 'tf') {
+                        const tfStr = ['a', 'b', 'c', 'd'].map(k => (q.correctTf && q.correctTf[k]) || 'Đ').join('');
+                        p2.push(tfStr);
+                    } else {
+                        p3.push(q.correctAnswer || '');
+                    }
+                });
+            });
+            return { p1, p2, p3 };
+        }
+
+        buildMixedExam(parsed, maDe) {
+            let globalQIndex = 0;
+            const answers = { p1: [], p2: [], p3: [] };
+            const mixedSectionsXml = [];
+
+            for (const sec of parsed.sections) {
+                if (sec.titleEl) mixedSectionsXml.push(sec.titleEl.xml);
+                if (sec.introElements) sec.introElements.forEach(e => mixedSectionsXml.push(e.xml));
+
+                let questionsToProcess = [...sec.questions];
+                if (this.config.dao_cau) {
+                    const lockedPositions = [];
+                    const movable = [];
+                    questionsToProcess.forEach((q, idx) => {
+                        if (q.isLocked) lockedPositions.push({ idx, q });
+                        else movable.push(q);
+                    });
+                    const shuffled = this.shuffleArray(movable);
+                    const finalOrder = [];
+                    let movIdx = 0;
+                    for (let i = 0; i < questionsToProcess.length; i++) {
+                        const locked = lockedPositions.find(p => p.idx === i);
+                        if (locked) finalOrder.push(locked.q);
+                        else finalOrder.push(shuffled[movIdx++]);
+                    }
+                    questionsToProcess = finalOrder;
+                }
+
+                for (const q of questionsToProcess) {
+                    globalQIndex++;
+                    const newQNum = globalQIndex;
+                    const mixedQXml = this.renderMixedQuestion(q, newQNum, answers, false);
+                    mixedSectionsXml.push(mixedQXml);
+                }
+            }
+
+            const headerXml = parsed.headerElements.map(e => {
+                let x = e.xml;
+                if (/Mã\s*đề\s*[:.\s]*\w+/i.test(x)) {
+                    x = x.replace(/(Mã\s*đề\s*[:.\s]*)(\w+)/i, `$1${maDe}`);
+                }
+                return x;
+            }).join('');
+
+            return {
+                docXml: parsed.preBody + headerXml + mixedSectionsXml.join('') + parsed.postBody,
+                answers
+            };
+        }
+
+        renderMixedQuestion(q, newQNum, answersAccumulator, keepUnderlines = false) {
+            const qElements = q.elements.map(e => ({ ...e }));
+
+            let firstXml = qElements[0].xml;
+            if (/(<w:t\b[^>]*>)(?:\[(?:NB|TH|VD|VDC|\w+)\]\s*)?(?:##\s*)?(?:Câu|Bài|Question)\s*\d+([:.\s(])/i.test(firstXml)) {
+                firstXml = firstXml.replace(
+                    /(<w:t\b[^>]*>)(?:\[(?:NB|TH|VD|VDC|\w+)\]\s*)?(?:##\s*)?(?:Câu|Bài|Question)\s*\d+([:.\s(])/i,
+                    `$1Câu ${newQNum}$2`
+                );
+            } else {
+                firstXml = firstXml.replace(/(<w:t\b[^>]*>)\s*\d+([:.\s(])/, `$1${newQNum}$2`);
+            }
+            firstXml = firstXml.replace(/(<w:t\b[^>]*>)##\s*/i, '$1');
+            qElements[0].xml = firstXml;
+
+            if (q.type === 'choice') {
+                let perm = [0, 1, 2, 3];
+                if (this.config.dao_pa) {
+                    perm = this.shuffleArray([0, 1, 2, 3]);
+                }
+
+                const origLetter = q.correctAnswer || 'A';
+                const origIdx = origLetter.charCodeAt(0) - 65;
+                const newAnsIdx = perm.indexOf(origIdx);
+                const newLetter = ['A', 'B', 'C', 'D'][newAnsIdx !== -1 ? newAnsIdx : 0];
+                if (answersAccumulator && answersAccumulator.p1) {
+                    answersAccumulator.p1.push(newLetter);
+                }
+
+                if (q.optType === 'table') {
+                    const targetEl = qElements[q.optElIdx];
+                    targetEl.xml = this.permuteTableCells(targetEl.xml, perm, keepUnderlines);
+                } else if (q.optType === 'single_para') {
+                    const targetEl = qElements[q.optElIdx];
+                    targetEl.xml = this.permuteSingleParaRuns(targetEl.xml, perm, keepUnderlines);
+                } else if (q.optType === '4_paras') {
+                    const paras = [
+                        qElements[q.optElIdx],
+                        qElements[q.optElIdx + 1],
+                        qElements[q.optElIdx + 2],
+                        qElements[q.optElIdx + 3]
+                    ];
+                    const labels = ['A', 'B', 'C', 'D'];
+                    const reordered = [];
+                    for (let i = 0; i < 4; i++) {
+                        const oldP = paras[perm[i]];
+                        let pXml = oldP.xml;
+                        if (!keepUnderlines) {
+                            pXml = pXml.replace(/<w:u\b[^>]*\/>/g, '').replace(/<w:u\b[^>]*>[\s\S]*?<\/w:u>/g, '');
+                        }
+                        pXml = pXml.replace(/(<w:t\b[^>]*>)\s*([A-D])\s*([.:])/, `$1${labels[i]}$3`);
+                        reordered.push({ ...oldP, xml: pXml });
+                    }
+                    for (let i = 0; i < 4; i++) {
+                        qElements[q.optElIdx + i] = reordered[i];
+                    }
+                }
+
+                qElements.forEach(e => {
+                    if (e.text.includes('Chọn ')) {
+                        e.xml = e.xml.replace(/(Chọn\s+)[A-D]/g, `$1${newLetter}`);
+                    }
+                });
+
+            } else if (q.type === 'tf') {
+                const tfStr = ['a', 'b', 'c', 'd'].map(k => (q.correctTf && q.correctTf[k]) || 'Đ').join('');
+                if (answersAccumulator && answersAccumulator.p2) {
+                    answersAccumulator.p2.push(tfStr);
+                }
+            } else {
+                if (answersAccumulator && answersAccumulator.p3) {
+                    answersAccumulator.p3.push(q.correctAnswer || '');
+                }
+            }
+
+            return qElements.map(e => e.xml).join('');
+        }
+
+        permuteTableCells(tblXml, perm, keepUnderlines = false) {
+            const tcRegex = /<w:tc\b[\s\S]*?<\/w:tc>/g;
+            const cells = tblXml.match(tcRegex) || [];
+            if (cells.length !== 4) return tblXml;
+
+            const labels = ['A', 'B', 'C', 'D'];
+            const newCells = [];
+            for (let i = 0; i < 4; i++) {
+                let cXml = cells[perm[i]];
+                if (!keepUnderlines) {
+                    cXml = cXml.replace(/<w:u\b[^>]*\/>/g, '').replace(/<w:u\b[^>]*>[\s\S]*?<\/w:u>/g, '');
+                }
+                cXml = cXml.replace(/(<w:t\b[^>]*>)\s*([A-D])\s*([.:])/, `$1${labels[i]}$3`);
+                newCells.push(cXml);
+            }
+            let cIdx = 0;
+            return tblXml.replace(tcRegex, () => newCells[cIdx++]);
+        }
+
+        permuteSingleParaRuns(pXml, perm, keepUnderlines = false) {
+            const pPrMatch = pXml.match(/<w:pPr\b[\s\S]*?<\/w:pPr>/);
+            const pPr = pPrMatch ? pPrMatch[0] : '';
+            const insideP = pXml.replace(/<w:p\b[^>]*>/, '').replace(/<\/w:p>$/, '').replace(pPr, '');
+
+            const runRegex = /<w:r\b[\s\S]*?<\/w:r>/g;
+            const runs = insideP.match(runRegex) || [];
+            if (runs.length === 0) return pXml;
+
+            const buckets = [[], [], [], []];
+            let currentBucket = -1;
+
+            runs.forEach(r => {
+                const text = (r.match(/<w:t\b[^>]*>([\s\S]*?)<\/w:t>/g) || []).map(t => t.replace(/<[^>]+>/g, '')).join('').trim();
+                const optMatch = text.match(/^([A-D])\s*[.:]/) || (r.includes('<w:b/>') && text.match(/^([A-D])$/));
+                if (optMatch) {
+                    currentBucket = optMatch[1].toUpperCase().charCodeAt(0) - 65;
+                }
+                if (currentBucket >= 0 && currentBucket <= 3) {
+                    buckets[currentBucket].push(r);
+                }
+            });
+
+            if (buckets.some(b => b.length === 0)) return pXml;
+
+            const labels = ['A', 'B', 'C', 'D'];
+            const newRuns = [];
+
+            for (let i = 0; i < 4; i++) {
+                const bucketRuns = [...buckets[perm[i]]];
+                let labelUpdated = false;
+                const processed = bucketRuns.map(r => {
+                    let rXml = r;
+                    if (!keepUnderlines) {
+                        rXml = rXml.replace(/<w:u\b[^>]*\/>/g, '').replace(/<w:u\b[^>]*>[\s\S]*?<\/w:u>/g, '');
+                    }
+                    if (!labelUpdated && /<w:t\b[^>]*>[\s\S]*?[A-D][.:\s]/.test(rXml)) {
+                        rXml = rXml.replace(/(<w:t\b[^>]*>)\s*([A-D])\s*([.:])/, `$1${labels[i]}$3`);
+                        labelUpdated = true;
+                    } else if (!labelUpdated && /<w:t\b[^>]*>[A-D]<\/w:t>/.test(rXml)) {
+                        rXml = rXml.replace(/(<w:t\b[^>]*>)[A-D](<\/w:t>)/, `$1${labels[i]}$2`);
+                        labelUpdated = true;
+                    }
+                    return rXml;
+                });
+
+                const clean = processed.filter(r => !r.includes('<w:tab/>') && !r.includes('<w:tab '));
+                newRuns.push(...clean);
+                if (i < 3) {
+                    newRuns.push('<w:r><w:tab/></w:r>');
+                }
+            }
+
+            const pTagMatch = pXml.match(/<w:p\b[^>]*>/);
+            const pTag = pTagMatch ? pTagMatch[0] : '<w:p>';
+            return `${pTag}${pPr}${newRuns.join('')}</w:p>`;
+        }
+
+        buildExamXml(parsed, options = {}) {
+            let globalQIndex = 0;
+            const sectionsXml = [];
+
+            for (const sec of parsed.sections) {
+                if (sec.titleEl) sectionsXml.push(sec.titleEl.xml);
+                if (sec.introElements) sec.introElements.forEach(e => sectionsXml.push(e.xml));
+
+                for (const q of sec.questions) {
+                    globalQIndex++;
+                    sectionsXml.push(this.renderMixedQuestion(q, globalQIndex, null, options.keepUnderlines));
+                }
+            }
+
+            const headerXml = parsed.headerElements.map(e => {
+                let x = e.xml;
+                if (/Mã\s*đề\s*[:.\s]*\w+/i.test(x) && options.examCode) {
+                    x = x.replace(/(Mã\s*đề\s*[:.\s]*)(\w+)/i, `$1${options.examCode}`);
+                }
+                return x;
+            }).join('');
+
+            return parsed.preBody + headerXml + sectionsXml.join('') + parsed.postBody;
+        }
+
+        shuffleArray(arr) {
+            const a = [...arr];
+            for (let i = a.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [a[i], a[j]] = [a[j], a[i]];
+            }
+            return a;
+        }
+    }
+
+    // =======================================================
     // 3. ĐỘNG CƠ TRỘN ĐỀ HOÀN CHỈNH (EXAM MIXER ENGINE)
     // =======================================================
     class ExamMixerEngine {
         constructor(inputData, config = {}) {
             this.inputData = inputData; // raw tex string, docx buffer, or questions array
+            this.isDocxInput = (inputData instanceof ArrayBuffer) || 
+                               (inputData instanceof Blob) || 
+                               (typeof Uint8Array !== 'undefined' && inputData instanceof Uint8Array) ||
+                               (typeof ArrayBuffer !== 'undefined' && ArrayBuffer.isView(inputData));
             this.config = {
                 so_de: 4,
                 ma_de_list: ['1001', '1002', '1003', '1004'],
@@ -445,6 +998,84 @@
         }
 
         /**
+         * Trộn trực tiếp file Word (.docx) ở tầng OpenXML
+         * Bảo toàn 100% công thức MathType OLE, bảng biểu, hình vẽ và định dạng
+         */
+        async mixDocxDirect(report) {
+            report(8, "Bắt đầu trộn đề Word trực tiếp từ file gốc (Bảo toàn 100% công thức MathType)...");
+            let buf = this.inputData;
+            if (buf instanceof Blob) {
+                buf = await buf.arrayBuffer();
+            } else if (typeof ArrayBuffer !== 'undefined' && ArrayBuffer.isView(buf)) {
+                buf = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+            }
+
+            const mixer = new DocxDirectMixer(buf, this.config);
+            const directResult = await mixer.mix(report);
+
+            report(75, "Đang tạo bảng đáp án Excel và Mã QR...");
+            const zip = new JSZip();
+            const deThiFolder = zip.folder("de_thi");
+            const dapAnFolder = zip.folder("dap_an");
+            const qrFolder = zip.folder("qr_code");
+
+            // 1. Thêm các file Word đề thi vào de_thi/
+            for (const [filename, fileData] of Object.entries(directResult.exams)) {
+                deThiFolder.file(filename, fileData);
+            }
+
+            // 2. Thêm file HuongDanGiai.docx vào dap_an/
+            if (directResult.huongDanGiai) {
+                dapAnFolder.file("HuongDanGiai.docx", directResult.huongDanGiai);
+            }
+
+            // 3. Tạo bảng đáp án Excel SmartTest & YoungMix
+            const matrixData = directResult.matrixData;
+            const smartTestBlob = await ExamMixerEngine.buildSmartTestXlsx(matrixData);
+            dapAnFolder.file("DapAn_SmartTest.xlsx", smartTestBlob);
+
+            const youngMixBlob = await ExamMixerEngine.buildYoungMixXlsx(matrixData);
+            dapAnFolder.file("DapAn_YoungMix.xlsx", youngMixBlob);
+
+            // 4. Tạo mã QR
+            const qrData = ExamMixerEngine.buildQrData(matrixData);
+            qrFolder.file("QR_TNMaker.txt", qrData.tnmChunks.map(c => `// Mã đề: ${c.madeList.join(', ')}\n${c.qrString}`).join('\n\n'));
+            qrFolder.file("QR_QM_ChamThi.json", JSON.stringify(qrData.qmList, null, 2));
+            qrFolder.file("QR_UnT.txt", qrData.untList.join('\n---\n'));
+
+            const shouldExportTex = this.config.output_format === 'tex' || this.config.output_format === 'both';
+            if (shouldExportTex) {
+                qrFolder.file("MaQR_ChamThi.tex", ExamMixerEngine.buildMaQrTex(qrData));
+            }
+
+            const qrViewerHtml = ExamMixerEngine.buildQrViewerHtml(this.config.header?.title || "Đề thi", matrixData, qrData);
+            qrFolder.file("Xem_Ma_QR.html", qrViewerHtml);
+
+            if (typeof QRCode !== 'undefined') {
+                for (const chunk of qrData.tnmChunks) {
+                    const blobPng = await ExamMixerEngine.generateQrPngBlob(chunk.qrString, 300, 300);
+                    if (blobPng) qrFolder.file(`TNMaker_De_${chunk.madeList.join('_')}.png`, blobPng);
+                }
+                for (const chunk of qrData.qmChunks) {
+                    const blobPng = await ExamMixerEngine.generateQrPngBlob(chunk.qrString, 300, 300);
+                    if (blobPng) qrFolder.file(`QM_De_${chunk.madeList.join('_')}.png`, blobPng);
+                }
+            }
+
+            report(97, "Đang đóng gói file ZIP hoàn chỉnh...");
+            const zipType = typeof Blob !== 'undefined' ? "blob" : "nodebuffer";
+            const finalZipBlob = await zip.generateAsync({ type: zipType });
+            report(100, "Hoàn tất trộn đề thi Word!");
+
+            return {
+                zipBlob: finalZipBlob,
+                matrixData,
+                maDeList: directResult.maDeList,
+                totalQuestions: directResult.totalQuestions
+            };
+        }
+
+        /**
          * Chạy tiến trình trộn đề hoàn chỉnh
          */
         async mix(progressCallback = null) {
@@ -454,6 +1085,11 @@
 
             report(5, "Đang khởi tạo dữ liệu đề thi...");
 
+            // NẾU ĐẦU VÀO LÀ FILE WORD DOCX -> TRỘN TRỰC TIẾP OPENXML (BẢO TOÀN 100% MATHTYPE)
+            if (this.isDocxInput) {
+                return await this.mixDocxDirect(report);
+            }
+
             let texContent = "";
             let parsedQuestions = [];
 
@@ -462,18 +1098,6 @@
             } else if (Array.isArray(this.inputData)) {
                 parsedQuestions = this.inputData;
                 texContent = this.convertQuestionsArrayToTex(parsedQuestions);
-            } else if (this.inputData instanceof ArrayBuffer || this.inputData instanceof Blob || (typeof ArrayBuffer !== 'undefined' && ArrayBuffer.isView(this.inputData))) {
-                let buf;
-                if (this.inputData instanceof Blob) {
-                    buf = await this.inputData.arrayBuffer();
-                } else if (typeof ArrayBuffer !== 'undefined' && ArrayBuffer.isView(this.inputData)) {
-                    buf = this.inputData.buffer.slice(this.inputData.byteOffset, this.inputData.byteOffset + this.inputData.byteLength);
-                } else {
-                    buf = this.inputData;
-                }
-                const parsedResult = await this.parseDocxInput(buf, report);
-                texContent = parsedResult.texContent;
-                parsedQuestions = parsedResult.parsedQuestions;
             }
 
             // Chuẩn hóa và trích xuất các khối câu hỏi {ex} và {bt}
