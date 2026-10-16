@@ -285,12 +285,172 @@
                 header: config.header || {},
                 ...config
             };
+            this.relsMap = {};
+            this.oleDataMap = {};
+        }
+
+        static extractTextFromMtef(binBuf) {
+            if (!binBuf) return '';
+            let idx = -1;
+            for (let i = 0; i < binBuf.length - 4; i++) {
+                if (binBuf[i] === 0x05 && binBuf[i+1] === 0x01) {
+                    idx = i;
+                    break;
+                }
+            }
+            if (idx === -1) return '';
+
+            let lineIdx = -1;
+            for (let j = idx; j < binBuf.length - 2; j++) {
+                if (binBuf[j] === 0x0a && (binBuf[j+1] === 0x01 || binBuf[j+1] === 0x00)) {
+                    lineIdx = j;
+                    break;
+                }
+            }
+            const startPos = lineIdx !== -1 ? lineIdx : idx + 30;
+
+            let str = '';
+            let p = startPos;
+            while (p < binBuf.length - 1) {
+                const tag = binBuf[p];
+                if (tag === 0x02) { // CHAR
+                    p++;
+                    const opts = binBuf[p++];
+                    let typeface = binBuf[p++];
+                    if (p + 1 < binBuf.length) {
+                        const code = binBuf[p] | (binBuf[p+1] << 8);
+                        p += 2;
+                        if (code === 0x2212 || code === 0x002d) {
+                            str += '-';
+                        } else if (code >= 32 && code <= 126) {
+                            str += String.fromCharCode(code);
+                        } else if (code === 0x00a0) {
+                            str += ' ';
+                        }
+                        if (opts & 0x04) {
+                            p++;
+                        }
+                    }
+                } else if (tag === 0x00) {
+                    p++;
+                } else if (tag === 0x0a) {
+                    p += 3;
+                } else if (tag === 0x09) {
+                    p += 3;
+                } else {
+                    p++;
+                }
+            }
+            return str.trim();
+        }
+
+        extractTextFromOleRId(rId) {
+            if (!rId || !this.relsMap) return '';
+            const target = this.relsMap[rId];
+            if (!target) return '';
+            const binBuf = this.oleDataMap[target] || this.oleDataMap[`word/${target}`];
+            if (!binBuf) return '';
+            return DocxDirectMixer.extractTextFromMtef(binBuf);
+        }
+
+        parseSummaryAnswersFromTables(footerElements) {
+            const summary = { p1: [], p2: [], p3: [] };
+            if (!footerElements || footerElements.length === 0) return summary;
+
+            const extractOle = (cellXml) => {
+                const m = cellXml.match(/<o:OLEObject\b[^>]*r:id="([^"]+)"/i);
+                if (!m) return '';
+                return this.extractTextFromOleRId(m[1]);
+            };
+
+            footerElements.forEach(el => {
+                if (el.tag !== 'w:tbl') return;
+                const tblXml = el.xml;
+                const rows = tblXml.match(/<w:tr\b[\s\S]*?<\/w:tr>/g) || [];
+                if (rows.length < 2) return;
+
+                const row0Cells = rows[0].match(/<w:tc\b[\s\S]*?<\/w:tc>/g) || [];
+                const row0Texts = row0Cells.map(c => (c.match(/<w:t\b[^>]*>([\s\S]*?)<\/w:t>/g) || []).map(t => t.replace(/<[^>]+>/g, '')).join('').trim());
+
+                const row1Cells = rows[1].match(/<w:tc\b[\s\S]*?<\/w:tc>/g) || [];
+                const row1Texts = row1Cells.map(c => (c.match(/<w:t\b[^>]*>([\s\S]*?)<\/w:t>/g) || []).map(t => t.replace(/<[^>]+>/g, '')).join('').trim());
+
+                // Part I check
+                if (row0Texts.some(t => /^Câu\s*\d+$/i.test(t)) && row1Texts.some(t => /^[A-D]$/i.test(t))) {
+                    row0Texts.forEach((t, cIdx) => {
+                        const m = t.match(/^Câu\s*(\d+)$/i);
+                        if (m && cIdx < row1Texts.length) {
+                            const qNum = parseInt(m[1], 10);
+                            const ans = row1Texts[cIdx].toUpperCase();
+                            if (/^[A-D]$/.test(ans)) {
+                                summary.p1[qNum - 1] = ans;
+                            }
+                        }
+                    });
+                }
+
+                // Part II check: Header has 'Ý a)', 'Ý b)', 'Ý c)', 'Ý d)'
+                if (row0Texts.some(t => /Ý\s*a\)/i.test(t)) && rows.length >= 2) {
+                    for (let r = 1; r < rows.length; r++) {
+                        const rCells = rows[r].match(/<w:tc\b[\s\S]*?<\/w:tc>/g) || [];
+                        const rTexts = rCells.map(c => (c.match(/<w:t\b[^>]*>([\s\S]*?)<\/w:t>/g) || []).map(t => t.replace(/<[^>]+>/g, '')).join('').trim());
+                        if (rTexts.length >= 5) {
+                            const qNumMatch = rTexts[0].match(/(\d+)/);
+                            if (qNumMatch) {
+                                const qNum = parseInt(qNumMatch[1], 10);
+                                const tfStr = rTexts.slice(1, 5).map(s => s.toUpperCase().startsWith('Đ') ? 'Đ' : 'S').join('');
+                                summary.p2[qNum - 1] = tfStr;
+                            }
+                        }
+                    }
+                }
+
+                // Part III check: Row 0 has 'Câu 1'..'Câu 6', Row 1 has OLE or numbers
+                if (row0Texts.some(t => /^Câu\s*\d+$/i.test(t)) && !row1Texts.some(t => /^[A-D]$/i.test(t))) {
+                    row0Texts.forEach((t, cIdx) => {
+                        const m = t.match(/^Câu\s*(\d+)$/i);
+                        if (m && cIdx < row1Cells.length) {
+                            const qNum = parseInt(m[1], 10);
+                            let ans = extractOle(row1Cells[cIdx]);
+                            if (!ans && cIdx < row1Texts.length) {
+                                ans = row1Texts[cIdx];
+                            }
+                            if (ans) {
+                                summary.p3[qNum - 1] = cleanShortAnswer(ans);
+                            }
+                        }
+                    });
+                }
+            });
+
+            return summary;
         }
 
         async mix(onProgress = () => {}) {
             onProgress(10, "Đang mở cấu trúc tệp Word DOCX gốc...");
             const srcZip = await JSZip.loadAsync(this.docxBuffer);
             const docXml = await srcZip.file('word/document.xml').async('text');
+
+            // Nạp bảng quan hệ rels để liên kết OLE object rId
+            this.relsMap = {};
+            if (srcZip.file('word/_rels/document.xml.rels')) {
+                const relsXml = await srcZip.file('word/_rels/document.xml.rels').async('text');
+                const relRegex = /<Relationship\b[^>]*Id="([^"]+)"[^>]*Target="([^"]+)"/g;
+                let rm;
+                while ((rm = relRegex.exec(relsXml)) !== null) {
+                    this.relsMap[rm[1]] = rm[2];
+                }
+            }
+
+            // Nạp dữ liệu nhị phân của các file OLE MathType
+            this.oleDataMap = {};
+            for (const path of Object.keys(srcZip.files)) {
+                if (path.startsWith('word/embeddings/')) {
+                    const binBuf = await srcZip.file(path).async('uint8array');
+                    this.oleDataMap[path] = binBuf;
+                    this.oleDataMap[path.replace('word/', '')] = binBuf;
+                }
+            }
 
             onProgress(15, "Đang phân tích cấu trúc các câu hỏi và công thức MathType...");
             const parsed = this.parseDocx(docXml);
@@ -604,6 +764,10 @@
                         currentQ = null;
                     }
                     currentSec = { titleEl: el, questions: [] };
+                    if (/PHẦN\s+(?:I\b|1\b)/i.test(trimmed)) currentSec.part = 'choice';
+                    else if (/PHẦN\s+(?:II\b|2\b)/i.test(trimmed)) currentSec.part = 'tf';
+                    else if (/PHẦN\s+(?:III\b|3\b)/i.test(trimmed)) currentSec.part = 'short';
+                    else if (/PHẦN\s+(?:IV\b|4\b)/i.test(trimmed)) currentSec.part = 'essay';
                     sections.push(currentSec);
                     continue;
                 }
@@ -615,7 +779,7 @@
                     qCounter++;
                     currentQ = {
                         id: qCounter,
-                        originalNum: (trimmed.match(qStartRegex) || [])[1] || qCounter,
+                        originalNum: parseInt((trimmed.match(qStartRegex) || [])[1] || qCounter, 10),
                         elements: [el],
                         type: 'choice',
                         isLocked: trimmed.includes('##')
@@ -628,6 +792,13 @@
                 }
             }
             if (currentQ) currentSec.questions.push(currentQ);
+
+            if (!sections[0].part && sections.length > 1 && sections[1].part === 'tf') {
+                sections[0].part = 'choice';
+            }
+
+            // Trích xuất đáp án từ Bảng Đáp Án Tổng Hợp ở cuối tài liệu (nếu có)
+            const summaryAnswers = this.parseSummaryAnswersFromTables(footerElements);
 
             // Chuẩn hóa tiêu đề các Phần theo chuẩn Bộ GD&ĐT 2025 (Chữ màu đen, 1 dòng, in đậm toàn bộ)
             const hasMultipleSections = sections.length > 1;
@@ -667,43 +838,90 @@
             sections.forEach(sec => {
                 sec.questions.forEach(q => {
                     totalQ++;
-                    this.analyzeQuestion(q);
+                    this.analyzeQuestion(q, sec, summaryAnswers);
                 });
             });
 
             return { preBody, headerElements, sections, footerElements, postBody, totalQuestions: totalQ };
         }
 
-        analyzeQuestion(q) {
+        analyzeQuestion(q, sec, summaryAnswers = { p1: [], p2: [], p3: [] }) {
             const fullText = q.elements.map(e => e.text).join('\n');
+            const qNum = q.originalNum || q.id;
 
             // 1. Kiểm tra câu trắc nghiệm Đúng / Sai (Part II)
-            if (/Đ(úng)?,?\s*S(ai)?/i.test(fullText) || /khẳng định sau/i.test(fullText) || /mỗi ý a\), b\), c\), d\)/i.test(fullText)) {
+            const hasTfStatements = q.elements.filter(el => /^\s*([a-d])[.)]\s*/i.test(el.text.trim())).length >= 2;
+            const isTf = sec?.part === 'tf' || hasTfStatements;
+
+            if (isTf) {
                 q.type = 'tf';
                 q.tfStatements = [];
                 q.correctTf = {};
+                const sumAns = summaryAnswers?.p2 && summaryAnswers.p2[qNum - 1]; // e.g. 'SSĐS'
+
                 q.elements.forEach((el, idx) => {
                     const tr = el.text.trim();
                     const m = tr.match(/^([a-d])[.)]\s*(.*)/i);
                     if (m) {
                         const letter = m[1].toLowerCase();
                         q.tfStatements.push({ elIdx: idx, letter });
-                        const content = m[2];
-                        const valMatch = content.match(/\b(ĐÚNG|SAI|Đ|S)\b/i) || content.match(/\((Đ|S|Đúng|Sai)\)/i);
-                        if (valMatch) {
-                            q.correctTf[letter] = valMatch[1].toUpperCase().startsWith('Đ') ? 'Đ' : 'S';
-                        } else if (this.hasUnderlineOrHighlight(el.xml)) {
-                            // Gạch chân hoặc highlight -> ĐÚNG
-                            q.correctTf[letter] = 'Đ';
+                        const lIdx = ['a', 'b', 'c', 'd'].indexOf(letter);
+                        if (sumAns && lIdx !== -1 && lIdx < sumAns.length) {
+                            q.correctTf[letter] = sumAns[lIdx];
                         } else {
-                            q.correctTf[letter] = 'S';
+                            const content = m[2];
+                            const valMatch = content.match(/\b(ĐÚNG|SAI|Đ|S)\b/i) || content.match(/\((Đ|S|Đúng|Sai)\)/i);
+                            if (valMatch) {
+                                q.correctTf[letter] = valMatch[1].toUpperCase().startsWith('Đ') ? 'Đ' : 'S';
+                            } else if (this.hasUnderlineOrHighlight(el.xml)) {
+                                q.correctTf[letter] = 'Đ';
+                            } else {
+                                q.correctTf[letter] = 'S';
+                            }
                         }
                     }
                 });
                 return;
             }
 
-            // 2. Kiểm tra câu trắc nghiệm 4 phương án A, B, C, D (Part I)
+            // 2. Kiểm tra câu trả lời ngắn (Part III)
+            if (sec?.part === 'short') {
+                q.type = 'short';
+                const sumAns = summaryAnswers?.p3 && summaryAnswers.p3[qNum - 1];
+                if (sumAns) {
+                    q.correctAnswer = sumAns;
+                    return;
+                }
+                let rawAns = '';
+                for (const el of q.elements) {
+                    const tr = el.text.trim();
+                    if (/^\s*(?:[-–•*]\s*)?(?:Đáp\s*án|Đáp\s*số|ĐS|Kết\s*quả)\s*[:=]/i.test(tr)) {
+                        const oleMatch = el.xml.match(/<o:OLEObject\b[^>]*r:id="([^"]+)"/i);
+                        if (oleMatch) {
+                            rawAns = this.extractTextFromOleRId(oleMatch[1]);
+                            if (rawAns) break;
+                        }
+                        const textAfter = tr.replace(/^\s*(?:[-–•*]\s*)?(?:Đáp\s*án|Đáp\s*số|ĐS|Kết\s*quả)\s*[:=]\s*/i, '').trim();
+                        if (textAfter && !/^(?:Lời\s*giải|HDG)/i.test(textAfter)) {
+                            rawAns = textAfter;
+                            break;
+                        }
+                    }
+                }
+                if (!rawAns) {
+                    for (const el of q.elements) {
+                        const oleMatch = el.xml.match(/<o:OLEObject\b[^>]*r:id="([^"]+)"/i);
+                        if (oleMatch && /Đáp\s*án|Đáp\s*số|ĐS|Kết\s*quả/i.test(el.text)) {
+                            rawAns = this.extractTextFromOleRId(oleMatch[1]);
+                            if (rawAns) break;
+                        }
+                    }
+                }
+                q.correctAnswer = cleanShortAnswer(rawAns);
+                return;
+            }
+
+            // 3. Kiểm tra câu trắc nghiệm 4 phương án A, B, C, D (Part I)
             let optType = null;
             let optElIdx = -1;
 
@@ -738,28 +956,15 @@
                 }
             }
 
-            if (optType) {
-                q.type = 'choice';
-                q.optType = optType;
-                q.optElIdx = optElIdx;
-                q.correctAnswer = this.detectOriginalAnswer(q);
+            q.type = 'choice';
+            q.optType = optType;
+            q.optElIdx = optElIdx;
+
+            const sumAns = summaryAnswers?.p1 && summaryAnswers.p1[qNum - 1];
+            if (sumAns) {
+                q.correctAnswer = sumAns;
             } else {
-                // 3. Câu trả lời ngắn (Part III)
-                q.type = 'short';
-                let rawAns = '';
-                for (const el of q.elements) {
-                    const tr = el.text.trim();
-                    const m = tr.match(/^(?:Đáp\s*án|Đáp\s*số|ĐS|Kết\s*quả)\s*[:=]\s*(.+)/i);
-                    if (m) {
-                        rawAns = m[1].trim();
-                        break;
-                    }
-                }
-                if (!rawAns) {
-                    const dsMatch = fullText.match(/(?:Đáp\s*án|Đáp\s*số|ĐS|Kết\s*quả)\s*[:=]\s*([^\n\r]+)/i);
-                    if (dsMatch) rawAns = dsMatch[1].trim();
-                }
-                q.correctAnswer = cleanShortAnswer(rawAns);
+                q.correctAnswer = this.detectOriginalAnswer(q);
             }
         }
 
@@ -856,7 +1061,7 @@
                     secQIndex++;
                     globalQIndex++;
                     const newQNum = hasMultipleSections ? secQIndex : globalQIndex;
-                    const mixedQXml = this.renderMixedQuestion(q, newQNum, answers, false);
+                    const mixedQXml = this.renderMixedQuestion(q, newQNum, answers, false, true);
                     mixedSectionsXml.push(mixedQXml);
                 }
             }
@@ -876,7 +1081,7 @@
             };
         }
 
-        renderMixedQuestion(q, newQNum, answersAccumulator, keepUnderlines = false) {
+        renderMixedQuestion(q, newQNum, answersAccumulator, keepUnderlines = false, shuffleOpts = true) {
             let qElements = q.elements.map(e => ({ ...e }));
 
             // Khi xuất đề thi cho học sinh (!keepUnderlines):
@@ -926,7 +1131,7 @@
 
             if (q.type === 'choice') {
                 let perm = [0, 1, 2, 3];
-                if (this.config.dao_pa) {
+                if (shuffleOpts && this.config.dao_pa) {
                     perm = this.shuffleArray([0, 1, 2, 3]);
                 }
 
@@ -978,7 +1183,7 @@
 
             } else if (q.type === 'tf') {
                 let perm = [0, 1, 2, 3];
-                if (this.config.dao_y_tf && q.tfStatements && q.tfStatements.length === 4) {
+                if (shuffleOpts && this.config.dao_y_tf && q.tfStatements && q.tfStatements.length === 4) {
                     perm = this.shuffleArray([0, 1, 2, 3]);
                     const oldStatements = q.tfStatements.map(s => qElements[s.elIdx]).filter(Boolean);
                     if (oldStatements.length === 4) {
@@ -1128,7 +1333,7 @@
                     secQIndex++;
                     globalQIndex++;
                     const newQNum = hasMultipleSections ? secQIndex : globalQIndex;
-                    sectionsXml.push(this.renderMixedQuestion(q, newQNum, null, options.keepUnderlines));
+                    sectionsXml.push(this.renderMixedQuestion(q, newQNum, null, options.keepUnderlines, options.shuffleOptions));
                 }
             }
 
@@ -2039,10 +2244,10 @@
                 });
             }
 
-            // Chia khối QM (tối đa 8 mã đề / mã QR tương tự TNMaker)
+            // Chia khối QM (tối đa 3 mã đề / mã QR theo đúng chuẩn LiveTex và app QM Chấm Thi)
             const qmChunks = [];
-            for (let i = 0; i < qmList.length; i += 8) {
-                const chunk = qmList.slice(i, i + 8);
+            for (let i = 0; i < qmList.length; i += 3) {
+                const chunk = qmList.slice(i, i + 3);
                 const jsonStr = JSON.stringify(chunk);
                 qmChunks.push({
                     madeList: chunk.map(c => c[0]),
@@ -2304,11 +2509,10 @@
                 const canvas = tempDiv.querySelector('canvas');
                 const img = tempDiv.querySelector('img');
                 let dataUrl = '';
-
-                if (img && img.src && img.src.startsWith('data:image/')) {
-                    dataUrl = img.src;
-                } else if (canvas && typeof canvas.toDataURL === 'function') {
+                if (canvas && typeof canvas.toDataURL === 'function') {
                     dataUrl = canvas.toDataURL('image/png');
+                } else if (img && img.src && img.src.startsWith('data:image/')) {
+                    dataUrl = img.src;
                 }
 
                 if (dataUrl && dataUrl.startsWith('data:image/png;base64,')) {
