@@ -208,7 +208,7 @@
             shuffledItems = shuffleArray(unlockedItems);
         } else {
             // Phân 4 cấp độ: Biết (1), Hiểu (2), Vận dụng (3), Vận dụng cao (4)
-            const groups = { 1: [], 2: [], 3: [], 4: [], 99: [] };
+            let groups = { 1: [], 2: [], 3: [], 4: [], 99: [] };
 
             for (const item of unlockedItems) {
                 const itemText = typeof item === 'object' ? (item.rawLatex || item.content || '') : String(item);
@@ -222,20 +222,66 @@
                     else if (['C', 'T'].includes(mucDo)) groups[4].push(item);
                     else groups[99].push(item);
                 } else if (typeof item === 'object' && item.level) {
-                    const lvl = item.level.toLowerCase();
+                    const lvl = String(item.level).toLowerCase();
                     if (lvl.includes('nhận biết') || lvl.includes('nb')) groups[1].push(item);
                     else if (lvl.includes('thông hiểu') || lvl.includes('th')) groups[2].push(item);
                     else if (lvl.includes('vận dụng cao') || lvl.includes('vdc')) groups[4].push(item);
                     else if (lvl.includes('vận dụng') || lvl.includes('vd')) groups[3].push(item);
                     else groups[99].push(item);
                 } else {
-                    groups[99].push(item);
+                    const tagMatch = itemText.match(/(?:\[|\()(?:\s*)(NB|TH|VDC|VD|B|H|C|V|Nhận\s*biết|Thông\s*hiểu|Vận\s*dụng\s*cao|Vận\s*dụng|Mức\s*độ\s*[1-4]|MĐ\s*[1-4])(?:\s*)(?:\]|\))/i);
+                    if (tagMatch) {
+                        const tag = tagMatch[1].toUpperCase().replace(/\s+/g, '');
+                        if (['NB', 'B', 'NHẬNBIẾT', 'MỨCĐỘ1', 'MĐ1'].includes(tag)) groups[1].push(item);
+                        else if (['TH', 'H', 'THÔNGHIỂU', 'MỨCĐỘ2', 'MĐ2'].includes(tag)) groups[2].push(item);
+                        else if (['VDC', 'C', 'VẬNDỤNGCAO', 'MỨCĐỘ4', 'MĐ4'].includes(tag)) groups[4].push(item);
+                        else if (['VD', 'V', 'VẬNDỤNG', 'MỨCĐỘ3', 'MĐ3'].includes(tag)) groups[3].push(item);
+                        else groups[99].push(item);
+                    } else {
+                        groups[99].push(item);
+                    }
+                }
+            }
+
+            // Nếu câu hỏi trong đề gốc không có tag mức độ, phân nhóm tuần tự từ dễ đến khó theo cấu hình
+            const taggedCount = groups[1].length + groups[2].length + groups[3].length + groups[4].length;
+            if (taggedCount === 0 && groups[99].length > 1) {
+                const allItems = [...groups[99]];
+                groups = { 1: [], 2: [], 3: [], 4: [], 99: [] };
+                const N = allItems.length;
+
+                if (phanNhomMode.includes("2 nhóm")) {
+                    const mid = Math.ceil(N / 2);
+                    groups[1] = allItems.slice(0, mid);
+                    groups[3] = allItems.slice(mid);
+                } else if (phanNhomMode.includes("3 nhóm: Biết < Hiểu < VD, VDC")) {
+                    const p1 = Math.round(N * 0.35);
+                    const p2 = Math.round(N * 0.35);
+                    groups[1] = allItems.slice(0, p1);
+                    groups[2] = allItems.slice(p1, p1 + p2);
+                    groups[3] = allItems.slice(p1 + p2);
+                } else if (phanNhomMode.includes("3 nhóm: Biết < Hiểu, VD < VDC")) {
+                    const p1 = Math.round(N * 0.30);
+                    const p2 = Math.round(N * 0.50);
+                    groups[1] = allItems.slice(0, p1);
+                    groups[2] = allItems.slice(p1, p1 + p2);
+                    groups[4] = allItems.slice(p1 + p2);
+                } else {
+                    const q1 = Math.round(N * 0.25);
+                    const q2 = Math.round(N * 0.25);
+                    const q3 = Math.round(N * 0.25);
+                    groups[1] = allItems.slice(0, q1);
+                    groups[2] = allItems.slice(q1, q1 + q2);
+                    groups[3] = allItems.slice(q1 + q2, q1 + q2 + q3);
+                    groups[4] = allItems.slice(q1 + q2 + q3);
                 }
             }
 
             // Trộn ngẫu nhiên câu hỏi bên trong từng nhóm
             for (const k in groups) {
-                groups[k] = shuffleArray(groups[k]);
+                if (groups[k].length > 1) {
+                    groups[k] = shuffleArray(groups[k]);
+                }
             }
 
             // Lắp ráp thứ tự theo cấu hình
@@ -845,9 +891,36 @@
             return { preBody, headerElements, sections, footerElements, postBody, totalQuestions: totalQ };
         }
 
+        detectQuestionLevel(q) {
+            const fullText = (q.elements || []).map(e => e.text || '').join(' ');
+            
+            // 1. Kiểm tra mã ID6: [9H4N1-1], [2D1B1-1], %[9H4N1-1], etc.
+            const id6Match = fullText.match(/(?:\[|%\[)\d[A-Z0-9][A-Z0-9]([YBKGTNHVC])[A-Z0-9]-[A-Z0-9]\]/i);
+            if (id6Match) {
+                const code = id6Match[1].toUpperCase();
+                if (['N', 'Y', 'B'].includes(code)) return 1; // Biết / Nhận biết
+                if (['H', 'K'].includes(code)) return 2;      // Hiểu / Thông hiểu
+                if (['V', 'G'].includes(code)) return 3;      // Vận dụng
+                if (['C', 'T'].includes(code)) return 4;      // Vận dụng cao
+            }
+
+            // 2. Kiểm tra tag mức độ: [NB], [TH], [VD], [VDC], [B], [H], [V], [C]
+            const tagMatch = fullText.match(/(?:\[|\()(?:\s*)(NB|TH|VDC|VD|B|H|C|V|Nhận\s*biết|Thông\s*hiểu|Vận\s*dụng\s*cao|Vận\s*dụng|Mức\s*độ\s*[1-4]|MĐ\s*[1-4])(?:\s*)(?:\]|\))/i);
+            if (tagMatch) {
+                const tag = tagMatch[1].toUpperCase().replace(/\s+/g, '');
+                if (['NB', 'B', 'NHẬNBIẾT', 'MỨCĐỘ1', 'MĐ1'].includes(tag)) return 1;
+                if (['TH', 'H', 'THÔNGHIỂU', 'MỨCĐỘ2', 'MĐ2'].includes(tag)) return 2;
+                if (['VDC', 'C', 'VẬNDỤNGCAO', 'MỨCĐỘ4', 'MĐ4'].includes(tag)) return 4;
+                if (['VD', 'V', 'VẬNDỤNG', 'MỨCĐỘ3', 'MĐ3'].includes(tag)) return 3;
+            }
+
+            return 99; // Không xác định mức độ
+        }
+
         analyzeQuestion(q, sec, summaryAnswers = { p1: [], p2: [], p3: [] }) {
             const fullText = q.elements.map(e => e.text).join('\n');
             const qNum = q.originalNum || q.id;
+            q.level = this.detectQuestionLevel(q);
 
             // 1. Kiểm tra câu trắc nghiệm Đúng / Sai (Part II)
             const hasTfStatements = q.elements.filter(el => /^\s*([a-d])[.)]\s*/i.test(el.text.trim())).length >= 2;
@@ -1027,6 +1100,105 @@
             return { p1, p2, p3 };
         }
 
+        smartShuffleDocxQuestions(questions, phanNhomMode = "Không phân nhóm") {
+            if (!Array.isArray(questions) || questions.length <= 1) return questions;
+            if (!this.config.dao_cau) return questions;
+
+            const unlockedIndices = [];
+            const unlockedItems = [];
+
+            for (let i = 0; i < questions.length; i++) {
+                const q = questions[i];
+                if (!q.isLocked) {
+                    unlockedIndices.push(i);
+                    unlockedItems.push(q);
+                }
+            }
+
+            if (unlockedItems.length <= 1) return questions;
+
+            let shuffledItems = [];
+
+            if (!phanNhomMode || phanNhomMode === "Không phân nhóm") {
+                shuffledItems = this.shuffleArray(unlockedItems);
+            } else {
+                // Phân 4 cấp độ: Biết (1), Hiểu (2), Vận dụng (3), Vận dụng cao (4), Khác (99)
+                let groups = { 1: [], 2: [], 3: [], 4: [], 99: [] };
+
+                for (const q of unlockedItems) {
+                    const lvl = q.level || this.detectQuestionLevel(q);
+                    q.level = lvl;
+                    if (groups[lvl]) groups[lvl].push(q);
+                    else groups[99].push(q);
+                }
+
+                // Nếu đa số câu hỏi không có tag (level 99) nhưng người dùng chọn phân nhóm,
+                // ta phân nhóm tuần tự theo tỷ lệ độ khó từ dễ đến khó của đề thi gốc:
+                const taggedCount = groups[1].length + groups[2].length + groups[3].length + groups[4].length;
+                if (taggedCount === 0 && groups[99].length > 1) {
+                    const allItems = [...groups[99]];
+                    groups = { 1: [], 2: [], 3: [], 4: [], 99: [] };
+                    const N = allItems.length;
+
+                    if (phanNhomMode.includes("2 nhóm")) {
+                        const mid = Math.ceil(N / 2);
+                        groups[1] = allItems.slice(0, mid);
+                        groups[3] = allItems.slice(mid);
+                    } else if (phanNhomMode.includes("3 nhóm: Biết < Hiểu < VD, VDC")) {
+                        const p1 = Math.round(N * 0.35);
+                        const p2 = Math.round(N * 0.35);
+                        groups[1] = allItems.slice(0, p1);
+                        groups[2] = allItems.slice(p1, p1 + p2);
+                        groups[3] = allItems.slice(p1 + p2);
+                    } else if (phanNhomMode.includes("3 nhóm: Biết < Hiểu, VD < VDC")) {
+                        const p1 = Math.round(N * 0.30);
+                        const p2 = Math.round(N * 0.50);
+                        groups[1] = allItems.slice(0, p1);
+                        groups[2] = allItems.slice(p1, p1 + p2);
+                        groups[4] = allItems.slice(p1 + p2);
+                    } else {
+                        // 4 nhóm mặc định
+                        const q1 = Math.round(N * 0.25);
+                        const q2 = Math.round(N * 0.25);
+                        const q3 = Math.round(N * 0.25);
+                        groups[1] = allItems.slice(0, q1);
+                        groups[2] = allItems.slice(q1, q1 + q2);
+                        groups[3] = allItems.slice(q1 + q2, q1 + q2 + q3);
+                        groups[4] = allItems.slice(q1 + q2 + q3);
+                    }
+                }
+
+                // Trộn ngẫu nhiên câu hỏi bên trong từng nhóm
+                for (const k in groups) {
+                    if (groups[k].length > 1) {
+                        groups[k] = this.shuffleArray(groups[k]);
+                    }
+                }
+
+                // Lắp ráp thứ tự theo cấu hình phân nhóm
+                if (phanNhomMode.includes("2 nhóm")) {
+                    const de = this.shuffleArray([...groups[1], ...groups[2]]);
+                    const kho = this.shuffleArray([...groups[3], ...groups[4]]);
+                    shuffledItems = [...de, ...kho, ...groups[99]];
+                } else if (phanNhomMode.includes("3 nhóm: Biết < Hiểu < VD, VDC")) {
+                    const kho = this.shuffleArray([...groups[3], ...groups[4]]);
+                    shuffledItems = [...groups[1], ...groups[2], ...kho, ...groups[99]];
+                } else if (phanNhomMode.includes("3 nhóm: Biết < Hiểu, VD < VDC")) {
+                    const tb = this.shuffleArray([...groups[2], ...groups[3]]);
+                    shuffledItems = [...groups[1], ...tb, ...groups[4], ...groups[99]];
+                } else {
+                    // 4 nhóm mặc định: Biết < Hiểu < VD < VDC
+                    shuffledItems = [...groups[1], ...groups[2], ...groups[3], ...groups[4], ...groups[99]];
+                }
+            }
+
+            const result = [...questions];
+            for (let k = 0; k < unlockedIndices.length; k++) {
+                result[unlockedIndices[k]] = shuffledItems[k];
+            }
+            return result;
+        }
+
         buildMixedExam(parsed, maDe) {
             let globalQIndex = 0;
             const answers = { p1: [], p2: [], p3: [] };
@@ -1037,24 +1209,7 @@
                 if (sec.titleEl) mixedSectionsXml.push(sec.titleEl.xml);
                 if (sec.introElements) sec.introElements.forEach(e => mixedSectionsXml.push(e.xml));
 
-                let questionsToProcess = [...sec.questions];
-                if (this.config.dao_cau) {
-                    const lockedPositions = [];
-                    const movable = [];
-                    questionsToProcess.forEach((q, idx) => {
-                        if (q.isLocked) lockedPositions.push({ idx, q });
-                        else movable.push(q);
-                    });
-                    const shuffled = this.shuffleArray(movable);
-                    const finalOrder = [];
-                    let movIdx = 0;
-                    for (let i = 0; i < questionsToProcess.length; i++) {
-                        const locked = lockedPositions.find(p => p.idx === i);
-                        if (locked) finalOrder.push(locked.q);
-                        else finalOrder.push(shuffled[movIdx++]);
-                    }
-                    questionsToProcess = finalOrder;
-                }
+                const questionsToProcess = this.smartShuffleDocxQuestions(sec.questions, this.config.phannhom);
 
                 let secQIndex = 0;
                 for (const q of questionsToProcess) {
@@ -1127,6 +1282,9 @@
                 firstXml = firstXml.replace(/(<w:t\b[^>]*>)\s*\d+([:.\s(])/, `$1${newQNum}: `);
             }
             firstXml = firstXml.replace(/(<w:t\b[^>]*>)##\s*/i, '$1');
+            if (!keepUnderlines) {
+                firstXml = firstXml.replace(/(<w:t\b[^>]*>)\s*(?:\[\d[A-Z0-9]{4,5}-[A-Z0-9]\]|\[(?:NB|TH|VD|VDC|B|H|V|C|Nhận\s*biết|Thông\s*hiểu|Vận\s*dụng\s*cao|Vận\s*dụng)\])\s*/gi, '$1');
+            }
             qElements[0].xml = firstXml;
 
             if (q.type === 'choice') {
@@ -2244,10 +2402,10 @@
                 });
             }
 
-            // Chia khối QM (tối đa 3 mã đề / mã QR theo đúng chuẩn LiveTex và app QM Chấm Thi)
+            // Chia khối QM (tối đa 8 mã đề / mã QR theo yêu cầu Thầy Phạm Đình Quang)
             const qmChunks = [];
-            for (let i = 0; i < qmList.length; i += 3) {
-                const chunk = qmList.slice(i, i + 3);
+            for (let i = 0; i < qmList.length; i += 8) {
+                const chunk = qmList.slice(i, i + 8);
                 const jsonStr = JSON.stringify(chunk);
                 qmChunks.push({
                     madeList: chunk.map(c => c[0]),
