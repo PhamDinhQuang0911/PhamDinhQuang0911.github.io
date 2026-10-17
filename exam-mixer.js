@@ -2770,6 +2770,66 @@ ${inputs}
                         </select>
                     </div>
 
+                    <!-- Nút Tải File mẫu chuẩn & Nút Mở Hướng dẫn định dạng -->
+                    <div class="flex items-center justify-between flex-wrap gap-2 px-1">
+                        <div class="flex items-center gap-2">
+                            <a href="mau_de_tron_chuan.docx" download="De_Thi_Mau_Tron_De_QMath.docx" class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/40 dark:hover:bg-blue-900/50 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-lg text-xs font-bold transition shadow-2xs">
+                                <i class="fa-solid fa-file-arrow-down text-blue-600 dark:text-blue-400"></i> Tải file Word mẫu chuẩn (.docx)
+                            </a>
+                            <span class="text-[11px] text-gray-400 hidden sm:inline">|</span>
+                            <span class="text-[11px] text-gray-500 dark:text-gray-400 hidden sm:inline">Chuẩn 3 Phần Bộ GD&ĐT 2025 kèm MathType</span>
+                        </div>
+                        <button type="button" onclick="window.toggleMixerGuide()" class="inline-flex items-center gap-1 text-xs font-bold text-primary-600 hover:text-primary-700 dark:text-primary-400 cursor-pointer">
+                            <i class="fa-solid fa-circle-question"></i> <span id="textToggleMixerGuide">Hướng dẫn định dạng &amp; quy tắc file</span>
+                            <i id="iconToggleMixerGuide" class="fa-solid fa-chevron-down text-[10px] transition-transform duration-200"></i>
+                        </button>
+                    </div>
+
+                    <!-- Khung Hướng dẫn định dạng chi tiết (Collapsible) -->
+                    <div id="mixerGuideBox" class="hidden p-3.5 bg-sky-50/70 dark:bg-sky-950/20 rounded-xl border border-sky-200 dark:border-sky-800/60 text-xs space-y-3 transition-all">
+                        <div class="flex items-center justify-between border-b border-sky-200 dark:border-sky-800/80 pb-2">
+                            <span class="font-bold text-sky-800 dark:text-sky-300 flex items-center gap-1.5">
+                                <i class="fa-solid fa-book-open"></i> Hướng dẫn định dạng file Word (.docx) &amp; Quy tắc trộn đề thi
+                            </span>
+                            <span class="text-[11px] text-sky-600 dark:text-sky-400 font-medium">Bảo toàn 100% công thức MathType OLE &amp; OMML</span>
+                        </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-[11px] text-gray-700 dark:text-gray-300">
+                            <!-- Cột 1: Các cách đặt phương án đúng -->
+                            <div class="space-y-2 bg-white dark:bg-gray-800/80 p-2.5 rounded-lg border border-sky-100 dark:border-gray-700">
+                                <p class="font-bold text-gray-800 dark:text-gray-200 flex items-center gap-1">
+                                    <i class="fa-solid fa-check-double text-emerald-500"></i> 1. Các cách đặt phương án đúng (Hỗ trợ cả 3 cách):
+                                </p>
+                                <ul class="list-disc pl-4 space-y-1 text-gray-600 dark:text-gray-300">
+                                    <li><b>Cách 1 (Gạch chân / Tô màu):</b> <u class="text-emerald-600 dark:text-emerald-400">Gạch chân</u> hoặc <span class="bg-yellow-200 dark:bg-yellow-800/60 px-1 rounded">Highlight</span> phương án đúng (VD: <u>A.</u> hoặc <u>A. $x = 2$</u>). Hệ thống sẽ tự động gỡ gạch chân/tô màu trên đề thi của học sinh.</li>
+                                    <li><b>Cách 2 (Trong Lời giải):</b> Ghi rõ <code class="bg-gray-100 dark:bg-gray-700 px-1 rounded font-bold">Chọn A</code> / <code class="bg-gray-100 dark:bg-gray-700 px-1 rounded font-bold">Chọn B</code>... trong phần lời giải.</li>
+                                    <li><b>Cách 3 (Bảng đáp án tổng hợp):</b> Đặt bảng đáp án tổng hợp ở cuối tài liệu (như trong file mẫu). Hệ thống tự động quét và trích xuất chuẩn xác 100%.</li>
+                                    <li><b>Phần II (Đúng / Sai):</b> Gạch chân ý Đúng (các ý không gạch chân là Sai), hoặc ghi <code class="bg-gray-100 dark:bg-gray-700 px-1 rounded font-bold">(Đúng)</code>, <code class="bg-gray-100 dark:bg-gray-700 px-1 rounded font-bold">(Sai)</code> ở cuối mỗi ý a, b, c, d.</li>
+                                    <li><b>Phần III (Trả lời ngắn):</b> Ghi sau từ khóa: <code class="bg-gray-100 dark:bg-gray-700 px-1 rounded font-bold">Đáp án: 0,5</code> hoặc <code class="bg-gray-100 dark:bg-gray-700 px-1 rounded font-bold">Đáp số: -6</code> (hoặc gạch chân số).</li>
+                                </ul>
+                            </div>
+
+                            <!-- Cột 2: Cấu trúc 3 Phần & Kết thúc file -->
+                            <div class="space-y-2 bg-white dark:bg-gray-800/80 p-2.5 rounded-lg border border-sky-100 dark:border-gray-700">
+                                <p class="font-bold text-gray-800 dark:text-gray-200 flex items-center gap-1">
+                                    <i class="fa-solid fa-flag-checkered text-rose-500"></i> 2. Khi nào thì kết thúc 1 file (Đề thi)?
+                                </p>
+                                <ul class="list-disc pl-4 space-y-1 text-gray-600 dark:text-gray-300">
+                                    <li>Đặt chữ <b class="text-rose-600 dark:text-rose-400">HẾT</b> hoặc <b class="text-rose-600 dark:text-rose-400">--- HẾT ---</b> hoặc <b class="text-rose-600 dark:text-rose-400">(HẾT)</b> ở một dòng riêng biệt.</li>
+                                    <li><b>Quy tắc quan trọng:</b> Mọi nội dung đặt sau chữ <b>HẾT</b> (như Bảng đáp án tổng hợp, Lời giải chi tiết, Ma trận đề, Thông tin giám thị) sẽ <b>KHÔNG bị trộn lẫn vào đề thi</b> của học sinh.</li>
+                                    <li>Đề thi con học sinh tải về sẽ tự động cắt phần sau chữ HẾT và thay bằng chân trang chuẩn Bộ GD&ĐT: <code class="bg-gray-100 dark:bg-gray-700 px-1 rounded">------------------- HẾT -------------------</code>.</li>
+                                </ul>
+
+                                <p class="font-bold text-gray-800 dark:text-gray-200 pt-1 flex items-center gap-1">
+                                    <i class="fa-solid fa-lock text-amber-500"></i> 3. Khóa câu hỏi / phương án không đảo:
+                                </p>
+                                <p class="text-gray-600 dark:text-gray-300">
+                                    Thêm ký hiệu <code class="bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 px-1 rounded font-bold">##</code> trước câu hỏi (VD: <code class="bg-gray-100 dark:bg-gray-700 px-1 rounded">## Câu 5:</code>) hoặc trước phương án để giữ nguyên vị trí ban đầu, không bị đảo xáo.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- 2. Bố cục 2 Cột: Cấu hình Trộn đề & Khung Tiêu Đề -->
                     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 16px;">
                         
@@ -2950,6 +3010,23 @@ ${inputs}
         const modal = document.getElementById('examMixerModal');
         if (modal) modal.classList.add('hidden');
     }
+
+    window.toggleMixerGuide = function() {
+        const box = document.getElementById('mixerGuideBox');
+        const icon = document.getElementById('iconToggleMixerGuide');
+        const text = document.getElementById('textToggleMixerGuide');
+        if (!box) return;
+        const isHidden = box.classList.contains('hidden');
+        if (isHidden) {
+            box.classList.remove('hidden');
+            if (icon) icon.className = "fa-solid fa-chevron-up text-[10px] transition-transform duration-200";
+            if (text) text.textContent = "Thu gọn hướng dẫn";
+        } else {
+            box.classList.add('hidden');
+            if (icon) icon.className = "fa-solid fa-chevron-down text-[10px] transition-transform duration-200";
+            if (text) text.textContent = "Hướng dẫn định dạng & quy tắc file";
+        }
+    };
 
     window.switchMixerInputTab = function(tab) {
         window._activeMixerTab = tab;
