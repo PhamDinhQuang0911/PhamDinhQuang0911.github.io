@@ -659,6 +659,243 @@ export class EmailAuthProvider {
     static credential(email, password) { return { email, password }; }
 }
 
+
+// ==========================================
+// 4. PARENT WATCH & LESSON NOTE HELPERS
+// ==========================================
+export function generateParentWatchToken(studentId = '') {
+    const r1 = Math.random().toString(36).substring(2, 10);
+    const t = Date.now().toString(36);
+    const r2 = Math.random().toString(36).substring(2, 10);
+    return `qm_pw_${r1}${t}${r2}`;
+}
+
+export async function getOrCreateParentWatchToken({ studentId, studentName = '', classId = '', className = '', examId = '', examTitle = '', forceNew = false } = {}) {
+    if (!studentId) return null;
+    const docId = examId ? `${studentId}_${examId}` : `student_${studentId}`;
+    try {
+        if (!forceNew) {
+            const snap = await getDoc(doc(null, 'parent_watch_tokens', docId));
+            if (snap.exists() && snap.data().token && !snap.data().revoked) {
+                return snap.data().token;
+            }
+            // Nếu chưa có theo exam, kiểm tra token cố định của học sinh trên users
+            if (!examId) {
+                const { data: userRow } = await supabase.from('users').select('id, raw_data').eq('id', studentId).maybeSingle();
+                if (userRow && userRow.raw_data && userRow.raw_data.parentWatchToken) {
+                    const tok = userRow.raw_data.parentWatchToken;
+                    await setDoc(doc(null, 'parent_watch_tokens', docId), {
+                        token: tok,
+                        scope: 'student',
+                        studentId,
+                        studentName,
+                        classId,
+                        className,
+                        createdAt: new Date().toISOString()
+                    }, { merge: true });
+                    return tok;
+                }
+            }
+        }
+        const newToken = generateParentWatchToken(studentId);
+        const payload = {
+            id: docId,
+            token: newToken,
+            scope: examId ? 'attempt' : 'student',
+            studentId,
+            studentName,
+            classId,
+            className,
+            examId: examId || null,
+            examTitle: examTitle || null,
+            revoked: false,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+        };
+        await setDoc(doc(null, 'parent_watch_tokens', docId), payload, { merge: true });
+        // Lưu đồng thời một bản ánh xạ theo chính mã token để tra cứu O(1)
+        await setDoc(doc(null, 'parent_watch_tokens', 'tok_' + newToken), payload, { merge: true });
+
+        if (!examId) {
+            try {
+                const { data: userRow } = await supabase.from('users').select('id, raw_data').eq('id', studentId).maybeSingle();
+                const currRaw = (userRow && userRow.raw_data) ? userRow.raw_data : {};
+                await supabase.from('users').update({
+                    raw_data: { ...currRaw, parentWatchToken: newToken }
+                }).eq('id', studentId);
+            } catch(e) {}
+        }
+        return newToken;
+    } catch (e) {
+        console.warn('[getOrCreateParentWatchToken] Error:', e);
+        return null;
+    }
+}
+
+export async function resolveParentWatchData(rawToken, filterExamId = '') {
+    if (!rawToken || typeof rawToken !== 'string') {
+        throw new Error('Mã theo dõi không hợp lệ!');
+    }
+    let token = rawToken.trim();
+    if (token.includes('?')) {
+        try {
+            const urlObj = new URL(token, 'https://qmath.io.vn');
+            token = urlObj.searchParams.get('t') || urlObj.searchParams.get('qr_token') || urlObj.searchParams.get('qr_login') || token;
+        } catch(e) {}
+    }
+    token = token.trim();
+    if (!token) throw new Error('Mã theo dõi trống!');
+
+    let studentId = '';
+    let studentName = '';
+    let classId = '';
+    let className = '';
+    let targetExamId = filterExamId || '';
+
+    // 1. Tra cứu O(1) trong parent_watch_tokens theo tok_<token>
+    const tokSnap = await getDoc(doc(null, 'parent_watch_tokens', 'tok_' + token));
+    if (tokSnap.exists() && !tokSnap.data().revoked) {
+        const d = tokSnap.data();
+        studentId = d.studentId || '';
+        studentName = d.studentName || '';
+        classId = d.classId || '';
+        className = d.className || '';
+        if (!targetExamId && d.examId) targetExamId = d.examId;
+    }
+
+    // 2. Nếu chưa thấy, tìm trong toàn bộ parent_watch_tokens
+    if (!studentId) {
+        try {
+            const allPwt = await getDocs(query(collection(null, 'parent_watch_tokens'), where('token', '==', token)));
+            if (!allPwt.empty) {
+                const d = allPwt.docs[0].data();
+                if (!d.revoked) {
+                    studentId = d.studentId || '';
+                    studentName = d.studentName || '';
+                    classId = d.classId || '';
+                    className = d.className || '';
+                    if (!targetExamId && d.examId) targetExamId = d.examId;
+                }
+            }
+        } catch(e) {}
+    }
+
+    // 3. Hỗ trợ quét trực tiếp mã QR thẻ học sinh (qm_qr_...) hoặc parentWatchToken trong bảng users
+    if (!studentId) {
+        try {
+            const { data: users } = await supabase
+                .from('users')
+                .select('*')
+                .or(`raw_data->>parentWatchToken.eq.${token},raw_data->>qrLoginToken.eq.${token},id.eq.${token}`)
+                .limit(1);
+            if (users && users.length > 0) {
+                const u = unwrapRecord(users[0]);
+                studentId = u.id;
+                studentName = u.displayName || u.display_name || u.email || 'Học sinh';
+            }
+        } catch(e) {}
+    }
+
+    if (!studentId) {
+        throw new Error('Mã theo dõi không tồn tại hoặc đã hết hạn. Vui lòng liên hệ Giáo viên để nhận đường dẫn mới.');
+    }
+
+    // 4. Bổ sung thông tin học sinh & lớp học nếu còn thiếu
+    let studentProfile = null;
+    try {
+        const uSnap = await getDoc(doc(null, 'users', studentId));
+        if (uSnap.exists()) {
+            studentProfile = uSnap.data();
+            if (!studentName) studentName = studentProfile.displayName || studentProfile.display_name || studentProfile.name || 'Học sinh';
+        }
+    } catch(e) {}
+
+    if (!className && classId) {
+        try {
+            const cSnap = await getDoc(doc(null, 'classes', classId));
+            if (cSnap.exists()) className = cSnap.data().name || '';
+        } catch(e) {}
+    }
+
+    // 5. Lấy danh sách bài đang làm (exam_attempts) của học sinh này
+    let attempts = [];
+    try {
+        const attSnap = await getDocs(query(collection(null, 'exam_attempts'), where('studentId', '==', studentId)));
+        attSnap.forEach(d => {
+            attempts.push({ id: d.id, ...d.data() });
+        });
+    } catch(e) {}
+
+    // Sắp xếp attempt mới nhất lên đầu
+    attempts.sort((a, b) => {
+        const ta = new Date(a.lastHeartbeat || a.lastUpdated || a.last_updated || a.startedAt || 0).getTime();
+        const tb = new Date(b.lastHeartbeat || b.lastUpdated || b.last_updated || b.startedAt || 0).getTime();
+        return tb - ta;
+    });
+
+    // 6. Lấy lịch sử kết quả đã nộp (results) gần đây của học sinh
+    let recentResults = [];
+    try {
+        const resSnap = await getDocs(query(collection(null, 'results'), where('studentId', '==', studentId)));
+        resSnap.forEach(d => {
+            recentResults.push({ id: d.id, ...d.data() });
+        });
+        recentResults.sort((a, b) => {
+            const ta = new Date(a.submittedAt || a.submitted_at || 0).getTime();
+            const tb = new Date(b.submittedAt || b.submitted_at || 0).getTime();
+            return tb - ta;
+        });
+    } catch(e) {}
+
+    // 7. Lấy thông tin đề thi liên quan (chỉ lấy metadata an toàn, KHÔNG lấy nội dung câu hỏi/đáp án)
+    const examIds = new Set();
+    if (targetExamId) examIds.add(targetExamId);
+    attempts.slice(0, 5).forEach(a => { if (a.examId || a.exam_id) examIds.add(a.examId || a.exam_id); });
+    recentResults.slice(0, 8).forEach(r => { if (r.examId || r.exam_id) examIds.add(r.examId || r.exam_id); });
+
+    const examMap = {};
+    for (const eid of examIds) {
+        try {
+            const { data: exRow } = await supabase
+                .from('exams')
+                .select('id, title, duration, pass_score, question_count, purpose, subject, grade, n8n_webhooks, raw_data')
+                .eq('id', eid)
+                .maybeSingle();
+            if (exRow) {
+                const raw = (exRow.raw_data && typeof exRow.raw_data === 'object') ? exRow.raw_data : {};
+                const wh = exRow.n8n_webhooks || raw.n8nWebhooks || {};
+                examMap[eid] = {
+                    id: exRow.id,
+                    title: exRow.title || raw.title || 'Bài kiểm tra',
+                    duration: exRow.duration || raw.duration || 45,
+                    passScore: exRow.pass_score ?? raw.passScore ?? 5,
+                    questionCount: exRow.question_count || raw.questionCount || 0,
+                    purpose: exRow.purpose || raw.purpose || '',
+                    subject: exRow.subject || raw.subject || 'Toán',
+                    grade: exRow.grade || raw.grade || '',
+                    parentScore: wh.parentScore !== false
+                };
+            }
+        } catch(e) {}
+    }
+
+    return {
+        token,
+        student: {
+            id: studentId,
+            name: studentName || 'Học sinh',
+            sbd: (studentProfile && studentProfile.sbd) || '',
+            classId,
+            className: className || ''
+        },
+        targetExamId,
+        attempts: attempts.slice(0, 5),
+        recentResults: recentResults.slice(0, 10),
+        examMap,
+        serverTime: new Date().toISOString()
+    };
+}
+
 if (typeof window !== 'undefined') {
     window.EmailAuthProvider = EmailAuthProvider;
     window.reauthenticateWithCredential = reauthenticateWithCredential;
@@ -1005,6 +1242,16 @@ function unwrapRecord(r) {
     if (r.raw_tex !== undefined && !res.rawTex) res.rawTex = r.raw_tex;
     if (r.raw_tex_name !== undefined && !res.rawTexName) res.rawTexName = r.raw_tex_name;
     if (r.latex_content !== undefined && !res.latexContent) res.latexContent = r.latex_content;
+    if (r.exam_id !== undefined && !res.examId) res.examId = r.exam_id;
+    if (r.student_id !== undefined && !res.studentId) res.studentId = r.student_id;
+    if (r.student_name !== undefined && !res.studentName) res.studentName = r.student_name;
+    if (r.class_id !== undefined && !res.classId) res.classId = r.class_id;
+    if (r.last_updated !== undefined && !res.lastUpdated) res.lastUpdated = r.last_updated;
+    if (r.submitted_at !== undefined && !res.submittedAt) res.submittedAt = r.submitted_at;
+    if (r.cheat_count !== undefined && res.cheatCount === undefined) res.cheatCount = r.cheat_count;
+    if (r.total_questions !== undefined && res.totalQuestions === undefined) res.totalQuestions = r.total_questions;
+    if (r.correct_count !== undefined && res.correctCount === undefined) res.correctCount = r.correct_count;
+    if (r.is_passed !== undefined && res.isPassed === undefined) res.isPassed = r.is_passed;
 
     // Unpack public_courses metadata from preview_link (fallback)
     if (r.preview_link && typeof r.preview_link === 'string' && r.preview_link.trim().startsWith('{')) {
@@ -1166,7 +1413,41 @@ function toSupabasePayload(table, id, data) {
     return converted;
 }
 
+const VIRTUAL_CONFIG_PREFIX = {
+    custom_topics: 'topic_',
+    qpoint_transactions: 'qptx_',
+    class_lessons: 'lesson_',
+    lesson_notes: 'lnote_',
+    parent_watch_tokens: 'pwt_',
+    lesson_views: 'lview_',
+    exam_live_events: 'evlive_'
+};
+
 export async function getDoc(docRef) {
+    if (docRef && VIRTUAL_CONFIG_PREFIX[docRef.table]) {
+        const prefix = VIRTUAL_CONFIG_PREFIX[docRef.table];
+        const rawId = String(docRef.id || '');
+        const confId = rawId.startsWith(prefix) ? rawId : (prefix + rawId);
+        const cleanId = rawId.startsWith(prefix) ? rawId.slice(prefix.length) : rawId;
+        try {
+            const { data: confData } = await supabase
+                .from('configurations')
+                .select('*')
+                .eq('id', confId)
+                .maybeSingle();
+            if (confData && confData.raw_data) {
+                const docData = unwrapRecord({ ...confData.raw_data, id: confData.raw_data.id || cleanId });
+                return {
+                    id: cleanId,
+                    exists: () => true,
+                    data: () => docData
+                };
+            }
+        } catch(e) {
+            console.warn('[Supabase getDoc virtual]', docRef.table, e);
+        }
+        return { id: cleanId, exists: () => false, data: () => ({}) };
+    }
     try {
         const table = docRef.table;
         const pkCol = getPrimaryKeyCol(table);
@@ -1191,7 +1472,86 @@ export async function getDoc(docRef) {
             }
         }
 
-        if (table === 'custom_topics') {
+        if (VIRTUAL_CONFIG_PREFIX[table]) {
+            const prefix = VIRTUAL_CONFIG_PREFIX[table];
+            try {
+                const { data: confRows, error: vErr } = await supabase
+                    .from('configurations')
+                    .select('*')
+                    .like('id', prefix + '%');
+                if (vErr) throw vErr;
+                let resultRows = (confRows || []).map(r => {
+                    const raw = (r.raw_data && typeof r.raw_data === 'object') ? r.raw_data : {};
+                    const itemId = raw.id || r.id.slice(prefix.length);
+                    return { id: itemId, ...raw };
+                });
+                const constraints = queryOrColRef.constraints || [];
+                let docs = resultRows.map(r => {
+                    const docData = unwrapRecord(r);
+                    return {
+                        id: r.id || r.key,
+                        exists: () => true,
+                        data: () => docData
+                    };
+                }).filter(doc => {
+                    const d = doc.data();
+                    for (const c of constraints) {
+                        if (c.type === 'where') {
+                            const val = d[c.field] !== undefined ? d[c.field] : d[mapFieldToColumn(c.field)];
+                            if (c.op === '==' || c.op === '===') {
+                                if (val !== c.value) return false;
+                            } else if (c.op === '!=') {
+                                if (val === c.value) return false;
+                            } else if (c.op === 'in') {
+                                if (!Array.isArray(c.value) || !c.value.includes(val)) return false;
+                            } else if (c.op === 'array-contains') {
+                                if (!Array.isArray(val) || !val.includes(c.value)) return false;
+                            } else if (c.op === 'array-contains-any') {
+                                if (!Array.isArray(val) || !Array.isArray(c.value) || !val.some(x => c.value.includes(x))) return false;
+                            }
+                        }
+                    }
+                    return true;
+                });
+                for (const c of constraints) {
+                    if (c.type === 'orderBy') {
+                        const dir = c.direction === 'desc' ? -1 : 1;
+                        docs.sort((a, b) => {
+                            const va = a.data()[c.field] ?? a.data()[mapFieldToColumn(c.field)] ?? '';
+                            const vb = b.data()[c.field] ?? b.data()[mapFieldToColumn(c.field)] ?? '';
+                            if (va < vb) return -1 * dir;
+                            if (va > vb) return 1 * dir;
+                            return 0;
+                        });
+                    }
+                }
+                for (const c of constraints) {
+                    if (c.type === 'limit' && c.count > 0) {
+                        docs = docs.slice(0, c.count);
+                    }
+                }
+                return {
+                    docs,
+                    forEach: (cb) => docs.forEach(cb),
+                    size: docs.length,
+                    empty: docs.length === 0
+                };
+            } catch(errV) {
+                console.warn('[Supabase getDocs virtual]', table, errV);
+                return { docs: [], forEach: () => {}, size: 0, empty: true };
+            }
+        }
+        if (VIRTUAL_CONFIG_PREFIX[table]) {
+        const prefix = VIRTUAL_CONFIG_PREFIX[table];
+        const confPayload = {
+            id: prefix + newId,
+            raw_data: { id: newId, ...data, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+            updated_at: new Date().toISOString()
+        };
+        await supabase.from('configurations').upsert(confPayload, { onConflict: 'id' });
+        return { id: newId };
+    }
+    if (table === 'custom_topics') {
             try {
                 const confId = docRef.id.startsWith('topic_') ? docRef.id : ('topic_' + docRef.id);
                 const { data: confData } = await supabase
@@ -1831,6 +2191,27 @@ export async function setDoc(docRef, data, options = {}) {
     const table = docRef.table;
     const pkCol = getPrimaryKeyCol(table);
 
+    if (VIRTUAL_CONFIG_PREFIX[table]) {
+        const prefix = VIRTUAL_CONFIG_PREFIX[table];
+        const rawId = String(docRef.id || '');
+        const confId = rawId.startsWith(prefix) ? rawId : (prefix + rawId);
+        const cleanId = rawId.startsWith(prefix) ? rawId.slice(prefix.length) : rawId;
+        let vData = data;
+        if (options && options.merge) {
+            try {
+                const { data: ex } = await supabase.from('configurations').select('raw_data').eq('id', confId).maybeSingle();
+                if (ex && ex.raw_data) vData = mergeDeep(ex.raw_data, data);
+            } catch(e) {}
+        }
+        const confPayload = {
+            id: confId,
+            raw_data: { id: cleanId, ...vData, updatedAt: new Date().toISOString() },
+            updated_at: new Date().toISOString()
+        };
+        const { error: confErr } = await supabase.from('configurations').upsert(confPayload, { onConflict: 'id' });
+        if (confErr) throw confErr;
+        return docRef;
+    }
     let finalData = data;
     if (options && options.merge) {
         try {
@@ -2349,7 +2730,7 @@ export async function deleteDoc(docRef) {
 }
 
 export function onSnapshot(targetRef, callback, errorCallback) {
-    const table = targetRef.table;
+    const table = VIRTUAL_CONFIG_PREFIX[targetRef.table] ? 'configurations' : targetRef.table;
     const channelId = `realtime_${table}_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
 
     if (targetRef.type === 'doc') {
@@ -2435,5 +2816,7 @@ if (typeof window !== 'undefined') {
     window.where = window.where || where;
     window.getDocs = window.getDocs || getDocs;
     window.includeQuestions = window.includeQuestions || includeQuestions;
+    window.getOrCreateParentWatchToken = window.getOrCreateParentWatchToken || getOrCreateParentWatchToken;
+    window.resolveParentWatchData = window.resolveParentWatchData || resolveParentWatchData;
 }
 

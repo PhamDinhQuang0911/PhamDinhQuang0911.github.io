@@ -83,6 +83,7 @@
     </script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <script src="./live-tracker.js?v=20261024"></script>
     
     <script>
     // --- CẤU HÌNH MATHJAX ---
@@ -1277,6 +1278,20 @@
                             attemptPayload.startTime = startTimeMs;
                         }
                         setDoc(attemptRef, attemptPayload, { merge: true }).catch(() => {});
+                        if (window.LiveTracker && window.LiveTracker.active) {
+                            const st = computeLiveStats();
+                            window.LiveTracker.progress({
+                                currentIndex,
+                                answeredCount: st.answeredCount,
+                                totalQuestions: st.totalQuestions,
+                                flaggedCount: st.flaggedCount,
+                                cheatCount,
+                                timeLeftSec: timeLeft,
+                                answers: userAnswers,
+                                briefNotes: window.briefNotes || {},
+                                answeredMap: st.answeredMap
+                            });
+                        }
                     };
 
                     if (immediate) {
@@ -1288,6 +1303,73 @@
                     }
                 }
             }
+        }
+
+        function computeLiveStats() {
+            const total = Array.isArray(currentQuestions) ? currentQuestions.length : 0;
+            let answered = 0;
+            let flagged = 0;
+            const answeredMap = {};
+            for (let i = 0; i < total; i++) {
+                const q = currentQuestions[i] || {};
+                const a = userAnswers[i];
+                let done = (a !== undefined && a !== null && a !== '');
+                if (q.type === 'tf' && typeof a === 'object' && a !== null) {
+                    done = Object.keys(a).length > 0;
+                }
+                if (done) answered++;
+                if (flaggedQuestions && flaggedQuestions[i]) flagged++;
+                answeredMap[i] = (flaggedQuestions && flaggedQuestions[i]) ? 2 : (done ? 1 : 0);
+            }
+            return {
+                answeredCount: answered,
+                flaggedCount: flagged,
+                totalQuestions: total,
+                answeredMap
+            };
+        }
+
+        function startLiveExamTracker() {
+            if (!window.LiveTracker || !currentUser || !examId || !examData) return;
+            const urlParams = new URLSearchParams(window.location.search);
+            const st = computeLiveStats();
+            window.LiveTracker.start({
+                examId: examId,
+                examTitle: examData.title || 'Bài kiểm tra',
+                studentId: currentUser.uid,
+                studentName: currentUser.displayName || currentUser.email || 'Học sinh',
+                sbd: currentUser.sbd || '',
+                studentEmail: currentUser.email || '',
+                classId: urlParams.get('classId') || '',
+                allowedClassIds: examData.allowedClassIds || examData.assignTo || (examData.allowedClassId ? [examData.allowedClassId] : []),
+                startedAt: startTimeMs ? new Date(startTimeMs).toISOString() : new Date().toISOString(),
+                currentIndex: currentIndex || 0,
+                answeredCount: st.answeredCount,
+                totalQuestions: st.totalQuestions,
+                flaggedCount: st.flaggedCount,
+                cheatCount: cheatCount || 0,
+                timeLeftSec: timeLeft || 0,
+                answers: userAnswers,
+                briefNotes: window.briefNotes || {},
+                answeredMap: st.answeredMap,
+                getTimeLeftSec: () => timeLeft,
+                onExtendTime: (addSec) => {
+                    timeLeft = (Number(timeLeft) || 0) + addSec;
+                    if (window.endTimeStamp) {
+                        window.endTimeStamp += addSec * 1000;
+                    } else {
+                        window.endTimeStamp = Date.now() + (timeLeft * 1000);
+                    }
+                    if (typeof updateTimer === 'function') updateTimer();
+                },
+                onForceSubmit: () => {
+                    if (examData && (examData.type === 'homework' || examData.type === 'mixed')) {
+                        if (typeof window.submitHomework === 'function') window.submitHomework(true);
+                    } else {
+                        submitReal(true);
+                    }
+                }
+            });
         }
 
         function startAutoSync() {
@@ -1473,7 +1555,7 @@
                         const attemptRef = doc(db, "exam_attempts", `${currentUser.uid}_${examId}`);
                         const attemptSnap = await getDoc(attemptRef);
                         let cloudAnswers = {};
-                        if (attemptSnap.exists()) cloudAnswers = attemptSnap.data().answers || {};
+                        if (attemptSnap.exists() && attemptSnap.data().status !== 'submitted') cloudAnswers = attemptSnap.data().answers || {};
                         const localAnswers = JSON.parse(localStorage.getItem(`ans_${currentUser.uid}_${examId}`)) || {};
                         userAnswers = { ...cloudAnswers, ...localAnswers };
                         
@@ -1493,7 +1575,7 @@
                 const attemptRef = doc(db, "exam_attempts", `${currentUser.uid}_${examId}`);
                 const attemptSnap = await getDoc(attemptRef);
                 const btnStart = document.getElementById('btnStartExam');
-                let hasDraft = attemptSnap.exists();
+                let hasDraft = attemptSnap.exists() && attemptSnap.data().status !== 'submitted';
 
                 const urlParams = new URLSearchParams(window.location.search);
                 
@@ -1756,6 +1838,8 @@
                         window.currentResultId = window.examHistory[0].id;
                     }
                 }
+                isExamActive = true;
+                startLiveExamTracker();
                 renderHomeworkView();
                 return;
             }
@@ -1930,6 +2014,7 @@
             if(examData.proctoring) { document.getElementById('cheatWarning').classList.remove('hidden'); initProctoring(); }
             
             isExamActive = true;
+            startLiveExamTracker();
             if (examData.type === 'mixed') {
                 renderHomeworkView();
             } else {
@@ -1978,6 +2063,9 @@
                     lastCheatTime = Date.now();
                     cheatCount++;
                     document.getElementById('cheatCount').textContent = cheatCount;
+                    if (window.LiveTracker && window.LiveTracker.active) {
+                        window.LiveTracker.violation('tab_blur', 'Rời màn hình / Chuyển tab khi đang làm bài', cheatCount);
+                    }
                     if(document.getElementById('cheatModalCount')) {
                         document.getElementById('cheatModalCount').textContent = cheatCount;
                     }
@@ -2176,6 +2264,18 @@
             if(window.MathJax) { MathJax.typesetPromise([dom.content, dom.options]).then(() => { if(window.renderTikz) window.renderTikz(); if(window.autoScaleTables) window.autoScaleTables(); }).catch(()=>{}); }
             updatePalette();
             closeAllSidebars();
+            if (window.LiveTracker && window.LiveTracker.active) {
+                const st = computeLiveStats();
+                window.LiveTracker.progress({
+                    currentIndex: idx,
+                    answeredCount: st.answeredCount,
+                    totalQuestions: st.totalQuestions,
+                    flaggedCount: st.flaggedCount,
+                    cheatCount,
+                    timeLeftSec: timeLeft,
+                    answeredMap: st.answeredMap
+                });
+            }
         }
 
         function updatePalette() {
@@ -2840,9 +2940,30 @@
             if (!window.examHistory) window.examHistory = [];
             window.examHistory.unshift(resultData);
             
-            // 3. [MỚI] XÓA DỮ LIỆU TẠM (CLEANUP)
-            // Xóa bản ghi "đang làm dở" trên Cloud sau khi đã lưu kết quả.
-            await deleteDoc(doc(db, "exam_attempts", `${currentUser.uid}_${examId}`));
+            // 3. [MỚI] CẬP NHẬT TRẠNG THÁI ĐÃ NỘP CHO PHÒNG GIÁM SÁT TRỰC TIẾP & PHỤ HUYNH
+            if (window.LiveTracker) {
+                await window.LiveTracker.submit({
+                    score,
+                    correctCount: correct,
+                    totalQuestions: currentQuestions.length,
+                    answeredCount: Object.keys(userAnswers || {}).length,
+                    cheatCount
+                });
+            } else {
+                await setDoc(doc(db, "exam_attempts", `${currentUser.uid}_${examId}`), {
+                    examId,
+                    studentId: currentUser.uid,
+                    studentName: currentUser.displayName || currentUser.email,
+                    classId: detectedClassId,
+                    status: 'submitted',
+                    score,
+                    correctCount: correct,
+                    totalQuestions: currentQuestions.length,
+                    cheatCount,
+                    submittedAt: new Date().toISOString(),
+                    lastUpdated: new Date().toISOString()
+                }, { merge: true });
+            }
             // Xóa dữ liệu trong máy
             localStorage.removeItem(`ans_${currentUser.uid}_${examId}`);
             localStorage.removeItem(`order_${currentUser.uid}_${examId}`);
@@ -4390,7 +4511,28 @@ window.requestResubmit = async () => {
                 window.retryGrantRefs = [];
             }
 
-                await deleteDoc(doc(db, "exam_attempts", `${currentUser.uid}_${examId}`));
+                if (window.LiveTracker) {
+                    await window.LiveTracker.submit({
+                        score,
+                        correctCount,
+                        totalQuestions,
+                        answeredCount: Object.keys(resultAnswers || {}).length,
+                        cheatCount: 0
+                    });
+                } else {
+                    await setDoc(doc(db, "exam_attempts", `${currentUser.uid}_${examId}`), {
+                        examId,
+                        studentId: currentUser.uid,
+                        studentName: currentUser.displayName || currentUser.email,
+                        classId: detectedClassId,
+                        status: 'submitted',
+                        score,
+                        correctCount,
+                        totalQuestions,
+                        submittedAt: new Date().toISOString(),
+                        lastUpdated: new Date().toISOString()
+                    }, { merge: true });
+                }
                 localStorage.removeItem(`ans_${currentUser.uid}_${examId}`);
                 localStorage.removeItem(`brief_${currentUser.uid}_${examId}`);
 
