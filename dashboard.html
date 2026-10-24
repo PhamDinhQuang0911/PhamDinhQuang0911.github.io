@@ -3600,16 +3600,20 @@
         <div class="modal-overlay absolute w-full h-full bg-slate-950/75 backdrop-blur-xs" onclick="window.toggleModal('batchPrintStudentCardsModal', false)"></div>
         <div class="modal-container bg-white w-full max-w-4xl mx-auto rounded-3xl shadow-2xl z-[70] overflow-hidden transform scale-95 transition-transform duration-300 flex flex-col max-h-[92vh] border border-gray-200">
             <!-- Header Modal -->
-            <div class="flex justify-between items-center py-4 px-6 border-b border-gray-200 bg-gray-50 shrink-0">
-                <div class="flex items-center gap-3">
-                    <span class="w-10 h-10 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-white flex items-center justify-center text-lg shadow-sm"><i class="fa-solid fa-print"></i></span>
-                    <div>
-                        <h3 class="font-extrabold text-gray-900 text-base">In Thẻ Học Sinh Cả Lớp (Khổ A4)</h3>
-                        <p class="text-xs text-gray-500" id="batchPrintSubtitle">Đang chuẩn bị danh sách thẻ...</p>
+            <div class="flex flex-wrap justify-between items-center gap-3 py-4 px-5 md:px-6 border-b border-gray-200 bg-gray-50 shrink-0">
+                <div class="flex items-center gap-3 min-w-0">
+                    <span class="w-10 h-10 rounded-xl btn-season-primary text-white flex items-center justify-center text-lg shadow-sm shrink-0"><i class="fa-solid fa-print"></i></span>
+                    <div class="min-w-0">
+                        <h3 class="font-extrabold text-gray-900 text-sm md:text-base truncate">In Thẻ Học Sinh Cả Lớp (Khổ A4)</h3>
+                        <p class="text-xs text-gray-500 truncate" id="batchPrintSubtitle">Đang chuẩn bị danh sách thẻ...</p>
                     </div>
                 </div>
-                <div class="flex items-center gap-2">
-                    <button type="button" onclick="window.triggerBatchPrint()" class="px-4 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white font-bold rounded-xl text-xs shadow-md flex items-center gap-2 transition cursor-pointer">
+                <div class="flex items-center gap-2 shrink-0">
+                    <button type="button" id="btnDownloadAllStudentCards" onclick="window.downloadAllStudentCardsBatch()" class="px-3.5 py-2 btn-season-secondary font-extrabold rounded-xl text-xs shadow-xs flex items-center gap-1.5 transition cursor-pointer" title="Tải về toàn bộ thẻ học sinh của lớp (Ảnh HD từng học sinh + Bảng A4)">
+                        <i class="fa-solid fa-download"></i>
+                        <span>Tải về toàn bộ thẻ</span>
+                    </button>
+                    <button type="button" onclick="window.triggerBatchPrint()" class="px-4 py-2 btn-season-primary text-white font-extrabold rounded-xl text-xs shadow-md flex items-center gap-1.5 transition cursor-pointer">
                         <i class="fa-solid fa-print"></i>
                         <span>Bắt đầu In ngay</span>
                     </button>
@@ -10531,6 +10535,128 @@
                 window.executePrintHtml(contentHtml, 'portrait');
             } else {
                 window.print();
+            }
+        };
+
+        window.downloadAllStudentCardsBatch = async function() {
+            if (!currentClassStudents || currentClassStudents.length === 0) {
+                window.showNotification("Chưa có thẻ học sinh nào để tải về!", "warning");
+                return;
+            }
+            const btn = document.getElementById('btnDownloadAllStudentCards');
+            const oldHtml = btn ? btn.innerHTML : '';
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>Đang tạo thẻ HD...</span>';
+            }
+            window.showNotification(`Đang kết xuất ${currentClassStudents.length} thẻ học sinh độ phân giải cao...`, "info");
+
+            try {
+                await new Promise(r => setTimeout(r, 120));
+                const currentClass = (window.allClassesData || []).find(c => c.id === currentViewingClassId);
+                const className = currentClass ? currentClass.name : 'Lớp học';
+                const safeClassName = className.trim().replace(/[\s\/\\:*?"<>|]+/g, '_');
+                const teacherProfile = window.currentAdminProfile || {};
+                const schoolTitle = teacherProfile.displayName ? `QMATH • ${teacherProfile.displayName}` : 'QMATH • HỆ THỐNG TOÁN THẦY QUANG';
+
+                const cardCanvases = [];
+                for (let i = 0; i < currentClassStudents.length; i++) {
+                    const st = currentClassStudents[i];
+                    const qrBox = document.getElementById(`batch_qr_${i}`);
+                    const canvas = window.drawStudentCardToCanvas({
+                        schoolTitle: schoolTitle,
+                        studentName: st.name || `Học sinh ${i + 1}`,
+                        className: `Lớp: ${className}`,
+                        sbd: `SBD: ${st.sbd || '---'}`,
+                        username: st.username || '---',
+                        qrElement: qrBox
+                    });
+                    if (canvas) {
+                        cardCanvases.push({ student: st, index: i, canvas });
+                    }
+                }
+
+                if (cardCanvases.length === 0) {
+                    window.showNotification("Không thể khởi tạo ảnh thẻ học sinh!", "error");
+                    return;
+                }
+
+                if (window.JSZip) {
+                    const zip = new window.JSZip();
+                    const folderIndividual = zip.folder("01_The_Tung_Hoc_Sinh_HD");
+                    const folderA4 = zip.folder("02_Trang_In_A4_8_The");
+
+                    // 1. Lưu từng thẻ học sinh HD (1000x630)
+                    cardCanvases.forEach(({ student, index, canvas }) => {
+                        const safeName = (student.name || `Hoc_Sinh_${index + 1}`).trim().replace(/[\s\/\\:*?"<>|]+/g, '_');
+                        const sbdPart = student.sbd ? `_${String(student.sbd).replace(/[\s\/\\:*?"<>|]+/g, '')}` : '';
+                        const fileName = `${String(index + 1).padStart(2, '0')}${sbdPart}_${safeName}.png`;
+                        const base64Data = canvas.toDataURL('image/png').split(',')[1];
+                        folderIndividual.file(fileName, base64Data, { base64: true });
+                    });
+
+                    // 2. Dàn trang khổ A4 (2 cột x 4 hàng = 8 thẻ/trang, độ phân giải 2160x2760 sắc nét)
+                    const cardsPerPage = 8;
+                    const totalPages = Math.ceil(cardCanvases.length / cardsPerPage);
+                    for (let p = 0; p < totalPages; p++) {
+                        const pageCanvas = document.createElement('canvas');
+                        pageCanvas.width = 2120;
+                        pageCanvas.height = 2780;
+                        const pCtx = pageCanvas.getContext('2d');
+                        if (pCtx) {
+                            pCtx.fillStyle = '#ffffff';
+                            pCtx.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
+
+                            // Tiêu đề đầu trang A4
+                            pCtx.fillStyle = '#0f172a';
+                            pCtx.font = 'bold 34px "Segoe UI", Inter, Arial, sans-serif';
+                            pCtx.fillText(`THẺ HỌC SINH LỚP ${className.toUpperCase()} — TRANG ${p + 1}/${totalPages}`, 50, 58);
+
+                            const slice = cardCanvases.slice(p * cardsPerPage, (p + 1) * cardsPerPage);
+                            slice.forEach((item, idxOnPage) => {
+                                const col = idxOnPage % 2;
+                                const row = Math.floor(idxOnPage / 2);
+                                const x = 50 + col * (980 + 60);
+                                const y = 90 + row * (618 + 42);
+                                pCtx.drawImage(item.canvas, x, y, 980, 618);
+                            });
+
+                            const pageBase64 = pageCanvas.toDataURL('image/png').split(',')[1];
+                            folderA4.file(`Trang_A4_${String(p + 1).padStart(2, '0')}.png`, pageBase64, { base64: true });
+                        }
+                    }
+
+                    const blob = await zip.generateAsync({ type: 'blob' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `The_Hoc_Sinh_${safeClassName}_${cardCanvases.length}_The.zip`;
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    setTimeout(() => URL.revokeObjectURL(url), 6000);
+                    window.showNotification(`Đã tải về trọn bộ ${cardCanvases.length} thẻ học sinh (.zip)!`, "success");
+                } else {
+                    // Fallback nếu không có JSZip: tải ảnh từng thẻ
+                    for (let i = 0; i < cardCanvases.length; i++) {
+                        const { student, index, canvas } = cardCanvases[i];
+                        const safeName = (student.name || `Hoc_Sinh_${index + 1}`).trim().replace(/[\s\/\\:*?"<>|]+/g, '_');
+                        const a = document.createElement('a');
+                        a.download = `The_HS_${String(index + 1).padStart(2, '0')}_${safeName}.png`;
+                        a.href = canvas.toDataURL('image/png');
+                        a.click();
+                        await new Promise(r => setTimeout(r, 150));
+                    }
+                    window.showNotification(`Đã tải về ${cardCanvases.length} ảnh thẻ học sinh!`, "success");
+                }
+            } catch (err) {
+                console.error("Lỗi tải toàn bộ thẻ:", err);
+                window.showNotification("Có lỗi khi tải trọn bộ thẻ: " + (err.message || err), "error");
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = oldHtml;
+                }
             }
         };
 
