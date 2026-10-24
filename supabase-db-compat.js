@@ -896,6 +896,7 @@ export async function resolveParentWatchData(rawToken, filterExamId = '') {
     };
 }
 
+
 if (typeof window !== 'undefined') {
     window.EmailAuthProvider = EmailAuthProvider;
     window.reauthenticateWithCredential = reauthenticateWithCredential;
@@ -2802,6 +2803,7 @@ export function writeBatch(db) {
     };
 }
 
+
 if (typeof window !== 'undefined') {
     window.db = window.db || getFirestore();
     window.auth = window.auth || authInstance;
@@ -2820,3 +2822,5 @@ if (typeof window !== 'undefined') {
     window.resolveParentWatchData = window.resolveParentWatchData || resolveParentWatchData;
 }
 
+export const db = getFirestore();
+export const auth = authInstance;
