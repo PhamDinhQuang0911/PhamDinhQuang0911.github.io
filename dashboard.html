@@ -5616,11 +5616,23 @@
                 if (window.showNotification) {
                     window.showNotification('📒 Đã lưu bài giảng "' + (savedLesson.title || '') + '" vào lớp học!', 'success');
                 }
-                if (window.currentClassId && (!savedLesson.classId || savedLesson.classId === window.currentClassId)) {
+                if (window.currentClassLessonsCache && savedLesson.classId) {
+                    delete window.currentClassLessonsCache[savedLesson.classId];
+                }
+                const activeCid = window.currentClassId || currentViewingClassId;
+                if (activeCid && (!savedLesson.classId || savedLesson.classId === activeCid)) {
                     if (typeof window.renderClassLessons === 'function') {
-                        window.renderClassLessons(window.currentClassId, true);
+                        window.renderClassLessons(activeCid, true);
                     }
                 }
+            }
+        });
+
+        window.addEventListener('focus', () => {
+            const activeCid = window.currentClassId || (typeof currentViewingClassId !== 'undefined' ? currentViewingClassId : null);
+            const lessonTab = document.getElementById('tabContentLessons');
+            if (activeCid && lessonTab && !lessonTab.classList.contains('hidden') && typeof window.renderClassLessons === 'function') {
+                window.renderClassLessons(activeCid, true);
             }
         });
     }
@@ -9055,7 +9067,7 @@
                 const pendingLoad = window.classExercisesLoads && window.classExercisesLoads.get(currentViewingClassId);
                 await (pendingLoad || renderClassExercises(currentViewingClassId));
             } else if (tabName === 'lessons') {
-                await window.renderClassLessons(currentViewingClassId);
+                await window.renderClassLessons(currentViewingClassId, true);
             } else if (tabName === 'courses') {
                 await window.renderClassCourses(currentViewingClassId);
             }

@@ -1473,86 +1473,7 @@ export async function getDoc(docRef) {
             }
         }
 
-        if (VIRTUAL_CONFIG_PREFIX[table]) {
-            const prefix = VIRTUAL_CONFIG_PREFIX[table];
-            try {
-                const { data: confRows, error: vErr } = await supabase
-                    .from('configurations')
-                    .select('*')
-                    .like('id', prefix + '%');
-                if (vErr) throw vErr;
-                let resultRows = (confRows || []).map(r => {
-                    const raw = (r.raw_data && typeof r.raw_data === 'object') ? r.raw_data : {};
-                    const itemId = raw.id || r.id.slice(prefix.length);
-                    return { id: itemId, ...raw };
-                });
-                const constraints = queryOrColRef.constraints || [];
-                let docs = resultRows.map(r => {
-                    const docData = unwrapRecord(r);
-                    return {
-                        id: r.id || r.key,
-                        exists: () => true,
-                        data: () => docData
-                    };
-                }).filter(doc => {
-                    const d = doc.data();
-                    for (const c of constraints) {
-                        if (c.type === 'where') {
-                            const val = d[c.field] !== undefined ? d[c.field] : d[mapFieldToColumn(c.field)];
-                            if (c.op === '==' || c.op === '===') {
-                                if (val !== c.value) return false;
-                            } else if (c.op === '!=') {
-                                if (val === c.value) return false;
-                            } else if (c.op === 'in') {
-                                if (!Array.isArray(c.value) || !c.value.includes(val)) return false;
-                            } else if (c.op === 'array-contains') {
-                                if (!Array.isArray(val) || !val.includes(c.value)) return false;
-                            } else if (c.op === 'array-contains-any') {
-                                if (!Array.isArray(val) || !Array.isArray(c.value) || !val.some(x => c.value.includes(x))) return false;
-                            }
-                        }
-                    }
-                    return true;
-                });
-                for (const c of constraints) {
-                    if (c.type === 'orderBy') {
-                        const dir = c.direction === 'desc' ? -1 : 1;
-                        docs.sort((a, b) => {
-                            const va = a.data()[c.field] ?? a.data()[mapFieldToColumn(c.field)] ?? '';
-                            const vb = b.data()[c.field] ?? b.data()[mapFieldToColumn(c.field)] ?? '';
-                            if (va < vb) return -1 * dir;
-                            if (va > vb) return 1 * dir;
-                            return 0;
-                        });
-                    }
-                }
-                for (const c of constraints) {
-                    if (c.type === 'limit' && c.count > 0) {
-                        docs = docs.slice(0, c.count);
-                    }
-                }
-                return {
-                    docs,
-                    forEach: (cb) => docs.forEach(cb),
-                    size: docs.length,
-                    empty: docs.length === 0
-                };
-            } catch(errV) {
-                console.warn('[Supabase getDocs virtual]', table, errV);
-                return { docs: [], forEach: () => {}, size: 0, empty: true };
-            }
-        }
-        if (VIRTUAL_CONFIG_PREFIX[table]) {
-        const prefix = VIRTUAL_CONFIG_PREFIX[table];
-        const confPayload = {
-            id: prefix + newId,
-            raw_data: { id: newId, ...data, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
-            updated_at: new Date().toISOString()
-        };
-        await supabase.from('configurations').upsert(confPayload, { onConflict: 'id' });
-        return { id: newId };
-    }
-    if (table === 'custom_topics') {
+        if (table === 'custom_topics') {
             try {
                 const confId = docRef.id.startsWith('topic_') ? docRef.id : ('topic_' + docRef.id);
                 const { data: confData } = await supabase
@@ -1762,6 +1683,76 @@ export async function getDocs(queryOrColRef) {
         const table = queryOrColRef.table;
         if (table === 'tags' && !isTagsTableAvailable) {
             return { docs: [], forEach: () => {}, size: 0, empty: true };
+        }
+
+        if (VIRTUAL_CONFIG_PREFIX[table]) {
+            const prefix = VIRTUAL_CONFIG_PREFIX[table];
+            try {
+                const { data: confRows, error: vErr } = await supabase
+                    .from('configurations')
+                    .select('*')
+                    .like('id', prefix + '%');
+                if (vErr) throw vErr;
+                let resultRows = (confRows || []).map(r => {
+                    const raw = (r.raw_data && typeof r.raw_data === 'object') ? r.raw_data : {};
+                    const itemId = raw.id || r.id.slice(prefix.length);
+                    return { id: itemId, ...raw };
+                });
+                const constraints = queryOrColRef.constraints || [];
+                let docs = resultRows.map(r => {
+                    const docData = unwrapRecord(r);
+                    return {
+                        id: r.id || r.key,
+                        exists: () => true,
+                        data: () => docData
+                    };
+                }).filter(doc => {
+                    const d = doc.data();
+                    for (const c of constraints) {
+                        if (c.type === 'where') {
+                            const val = d[c.field] !== undefined ? d[c.field] : d[mapFieldToColumn(c.field)];
+                            if (c.op === '==' || c.op === '===') {
+                                if (val !== c.value) return false;
+                            } else if (c.op === '!=') {
+                                if (val === c.value) return false;
+                            } else if (c.op === 'in') {
+                                if (!Array.isArray(c.value) || !c.value.includes(val)) return false;
+                            } else if (c.op === 'array-contains') {
+                                if (!Array.isArray(val) || !val.includes(c.value)) return false;
+                            } else if (c.op === 'array-contains-any') {
+                                if (!Array.isArray(val) || !Array.isArray(c.value) || !val.some(x => c.value.includes(x))) return false;
+                            }
+                        }
+                    }
+                    return true;
+                });
+                for (const c of constraints) {
+                    if (c.type === 'orderBy') {
+                        const dir = c.direction === 'desc' ? -1 : 1;
+                        docs.sort((a, b) => {
+                            const va = a.data()[c.field] ?? a.data()[mapFieldToColumn(c.field)] ?? '';
+                            const vb = b.data()[c.field] ?? b.data()[mapFieldToColumn(c.field)] ?? '';
+                            if (va < vb) return -1 * dir;
+                            if (va > vb) return 1 * dir;
+                            return 0;
+                        });
+                    }
+                }
+                for (const c of constraints) {
+                    if (c.type === 'limit' && c.count > 0) {
+                        docs = docs.slice(0, c.count);
+                    }
+                }
+                return {
+                    docs,
+                    forEach: (cb) => docs.forEach(cb),
+                    size: docs.length,
+                    empty: docs.length === 0
+                };
+            } catch(errV) {
+                console.warn('[Supabase getDocs virtual]', table, errV);
+                return { docs: [], forEach: () => {}, size: 0, empty: true };
+            }
         }
 
         if (table === 'custom_topics') {
@@ -2378,6 +2369,17 @@ export async function setDoc(docRef, data, options = {}) {
 
 export async function updateDoc(docRef, updates) {
     const table = docRef.table;
+    if (VIRTUAL_CONFIG_PREFIX[table]) {
+        const prefix = VIRTUAL_CONFIG_PREFIX[table];
+        const rawId = String(docRef.id || '');
+        const confId = rawId.startsWith(prefix) ? rawId : (prefix + rawId);
+        const cleanId = rawId.startsWith(prefix) ? rawId.slice(prefix.length) : rawId;
+        const { data: existing } = await supabase.from('configurations').select('raw_data').eq('id', confId).maybeSingle();
+        const currRaw = (existing && existing.raw_data && typeof existing.raw_data === 'object') ? existing.raw_data : {};
+        const mergedRaw = { id: cleanId, ...currRaw, ...updates, updatedAt: new Date().toISOString() };
+        await supabase.from('configurations').upsert({ id: confId, raw_data: mergedRaw, updated_at: new Date().toISOString() }, { onConflict: 'id' });
+        return docRef;
+    }
     const pkCol = getPrimaryKeyCol(table);
     const validCols = TABLE_COLUMNS[table];
     const payload = {};
@@ -2593,6 +2595,16 @@ export async function updateDoc(docRef, updates) {
 export async function addDoc(colRef, data) {
     const newId = generateId();
     const table = colRef.table;
+    if (VIRTUAL_CONFIG_PREFIX[table]) {
+        const prefix = VIRTUAL_CONFIG_PREFIX[table];
+        const confPayload = {
+            id: prefix + newId,
+            raw_data: { id: newId, ...data, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+            updated_at: new Date().toISOString()
+        };
+        await supabase.from('configurations').upsert(confPayload, { onConflict: 'id' });
+        return { id: newId };
+    }
 
     if (table === 'custom_topics') {
         const confPayload = {
@@ -2681,6 +2693,13 @@ export async function addDoc(colRef, data) {
 
 export async function deleteDoc(docRef) {
     const table = docRef.table;
+    if (VIRTUAL_CONFIG_PREFIX[table]) {
+        const prefix = VIRTUAL_CONFIG_PREFIX[table];
+        const rawId = String(docRef.id || '');
+        const confId = rawId.startsWith(prefix) ? rawId : (prefix + rawId);
+        try { await supabase.from('configurations').delete().eq('id', confId); } catch(e) {}
+        return true;
+    }
     const pkCol = getPrimaryKeyCol(table);
     if (table === 'orders') {
         await deleteOrderFromFirebase(docRef.id);
