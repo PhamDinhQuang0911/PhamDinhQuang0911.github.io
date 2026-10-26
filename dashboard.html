@@ -1305,6 +1305,8 @@
         }
     </style>
     <link rel="stylesheet" href="/styles.css?v=18">
+    <!-- Hls.js Library: HLS Video Streaming cho video bài giảng không giới hạn dung lượng -->
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
 </head>
 <body class="h-screen flex overflow-hidden text-gray-800 bg-gray-50">
 
@@ -7224,6 +7226,15 @@
             if (!modal) return;
             modal.classList.remove('hidden');
 
+            if (window._teacherHlsInstance) {
+                window._teacherHlsInstance.destroy();
+                window._teacherHlsInstance = null;
+            }
+            if (window._currentTeacherHlsBlob) {
+                URL.revokeObjectURL(window._currentTeacherHlsBlob);
+                window._currentTeacherHlsBlob = null;
+            }
+
             const user = auth.currentUser;
             if (!user) return;
 
@@ -9168,7 +9179,7 @@
                     const sizeKb = lesson.sizeBytes ? Math.max(1, Math.round(lesson.sizeBytes / 1024)) + ' KB' : 'Vector';
                     const pageCount = lesson.pageCount || 1;
                     const version = lesson.version || 1;
-                    const hasVideo = !!(lesson.video && (lesson.video.streamUrl || lesson.video.fileId || lesson.video.tmeUrl));
+                    const hasVideo = !!(lesson.video && (lesson.video.streamUrl || lesson.video.fileId || lesson.video.tmeUrl || lesson.video.m3u8 || lesson.video.type === 'hls'));
                     const coverHtml = lesson.coverUrl
                         ? '<img src="' + lesson.coverUrl + '" class="w-full h-36 object-cover object-top bg-slate-900 rounded-xl border border-gray-100 mb-3" onerror="this.style.display=\'none\'">'
                         : '<div class="w-full h-32 bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl flex flex-col items-center justify-center text-amber-400 mb-3 shadow-inner"><i class="fa-solid fa-chalkboard-user text-3xl mb-1"></i><span class="text-[10px] text-slate-300 font-semibold">' + pageCount + ' trang bảng viết</span></div>';
@@ -9309,7 +9320,7 @@
                                 '<p class="text-[11px] text-slate-400 mt-1">Vui lòng chờ trong giây lát</p>' +
                             '</div>' +
 
-                            '<video id="teacherVideoEl" controls playsinline webkit-playsinline autoplay class="w-full max-h-[64vh] md:max-h-[68vh] bg-black block outline-none"></video>' +
+                            '<video id="teacherVideoEl" controls controlslist="nodownload" playsinline webkit-playsinline autoplay class="w-full max-h-[64vh] md:max-h-[68vh] bg-black block outline-none"></video>' +
 
                             '<iframe id="teacherVideoIframe" class="w-full h-[64vh] md:h-[68vh] border-0 hidden" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen" allowfullscreen></iframe>' +
 
@@ -9415,6 +9426,61 @@
 
             const rawUrl = video.streamUrl || video.url || video.tmeUrl || '';
 
+            // 0. Chuẩn HLS (HTTP Live Streaming) - Hỗ trợ video lớn 1GB - 2GB phát trực tiếp không giật lag
+            if (video.type === 'hls' || video.m3u8 || /\.m3u8(\?.*)?$/i.test(rawUrl)) {
+                loaderEl.classList.remove('hidden');
+                videoEl.classList.remove('hidden');
+
+                let hlsSource = rawUrl;
+                if (video.m3u8) {
+                    const blob = new Blob([video.m3u8], { type: 'application/vnd.apple.mpegurl' });
+                    window._currentTeacherHlsBlob = URL.createObjectURL(blob);
+                    hlsSource = window._currentTeacherHlsBlob;
+                }
+
+                if (typeof Hls !== 'undefined' && Hls.isSupported()) {
+                    const hls = new Hls({
+                        enableWorker: true,
+                        lowLatencyMode: false,
+                        backBufferLength: 60,
+                        maxBufferLength: 30,
+                        maxMaxBufferLength: 600
+                    });
+                    window._teacherHlsInstance = hls;
+                    hls.loadSource(hlsSource);
+                    hls.attachMedia(videoEl);
+                    hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                        loaderEl.classList.add('hidden');
+                        videoEl.play().catch(() => {});
+                    });
+                    hls.on(Hls.Events.ERROR, (event, data) => {
+                        if (data.fatal) {
+                            console.warn('Lỗi luồng HLS fatal:', data);
+                            loaderEl.classList.add('hidden');
+                            switch (data.type) {
+                                case Hls.ErrorTypes.NETWORK_ERROR:
+                                    hls.startLoad();
+                                    break;
+                                case Hls.ErrorTypes.MEDIA_ERROR:
+                                    hls.recoverMediaError();
+                                    break;
+                                default:
+                                    hls.destroy();
+                                    break;
+                            }
+                        }
+                    });
+                    return;
+                } else if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
+                    videoEl.src = hlsSource;
+                    videoEl.addEventListener('loadedmetadata', () => {
+                        loaderEl.classList.add('hidden');
+                        videoEl.play().catch(() => {});
+                    }, { once: true });
+                    return;
+                }
+            }
+
             // 1. YouTube video (Unlisted or Public)
             const ytMatch = rawUrl.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})/);
             if (ytMatch) {
@@ -9492,6 +9558,14 @@
                 const ifr = document.getElementById('teacherVideoIframe');
                 if (ifr) ifr.src = 'about:blank';
             }
+            if (window._teacherHlsInstance) {
+                window._teacherHlsInstance.destroy();
+                window._teacherHlsInstance = null;
+            }
+            if (window._currentTeacherHlsBlob) {
+                URL.revokeObjectURL(window._currentTeacherHlsBlob);
+                window._currentTeacherHlsBlob = null;
+            }
         };
 
         window.openTeacherLessonInfo = function(lessonId) {
@@ -9503,7 +9577,7 @@
             const dateStr = lesson.lessonDate ? new Date(lesson.lessonDate).toLocaleDateString('vi-VN') : '---';
             const sizeKb = lesson.sizeBytes ? Math.max(1, Math.round(lesson.sizeBytes / 1024)) + ' KB' : 'Vector';
             const pageCount = lesson.pageCount || 1;
-            const hasVideo = !!(lesson.video && (lesson.video.streamUrl || lesson.video.fileId || lesson.video.tmeUrl));
+            const hasVideo = !!(lesson.video && (lesson.video.streamUrl || lesson.video.fileId || lesson.video.tmeUrl || lesson.video.m3u8 || lesson.video.type === 'hls'));
             const materials = Array.isArray(lesson.materials) ? lesson.materials : [];
 
             let msg = '📚 BÀI GIẢNG: ' + safeTitle + '\n' +

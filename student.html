@@ -576,7 +576,9 @@
         };
     </script>
     <link rel="stylesheet" href="/styles.css?v=5">
-<meta name="view-transition" content="same-origin" /></head>
+<meta name="view-transition" content="same-origin" />    <!-- Hls.js Library: HLS Video Streaming cho học sinh -->
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
+</head>
 <body class="h-screen flex overflow-hidden font-sans" data-page="student">
 
     <div id="mobileOverlay" onclick="toggleMobileSidebar()" class="fixed inset-0 bg-gray-900/60 z-[45] hidden transition-opacity md:hidden backdrop-blur-sm"></div>
@@ -2656,6 +2658,15 @@
             // Mở modal ngay lập tức (0ms)
             if (window.QMathSecurity) window.QMathSecurity.setContext({ zone: 'leaderboard', examId: examIdToLoad });
             modal.classList.remove('hidden');
+
+            if (window._studentHlsInstance) {
+                window._studentHlsInstance.destroy();
+                window._studentHlsInstance = null;
+            }
+            if (window._currentStudentHlsBlob) {
+                URL.revokeObjectURL(window._currentStudentHlsBlob);
+                window._currentStudentHlsBlob = null;
+            }
             setTimeout(() => {
                 modal.classList.remove('opacity-0');
                 const box = document.getElementById('examLeaderboardBox');
@@ -3268,7 +3279,7 @@
                             ? new Date(lesson.lessonDate).toLocaleDateString('vi-VN')
                             : (lesson.updatedAt ? new Date(lesson.updatedAt).toLocaleDateString('vi-VN') : '---');
                         const pageCount = lesson.pageCount || 1;
-                        const hasVideo = !!(lesson.video && (lesson.video.streamUrl || lesson.video.fileId || lesson.video.tmeUrl));
+                        const hasVideo = !!(lesson.video && (lesson.video.streamUrl || lesson.video.fileId || lesson.video.tmeUrl || lesson.video.m3u8 || lesson.video.type === 'hls'));
                         const matCount = Array.isArray(lesson.materials) ? lesson.materials.length : 0;
 
                         const thumbHtml = lesson.coverUrl
@@ -3313,7 +3324,7 @@
                             ? new Date(lesson.lessonDate).toLocaleDateString('vi-VN')
                             : (lesson.updatedAt ? new Date(lesson.updatedAt).toLocaleDateString('vi-VN') : '---');
                         const pageCount = lesson.pageCount || 1;
-                        const hasVideo = !!(lesson.video && (lesson.video.streamUrl || lesson.video.fileId || lesson.video.tmeUrl));
+                        const hasVideo = !!(lesson.video && (lesson.video.streamUrl || lesson.video.fileId || lesson.video.tmeUrl || lesson.video.m3u8 || lesson.video.type === 'hls'));
                         const matCount = Array.isArray(lesson.materials) ? lesson.materials.length : 0;
 
                         const coverHtml = lesson.coverUrl
@@ -3381,7 +3392,7 @@
                 ? new Date(lesson.lessonDate).toLocaleDateString('vi-VN')
                 : (lesson.updatedAt ? new Date(lesson.updatedAt).toLocaleDateString('vi-VN') : 'Chưa cập nhật');
             const pageCount = lesson.pageCount || 1;
-            const hasVideo = !!(lesson.video && (lesson.video.streamUrl || lesson.video.fileId || lesson.video.tmeUrl));
+            const hasVideo = !!(lesson.video && (lesson.video.streamUrl || lesson.video.fileId || lesson.video.tmeUrl || lesson.video.m3u8 || lesson.video.type === 'hls'));
             const materials = Array.isArray(lesson.materials) ? lesson.materials : [];
 
             let videoCardHtml = '';
@@ -3534,7 +3545,7 @@
                                 '<p class="text-[11px] text-slate-400 mt-1">Vui lòng chờ trong giây lát</p>' +
                             '</div>' +
 
-                            '<video id="studentVideoEl" controls playsinline webkit-playsinline autoplay class="w-full max-h-[64vh] md:max-h-[68vh] bg-black block outline-none"></video>' +
+                            '<video id="studentVideoEl" controls controlslist="nodownload" playsinline webkit-playsinline autoplay class="w-full max-h-[64vh] md:max-h-[68vh] bg-black block outline-none"></video>' +
 
                             '<iframe id="studentVideoIframe" class="w-full h-[64vh] md:h-[68vh] border-0 hidden" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen" allowfullscreen></iframe>' +
 
@@ -3646,6 +3657,61 @@
 
             const rawUrl = video.streamUrl || video.url || video.tmeUrl || '';
 
+            // 0. Chuẩn HLS (HTTP Live Streaming) - Hỗ trợ video bài giảng 1GB - 2GB phát trực tiếp cho học sinh
+            if (video.type === 'hls' || video.m3u8 || /\.m3u8(\?.*)?$/i.test(rawUrl)) {
+                loaderEl.classList.remove('hidden');
+                videoEl.classList.remove('hidden');
+
+                let hlsSource = rawUrl;
+                if (video.m3u8) {
+                    const blob = new Blob([video.m3u8], { type: 'application/vnd.apple.mpegurl' });
+                    window._currentStudentHlsBlob = URL.createObjectURL(blob);
+                    hlsSource = window._currentStudentHlsBlob;
+                }
+
+                if (typeof Hls !== 'undefined' && Hls.isSupported()) {
+                    const hls = new Hls({
+                        enableWorker: true,
+                        lowLatencyMode: false,
+                        backBufferLength: 60,
+                        maxBufferLength: 30,
+                        maxMaxBufferLength: 600
+                    });
+                    window._studentHlsInstance = hls;
+                    hls.loadSource(hlsSource);
+                    hls.attachMedia(videoEl);
+                    hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                        loaderEl.classList.add('hidden');
+                        videoEl.play().catch(() => {});
+                    });
+                    hls.on(Hls.Events.ERROR, (event, data) => {
+                        if (data.fatal) {
+                            console.warn('Lỗi luồng HLS fatal:', data);
+                            loaderEl.classList.add('hidden');
+                            switch (data.type) {
+                                case Hls.ErrorTypes.NETWORK_ERROR:
+                                    hls.startLoad();
+                                    break;
+                                case Hls.ErrorTypes.MEDIA_ERROR:
+                                    hls.recoverMediaError();
+                                    break;
+                                default:
+                                    hls.destroy();
+                                    break;
+                            }
+                        }
+                    });
+                    return;
+                } else if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
+                    videoEl.src = hlsSource;
+                    videoEl.addEventListener('loadedmetadata', () => {
+                        loaderEl.classList.add('hidden');
+                        videoEl.play().catch(() => {});
+                    }, { once: true });
+                    return;
+                }
+            }
+
             // 1. YouTube video (Unlisted or Public)
             const ytMatch = rawUrl.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})/);
             if (ytMatch) {
@@ -3727,6 +3793,14 @@
                 if (iframeEl) {
                     iframeEl.src = 'about:blank';
                 }
+            }
+            if (window._studentHlsInstance) {
+                window._studentHlsInstance.destroy();
+                window._studentHlsInstance = null;
+            }
+            if (window._currentStudentHlsBlob) {
+                URL.revokeObjectURL(window._currentStudentHlsBlob);
+                window._currentStudentHlsBlob = null;
             }
         };
 
