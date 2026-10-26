@@ -9168,6 +9168,7 @@
                     const sizeKb = lesson.sizeBytes ? Math.max(1, Math.round(lesson.sizeBytes / 1024)) + ' KB' : 'Vector';
                     const pageCount = lesson.pageCount || 1;
                     const version = lesson.version || 1;
+                    const hasVideo = !!(lesson.video && (lesson.video.streamUrl || lesson.video.fileId || lesson.video.tmeUrl));
                     const coverHtml = lesson.coverUrl
                         ? '<img src="' + lesson.coverUrl + '" class="w-full h-36 object-cover object-top bg-slate-900 rounded-xl border border-gray-100 mb-3" onerror="this.style.display=\'none\'">'
                         : '<div class="w-full h-32 bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl flex flex-col items-center justify-center text-amber-400 mb-3 shadow-inner"><i class="fa-solid fa-chalkboard-user text-3xl mb-1"></i><span class="text-[10px] text-slate-300 font-semibold">' + pageCount + ' trang bảng viết</span></div>';
@@ -9177,8 +9178,12 @@
                             '<div class="relative cursor-pointer" onclick="window.openLessonPreviewModal(\'' + lesson.id + '\', \'' + safeTitle + '\')">' +
                                 coverHtml +
                                 '<span class="absolute top-2 right-2 bg-black/75 text-white text-[10px] font-bold px-2 py-0.5 rounded-full backdrop-blur-xs">' + pageCount + ' trang · v' + version + '</span>' +
+                                (hasVideo ? '<span class="absolute top-2 left-2 bg-emerald-600/90 text-white text-[10px] font-extrabold px-2 py-0.5 rounded-full flex items-center gap-1 shadow-xs backdrop-blur-xs"><i class="fa-solid fa-circle-play"></i> Video</span>' : '') +
                             '</div>' +
-                            '<h4 class="font-bold text-gray-800 text-sm line-clamp-2 group-hover:text-amber-600 transition-colors cursor-pointer mb-1.5" onclick="window.openLessonPreviewModal(\'' + lesson.id + '\', \'' + safeTitle + '\')" title="' + safeTitle + '">' + (lesson.title || 'Bài giảng') + '</h4>' +
+                            '<div class="flex items-start justify-between gap-1.5 mb-1.5">' +
+                                '<h4 class="font-bold text-gray-800 text-sm line-clamp-2 group-hover:text-amber-600 transition-colors cursor-pointer flex-1" onclick="window.openLessonPreviewModal(\'' + lesson.id + '\', \'' + safeTitle + '\')" title="' + safeTitle + '">' + (lesson.title || 'Bài giảng') + '</h4>' +
+                                '<button type="button" onclick="window.openTeacherLessonInfo(\'' + lesson.id + '\')" class="w-6 h-6 rounded-lg bg-gray-100 hover:bg-amber-100 text-gray-500 hover:text-amber-700 text-[10px] font-black shrink-0 flex items-center justify-center transition cursor-pointer" title="Thông tin cơ bản bài học"><i class="fa-solid fa-info"></i></button>' +
+                            '</div>' +
                             (lesson.summary ? '<p class="text-xs text-gray-500 line-clamp-2 mb-2">' + lesson.summary + '</p>' : '') +
                             '<div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-gray-400 mb-3">' +
                                 '<span><i class="fa-regular fa-calendar mr-1"></i>' + dateStr + '</span>' +
@@ -9252,6 +9257,171 @@
                 if (iframe) iframe.src = 'about:blank';
             }
         };
+
+
+        window.openTeacherVideoPlayer = async function(lessonId) {
+            const lessons = window._activeClassLessons || [];
+            const lesson = lessons.find(l => l.id === lessonId);
+            if (!lesson || !lesson.video) {
+                alert('Không tìm thấy video bài giảng!');
+                return;
+            }
+            const video = lesson.video;
+            const title = lesson.title || video.title || 'Video Bài Giảng';
+
+            let modal = document.getElementById('teacherVideoPlayerModal');
+            if (!modal) {
+                modal = document.createElement('div');
+                modal.id = 'teacherVideoPlayerModal';
+                modal.className = 'fixed inset-0 z-[150] bg-black/90 backdrop-blur-md flex flex-col justify-center items-center p-2 sm:p-4 md:p-6 hidden animate-fade-in';
+                modal.innerHTML = `
+                    <div class="w-full max-w-4xl bg-slate-900 rounded-2xl md:rounded-3xl border border-slate-800 shadow-2xl overflow-hidden flex flex-col max-h-[96vh]">
+                        <div class="h-12 md:h-14 bg-slate-950 border-b border-slate-800 px-4 flex items-center justify-between text-white shrink-0">
+                            <div class="flex items-center gap-2 min-w-0">
+                                <span class="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center text-sm shrink-0"><i class="fa-solid fa-circle-play"></i></span>
+                                <h3 id="teacherVpTitle" class="font-bold text-xs md:text-sm text-slate-100 truncate">Video Bài Giảng</h3>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <button type="button" id="teacherVpFsBtn" class="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center justify-center text-xs transition cursor-pointer" title="Toàn màn hình">
+                                    <i class="fa-solid fa-expand"></i>
+                                </button>
+                                <button type="button" onclick="window.closeTeacherVideoPlayer()" class="w-8 h-8 rounded-lg bg-slate-800 hover:bg-rose-600 text-slate-300 hover:text-white flex items-center justify-center text-sm transition cursor-pointer">
+                                    <i class="fa-solid fa-xmark"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="relative bg-black flex items-center justify-center min-h-[240px] sm:min-h-[360px] md:min-h-[460px]">
+                            <div id="teacherVpLoader" class="absolute inset-0 flex flex-col items-center justify-center text-white bg-black/80 z-10 hidden">
+                                <i class="fa-solid fa-circle-notch fa-spin text-3xl text-emerald-400 mb-2"></i>
+                                <p class="text-xs font-semibold">Đang tải luồng phát video...</p>
+                            </div>
+                            <video id="teacherVideoEl" controls playsinline webkit-playsinline autoplay class="w-full max-h-[66vh] bg-black block outline-none"></video>
+                            <iframe id="teacherVideoIframe" class="w-full h-[66vh] border-0 hidden" allow="autoplay; fullscreen"></iframe>
+                        </div>
+                        <div class="p-3 bg-slate-950 border-t border-slate-800 flex items-center justify-between gap-2 text-white shrink-0">
+                            <div class="flex items-center gap-1.5">
+                                <span class="text-[11px] text-slate-400 font-bold mr-1">Tốc độ:</span>
+                                <button type="button" class="teacher-vp-speed-btn px-2.5 py-1 rounded-lg text-[11px] font-bold border border-slate-700 bg-slate-800 text-slate-300" data-spd="0.75">0.75x</button>
+                                <button type="button" class="teacher-vp-speed-btn px-2.5 py-1 rounded-lg text-[11px] font-bold border border-emerald-500 bg-emerald-600 text-white" data-spd="1">1x</button>
+                                <button type="button" class="teacher-vp-speed-btn px-2.5 py-1 rounded-lg text-[11px] font-bold border border-slate-700 bg-slate-800 text-slate-300" data-spd="1.25">1.25x</button>
+                                <button type="button" class="teacher-vp-speed-btn px-2.5 py-1 rounded-lg text-[11px] font-bold border border-slate-700 bg-slate-800 text-slate-300" data-spd="1.5">1.5x</button>
+                                <button type="button" class="teacher-vp-speed-btn px-2.5 py-1 rounded-lg text-[11px] font-bold border border-slate-700 bg-slate-800 text-slate-300" data-spd="2">2x</button>
+                            </div>
+                            <button type="button" onclick="window.closeTeacherVideoPlayer()" class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold cursor-pointer">
+                                Đóng (Esc)
+                            </button>
+                        </div>
+                    </div>
+                `;
+                document.body.appendChild(modal);
+
+                modal.querySelectorAll('.teacher-vp-speed-btn').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        const spd = parseFloat(btn.getAttribute('data-spd'));
+                        const vid = document.getElementById('teacherVideoEl');
+                        if (vid) vid.playbackRate = spd;
+                        modal.querySelectorAll('.teacher-vp-speed-btn').forEach(b => {
+                            b.className = 'teacher-vp-speed-btn px-2.5 py-1 rounded-lg text-[11px] font-bold border border-slate-700 bg-slate-800 text-slate-300';
+                        });
+                        btn.className = 'teacher-vp-speed-btn px-2.5 py-1 rounded-lg text-[11px] font-bold border border-emerald-500 bg-emerald-600 text-white';
+                    });
+                });
+
+                document.getElementById('teacherVpFsBtn').onclick = () => {
+                    const vid = document.getElementById('teacherVideoEl');
+                    if (!vid) return;
+                    if (vid.requestFullscreen) vid.requestFullscreen();
+                };
+
+                window.addEventListener('keydown', (e) => {
+                    if (modal && !modal.classList.contains('hidden') && e.key === 'Escape') {
+                        window.closeTeacherVideoPlayer();
+                    }
+                });
+            }
+
+            document.getElementById('teacherVpTitle').textContent = title;
+            const videoEl = document.getElementById('teacherVideoEl');
+            const iframeEl = document.getElementById('teacherVideoIframe');
+            const loaderEl = document.getElementById('teacherVpLoader');
+
+            videoEl.classList.remove('hidden');
+            iframeEl.classList.add('hidden');
+            videoEl.pause();
+            videoEl.src = '';
+            modal.classList.remove('hidden');
+
+            let directUrl = video.streamUrl || '';
+            if (directUrl) {
+                videoEl.src = directUrl;
+                videoEl.play().catch(() => {});
+            } else if (video.fileId) {
+                loaderEl.classList.remove('hidden');
+                try {
+                    const BOT_TOKEN = '8662985318:AAHIweMUW706XKIXFi-bFisaFoE7hZaMHDo';
+                    const res = await fetch('https://api.telegram.org/bot' + BOT_TOKEN + '/getFile?file_id=' + encodeURIComponent(video.fileId));
+                    const data = await res.json();
+                    loaderEl.classList.add('hidden');
+                    if (data.ok && data.result && data.result.file_path) {
+                        const tgStream = 'https://api.telegram.org/file/bot' + BOT_TOKEN + '/' + data.result.file_path;
+                        video.streamUrl = tgStream;
+                        videoEl.src = tgStream;
+                        videoEl.play().catch(() => {});
+                    } else if (video.tmeUrl) {
+                        const match = video.tmeUrl.match(/t\.me\/([^/]+)\/(\d+)/);
+                        if (match) {
+                            videoEl.classList.add('hidden');
+                            iframeEl.classList.remove('hidden');
+                            iframeEl.src = 'https://t.me/' + match[1] + '/' + match[2] + '?embed=1';
+                        }
+                    }
+                } catch(e) {
+                    loaderEl.classList.add('hidden');
+                }
+            } else if (video.tmeUrl) {
+                const match = video.tmeUrl.match(/t\.me\/([^/]+)\/(\d+)/);
+                if (match) {
+                    videoEl.classList.add('hidden');
+                    iframeEl.classList.remove('hidden');
+                    iframeEl.src = 'https://t.me/' + match[1] + '/' + match[2] + '?embed=1';
+                }
+            }
+        };
+
+        window.closeTeacherVideoPlayer = function() {
+            const modal = document.getElementById('teacherVideoPlayerModal');
+            if (modal) {
+                modal.classList.add('hidden');
+                const vid = document.getElementById('teacherVideoEl');
+                if (vid) { vid.pause(); vid.src = ''; }
+                const ifr = document.getElementById('teacherVideoIframe');
+                if (ifr) ifr.src = 'about:blank';
+            }
+        };
+
+        window.openTeacherLessonInfo = function(lessonId) {
+            const lessons = window._activeClassLessons || [];
+            const lesson = lessons.find(l => l.id === lessonId);
+            if (!lesson) return;
+
+            const safeTitle = lesson.title || 'Bài giảng';
+            const dateStr = lesson.lessonDate ? new Date(lesson.lessonDate).toLocaleDateString('vi-VN') : '---';
+            const sizeKb = lesson.sizeBytes ? Math.max(1, Math.round(lesson.sizeBytes / 1024)) + ' KB' : 'Vector';
+            const pageCount = lesson.pageCount || 1;
+            const hasVideo = !!(lesson.video && (lesson.video.streamUrl || lesson.video.fileId || lesson.video.tmeUrl));
+            const materials = Array.isArray(lesson.materials) ? lesson.materials : [];
+
+            let msg = '📚 BÀI GIẢNG: ' + safeTitle + '\n' +
+                '📁 Chương: ' + (lesson.chapter || 'Bài giảng chung') + '\n' +
+                '📅 Ngày học: ' + dateStr + '\n' +
+                '📄 Số trang: ' + pageCount + ' trang (' + sizeKb + ')\n' +
+                '🎬 Video: ' + (hasVideo ? 'Đã có video đính kèm (Phát trực tiếp)' : 'Chưa có video') + '\n' +
+                '📎 Học liệu: ' + materials.length + ' tài liệu đính kèm\n';
+            if (lesson.summary) msg += '📝 Ghi chú: ' + lesson.summary;
+
+            alert(msg);
+        };
+
 
         window.copyLessonToOtherClass = async function(lessonId) {
             const lesson = (window._activeClassLessons || []).find(l => l.id === lessonId);

@@ -1003,6 +1003,24 @@
                             <option value="oldest">📅 Cũ nhất trước</option>
                         </select>
                     </div>
+
+                    <!-- Thanh điều khiển hiển thị Bài giảng (Lưới vs Danh sách thu nhỏ) -->
+                    <div id="studentClassLessonControls" class="hidden flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-gray-100">
+                        <div class="flex items-center gap-2">
+                            <span class="text-xs font-bold text-gray-500">Chế độ hiển thị:</span>
+                            <div class="bg-gray-100 p-1 rounded-xl flex shrink-0">
+                                <button type="button" onclick="window.changeLessonLayout('grid')" id="btn-lesson-layout-grid" class="px-2.5 py-1.5 rounded-lg text-xs font-bold text-primary-600 bg-white shadow-xs transition-all flex items-center gap-1.5 cursor-pointer">
+                                    <i class="fa-solid fa-border-all"></i> <span class="hidden sm:inline">Lưới thẻ</span>
+                                </button>
+                                <button type="button" onclick="window.changeLessonLayout('list')" id="btn-lesson-layout-list" class="px-2.5 py-1.5 rounded-lg text-xs font-bold text-gray-500 hover:text-primary-600 transition-all flex items-center gap-1.5 cursor-pointer">
+                                    <i class="fa-solid fa-list-ul"></i> <span class="hidden sm:inline">Danh sách thu nhỏ</span>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-3 ml-auto text-xs font-semibold text-gray-500">
+                            <span id="studentLessonsTotalCount" class="font-bold text-gray-600"></span>
+                        </div>
+                    </div>
                 </div>
                 <div id="classExamList" class="pb-2 md:pb-4"></div>
                 <div id="classLessonList" class="hidden pb-4 space-y-6"></div>
@@ -3105,12 +3123,39 @@
         // --- CHẾ ĐỘ XEM BÀI GIẢNG & GHI CHÉP BẢNG VẼ (NOTERENDERER) CHO HỌC SINH ---
         window.studentClassLessonsMap = window.studentClassLessonsMap || {};
         window.currentStudentClassSubTab = 'exams';
+        window.studentLessonLayout = localStorage.getItem('qm_student_lesson_layout') || 'grid';
+
+        // Cập nhật trạng thái nút bấm Lưới vs Danh sách thu nhỏ
+        window.updateLessonLayoutButtons = () => {
+            const mode = window.studentLessonLayout || 'grid';
+            const btnGrid = document.getElementById('btn-lesson-layout-grid');
+            const btnList = document.getElementById('btn-lesson-layout-list');
+            if (!btnGrid || !btnList) return;
+            if (mode === 'grid') {
+                btnGrid.className = 'px-2.5 py-1.5 rounded-lg text-xs font-bold text-primary-600 bg-white shadow-xs transition-all flex items-center gap-1.5 cursor-pointer';
+                btnList.className = 'px-2.5 py-1.5 rounded-lg text-xs font-bold text-gray-500 hover:text-primary-600 transition-all flex items-center gap-1.5 cursor-pointer';
+            } else {
+                btnGrid.className = 'px-2.5 py-1.5 rounded-lg text-xs font-bold text-gray-500 hover:text-primary-600 transition-all flex items-center gap-1.5 cursor-pointer';
+                btnList.className = 'px-2.5 py-1.5 rounded-lg text-xs font-bold text-primary-600 bg-white shadow-xs transition-all flex items-center gap-1.5 cursor-pointer';
+            }
+        };
+
+        // Chuyển đổi giữa chế độ Lưới thẻ & Danh sách thu nhỏ
+        window.changeLessonLayout = (mode) => {
+            window.studentLessonLayout = mode;
+            try { localStorage.setItem('qm_student_lesson_layout', mode); } catch(_) {}
+            window.updateLessonLayoutButtons();
+            if (window.currentStudentClassId && window.studentClassLessonsMap[window.currentStudentClassId]) {
+                window.renderStudentClassLessonsUI(window.studentClassLessonsMap[window.currentStudentClassId]);
+            }
+        };
 
         window.switchStudentClassSubTab = (subTab, triggerRender = true) => {
             window.currentStudentClassSubTab = subTab;
             const btnExams = document.getElementById('studentSubTabBtnExams');
             const btnLessons = document.getElementById('studentSubTabBtnLessons');
             const controlsExams = document.getElementById('studentClassExamControls');
+            const controlsLessons = document.getElementById('studentClassLessonControls');
             const examListEl = document.getElementById('classExamList');
             const lessonListEl = document.getElementById('classLessonList');
 
@@ -3122,13 +3167,16 @@
 
             if (subTab === 'lessons') {
                 if (controlsExams) controlsExams.classList.add('hidden');
+                if (controlsLessons) controlsLessons.classList.remove('hidden');
                 if (examListEl) examListEl.classList.add('hidden');
                 if (lessonListEl) lessonListEl.classList.remove('hidden');
+                window.updateLessonLayoutButtons();
                 if (triggerRender && window.currentStudentClassId) {
                     window.loadStudentClassLessons(window.currentStudentClassId, true);
                 }
             } else {
                 if (controlsExams) controlsExams.classList.remove('hidden');
+                if (controlsLessons) controlsLessons.classList.add('hidden');
                 if (examListEl) examListEl.classList.remove('hidden');
                 if (lessonListEl) lessonListEl.classList.add('hidden');
             }
@@ -3175,15 +3223,22 @@
             }
         };
 
+        // Render UI Bài giảng: Hỗ trợ cả 2 chế độ [Lưới thẻ] & [Danh sách thu nhỏ]
         window.renderStudentClassLessonsUI = (lessons) => {
             const lessonListEl = document.getElementById('classLessonList');
             if (!lessonListEl) return;
+
+            const countEl = document.getElementById('studentLessonsTotalCount');
+            if (countEl) {
+                countEl.textContent = (lessons && lessons.length > 0) ? (lessons.length + ' bài giảng') : '';
+            }
 
             if (!lessons || lessons.length === 0) {
                 lessonListEl.innerHTML = '<div class="bg-white rounded-2xl border border-gray-100 p-12 text-center text-gray-400 shadow-xs"><i class="fa-solid fa-book-open-reader text-4xl mb-3 text-gray-200"></i><p class="font-bold text-gray-600">Chưa có bài giảng ghi chép nào trong lớp này.</p><p class="text-xs text-gray-400 mt-1">Khi Thầy/Cô lưu bài viết bảng từ Bảng vẽ vào lớp, bài giảng sẽ xuất hiện tại đây để em xem lại.</p></div>';
                 return;
             }
 
+            const isListMode = (window.studentLessonLayout === 'list');
             const groups = new Map();
             lessons.forEach(item => {
                 const chap = (item.chapter || 'Bài giảng trên lớp').trim();
@@ -3202,47 +3257,440 @@
                                 '<p class="text-[11px] text-gray-400 font-semibold">' + items.length + ' bài ghi chép</p>' +
                             '</div>' +
                         '</div>' +
-                    '</div>' +
-                    '<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">';
-
-                items.forEach(lesson => {
-                    const safeTitle = String(lesson.title || 'Bài giảng').replace(/'/g, "\'").replace(/"/g, '&quot;');
-                    const dateStr = lesson.lessonDate
-                        ? new Date(lesson.lessonDate).toLocaleDateString('vi-VN')
-                        : (lesson.updatedAt ? new Date(lesson.updatedAt).toLocaleDateString('vi-VN') : '---');
-                    const pageCount = lesson.pageCount || 1;
-                    const coverHtml = lesson.coverUrl
-                        ? '<img src="' + lesson.coverUrl + '" class="w-full h-36 object-cover object-top bg-slate-900 rounded-xl border border-gray-100 mb-3" onerror="this.style.display=\'none\'">'
-                        : '<div class="w-full h-32 bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl flex flex-col items-center justify-center text-amber-400 mb-3"><i class="fa-solid fa-chalkboard-user text-3xl mb-1"></i><span class="text-[11px] text-slate-300 font-semibold">' + pageCount + ' trang bảng viết</span></div>';
-
-                    html += '<div class="bg-gray-50/60 hover:bg-white p-4 rounded-2xl border border-gray-200/80 hover:border-primary-300 hover:shadow-md transition-all flex flex-col justify-between group cursor-pointer" onclick="window.openStudentLessonViewer(\'' + lesson.id + '\', \'' + safeTitle + '\')">' +
-                        '<div>' +
-                            '<div class="relative">' +
-                                coverHtml +
-                                '<span class="absolute top-2 right-2 bg-black/75 text-white text-[10px] font-bold px-2.5 py-0.5 rounded-full">' + pageCount + ' trang</span>' +
-                            '</div>' +
-                            '<h4 class="font-extrabold text-gray-800 text-sm md:text-base group-hover:text-primary-600 transition-colors line-clamp-2 mb-1">' + (lesson.title || 'Bài giảng') + '</h4>' +
-                            (lesson.summary ? '<p class="text-xs text-gray-500 line-clamp-2 mb-2">' + lesson.summary + '</p>' : '') +
-                            '<div class="flex items-center gap-3 text-[11px] text-gray-400 font-medium mb-3">' +
-                                '<span><i class="fa-regular fa-calendar mr-1"></i>Ngày học: ' + dateStr + '</span>' +
-                                (lesson.teacherName ? '<span><i class="fa-solid fa-chalkboard-user mr-1"></i>' + lesson.teacherName + '</span>' : '') +
-                            '</div>' +
-                        '</div>' +
-                        '<div class="pt-3 border-t border-gray-200/60 flex items-center gap-2 mt-auto" onclick="event.stopPropagation()">' +
-                            '<button type="button" onclick="window.openStudentLessonViewer(\'' + lesson.id + '\', \'' + safeTitle + '\')" class="flex-1 py-2 px-3 bg-gradient-to-r from-primary-500 to-primary-600 hover:from-primary-600 hover:to-primary-700 text-white text-xs font-extrabold rounded-xl shadow-xs transition flex items-center justify-center gap-1.5 cursor-pointer">' +
-                                '<i class="fa-solid fa-book-open"></i> Mở xem bài giảng' +
-                            '</button>' +
-                            '<button type="button" onclick="window.open(\'https://note.qmath.io.vn/?view=' + encodeURIComponent(lesson.id) + '&export=pdf\', \'_blank\')" class="py-2 px-3 bg-primary-50 hover:bg-primary-100 text-primary-700 text-xs font-bold rounded-xl transition flex items-center justify-center gap-1 cursor-pointer" title="Tải / Xuất file PDF">' +
-                                '<i class="fa-solid fa-file-pdf"></i> PDF' +
-                            '</button>' +
-                        '</div>' +
                     '</div>';
-                });
 
-                html += '</div></div>';
+                if (isListMode) {
+                    // --- 1. CHẾ ĐỘ DANH SÁCH THU NHỎ (COMPACT LIST VIEW) ---
+                    html += '<div class="divide-y divide-gray-100 bg-gray-50/50 rounded-2xl border border-gray-200/70 overflow-hidden shadow-2xs">';
+                    items.forEach(lesson => {
+                        const safeTitle = String(lesson.title || 'Bài giảng').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                        const dateStr = lesson.lessonDate
+                            ? new Date(lesson.lessonDate).toLocaleDateString('vi-VN')
+                            : (lesson.updatedAt ? new Date(lesson.updatedAt).toLocaleDateString('vi-VN') : '---');
+                        const pageCount = lesson.pageCount || 1;
+                        const hasVideo = !!(lesson.video && (lesson.video.streamUrl || lesson.video.fileId || lesson.video.tmeUrl));
+                        const matCount = Array.isArray(lesson.materials) ? lesson.materials.length : 0;
+
+                        const thumbHtml = lesson.coverUrl
+                            ? '<img src="' + lesson.coverUrl + '" class="w-20 h-14 md:w-28 md:h-18 object-cover object-top rounded-xl border border-gray-200 shrink-0 bg-slate-900" onerror="this.style.display=\'none\'">'
+                            : '<div class="w-20 h-14 md:w-28 md:h-18 bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl flex flex-col items-center justify-center text-amber-400 shrink-0 border border-slate-700/50 shadow-inner"><i class="fa-solid fa-chalkboard-user text-lg md:text-xl mb-0.5"></i><span class="text-[9px] text-slate-300 font-semibold">' + pageCount + ' trang</span></div>';
+
+                        html += '<div class="p-3 md:p-3.5 hover:bg-white transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 group cursor-pointer" onclick="window.openStudentLessonViewer(\'' + lesson.id + '\', \'' + safeTitle + '\')">' +
+                            '<div class="flex items-center gap-3 min-w-0 flex-1">' +
+                                '<div class="relative shrink-0">' +
+                                    thumbHtml +
+                                    (hasVideo ? '<span class="absolute bottom-1 right-1 w-5 h-5 rounded-full bg-emerald-600 text-white flex items-center justify-center text-[10px] shadow-sm"><i class="fa-solid fa-play text-[8px]"></i></span>' : '') +
+                                '</div>' +
+                                '<div class="min-w-0 flex-1">' +
+                                    '<div class="flex items-center gap-2 flex-wrap mb-1">' +
+                                        '<h4 class="font-bold text-gray-800 text-sm md:text-base group-hover:text-primary-600 transition-colors truncate">' + (lesson.title || 'Bài giảng') + '</h4>' +
+                                        (hasVideo ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1 shrink-0"><i class="fa-solid fa-circle-play text-emerald-600"></i> Video</span>' : '') +
+                                        (matCount > 0 ? '<span class="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200 shrink-0"><i class="fa-solid fa-paperclip"></i> ' + matCount + '</span>' : '') +
+                                    '</div>' +
+                                    (lesson.summary ? '<p class="text-xs text-gray-500 line-clamp-1 mb-1.5">' + lesson.summary + '</p>' : '') +
+                                    '<div class="flex items-center gap-3 text-[11px] text-gray-400 font-medium">' +
+                                        '<span><i class="fa-regular fa-calendar mr-1"></i>' + dateStr + '</span>' +
+                                        (lesson.teacherName ? '<span><i class="fa-solid fa-chalkboard-user mr-1"></i>' + lesson.teacherName + '</span>' : '') +
+                                        '<span><i class="fa-regular fa-file-lines mr-1"></i>' + pageCount + ' trang</span>' +
+                                    '</div>' +
+                                '</div>' +
+                            '</div>' +
+                            '<div class="flex items-center gap-1.5 shrink-0 self-end sm:self-center pt-2 sm:pt-0 border-t sm:border-t-0 border-gray-100 w-full sm:w-auto justify-end" onclick="event.stopPropagation()">' +
+                                (hasVideo ? '<button type="button" onclick="window.openStudentVideoPlayer(\'' + lesson.id + '\')" class="px-3 py-1.5 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white text-xs font-extrabold rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer" title="Xem video bài giảng trực tiếp"><i class="fa-solid fa-circle-play text-sm"></i> <span>Phát Video</span></button>' : '') +
+                                '<button type="button" onclick="window.openStudentLessonViewer(\'' + lesson.id + '\', \'' + safeTitle + '\')" class="px-3 py-1.5 bg-primary-600 hover:bg-primary-700 text-white text-xs font-extrabold rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer" title="Mở bảng viết"><i class="fa-solid fa-book-open"></i> <span>Xem bài</span></button>' +
+                                '<button type="button" onclick="window.openStudentLessonInfo(\'' + lesson.id + '\')" class="w-8 h-8 rounded-xl bg-white hover:bg-primary-50 text-gray-600 hover:text-primary-700 border border-gray-200 text-xs font-black flex items-center justify-center transition cursor-pointer shadow-2xs" title="Thông tin chi tiết bài học"><i class="fa-solid fa-info"></i></button>' +
+                                '<button type="button" onclick="window.open(\'https://note.qmath.io.vn/?view=\' + encodeURIComponent(\'' + lesson.id + '\') + \'&export=pdf\', \'_blank\')" class="w-8 h-8 rounded-xl bg-white hover:bg-rose-50 text-gray-600 hover:text-rose-600 border border-gray-200 text-xs font-bold flex items-center justify-center transition cursor-pointer shadow-2xs" title="Xuất PDF"><i class="fa-solid fa-file-pdf"></i></button>' +
+                            '</div>' +
+                        '</div>';
+                    });
+                    html += '</div>';
+                } else {
+                    // --- 2. CHẾ ĐỘ LƯỚI THẺ (GRID CARDS VIEW) ---
+                    html += '<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">';
+                    items.forEach(lesson => {
+                        const safeTitle = String(lesson.title || 'Bài giảng').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                        const dateStr = lesson.lessonDate
+                            ? new Date(lesson.lessonDate).toLocaleDateString('vi-VN')
+                            : (lesson.updatedAt ? new Date(lesson.updatedAt).toLocaleDateString('vi-VN') : '---');
+                        const pageCount = lesson.pageCount || 1;
+                        const hasVideo = !!(lesson.video && (lesson.video.streamUrl || lesson.video.fileId || lesson.video.tmeUrl));
+                        const matCount = Array.isArray(lesson.materials) ? lesson.materials.length : 0;
+
+                        const coverHtml = lesson.coverUrl
+                            ? '<img src="' + lesson.coverUrl + '" class="w-full h-36 object-cover object-top bg-slate-900 rounded-xl border border-gray-100 mb-3" onerror="this.style.display=\'none\'">'
+                            : '<div class="w-full h-32 bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl flex flex-col items-center justify-center text-amber-400 mb-3"><i class="fa-solid fa-chalkboard-user text-3xl mb-1"></i><span class="text-[11px] text-slate-300 font-semibold">' + pageCount + ' trang bảng viết</span></div>';
+
+                        html += '<div class="bg-gray-50/60 hover:bg-white p-4 rounded-2xl border border-gray-200/80 hover:border-primary-300 hover:shadow-md transition-all flex flex-col justify-between group cursor-pointer relative" onclick="window.openStudentLessonViewer(\'' + lesson.id + '\', \'' + safeTitle + '\')">' +
+                            '<div>' +
+                                '<div class="relative">' +
+                                    coverHtml +
+                                    '<span class="absolute top-2 right-2 bg-black/75 text-white text-[10px] font-bold px-2.5 py-0.5 rounded-full backdrop-blur-xs">' + pageCount + ' trang</span>' +
+                                    (hasVideo ? '<span class="absolute top-2 left-2 bg-emerald-600/90 text-white text-[10px] font-extrabold px-2.5 py-0.5 rounded-full flex items-center gap-1 shadow-sm backdrop-blur-xs"><i class="fa-solid fa-circle-play"></i> Có video</span>' : '') +
+                                '</div>' +
+                                '<div class="flex items-start justify-between gap-2 mb-1">' +
+                                    '<h4 class="font-extrabold text-gray-800 text-sm md:text-base group-hover:text-primary-600 transition-colors line-clamp-2 flex-1">' + (lesson.title || 'Bài giảng') + '</h4>' +
+                                    '<button type="button" onclick="event.stopPropagation(); window.openStudentLessonInfo(\'' + lesson.id + '\')" class="w-7 h-7 rounded-lg bg-gray-100 hover:bg-primary-100 text-gray-600 hover:text-primary-700 text-xs font-black shrink-0 flex items-center justify-center transition cursor-pointer" title="Thông tin cơ bản về bài học"><i class="fa-solid fa-info"></i></button>' +
+                                '</div>' +
+                                (lesson.summary ? '<p class="text-xs text-gray-500 line-clamp-2 mb-2">' + lesson.summary + '</p>' : '') +
+                                '<div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-gray-400 font-medium mb-3">' +
+                                    '<span><i class="fa-regular fa-calendar mr-1"></i>Ngày: ' + dateStr + '</span>' +
+                                    (lesson.teacherName ? '<span><i class="fa-solid fa-chalkboard-user mr-1"></i>' + lesson.teacherName + '</span>' : '') +
+                                    (matCount > 0 ? '<span class="text-amber-600 font-bold"><i class="fa-solid fa-paperclip mr-1"></i>' + matCount + ' học liệu</span>' : '') +
+                                '</div>' +
+                            '</div>' +
+                            '<div class="pt-3 border-t border-gray-200/60 flex items-center gap-1.5 mt-auto" onclick="event.stopPropagation()">' +
+                                (hasVideo ? '<button type="button" onclick="window.openStudentVideoPlayer(\'' + lesson.id + '\')" class="py-2 px-2.5 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white text-xs font-extrabold rounded-xl shadow-xs transition flex items-center justify-center gap-1 cursor-pointer" title="Xem video bài giảng trực tiếp"><i class="fa-solid fa-circle-play text-sm"></i> <span>Phát Video</span></button>' : '') +
+                                '<button type="button" onclick="window.openStudentLessonViewer(\'' + lesson.id + '\', \'' + safeTitle + '\')" class="flex-1 py-2 px-2.5 bg-gradient-to-r from-primary-500 to-primary-600 hover:from-primary-600 hover:to-primary-700 text-white text-xs font-extrabold rounded-xl shadow-xs transition flex items-center justify-center gap-1.5 cursor-pointer">' +
+                                    '<i class="fa-solid fa-book-open"></i> Xem bài' +
+                                '</button>' +
+                                '<button type="button" onclick="window.open(\'https://note.qmath.io.vn/?view=\' + encodeURIComponent(\'' + lesson.id + '\') + \'&export=pdf\', \'_blank\')" class="py-2 px-2.5 bg-primary-50 hover:bg-primary-100 text-primary-700 text-xs font-bold rounded-xl transition flex items-center justify-center gap-1 cursor-pointer" title="Tải / Xuất file PDF">' +
+                                    '<i class="fa-solid fa-file-pdf"></i> PDF' +
+                                '</button>' +
+                            '</div>' +
+                        '</div>';
+                    });
+                    html += '</div>';
+                }
+
+                html += '</div>';
             });
 
             lessonListEl.innerHTML = html;
+        };
+
+        // --- MODAL THÔNG TIN CƠ BẢN VỀ BÀI HỌC (NÚT CHỮ i) ---
+        window.openStudentLessonInfo = (lessonId) => {
+            const lessons = (window.currentStudentClassId && window.studentClassLessonsMap[window.currentStudentClassId]) || [];
+            const lesson = lessons.find(l => l.id === lessonId);
+            if (!lesson) return;
+
+            let modal = document.getElementById('studentLessonInfoModal');
+            if (!modal) {
+                modal = document.createElement('div');
+                modal.id = 'studentLessonInfoModal';
+                modal.className = 'fixed inset-0 z-[140] bg-black/75 backdrop-blur-xs flex items-center justify-center p-3 md:p-6 hidden animate-fade-in';
+                modal.innerHTML = '<div id="studentLessonInfoContent" class="bg-white rounded-3xl max-w-xl w-full shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"></div>';
+                document.body.appendChild(modal);
+                modal.addEventListener('click', (e) => {
+                    if (e.target === modal) window.closeStudentLessonInfo();
+                });
+            }
+
+            const safeTitle = String(lesson.title || 'Bài giảng').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+            const dateStr = lesson.lessonDate
+                ? new Date(lesson.lessonDate).toLocaleDateString('vi-VN')
+                : (lesson.updatedAt ? new Date(lesson.updatedAt).toLocaleDateString('vi-VN') : 'Chưa cập nhật');
+            const pageCount = lesson.pageCount || 1;
+            const hasVideo = !!(lesson.video && (lesson.video.streamUrl || lesson.video.fileId || lesson.video.tmeUrl));
+            const materials = Array.isArray(lesson.materials) ? lesson.materials : [];
+
+            let videoCardHtml = '';
+            if (hasVideo) {
+                const vid = lesson.video;
+                const durText = vid.duration ? (Math.floor(vid.duration / 60) + ' phút ' + (vid.duration % 60) + ' giây') : 'Có sẵn';
+                const sizeMb = vid.size ? (vid.size / (1024 * 1024)).toFixed(1) + ' MB' : '';
+                videoCardHtml = '<div class="bg-gradient-to-br from-emerald-50 to-teal-50 border border-emerald-200 rounded-2xl p-4 flex flex-col gap-3">' +
+                    '<div class="flex items-center justify-between">' +
+                        '<div class="flex items-center gap-2">' +
+                            '<span class="w-8 h-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center text-sm shadow-xs"><i class="fa-solid fa-circle-play"></i></span>' +
+                            '<div>' +
+                                '<h5 class="font-extrabold text-emerald-950 text-sm">Video bài giảng trực tiếp</h5>' +
+                                '<p class="text-[11px] text-emerald-700 font-medium">Thời lượng: ' + durText + (sizeMb ? ' • ' + sizeMb : '') + '</p>' +
+                            '</div>' +
+                        '</div>' +
+                        '<button type="button" onclick="window.closeStudentLessonInfo(); window.openStudentVideoPlayer(\'' + lesson.id + '\')" class="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer">' +
+                            '<i class="fa-solid fa-play"></i> Xem video ngay' +
+                        '</button>' +
+                    '</div>' +
+                '</div>';
+            } else {
+                videoCardHtml = '<div class="bg-gray-50 border border-gray-200/80 rounded-2xl p-3.5 flex items-center gap-2.5 text-gray-400 text-xs font-medium">' +
+                    '<i class="fa-solid fa-video-slash text-base text-gray-300"></i>' +
+                    '<span>Chưa có video bài giảng đính kèm cho bài học này.</span>' +
+                '</div>';
+            }
+
+            let materialsHtml = '';
+            if (materials.length > 0) {
+                materialsHtml = '<div class="space-y-2">' +
+                    '<h5 class="text-xs font-extrabold text-gray-700 flex items-center gap-1.5"><i class="fa-solid fa-paperclip text-amber-500"></i> Tài liệu & Học liệu đính kèm (' + materials.length + ')</h5>' +
+                    '<div class="space-y-1.5 max-h-40 overflow-y-auto pr-1">' +
+                    materials.map(m => {
+                        const mSize = m.size ? ((m.size / 1024) > 1024 ? (m.size / (1024 * 1024)).toFixed(1) + ' MB' : Math.round(m.size / 1024) + ' KB') : '';
+                        return '<div class="flex items-center justify-between p-2 rounded-xl bg-gray-50 hover:bg-amber-50/50 border border-gray-100 transition">' +
+                            '<div class="flex items-center gap-2 min-w-0 flex-1 mr-2">' +
+                                '<i class="fa-solid fa-file text-amber-500 text-sm shrink-0"></i>' +
+                                '<span class="text-xs font-semibold text-gray-700 truncate" title="' + (m.name || '') + '">' + (m.name || 'Tài liệu') + '</span>' +
+                                (mSize ? '<span class="text-[10px] text-gray-400 shrink-0">(' + mSize + ')</span>' : '') +
+                            '</div>' +
+                            '<a href="' + m.url + '" target="_blank" download="' + (m.name || 'tailieu') + '" class="px-2.5 py-1 rounded-lg bg-white hover:bg-amber-100 border border-gray-200 text-amber-800 text-[11px] font-bold flex items-center gap-1 shrink-0">' +
+                                '<i class="fa-solid fa-download"></i> Tải về' +
+                            '</a>' +
+                        '</div>';
+                    }).join('') +
+                    '</div></div>';
+            }
+
+            const contentEl = document.getElementById('studentLessonInfoContent');
+            contentEl.innerHTML = 
+                '<div class="p-5 bg-gradient-to-r from-primary-600 to-primary-700 text-white flex items-center justify-between shrink-0">' +
+                    '<div class="flex items-center gap-2.5 min-w-0">' +
+                        '<span class="w-8 h-8 rounded-xl bg-white/20 text-white flex items-center justify-center text-sm font-black shrink-0"><i class="fa-solid fa-circle-info"></i></span>' +
+                        '<div class="min-w-0">' +
+                            '<h3 class="font-extrabold text-sm md:text-base leading-snug truncate">Thông tin bài học</h3>' +
+                            '<p class="text-[11px] text-primary-100 font-medium truncate">' + (lesson.chapter || 'Bài giảng trên lớp') + '</p>' +
+                        '</div>' +
+                    '</div>' +
+                    '<button type="button" onclick="window.closeStudentLessonInfo()" class="w-8 h-8 rounded-xl bg-white/10 hover:bg-white/25 text-white flex items-center justify-center transition cursor-pointer shrink-0">' +
+                        '<i class="fa-solid fa-xmark"></i>' +
+                    '</button>' +
+                '</div>' +
+                '<div class="p-5 overflow-y-auto space-y-4 text-gray-700 flex-1">' +
+                    '<div>' +
+                        '<h4 class="font-black text-gray-900 text-base md:text-lg mb-1 leading-snug">' + (lesson.title || 'Bài giảng') + '</h4>' +
+                        '<div class="flex flex-wrap items-center gap-3 text-xs text-gray-500 font-medium">' +
+                            '<span><i class="fa-regular fa-calendar mr-1 text-gray-400"></i>Ngày học: <strong class="text-gray-700">' + dateStr + '</strong></span>' +
+                            '<span><i class="fa-solid fa-chalkboard-user mr-1 text-gray-400"></i>Giáo viên: <strong class="text-gray-700">' + (lesson.teacherName || 'Thầy Quang') + '</strong></span>' +
+                            '<span><i class="fa-regular fa-file-lines mr-1 text-gray-400"></i>Quy mô: <strong class="text-gray-700">' + pageCount + ' trang viết</strong></span>' +
+                        '</div>' +
+                    '</div>' +
+                    (lesson.summary ? 
+                        '<div class="bg-gray-50 p-3.5 rounded-2xl border border-gray-100">' +
+                            '<h5 class="text-xs font-extrabold text-gray-700 mb-1 flex items-center gap-1.5"><i class="fa-solid fa-comment-dots text-primary-500"></i> Tóm tắt & Ghi chú bài giảng</h5>' +
+                            '<p class="text-xs text-gray-600 leading-relaxed whitespace-pre-wrap">' + lesson.summary + '</p>' +
+                        '</div>' : '') +
+                    videoCardHtml +
+                    materialsHtml +
+                '</div>' +
+                '<div class="p-4 bg-gray-50 border-t border-gray-100 flex items-center justify-between gap-2 shrink-0">' +
+                    '<button type="button" onclick="window.closeStudentLessonInfo()" class="px-4 py-2 rounded-xl bg-gray-200 hover:bg-gray-300 text-gray-700 text-xs font-extrabold transition cursor-pointer">' +
+                        'Đóng' +
+                    '</button>' +
+                    '<div class="flex items-center gap-2">' +
+                        '<button type="button" onclick="window.open(\'https://note.qmath.io.vn/?view=\' + encodeURIComponent(\'' + lesson.id + '\') + \'&export=pdf\', \'_blank\')" class="px-3 py-2 rounded-xl bg-primary-50 hover:bg-primary-100 text-primary-700 text-xs font-extrabold transition flex items-center gap-1.5 cursor-pointer">' +
+                            '<i class="fa-solid fa-file-pdf"></i> Xuất PDF' +
+                        '</button>' +
+                        '<button type="button" onclick="window.closeStudentLessonInfo(); window.openStudentLessonViewer(\'' + lesson.id + '\', \'' + safeTitle + '\')" class="px-4 py-2 rounded-xl bg-primary-600 hover:bg-primary-700 text-white text-xs font-extrabold shadow-xs transition flex items-center gap-1.5 cursor-pointer">' +
+                            '<i class="fa-solid fa-book-open"></i> Xem bài giảng' +
+                        '</button>' +
+                    '</div>' +
+                '</div>';
+            modal.classList.remove('hidden');
+        };
+
+        window.closeStudentLessonInfo = () => {
+            const modal = document.getElementById('studentLessonInfoModal');
+            if (modal) modal.classList.add('hidden');
+        };
+
+        // --- TRÌNH PHÁT VIDEO TRỰC TIẾP TRÊN WEB LMS (PC & ĐIỆN THOẠI) ---
+        window.openStudentVideoPlayer = async (lessonId) => {
+            const lessons = (window.currentStudentClassId && window.studentClassLessonsMap[window.currentStudentClassId]) || [];
+            const lesson = lessons.find(l => l.id === lessonId);
+            if (!lesson || !lesson.video) {
+                alert('Không tìm thấy video cho bài học này!');
+                return;
+            }
+
+            const video = lesson.video;
+            const title = lesson.title || video.title || 'Video Bài Giảng';
+
+            let modal = document.getElementById('studentVideoPlayerModal');
+            if (!modal) {
+                modal = document.createElement('div');
+                modal.id = 'studentVideoPlayerModal';
+                modal.className = 'fixed inset-0 z-[160] bg-black/92 backdrop-blur-md flex flex-col justify-center items-center p-2 sm:p-4 md:p-6 hidden animate-fade-in select-none';
+                modal.innerHTML = 
+                    '<div class="w-full max-w-4xl bg-slate-900 rounded-2xl md:rounded-3xl border border-slate-800 shadow-2xl overflow-hidden flex flex-col max-h-[96vh]">' +
+                        '<!-- Top Header -->' +
+                        '<div class="h-12 md:h-14 bg-slate-950 border-b border-slate-800 px-3 md:px-5 flex items-center justify-between text-white shrink-0">' +
+                            '<div class="flex items-center gap-2 md:gap-3 min-w-0">' +
+                                '<span class="w-7 h-7 md:w-8 md:h-8 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center text-xs md:text-sm shrink-0 shadow-inner">' +
+                                    '<i class="fa-solid fa-circle-play"></i>' +
+                                '</span>' +
+                                '<div class="min-w-0">' +
+                                    '<h3 id="studentVpTitle" class="font-extrabold text-xs md:text-sm text-slate-100 truncate">Video Bài Giảng</h3>' +
+                                    '<p id="studentVpSubtitle" class="text-[10px] md:text-[11px] text-slate-400 truncate">Phát trực tiếp trên Web LMS</p>' +
+                                '</div>' +
+                            '</div>' +
+                            '<div class="flex items-center gap-2 shrink-0">' +
+                                '<button type="button" id="studentVpPipBtn" class="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center justify-center text-xs transition cursor-pointer" title="Hình trong hình (PiP)">' +
+                                    '<i class="fa-solid fa-clone"></i>' +
+                                '</button>' +
+                                '<button type="button" id="studentVpFsBtn" class="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center justify-center text-xs transition cursor-pointer" title="Toàn màn hình">' +
+                                    '<i class="fa-solid fa-expand"></i>' +
+                                '</button>' +
+                                '<button type="button" onclick="window.closeStudentVideoPlayer()" class="w-8 h-8 md:w-9 md:h-9 rounded-xl bg-slate-800 hover:bg-rose-600 text-slate-300 hover:text-white flex items-center justify-center text-sm transition cursor-pointer">' +
+                                    '<i class="fa-solid fa-xmark"></i>' +
+                                '</button>' +
+                            '</div>' +
+                        '</div>' +
+
+                        '<!-- Video Screen Container -->' +
+                        '<div class="relative bg-black flex items-center justify-center overflow-hidden min-h-[220px] sm:min-h-[340px] md:min-h-[440px]">' +
+                            '<div id="studentVpLoader" class="absolute inset-0 flex flex-col items-center justify-center text-white bg-black/80 z-10 hidden">' +
+                                '<i class="fa-solid fa-circle-notch fa-spin text-3xl md:text-4xl text-emerald-400 mb-3"></i>' +
+                                '<p class="text-xs md:text-sm font-semibold text-slate-200">Đang tải luồng phát video trực tiếp...</p>' +
+                                '<p class="text-[11px] text-slate-400 mt-1">Vui lòng chờ trong giây lát</p>' +
+                            '</div>' +
+
+                            '<video id="studentVideoEl" controls playsinline webkit-playsinline autoplay class="w-full max-h-[64vh] md:max-h-[68vh] bg-black block outline-none"></video>' +
+
+                            '<iframe id="studentVideoIframe" class="w-full h-[64vh] md:h-[68vh] border-0 hidden" allow="autoplay; fullscreen" sandbox="allow-scripts allow-same-origin allow-popups"></iframe>' +
+                        '</div>' +
+
+                        '<!-- Bottom Control & Speed Bar -->' +
+                        '<div class="p-2.5 md:p-3 bg-slate-950 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2 shrink-0 text-white">' +
+                            '<div class="flex items-center gap-1.5 flex-wrap">' +
+                                '<span class="text-[11px] text-slate-400 font-bold mr-1 hidden sm:inline"><i class="fa-solid fa-gauge-high mr-1"></i>Tốc độ:</span>' +
+                                '<button type="button" class="student-vp-speed-btn px-2.5 py-1 rounded-lg text-[11px] font-bold border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer" data-spd="0.75">0.75x</button>' +
+                                '<button type="button" class="student-vp-speed-btn px-2.5 py-1 rounded-lg text-[11px] font-bold border border-emerald-500 bg-emerald-600 text-white cursor-pointer" data-spd="1">1.0x</button>' +
+                                '<button type="button" class="student-vp-speed-btn px-2.5 py-1 rounded-lg text-[11px] font-bold border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer" data-spd="1.25">1.25x</button>' +
+                                '<button type="button" class="student-vp-speed-btn px-2.5 py-1 rounded-lg text-[11px] font-bold border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer" data-spd="1.5">1.5x</button>' +
+                                '<button type="button" class="student-vp-speed-btn px-2.5 py-1 rounded-lg text-[11px] font-bold border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer" data-spd="2">2.0x</button>' +
+                            '</div>' +
+
+                            '<div class="flex items-center gap-2">' +
+                                '<button type="button" id="studentVpNotesBtn" class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white text-xs font-extrabold flex items-center gap-1.5 cursor-pointer transition">' +
+                                    '<i class="fa-solid fa-book-open text-primary-400"></i> <span class="hidden sm:inline">Mở bài ghi chép</span>' +
+                                '</button>' +
+                                '<button type="button" onclick="window.closeStudentVideoPlayer()" class="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold cursor-pointer transition">' +
+                                    'Đóng (Esc)' +
+                                '</button>' +
+                            '</div>' +
+                        '</div>' +
+                    '</div>';
+                document.body.appendChild(modal);
+
+                // Speed buttons event listeners
+                modal.querySelectorAll('.student-vp-speed-btn').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        const spd = parseFloat(btn.getAttribute('data-spd'));
+                        const vidEl = document.getElementById('studentVideoEl');
+                        if (vidEl) vidEl.playbackRate = spd;
+                        modal.querySelectorAll('.student-vp-speed-btn').forEach(b => {
+                            b.className = 'student-vp-speed-btn px-2.5 py-1 rounded-lg text-[11px] font-bold border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer';
+                        });
+                        btn.className = 'student-vp-speed-btn px-2.5 py-1 rounded-lg text-[11px] font-bold border border-emerald-500 bg-emerald-600 text-white cursor-pointer';
+                    });
+                });
+
+                // PiP button
+                document.getElementById('studentVpPipBtn').onclick = async () => {
+                    const vidEl = document.getElementById('studentVideoEl');
+                    if (vidEl && document.pictureInPictureEnabled) {
+                        try {
+                            if (document.pictureInPictureElement) await document.exitPictureInPicture();
+                            else await vidEl.requestPictureInPicture();
+                        } catch(e) {}
+                    }
+                };
+
+                // Fullscreen button
+                document.getElementById('studentVpFsBtn').onclick = () => {
+                    const vidEl = document.getElementById('studentVideoEl');
+                    if (!vidEl) return;
+                    if (vidEl.requestFullscreen) vidEl.requestFullscreen();
+                    else if (vidEl.webkitRequestFullscreen) vidEl.webkitRequestFullscreen();
+                };
+
+                // Keyboard listeners
+                window.addEventListener('keydown', (e) => {
+                    if (modal && !modal.classList.contains('hidden')) {
+                        if (e.key === 'Escape') {
+                            window.closeStudentVideoPlayer();
+                        }
+                    }
+                });
+            }
+
+            document.getElementById('studentVpTitle').textContent = title;
+            const durText = video.duration ? (Math.floor(video.duration / 60) + 'm ' + (video.duration % 60) + 's') : '';
+            const sizeMb = video.size ? (video.size / (1024 * 1024)).toFixed(1) + ' MB' : '';
+            document.getElementById('studentVpSubtitle').textContent = [durText, sizeMb, 'Phát trực tiếp'].filter(Boolean).join(' • ');
+
+            const vidNotesBtn = document.getElementById('studentVpNotesBtn');
+            if (vidNotesBtn) {
+                vidNotesBtn.onclick = () => {
+                    window.closeStudentVideoPlayer();
+                    window.openStudentLessonViewer(lesson.id, title);
+                };
+            }
+
+            const videoEl = document.getElementById('studentVideoEl');
+            const iframeEl = document.getElementById('studentVideoIframe');
+            const loaderEl = document.getElementById('studentVpLoader');
+
+            videoEl.classList.remove('hidden');
+            iframeEl.classList.add('hidden');
+            videoEl.pause();
+            videoEl.src = '';
+            modal.classList.remove('hidden');
+
+            // Xử lý nguồn phát video trực tiếp (R2 Cloudflare hoặc Telegram Bot direct stream)
+            let directUrl = video.streamUrl || '';
+
+            if (directUrl) {
+                videoEl.src = directUrl;
+                videoEl.play().catch(() => {});
+            } else if (video.fileId) {
+                // Tự động gọi API Telegram Bot để lấy luồng trực tiếp file_path
+                loaderEl.classList.remove('hidden');
+                try {
+                    const BOT_TOKEN = '8662985318:AAHIweMUW706XKIXFi-bFisaFoE7hZaMHDo';
+                    const res = await fetch('https://api.telegram.org/bot' + BOT_TOKEN + '/getFile?file_id=' + encodeURIComponent(video.fileId));
+                    const data = await res.json();
+                    loaderEl.classList.add('hidden');
+                    if (data.ok && data.result && data.result.file_path) {
+                        const tgStream = 'https://api.telegram.org/file/bot' + BOT_TOKEN + '/' + data.result.file_path;
+                        video.streamUrl = tgStream; // Cache lại
+                        videoEl.src = tgStream;
+                        videoEl.play().catch(() => {});
+                    } else if (video.tmeUrl) {
+                        // File > 20MB: hiển thị player nhúng web
+                        const match = video.tmeUrl.match(/t\.me\/([^/]+)\/(\d+)/);
+                        if (match) {
+                            videoEl.classList.add('hidden');
+                            iframeEl.classList.remove('hidden');
+                            iframeEl.src = 'https://t.me/' + match[1] + '/' + match[2] + '?embed=1';
+                        }
+                    }
+                } catch(err) {
+                    loaderEl.classList.add('hidden');
+                    console.warn("Lỗi phân giải luồng video:", err);
+                    if (video.tmeUrl) {
+                        const match = video.tmeUrl.match(/t\.me\/([^/]+)\/(\d+)/);
+                        if (match) {
+                            videoEl.classList.add('hidden');
+                            iframeEl.classList.remove('hidden');
+                            iframeEl.src = 'https://t.me/' + match[1] + '/' + match[2] + '?embed=1';
+                        }
+                    }
+                }
+            } else if (video.tmeUrl) {
+                const match = video.tmeUrl.match(/t\.me\/([^/]+)\/(\d+)/);
+                if (match) {
+                    videoEl.classList.add('hidden');
+                    iframeEl.classList.remove('hidden');
+                    iframeEl.src = 'https://t.me/' + match[1] + '/' + match[2] + '?embed=1';
+                }
+            }
+        };
+
+        window.closeStudentVideoPlayer = () => {
+            const modal = document.getElementById('studentVideoPlayerModal');
+            if (modal) {
+                modal.classList.add('hidden');
+                const videoEl = document.getElementById('studentVideoEl');
+                if (videoEl) {
+                    videoEl.pause();
+                    videoEl.src = '';
+                }
+                const iframeEl = document.getElementById('studentVideoIframe');
+                if (iframeEl) {
+                    iframeEl.src = 'about:blank';
+                }
+            }
         };
 
         window.openStudentLessonViewer = async (lessonId, title) => {
@@ -3255,26 +3703,25 @@
                 modal = document.createElement('div');
                 modal.id = 'studentLessonViewerModal';
                 modal.className = 'fixed inset-0 z-[120] bg-black/85 backdrop-blur-xs flex flex-col hidden';
-                modal.innerHTML = `
-                    <div class="h-12 bg-slate-900 border-b border-slate-800 px-3 md:px-5 flex items-center justify-between text-white shrink-0">
-                        <div class="flex items-center gap-2 min-w-0">
-                            <span class="w-7 h-7 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center text-xs shrink-0"><i class="fa-solid fa-book-open-reader"></i></span>
-                            <h3 id="studentLessonViewerTitle" class="font-bold text-xs md:text-sm truncate">Bài giảng</h3>
-                        </div>
-                        <div class="flex items-center gap-2 shrink-0">
-                            <a id="studentLessonViewerPdfBtn" href="#" target="_blank" class="px-2.5 py-1.5 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 border border-rose-400/30 text-xs font-bold text-rose-200 flex items-center gap-1.5">
-                                <i class="fa-solid fa-file-pdf"></i> <span class="hidden sm:inline">Xuất PDF</span>
-                            </a>
-                            <a id="studentLessonViewerNewTab" href="#" target="_blank" class="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-200 flex items-center gap-1.5">
-                                <i class="fa-solid fa-up-right-from-square"></i> <span class="hidden sm:inline">Mở toàn màn hình</span>
-                            </a>
-                            <button type="button" onclick="window.closeStudentLessonViewer()" class="w-8 h-8 rounded-lg bg-slate-800 hover:bg-rose-600 text-slate-200 hover:text-white flex items-center justify-center cursor-pointer transition-colors">
-                                <i class="fa-solid fa-xmark"></i>
-                            </button>
-                        </div>
-                    </div>
-                    <iframe id="studentLessonViewerIframe" class="flex-1 w-full border-0 bg-slate-950" src="about:blank" allow="fullscreen"></iframe>
-                `;
+                modal.innerHTML = 
+                    '<div class="h-12 bg-slate-900 border-b border-slate-800 px-3 md:px-5 flex items-center justify-between text-white shrink-0">' +
+                        '<div class="flex items-center gap-2 min-w-0">' +
+                            '<span class="w-7 h-7 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center text-xs shrink-0"><i class="fa-solid fa-book-open-reader"></i></span>' +
+                            '<h3 id="studentLessonViewerTitle" class="font-bold text-xs md:text-sm truncate">Bài giảng</h3>' +
+                        '</div>' +
+                        '<div class="flex items-center gap-2 shrink-0">' +
+                            '<a id="studentLessonViewerPdfBtn" href="#" target="_blank" class="px-2.5 py-1.5 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 border border-rose-400/30 text-xs font-bold text-rose-200 flex items-center gap-1.5">' +
+                                '<i class="fa-solid fa-file-pdf"></i> <span class="hidden sm:inline">Xuất PDF</span>' +
+                            '</a>' +
+                            '<a id="studentLessonViewerNewTab" href="#" target="_blank" class="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-200 flex items-center gap-1.5">' +
+                                '<i class="fa-solid fa-up-right-from-square"></i> <span class="hidden sm:inline">Mở toàn màn hình</span>' +
+                            '</a>' +
+                            '<button type="button" onclick="window.closeStudentLessonViewer()" class="w-8 h-8 rounded-lg bg-slate-800 hover:bg-rose-600 text-slate-200 hover:text-white flex items-center justify-center cursor-pointer transition-colors">' +
+                                '<i class="fa-solid fa-xmark"></i>' +
+                            '</button>' +
+                        '</div>' +
+                    '</div>' +
+                    '<iframe id="studentLessonViewerIframe" class="flex-1 w-full border-0 bg-slate-950" src="about:blank" allow="fullscreen"></iframe>';
                 document.body.appendChild(modal);
             }
 
@@ -3308,7 +3755,8 @@
             }
         };
 
-        // --- HÀM RENDER DANH SÁCH BÀI TẬP (GRID + LIST ĐẦY ĐỦ) ---
+
+// --- HÀM RENDER DANH SÁCH BÀI TẬP (GRID + LIST ĐẦY ĐỦ) ---
         window.renderClassExams = (sortType) => {
             currentSortMode = sortType;
             const container = document.getElementById('classExamList');
