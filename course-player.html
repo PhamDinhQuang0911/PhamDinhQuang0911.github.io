@@ -28,6 +28,10 @@
     <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+    <!-- HLS.js & Plyr cho trình phát video HLS Telegram bảo mật (Free 100%) -->
+    <link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css" />
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.8/dist/hls.min.js"></script>
+    <script src="https://cdn.plyr.io/3.7.8/plyr.polyfilled.min.js"></script>
     
     <style>
         /* Scrollbar */
@@ -35,6 +39,25 @@
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 3px; }
         ::-webkit-scrollbar-thumb:hover { background: #94A3B8; }
+
+        /* Tùy biến Trình phát HLS Video Plyr */
+        #hlsPlayerWrapper .plyr {
+            width: 100%;
+            height: 100%;
+            background: #000;
+        }
+        #hlsPlayerWrapper .plyr__video-wrapper {
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #000;
+        }
+        #hlsPlayerWrapper video {
+            max-height: 100%;
+            width: 100%;
+            object-fit: contain;
+        }
 
         /* SIDEBAR TRANSITION & WIDTH CONTROL */
         #sidebar {
@@ -154,7 +177,12 @@
             </div>
 
             <div id="videoPlayerContainer" class="hidden w-full h-full bg-black z-20 relative group">
-                <div id="ytPlayer" class="w-full h-full"></div> <div id="videoTimerOverlay" class="absolute top-4 right-4 bg-black/80 text-white px-4 py-2 rounded-full text-xs font-bold backdrop-blur-md border border-white/10 flex items-center gap-3 shadow-lg z-30 transition-opacity duration-500">
+                <div id="ytPlayer" class="w-full h-full"></div>
+                <!-- Trình phát HLS Video Telegram bảo mật (Plyr + Hls.js) -->
+                <div id="hlsPlayerWrapper" class="w-full h-full hidden flex items-center justify-center bg-black">
+                    <video id="hlsVideo" class="w-full h-full object-contain" playsinline controls controlsList="nodownload" oncontextmenu="return false;"></video>
+                </div>
+                <div id="videoTimerOverlay" class="absolute top-4 right-4 bg-black/80 text-white px-4 py-2 rounded-full text-xs font-bold backdrop-blur-md border border-white/10 flex items-center gap-3 shadow-lg z-30 transition-opacity duration-500">
                     <div class="flex items-center gap-2">
                         <i class="fa-solid fa-clock text-orange-500 animate-pulse"></i>
                         <span class="text-gray-300">Yêu cầu xem tối thiểu:</span>
@@ -256,6 +284,10 @@
         let isVideoCompleted = false;
         let lastPlaybackPosition = 0; // [MỚI] Vị trí giây cuối cùng đã xem
         let savedRemainingSeconds = -1; // [MỚI] Thời gian đếm ngược còn lại đã lưu
+        // BIẾN TRÌNH PHÁT HLS TELEGRAM
+        let hlsInstance = null;
+        let plyrInstance = null;
+        let currentHlsBlobUrl = null;
 
         const urlParams = new URLSearchParams(window.location.search);
         const courseId = urlParams.get('id');
@@ -575,7 +607,7 @@
                 
                 isVideoCompleted = completedItems.has(index);
                 
-                // [MỚI] Tải lịch sử xem từ Firebase (nếu có)
+                // [MỚI] Tải lịch sử xem từ Firebase/Supabase (nếu có)
                 const user = auth.currentUser;
                 const progressRef = doc(db, "user_progress", `${user.uid}_${courseId}`);
                 const pSnap = await getDoc(progressRef);
@@ -594,27 +626,159 @@
                 if (isVideoCompleted) watchedSeconds = requiredSeconds;
                 updateTimerUI();
 
-                let videoId = '';
-                if(item.content && item.content.includes('youtu')) {
-                    const m = item.content.match(/(?:youtu\.be\/|youtube\.com\/(?:.*v=|.*\/))([^&?]*)/);
-                    if(m && m[1]) videoId = m[1];
-                }
+                // KIỂM TRA NGUỒN VIDEO: HLS TELEGRAM HAY YOUTUBE
+                const isHls = item.videoType === 'hls' || !!item.m3u8 || 
+                    (item.content && (item.content.includes('/chunk/') || item.content.includes('/playlist/') || item.content.includes('.m3u8') || item.content.startsWith('#EXTM3U')));
 
-                if(player && player.loadVideoById) {
-                    player.loadVideoById({
-                        videoId: videoId,
-                        startSeconds: isVideoCompleted ? 0 : lastPlaybackPosition // [MỚI] Bắt đầu từ vị trí cũ
-                    });
+                const ytContainer = document.getElementById('ytPlayer');
+                const hlsWrapper = document.getElementById('hlsPlayerWrapper');
+                const videoEl = document.getElementById('hlsVideo');
+
+                if (isHls) {
+                    // --- CHẾ ĐỘ 1: HLS VIDEO STREAMING TỪ TELEGRAM ---
+                    ytContainer.classList.add('hidden');
+                    hlsWrapper.classList.remove('hidden');
+
+                    if (player && typeof player.pauseVideo === 'function') {
+                        try { player.pauseVideo(); } catch(e){}
+                    }
+
+                    // Dọn dẹp phiên phát HLS cũ
+                    if (plyrInstance) {
+                        try { plyrInstance.destroy(); } catch(e){}
+                        plyrInstance = null;
+                    }
+                    if (hlsInstance) {
+                        hlsInstance.destroy();
+                        hlsInstance = null;
+                    }
+                    if (currentHlsBlobUrl) {
+                        URL.revokeObjectURL(currentHlsBlobUrl);
+                        currentHlsBlobUrl = null;
+                    }
+
+                    // Chuẩn bị đường dẫn stream
+                    let streamSrc = '';
+                    if (item.m3u8 && typeof item.m3u8 === 'string' && item.m3u8.trim().startsWith('#EXTM3U')) {
+                        const blob = new Blob([item.m3u8], { type: 'application/vnd.apple.mpegurl' });
+                        currentHlsBlobUrl = URL.createObjectURL(blob);
+                        streamSrc = currentHlsBlobUrl;
+                    } else if (item.content && typeof item.content === 'string' && item.content.trim().startsWith('#EXTM3U')) {
+                        const blob = new Blob([item.content], { type: 'application/vnd.apple.mpegurl' });
+                        currentHlsBlobUrl = URL.createObjectURL(blob);
+                        streamSrc = currentHlsBlobUrl;
+                    } else if (item.content) {
+                        streamSrc = item.content.trim();
+                    }
+
+                    videoEl.removeAttribute('src');
+                    videoEl.load();
+
+                    const setupHlsPlyrTracking = () => {
+                        try {
+                            plyrInstance = new Plyr(videoEl, {
+                                controls: ['play-large', 'play', 'progress', 'current-time', 'duration', 'mute', 'volume', 'settings', 'pip', 'airplay', 'fullscreen'],
+                                settings: ['speed'],
+                                speed: { selected: 1, options: [0.75, 1, 1.25, 1.5, 1.75, 2] },
+                                keyboard: { focused: true, global: true }
+                            });
+                        } catch(e) {
+                            console.warn("Plyr init fallback:", e);
+                        }
+
+                        if (lastPlaybackPosition > 0 && !isVideoCompleted) {
+                            try { videoEl.currentTime = lastPlaybackPosition; } catch(e){}
+                        }
+
+                        videoEl.onplay = () => {
+                            if (timerInterval) clearInterval(timerInterval);
+                            timerInterval = setInterval(async () => {
+                                const currentTime = Math.floor(videoEl.currentTime || 0);
+                                if (!isVideoCompleted) {
+                                    watchedSeconds++;
+                                    updateTimerUI();
+                                    if (watchedSeconds >= requiredSeconds) {
+                                        clearInterval(timerInterval);
+                                        isVideoCompleted = true;
+                                        await markAsCompleted(currentItemIndex);
+                                        window.showToast("Đã đủ thời gian tối thiểu! Bài tiếp theo đã mở khóa.", "success");
+                                        updateStats();
+                                        updateNavButtons();
+                                    }
+                                }
+                                if (watchedSeconds % 5 === 0) {
+                                    saveCurrentPlayback(currentTime, watchedSeconds);
+                                }
+                            }, 1000);
+                        };
+
+                        videoEl.onpause = () => {
+                            if (timerInterval) clearInterval(timerInterval);
+                        };
+
+                        videoEl.onended = () => {
+                            if (timerInterval) clearInterval(timerInterval);
+                            if (isVideoCompleted && currentItemIndex < flatItems.length - 1) {
+                                window.showToast("Đang chuyển sang bài tiếp theo...", "success");
+                                setTimeout(() => window.playItem(currentItemIndex + 1), 2000);
+                            }
+                        };
+                    };
+
+                    if (window.Hls && Hls.isSupported() && streamSrc) {
+                        hlsInstance = new Hls({ maxBufferLength: 30, enableWorker: true });
+                        hlsInstance.loadSource(streamSrc);
+                        hlsInstance.attachMedia(videoEl);
+                        hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
+                            setupHlsPlyrTracking();
+                        });
+                        hlsInstance.on(Hls.Events.ERROR, (event, data) => {
+                            if (data.fatal) {
+                                console.error("HLS Fatal Error:", data);
+                                if (data.type === Hls.ErrorTypes.NETWORK_ERROR) hlsInstance.startLoad();
+                                else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) hlsInstance.recoverMediaError();
+                                else hlsInstance.destroy();
+                            }
+                        });
+                    } else if (videoEl.canPlayType('application/vnd.apple.mpegurl') && streamSrc) {
+                        // iOS Safari HLS Native
+                        videoEl.src = streamSrc;
+                        setupHlsPlyrTracking();
+                    }
+
                 } else {
-                    setTimeout(() => { 
-                        if(player && player.loadVideoById) 
-                            player.loadVideoById({ videoId, startSeconds: isVideoCompleted ? 0 : lastPlaybackPosition }); 
-                    }, 1000);
+                    // --- CHẾ ĐỘ 2: YOUTUBE VIDEO NHƯ TRƯỚC ---
+                    hlsWrapper.classList.add('hidden');
+                    ytContainer.classList.remove('hidden');
+
+                    if (videoEl) {
+                        try { videoEl.pause(); } catch(e){}
+                    }
+
+                    let videoId = '';
+                    if(item.content && item.content.includes('youtu')) {
+                        const m = item.content.match(/(?:youtu\.be\/|youtube\.com\/(?:.*v=|.*\/))([^&?]*)/);
+                        if(m && m[1]) videoId = m[1];
+                    }
+
+                    if(player && player.loadVideoById) {
+                        player.loadVideoById({
+                            videoId: videoId,
+                            startSeconds: isVideoCompleted ? 0 : lastPlaybackPosition
+                        });
+                    } else {
+                        setTimeout(() => { 
+                            if(player && player.loadVideoById) 
+                                player.loadVideoById({ videoId, startSeconds: isVideoCompleted ? 0 : lastPlaybackPosition }); 
+                        }, 1000);
+                    }
                 }
             
             // --- TRƯỜNG HỢP 2: PDF ---
             // --- TRƯỜNG HỢP 2: PDF ---
             } else if(item.type === 'pdf') {
+                const v = document.getElementById('hlsVideo'); if (v) try { v.pause(); } catch(e){}
+                if (player && typeof player.pauseVideo === 'function') try { player.pauseVideo(); } catch(e){}
                 pdfFrame.classList.remove('hidden');
                 
                 // [ĐÃ SỬA] Dùng hàm xử lý link thông minh vừa tạo ở trên

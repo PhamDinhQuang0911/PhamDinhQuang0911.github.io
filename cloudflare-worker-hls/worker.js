@@ -5,11 +5,20 @@
  *  1. Proxy luồng video HLS (.ts chunks) từ Telegram Bot API qua Cloudflare Edge.
  *  2. Vượt qua giới hạn 20MB download của Telegram Bot bằng cách phục vụ từng chunk < 15MB.
  *  3. Lưu đệm vĩnh viễn (Edge Caching) qua Cache API (caches.default), tối đa hóa tốc độ phát và 0 tải lặp lại lên Telegram Bot.
- *  4. Hỗ trợ CORS đầy đủ cho các tên miền LMS: qmath.io.vn, note.qmath.io.vn, github.io, localhost.
+ *  4. Hỗ trợ xoay vòng nhiều Bot Token để chia tải và phòng chống Rate Limit (429).
+ *  5. Endpoint /playlist/:id.m3u8 lấy trực tiếp danh sách phát từ Supabase.
+ *  6. Hỗ trợ CORS đầy đủ cho các tên miền LMS: qmath.io.vn, note.qmath.io.vn, github.io, localhost.
  */
 
-// Cấu hình mặc định (có thể ghi đè bằng Cloudflare Environment Variables / Secrets)
-const DEFAULT_BOT_TOKEN = "8662985318:AAHIweMUW706XKIXFi-bFisaFoE7hZaMHDo";
+// Danh sách Bot Token (có thể cấu hình thêm qua env.TELEGRAM_BOT_TOKENS cách nhau dấu phẩy)
+const DEFAULT_BOT_TOKENS = [
+  "8662985318:AAHIweMUW706XKIXFi-bFisaFoE7hZaMHDo"
+];
+
+const SUPABASE_CONFIG = {
+  url: "https://cuniqanbumcrqcdlcvad.supabase.co",
+  anonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN1bmlxYW5idW1jcnFjZGxjdmFkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg5NDE4MTMsImV4cCI6MjEwNDUxNzgxM30.MWSv1QKVlQ9r-8r0hkrqWsmm75hULq_VjPCbTqXDe-o"
+};
 
 // Danh sách Origin được phép truy cập
 const ALLOWED_ORIGINS = [
@@ -39,6 +48,17 @@ function getCorsHeaders(request) {
     "Access-Control-Expose-Headers": "Content-Length, Content-Range, Content-Type, X-Cache, Accept-Ranges",
     "Access-Control-Max-Age": "86400"
   };
+}
+
+function getBotTokens(env) {
+  if (env && env.TELEGRAM_BOT_TOKENS) {
+    const list = env.TELEGRAM_BOT_TOKENS.split(",").map(t => t.trim()).filter(Boolean);
+    if (list.length > 0) return list;
+  }
+  if (env && env.TELEGRAM_BOT_TOKEN) {
+    return [env.TELEGRAM_BOT_TOKEN.trim()];
+  }
+  return DEFAULT_BOT_TOKENS;
 }
 
 export default {
@@ -73,7 +93,8 @@ export default {
         JSON.stringify({
           status: "online",
           service: "QMath Telegram HLS Stream Proxy",
-          version: "1.0.0",
+          version: "2.0.0",
+          features: ["edge-caching", "multi-token-rotation", "playlist-proxy"],
           timestamp: new Date().toISOString()
         }, null, 2),
         {
@@ -87,7 +108,48 @@ export default {
       );
     }
 
-    // 3. Endpoint phục vụ chunk video HLS:
+    // 3. Endpoint phục vụ danh sách phát: /playlist/:id hoặc /playlist/:id.m3u8
+    const playlistMatch = pathname.match(/^\/playlist\/(.+)$/i);
+    if (playlistMatch) {
+      let videoId = playlistMatch[1].replace(/\.m3u8$/i, "").trim();
+      const configId = videoId.startsWith("hls_video_") ? videoId : (videoId.startsWith("lesson_") ? videoId : `hls_video_${videoId}`);
+
+      try {
+        const sbUrl = `${SUPABASE_CONFIG.url}/rest/v1/configurations?id=eq.${encodeURIComponent(configId)}&select=raw_data`;
+        const sbRes = await fetch(sbUrl, {
+          headers: {
+            apikey: SUPABASE_CONFIG.anonKey,
+            Authorization: `Bearer ${SUPABASE_CONFIG.anonKey}`
+          }
+        });
+
+        if (sbRes.ok) {
+          const rows = await sbRes.json();
+          const m3u8 = rows?.[0]?.raw_data?.m3u8 || rows?.[0]?.raw_data?.video?.m3u8;
+          if (m3u8) {
+            return new Response(m3u8, {
+              status: 200,
+              headers: {
+                ...corsHeaders,
+                "Content-Type": "application/vnd.apple.mpegurl; charset=utf-8",
+                "Cache-Control": "public, max-age=3600"
+              }
+            });
+          }
+        }
+        return new Response("Không tìm thấy playlist m3u8 trên cơ sở dữ liệu Supabase", {
+          status: 404,
+          headers: { ...corsHeaders, "Content-Type": "text/plain; charset=utf-8" }
+        });
+      } catch (err) {
+        return new Response(`Lỗi truy vấn playlist: ${err.message}`, {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "text/plain; charset=utf-8" }
+        });
+      }
+    }
+
+    // 4. Endpoint phục vụ chunk video HLS:
     // Hỗ trợ: /chunk/:file_id, /chunk/:file_id.ts, hoặc ?file_id=:file_id
     let fileId = "";
     const chunkMatch = pathname.match(/^\/chunk\/(.+)$/i);
@@ -107,7 +169,7 @@ export default {
       });
     }
 
-    // 4. KIỂM TRA CLOUDFLARE EDGE CACHE (caches.default)
+    // 5. KIỂM TRA CLOUDFLARE EDGE CACHE (caches.default)
     const cache = caches.default;
     // Chuẩn hóa cache key theo URL chunk sạch
     const cacheUrl = new URL(request.url);
@@ -128,35 +190,58 @@ export default {
       });
     }
 
-    // 5. CACHE MISS: Lấy đường dẫn file từ Telegram Bot API
-    const botToken = (env && env.TELEGRAM_BOT_TOKEN) || DEFAULT_BOT_TOKEN;
+    // 6. CACHE MISS: Lấy đường dẫn file từ Telegram Bot API (có cơ chế xoay vòng tokens)
+    const tokens = getBotTokens(env);
+    let filePath = null;
+    let chosenToken = null;
+    let lastError = null;
 
-    try {
-      const getFileUrl = `https://api.telegram.org/bot${botToken}/getFile?file_id=${encodeURIComponent(fileId)}`;
-      const getFileRes = await fetch(getFileUrl);
+    // Băm fileId để chọn token ban đầu giúp cân bằng tải
+    const hash = Array.from(fileId).reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    const startIdx = hash % tokens.length;
 
-      if (!getFileRes.ok) {
-        return new Response(`Lỗi kết nối Telegram Bot API (${getFileRes.status})`, {
-          status: 502,
+    for (let i = 0; i < tokens.length; i++) {
+      const token = tokens[(startIdx + i) % tokens.length];
+      try {
+        const getFileUrl = `https://api.telegram.org/bot${token}/getFile?file_id=${encodeURIComponent(fileId)}`;
+        const getFileRes = await fetch(getFileUrl);
+
+        if (getFileRes.status === 429) {
+          // Token bị rate limit, thử token tiếp theo
+          continue;
+        }
+
+        if (!getFileRes.ok) {
+          lastError = `Telegram HTTP ${getFileRes.status}`;
+          continue;
+        }
+
+        const fileData = await getFileRes.json();
+        if (fileData.ok && fileData.result && fileData.result.file_path) {
+          filePath = fileData.result.file_path;
+          chosenToken = token;
+          break;
+        } else {
+          lastError = fileData.description || "file_id không hợp lệ";
+        }
+      } catch (err) {
+        lastError = err.message;
+      }
+    }
+
+    if (!filePath || !chosenToken) {
+      return new Response(
+        `Không thể lấy phân đoạn video từ Telegram: ${lastError || "Tất cả token đều thất bại"}`,
+        {
+          status: 404,
           headers: { ...corsHeaders, "Content-Type": "text/plain; charset=utf-8" }
-        });
-      }
+        }
+      );
+    }
 
-      const fileData = await getFileRes.json();
-      if (!fileData.ok || !fileData.result || !fileData.result.file_path) {
-        return new Response(
-          `Không tìm thấy file trên Telegram: ${fileData.description || "file_id không hợp lệ"}`,
-          {
-            status: 404,
-            headers: { ...corsHeaders, "Content-Type": "text/plain; charset=utf-8" }
-          }
-        );
-      }
-
-      const filePath = fileData.result.file_path;
-      const tgDownloadUrl = `https://api.telegram.org/file/bot${botToken}/${filePath}`;
-
-      // 6. Tải binary của mảnh video (.ts) từ Telegram
+    // 7. Tải binary của mảnh video (.ts) từ Telegram CDN
+    const tgDownloadUrl = `https://api.telegram.org/file/bot${chosenToken}/${filePath}`;
+    try {
       const tgFileRes = await fetch(tgDownloadUrl);
       if (!tgFileRes.ok) {
         return new Response(`Lỗi tải dữ liệu video từ Telegram CDN (${tgFileRes.status})`, {
@@ -165,7 +250,7 @@ export default {
         });
       }
 
-      // 7. Thiết lập response headers tối ưu cho HLS streaming & cache vĩnh viễn
+      // 8. Thiết lập response headers tối ưu cho HLS streaming & cache vĩnh viễn
       const responseHeaders = new Headers();
       Object.entries(corsHeaders).forEach(([k, v]) => responseHeaders.set(k, v));
 
@@ -183,7 +268,7 @@ export default {
         headers: responseHeaders
       });
 
-      // 8. Lưu vào Cloudflare Edge Cache chạy nền
+      // 9. Lưu vào Cloudflare Edge Cache chạy nền
       ctx.waitUntil(cache.put(cacheKey, streamResponse.clone()));
 
       return streamResponse;

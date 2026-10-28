@@ -5,25 +5,31 @@
  * QMATH VIDEO HLS PRE-PROCESSOR & TELEGRAM UPLOADER (FREE 100%)
  * ============================================================================
  * Quy trình xử lý tự động:
- *  1. Cắt video MP4 bằng FFmpeg (-c copy siêu tốc) thành playlist .m3u8 và các chunk .ts (6s / chunk).
+ *  1. Cắt video MP4 bằng FFmpeg (-c copy siêu tốc) thành playlist .m3u8 và các chunk .ts (5-8s / chunk).
  *  2. Đẩy tuần tự từng chunk .ts (< 15MB) lên Telegram Channel kho_video_qmath_2026 qua Bot API.
  *  3. Thu thập file_id của từng chunk và tự động thay thế đường dẫn trong file .m3u8 bằng Cloudflare Worker URL.
- *  4. Đồng bộ trực tiếp metadata và nội dung .m3u8 lên cơ sở dữ liệu Supabase (bảng configurations -> lesson_<id>).
+ *  4. Đồng bộ trực tiếp metadata và nội dung .m3u8 lên cơ sở dữ liệu Supabase:
+ *     - Lưu vào Thư viện Video HLS trung tâm (configurations -> hls_video_<id>)
+ *     - Tùy chọn gán trực tiếp vào Khóa học (public_courses -> curriculum)
+ *     - Tùy chọn gán vào Buổi học (configurations -> lesson_<id>)
  *  5. Tự động dọn dẹp các mảnh .ts tạm trên ổ cứng sau khi hoàn thành.
  * ============================================================================
  */
 
 const fs = require('fs');
 const path = require('path');
-const { spawnSync, execSync } = require('child_process');
+const { spawnSync } = require('child_process');
 const readline = require('readline');
 
 // ==========================================
 // CẤU HÌNH MẶC ĐỊNH
 // ==========================================
 const CONFIG = {
-  // Telegram Bot Token & Channel
-  TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN || '8662985318:AAHIweMUW706XKIXFi-bFisaFoE7hZaMHDo',
+  // Telegram Bot Token (Hỗ trợ danh sách token cách nhau bởi dấu phẩy để xoay vòng)
+  TELEGRAM_BOT_TOKENS: (process.env.TELEGRAM_BOT_TOKENS || process.env.TELEGRAM_BOT_TOKEN || '8662985318:AAHIweMUW706XKIXFi-bFisaFoE7hZaMHDo')
+    .split(',')
+    .map(t => t.trim())
+    .filter(Boolean),
   TELEGRAM_CHAT_ID: process.env.TELEGRAM_CHAT_ID || '@kho_video_qmath_2026',
 
   // Cloudflare Worker phát video HLS
@@ -114,8 +120,125 @@ function formatBytes(bytes) {
 }
 
 // ==========================================
-// THƯ VIỆN KẾT NỐI SUPABASE
+// TƯƠNG TÁC SUPABASE
 // ==========================================
+
+// 1. Lưu metadata video vào thư viện trung tâm configurations (hls_video_<id>)
+async function saveHlsVideoToLibrary(videoMetadata) {
+  const videoId = `hls_video_${Date.now()}`;
+  videoMetadata.id = videoId;
+
+  const url = `${CONFIG.SUPABASE_URL}/rest/v1/configurations?on_conflict=id`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'apikey': CONFIG.SUPABASE_ANON_KEY,
+      'Authorization': `Bearer ${CONFIG.SUPABASE_ANON_KEY}`,
+      'Content-Type': 'application/json',
+      'Prefer': 'resolution=merge-duplicates,return=representation'
+    },
+    body: JSON.stringify({
+      id: videoId,
+      raw_data: videoMetadata,
+      updated_at: new Date().toISOString()
+    })
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Lưu video vào Thư viện Supabase thất bại (${res.status}): ${errText}`);
+  }
+  return videoId;
+}
+
+// 2. Lấy danh sách khóa học gần đây
+async function fetchRecentCourses() {
+  try {
+    const url = `${CONFIG.SUPABASE_URL}/rest/v1/public_courses?select=id,title,curriculum,updated_at&order=updated_at.desc&limit=15`;
+    const res = await fetch(url, {
+      headers: {
+        'apikey': CONFIG.SUPABASE_ANON_KEY,
+        'Authorization': `Bearer ${CONFIG.SUPABASE_ANON_KEY}`
+      }
+    });
+    if (!res.ok) return [];
+    return await res.json();
+  } catch (e) {
+    return [];
+  }
+}
+
+// 3. Gán video vào giáo án của khóa học (public_courses)
+async function attachVideoToCourse(courseId, videoMetadata) {
+  const getUrl = `${CONFIG.SUPABASE_URL}/rest/v1/public_courses?id=eq.${encodeURIComponent(courseId)}&select=id,title,curriculum`;
+  const res = await fetch(getUrl, {
+    headers: {
+      'apikey': CONFIG.SUPABASE_ANON_KEY,
+      'Authorization': `Bearer ${CONFIG.SUPABASE_ANON_KEY}`
+    }
+  });
+
+  if (!res.ok) throw new Error(`Không tìm thấy khóa học ${courseId}`);
+  const rows = await res.json();
+  if (!rows || rows.length === 0) throw new Error(`Khóa học ${courseId} không tồn tại`);
+
+  const course = rows[0];
+  let curriculum = Array.isArray(course.curriculum) ? course.curriculum : [];
+
+  if (curriculum.length === 0) {
+    curriculum.push({
+      title: 'Chương 1: Bài giảng video',
+      lessons: [{ title: 'Bài học', items: [] }]
+    });
+  }
+
+  const newItem = {
+    id: `it_${Date.now()}`,
+    type: 'video',
+    videoType: 'hls',
+    title: videoMetadata.title,
+    content: `${videoMetadata.workerDomain}/playlist/${videoMetadata.id}.m3u8`,
+    m3u8: videoMetadata.m3u8,
+    duration: videoMetadata.duration,
+    chunkCount: videoMetadata.chunkCount,
+    minWatchTime: Math.max(1, Math.round(videoMetadata.duration / 120)), // Yêu cầu xem tối thiểu ~50%
+    isPublished: true
+  };
+
+  // Thêm vào bài học đầu tiên của chương mới nhất
+  const lastChapter = curriculum[curriculum.length - 1];
+  if (!Array.isArray(lastChapter.lessons) || lastChapter.lessons.length === 0) {
+    lastChapter.lessons = [{ title: 'Bài học 1', items: [] }];
+  }
+  const lastLesson = lastChapter.lessons[lastChapter.lessons.length - 1];
+  if (!Array.isArray(lastLesson.items)) lastLesson.items = [];
+  lastLesson.items.push(newItem);
+
+  // Cập nhật lên Supabase
+  const patchUrl = `${CONFIG.SUPABASE_URL}/rest/v1/public_courses?id=eq.${encodeURIComponent(courseId)}`;
+  const patchRes = await fetch(patchUrl, {
+    method: 'PATCH',
+    headers: {
+      'apikey': CONFIG.SUPABASE_ANON_KEY,
+      'Authorization': `Bearer ${CONFIG.SUPABASE_ANON_KEY}`,
+      'Content-Type': 'application/json',
+      'Prefer': 'return=minimal'
+    },
+    body: JSON.stringify({
+      curriculum: curriculum,
+      updated_at: new Date().toISOString()
+    })
+  });
+
+  if (!patchRes.ok) {
+    const errText = await patchRes.text();
+    throw new Error(`Cập nhật giáo án khóa học thất bại (${patchRes.status}): ${errText}`);
+  }
+
+  return { courseTitle: course.title, itemId: newItem.id };
+}
+
+// 4. Lấy danh sách buổi học gần đây (lesson_*)
 async function fetchRecentLessons() {
   try {
     const url = `${CONFIG.SUPABASE_URL}/rest/v1/configurations?select=id,raw_data,updated_at&id=like.lesson_*&order=updated_at.desc&limit=15`;
@@ -140,9 +263,9 @@ async function fetchRecentLessons() {
   }
 }
 
+// 5. Gán video vào buổi học (lesson_*)
 async function updateLessonOnSupabase(configId, videoMetadata) {
   const url = `${CONFIG.SUPABASE_URL}/rest/v1/configurations?id=eq.${encodeURIComponent(configId)}`;
-  // 1. Lấy dữ liệu cũ
   const getRes = await fetch(url, {
     headers: {
       'apikey': CONFIG.SUPABASE_ANON_KEY,
@@ -157,7 +280,6 @@ async function updateLessonOnSupabase(configId, videoMetadata) {
     }
   }
 
-  // 2. Gộp thuộc tính video vào raw_data
   const updatedRaw = {
     ...existingRaw,
     id: existingRaw.id || configId.replace(/^lesson_/, ''),
@@ -165,7 +287,6 @@ async function updateLessonOnSupabase(configId, videoMetadata) {
     updatedAt: new Date().toISOString()
   };
 
-  // 3. Upsert vào configurations
   const upsertUrl = `${CONFIG.SUPABASE_URL}/rest/v1/configurations?on_conflict=id`;
   const postRes = await fetch(upsertUrl, {
     method: 'POST',
@@ -186,7 +307,6 @@ async function updateLessonOnSupabase(configId, videoMetadata) {
     const errText = await postRes.text();
     throw new Error(`Cập nhật Supabase thất bại (${postRes.status}): ${errText}`);
   }
-  return await postRes.json();
 }
 
 // ==========================================
@@ -195,15 +315,18 @@ async function updateLessonOnSupabase(configId, videoMetadata) {
 async function uploadChunkToTelegram(chunkPath, chunkName, index, total) {
   const fileBytes = fs.readFileSync(chunkPath);
   const blob = new Blob([fileBytes], { type: 'video/mp2t' });
+  const tokens = CONFIG.TELEGRAM_BOT_TOKENS;
 
   for (let attempt = 1; attempt <= CONFIG.MAX_RETRIES; attempt++) {
+    // Xoay vòng token dựa theo index và lần thử
+    const token = tokens[(index + attempt - 1) % tokens.length];
     try {
       const formData = new FormData();
       formData.append('chat_id', CONFIG.TELEGRAM_CHAT_ID);
       formData.append('caption', `🎬 HLS Chunk: ${chunkName} (#${index + 1}/${total})`);
       formData.append('document', blob, chunkName);
 
-      const url = `https://api.telegram.org/bot${CONFIG.TELEGRAM_BOT_TOKEN}/sendDocument`;
+      const url = `https://api.telegram.org/bot${token}/sendDocument`;
       const res = await fetch(url, {
         method: 'POST',
         body: formData
@@ -212,9 +335,9 @@ async function uploadChunkToTelegram(chunkPath, chunkName, index, total) {
       const data = await res.json();
 
       if (res.status === 429 || (data && data.error_code === 429)) {
-        const retryAfter = (data.parameters && data.parameters.retry_after) || (attempt * 3);
-        console.warn(`  ⚠️ Telegram Rate Limit 429! Đang chờ ${retryAfter}s trước khi thử lại... (lần ${attempt}/${CONFIG.MAX_RETRIES})`);
-        await sleep(retryAfter * 1000 + 500);
+        const retryAfter = (data.parameters && data.parameters.retry_after) || (attempt * 2);
+        console.warn(`  ⚠️ Telegram Rate Limit 429! Đang chờ ${retryAfter}s... (lần ${attempt}/${CONFIG.MAX_RETRIES})`);
+        await sleep(retryAfter * 1000 + 300);
         continue;
       }
 
@@ -241,7 +364,7 @@ async function uploadChunkToTelegram(chunkPath, chunkName, index, total) {
 // ==========================================
 async function main() {
   console.log('\n╔═════════════════════════════════════════════════════════════════════╗');
-  console.log('║       QMATH HLS VIDEO STREAMING - TELEGRAM + CLOUDFLARE (FREE)      ║');
+  console.log('║       QMATH VIDEO HLS STREAMING - TELEGRAM + CLOUDFLARE (FREE)      ║');
   console.log('╚═════════════════════════════════════════════════════════════════════╝\n');
 
   // 1. Kiểm tra FFmpeg
@@ -257,21 +380,21 @@ async function main() {
   const args = process.argv.slice(2);
   let inputVideo = '';
   let cliTitle = '';
+  let cliCourseId = '';
   let cliLessonId = '';
   let cliWorker = '';
-  let skipSync = false;
   let autoYes = false;
 
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
     if (a === '--title' && args[i + 1]) {
       cliTitle = args[++i];
+    } else if (a === '--course' && args[i + 1]) {
+      cliCourseId = args[++i];
     } else if (a === '--lesson' && args[i + 1]) {
       cliLessonId = args[++i];
     } else if (a === '--worker' && args[i + 1]) {
       cliWorker = args[++i];
-    } else if (a === '--skip-sync') {
-      skipSync = true;
     } else if (a === '--yes' || a === '-y') {
       autoYes = true;
     } else if (!a.startsWith('--') && !inputVideo) {
@@ -299,56 +422,7 @@ async function main() {
   // 4. Cloudflare Worker Domain
   const workerDomain = (cliWorker || (autoYes ? CONFIG.DEFAULT_WORKER_DOMAIN : await ask('🌐 Cloudflare Worker Domain', CONFIG.DEFAULT_WORKER_DOMAIN))).replace(/\/+$/, '');
 
-  // 5. Chọn bài giảng trên Supabase để gắn video
-  let targetConfigId = '';
-  let targetLessonTitle = '';
-
-  if (cliLessonId) {
-    targetConfigId = cliLessonId.startsWith('lesson_') ? cliLessonId : `lesson_${cliLessonId}`;
-    console.log(`🎯 Đã chỉ định gắn video vào bài: ${targetConfigId}`);
-  } else if (!skipSync) {
-    console.log('\n🔍 Đang tải danh sách bài giảng từ Supabase...');
-    const recentLessons = await fetchRecentLessons();
-
-    if (autoYes && recentLessons.length > 0) {
-      targetConfigId = recentLessons[0].configId;
-      targetLessonTitle = recentLessons[0].title;
-      console.log(`🎯 Tự động chọn bài giảng mới nhất: "${targetLessonTitle}" (${targetConfigId})`);
-    } else if (recentLessons.length > 0) {
-      console.log('\n--- DANH SÁCH BÀI GIẢNG GẦN ĐÂY ---');
-      recentLessons.forEach((l, idx) => {
-        const vidIcon = l.hasVideo ? '🎬 [Đã có video]' : '⚪ [Chưa có video]';
-        console.log(`  [${idx + 1}] ${l.title} (${l.chapter}) ${vidIcon} -> id: ${l.lessonId}`);
-      });
-      console.log(`  [0] Nhập ID bài giảng thủ công (hoặc tạo bài giảng mới)`);
-      console.log(`  [skip] Không đồng bộ Supabase (chỉ xuất file m3u8 cục bộ)\n`);
-
-      const choice = await ask('👉 Chọn số thứ tự bài giảng muốn gắn video', '1');
-      if (choice.toLowerCase() === 'skip') {
-        targetConfigId = '';
-      } else {
-        const num = parseInt(choice, 10);
-        if (num >= 1 && num <= recentLessons.length) {
-          const selected = recentLessons[num - 1];
-          targetConfigId = selected.configId;
-          targetLessonTitle = selected.title;
-          console.log(`🎯 Đã chọn gắn video vào bài: "${targetLessonTitle}" (${targetConfigId})`);
-        } else {
-          const manualId = await ask('Nhập Lesson ID (ví dụ: les_abc123 hoặc abc123)');
-          if (manualId) {
-            targetConfigId = manualId.startsWith('lesson_') ? manualId : `lesson_${manualId}`;
-          }
-        }
-      }
-    } else {
-      const manualId = await ask('Nhập Lesson ID trên Supabase để gắn video (bỏ trống nếu chỉ xuất file)', '');
-      if (manualId) {
-        targetConfigId = manualId.startsWith('lesson_') ? manualId : `lesson_${manualId}`;
-      }
-    }
-  }
-
-  // 6. Tạo thư mục tạm để chứa các mảnh HLS
+  // 5. Tạo thư mục tạm để chứa các mảnh HLS
   const tempDir = path.join(path.dirname(inputVideo), `_hls_temp_${Date.now()}`);
   fs.mkdirSync(tempDir, { recursive: true });
   const rawPlaylistPath = path.join(tempDir, 'playlist.m3u8');
@@ -381,7 +455,7 @@ async function main() {
   const cutDuration = ((Date.now() - tStartCut) / 1000).toFixed(1);
   console.log(`⚡ Cắt video hoàn tất trong ${cutDuration} giây!`);
 
-  // 7. Thu thập danh sách các chunk .ts
+  // 6. Thu thập danh sách các chunk .ts
   const allFiles = fs.readdirSync(tempDir);
   const chunkFiles = allFiles.filter(f => f.endsWith('.ts')).sort();
   if (chunkFiles.length === 0) {
@@ -404,7 +478,7 @@ async function main() {
     console.warn('⚠️ CẢNH BÁO: Có phân đoạn lớn hơn 20MB. Telegram Bot API getFile có thể từ chối tải phân đoạn này.');
   }
 
-  // 8. Tải từng chunk lên Telegram Channel
+  // 7. Tải từng chunk lên Telegram Channel
   console.log(`\n🚀 BẮT ĐẦU TẢI ${chunkFiles.length} PHÂN ĐOẠN LÊN TELEGRAM CHANNEL (${CONFIG.TELEGRAM_CHAT_ID})...`);
   const chunkToFileIdMap = {};
   const tStartUpload = Date.now();
@@ -435,17 +509,16 @@ async function main() {
   const uploadDuration = ((Date.now() - tStartUpload) / 1000).toFixed(1);
   console.log(`\n🎉 ĐÃ TẢI LÊN TOÀN BỘ ${chunkFiles.length} CHUNKS TRONG ${uploadDuration}s!`);
 
-  // 9. Đọc file playlist.m3u8 gốc và viết lại với URL Cloudflare Worker
+  // 8. Đọc file playlist.m3u8 gốc và viết lại với URL Cloudflare Worker
   let rawPlaylistContent = fs.readFileSync(rawPlaylistPath, 'utf-8');
   let finalPlaylistContent = rawPlaylistContent;
 
   for (const [chunkName, fileId] of Object.entries(chunkToFileIdMap)) {
     const workerChunkUrl = `${workerDomain}/chunk/${fileId}.ts`;
-    // Thay thế chính xác tên chunk trong file .m3u8
     finalPlaylistContent = finalPlaylistContent.split(chunkName).join(workerChunkUrl);
   }
 
-  // 10. Tính tổng thời lượng video từ file playlist
+  // 9. Tính tổng thời lượng video từ file playlist
   let totalDurationSec = 0;
   const durationMatches = finalPlaylistContent.matchAll(/#EXTINF:([\d.]+),/g);
   for (const m of durationMatches) {
@@ -453,7 +526,7 @@ async function main() {
   }
   totalDurationSec = Math.round(totalDurationSec);
 
-  // 11. Chuẩn bị metadata hoàn chỉnh
+  // 10. Chuẩn bị metadata hoàn chỉnh
   const videoMetadata = {
     type: 'hls',
     title: videoTitle,
@@ -463,19 +536,84 @@ async function main() {
     channel: CONFIG.TELEGRAM_CHAT_ID.replace(/^@/, ''),
     workerDomain: workerDomain,
     m3u8: finalPlaylistContent,
-    streamUrl: '', // Sẽ được client tạo Blob URL tự động từ m3u8
     tmeUrl: `https://t.me/${CONFIG.TELEGRAM_CHAT_ID.replace(/^@/, '')}`,
     updatedAt: new Date().toISOString()
   };
 
-  // 12. Cập nhật lên Supabase
-  if (targetConfigId) {
-    console.log(`\n💾 Đang đồng bộ cấu hình bài giảng lên Supabase (${targetConfigId})...`);
+  // 11. Lưu vào Thư viện Video HLS trung tâm (configurations -> hls_video_<id>)
+  console.log('\n💾 Đang lưu video vào Thư viện HLS trung tâm Supabase...');
+  try {
+    const libId = await saveHlsVideoToLibrary(videoMetadata);
+    videoMetadata.id = libId;
+    console.log(`✅ ĐÃ LƯU VÀO THƯ VIỆN TRUNG TÂM! Mã video: "${libId}"`);
+  } catch (err) {
+    console.error(`⚠️ Không thể lưu vào thư viện trung tâm: ${err.message}`);
+  }
+
+  // 12. Tùy chọn gán vào Khóa học hoặc Buổi học
+  if (cliCourseId) {
+    console.log(`\n📚 Đang gán video vào Khóa học: ${cliCourseId}...`);
+    try {
+      const res = await attachVideoToCourse(cliCourseId, videoMetadata);
+      console.log(`✅ ĐÃ GÁN THÀNH CÔNG VÀO KHÓA HỌC "${res.courseTitle}" (Item ID: ${res.itemId})!`);
+    } catch (e) {
+      console.error(`❌ Lỗi gán vào khóa học: ${e.message}`);
+    }
+  } else if (cliLessonId) {
+    const targetConfigId = cliLessonId.startsWith('lesson_') ? cliLessonId : `lesson_${cliLessonId}`;
+    console.log(`\n📝 Đang gán video vào buổi học: ${targetConfigId}...`);
     try {
       await updateLessonOnSupabase(targetConfigId, videoMetadata);
-      console.log(`✅ ĐỒNG BỘ SUPABASE THÀNH CÔNG! Học sinh và giáo viên có thể xem trực tiếp ngay lập tức.`);
-    } catch (err) {
-      console.error(`❌ Lỗi cập nhật Supabase: ${err.message}`);
+      console.log(`✅ ĐÃ GÁN THÀNH CÔNG VÀO BUỔI HỌC ${targetConfigId}!`);
+    } catch (e) {
+      console.error(`❌ Lỗi gán vào buổi học: ${e.message}`);
+    }
+  } else if (!autoYes) {
+    console.log('\n--- TÙY CHỌN ĐỒNG BỘ GIÁO ÁN LMS ---');
+    console.log('  [1] Gán trực tiếp vào một KHÓA HỌC (public_courses)');
+    console.log('  [2] Gán vào một BUỔI HỌC (class_lessons / lesson_*)');
+    console.log('  [0] Hoàn thành (Video đã có sẵn trong Thư viện để gắn bất kỳ lúc nào)');
+
+    const syncChoice = await ask('👉 Chọn hình thức đồng bộ', '1');
+    if (syncChoice === '1') {
+      console.log('\n🔍 Đang tải danh sách Khóa học từ Supabase...');
+      const courses = await fetchRecentCourses();
+      if (courses.length > 0) {
+        console.log('\n--- DANH SÁCH KHÓA HỌC GẦN ĐÂY ---');
+        courses.forEach((c, idx) => {
+          console.log(`  [${idx + 1}] ${c.title} (id: ${c.id})`);
+        });
+        const cNum = parseInt(await ask('👉 Chọn số thứ tự khóa học muốn gán video', '1'), 10);
+        if (cNum >= 1 && cNum <= courses.length) {
+          const selectedCourse = courses[cNum - 1];
+          try {
+            await attachVideoToCourse(selectedCourse.id, videoMetadata);
+            console.log(`✅ ĐÃ GÁN THÀNH CÔNG VÀO KHÓA HỌC "${selectedCourse.title}"!`);
+          } catch (e) {
+            console.error(`❌ Lỗi: ${e.message}`);
+          }
+        }
+      }
+    } else if (syncChoice === '2') {
+      console.log('\n🔍 Đang tải danh sách Buổi học từ Supabase...');
+      const lessons = await fetchRecentLessons();
+      if (lessons.length > 0) {
+        console.log('\n--- DANH SÁCH BUỔI HỌC GẦN ĐÂY ---');
+        lessons.forEach((l, idx) => {
+          const vidIcon = l.hasVideo ? '🎬 [Đã có video]' : '⚪ [Chưa có video]';
+          console.log(`  [${idx + 1}] ${l.title} (${l.chapter}) ${vidIcon} -> id: ${l.lessonId}`);
+        });
+        const lNum = parseInt(await ask('👉 Chọn số thứ tự buổi học muốn gán video', '1'), 10);
+        if (lNum >= 1 && lNum <= lessons.length) {
+          const selectedLesson = lessons[lNum - 1];
+          try {
+            await updateLessonOnSupabase(selectedLesson.configId, videoMetadata);
+            console.log(`✅ ĐÃ GÁN THÀNH CÔNG VÀO BUỔI HỌC "${selectedLesson.title}"!`);
+          } catch (e) {
+            console.error(`❌ Lỗi: ${e.message}`);
+          }
+        }
+      }
     }
   }
 
@@ -485,7 +623,7 @@ async function main() {
 
   fs.writeFileSync(outJsonFile, JSON.stringify(videoMetadata, null, 2), 'utf-8');
   fs.writeFileSync(outM3u8File, finalPlaylistContent, 'utf-8');
-  console.log(`\n💾 Đã lưu file dự phòng:`);
+  console.log(`\n💾 Đã lưu file dự phòng trên máy:`);
   console.log(`  📄 Metadata JSON: "${outJsonFile}"`);
   console.log(`  📄 Playlist M3U8: "${outM3u8File}"`);
 

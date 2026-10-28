@@ -26,6 +26,8 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <!-- HLS.js cho Xem trước Video Telegram HLS (100% Free) -->
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.8/dist/hls.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
@@ -620,11 +622,75 @@
 
                     <div class="flex-1 overflow-y-auto bg-gray-50/50 p-4 md:p-8">
                         <div id="panelVideo" class="content-panel hidden space-y-6 max-w-4xl mx-auto">
-                            <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-4">
-                                <div><label class="block text-sm font-bold text-gray-700 mb-2">Link YouTube</label><input type="text" id="videoUrlInput" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand outline-none"></div>
-                                <div><label class="block text-sm font-bold text-gray-700 mb-2">Thời gian xem (Phút)</label><div class="relative"><input type="number" id="videoMinTime" value="10" class="w-full pl-4 pr-12 py-2 border border-gray-300 rounded-lg font-bold"><span class="absolute right-4 top-2 text-gray-400 text-sm font-bold">Phút</span></div></div>
+                            <!-- CHỌN NGUỒN VIDEO -->
+                            <div class="flex gap-4 mb-4 flex-col md:flex-row">
+                                <label class="flex-1 cursor-pointer">
+                                    <input type="radio" name="videoSource" value="youtube" class="peer sr-only" checked onchange="toggleVideoSource()">
+                                    <div class="p-3.5 rounded-xl border-2 border-gray-200 peer-checked:border-brand peer-checked:bg-teal-50 hover:bg-white text-center transition-all">
+                                        <i class="fa-brands fa-youtube text-2xl mb-1 block text-red-500"></i>
+                                        <span class="font-bold text-sm text-gray-800">Link YouTube</span>
+                                    </div>
+                                </label>
+                                <label class="flex-1 cursor-pointer">
+                                    <input type="radio" name="videoSource" value="telegram_hls" class="peer sr-only" onchange="toggleVideoSource()">
+                                    <div class="p-3.5 rounded-xl border-2 border-gray-200 peer-checked:border-brand peer-checked:bg-teal-50 hover:bg-white text-center transition-all">
+                                        <i class="fa-brands fa-telegram text-2xl mb-1 block text-sky-500"></i>
+                                        <span class="font-bold text-sm text-gray-800">Video HLS Telegram (100% Free, Bảo mật)</span>
+                                    </div>
+                                </label>
                             </div>
-                            <div id="videoPreviewArea" class="aspect-video bg-black rounded-xl overflow-hidden shadow-lg hidden relative"><iframe id="videoFrame" class="w-full h-full" src=""></iframe></div>
+
+                            <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-4">
+                                <!-- NGUỒN YOUTUBE -->
+                                <div id="videoYoutubeArea">
+                                    <label class="block text-sm font-bold text-gray-700 mb-2">Link YouTube</label>
+                                    <input type="text" id="videoUrlInput" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand outline-none" placeholder="https://www.youtube.com/watch?v=...">
+                                </div>
+
+                                <!-- NGUỒN TELEGRAM HLS -->
+                                <div id="videoHlsArea" class="hidden space-y-4">
+                                    <div>
+                                        <div class="flex items-center justify-between mb-2">
+                                            <label class="text-sm font-bold text-gray-700 flex items-center gap-1.5">
+                                                <i class="fa-solid fa-cloud-arrow-up text-sky-500"></i> Chọn video từ Thư viện HLS Telegram (Supabase)
+                                            </label>
+                                            <button type="button" onclick="loadHlsVideoLibrary()" class="text-xs text-teal-600 hover:text-teal-700 font-bold flex items-center gap-1 cursor-pointer">
+                                                <i class="fa-solid fa-arrows-rotate"></i> Làm mới danh sách
+                                            </button>
+                                        </div>
+                                        <select id="hlsVideoSelect" class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand outline-none bg-white text-sm font-medium">
+                                            <option value="">-- Chọn video trong kho HLS đã tải lên --</option>
+                                        </select>
+                                        <p class="text-[11px] text-gray-500 mt-1">Video được cắt thành các mảnh nhỏ (&lt; 15MB) lưu trữ vĩnh viễn trên kênh Telegram bí mật và phân phối qua Cloudflare Edge.</p>
+                                    </div>
+
+                                    <div>
+                                        <label class="block text-sm font-bold text-gray-700 mb-1.5">Hoặc dán trực tiếp chuỗi M3U8 / Link Cloudflare Worker</label>
+                                        <textarea id="hlsM3u8Input" rows="2" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand outline-none text-xs font-mono" placeholder="#EXTM3U hoặc https://tg-hls.../playlist/xxx.m3u8"></textarea>
+                                    </div>
+
+                                    <div class="p-3 bg-sky-50 border border-sky-200 rounded-xl flex items-start gap-2.5">
+                                        <i class="fa-solid fa-circle-info text-sky-600 text-base mt-0.5"></i>
+                                        <div class="text-xs text-sky-900 leading-relaxed">
+                                            <strong>Công cụ Upload Video 1GB - 2GB:</strong> Chạy file <code>tools/hls_uploader/Upload_Video_HLS.bat</code> trên máy tính và kéo thả video vào để cắt & upload tự động trong chớp mắt.
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label class="block text-sm font-bold text-gray-700 mb-2">Thời gian xem tối thiểu (Phút)</label>
+                                    <div class="relative">
+                                        <input type="number" id="videoMinTime" value="10" class="w-full pl-4 pr-12 py-2 border border-gray-300 rounded-lg font-bold">
+                                        <span class="absolute right-4 top-2 text-gray-400 text-sm font-bold">Phút</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- KHUNG XEM TRƯỚC VIDEO (HỖ TRỢ CẢ YOUTUBE VÀ HLS VIDEO) -->
+                            <div id="videoPreviewArea" class="aspect-video bg-black rounded-xl overflow-hidden shadow-lg hidden relative">
+                                <iframe id="videoFrame" class="w-full h-full" src=""></iframe>
+                                <video id="mgrHlsVideo" class="w-full h-full object-contain hidden" playsinline controls controlsList="nodownload"></video>
+                            </div>
                         </div>
 
                         <div id="panelPdf" class="content-panel hidden space-y-6 max-w-4xl mx-auto">
@@ -3002,10 +3068,18 @@ function renderCurriculumTree() {
             
             // Fill Content
             if(data.type === 'video') {
-                document.getElementById('videoUrlInput').value = data.content || '';
-                // [MỚI] Load thời gian xem, nếu không có dữ liệu cũ thì mặc định 10
+                const isHls = data.videoType === 'hls' || !!data.m3u8 || (data.content && data.content.includes('/chunk/'));
+                const radioYt = document.querySelector('input[name="videoSource"][value="youtube"]');
+                const radioHls = document.querySelector('input[name="videoSource"][value="telegram_hls"]');
+                if (isHls && radioHls) radioHls.checked = true;
+                else if (radioYt) radioYt.checked = true;
+                window.toggleVideoSource();
+
+                document.getElementById('videoUrlInput').value = isHls ? '' : (data.content || '');
+                const m3u8El = document.getElementById('hlsM3u8Input');
+                if (m3u8El) m3u8El.value = data.m3u8 || (isHls ? (data.content || '') : '');
                 document.getElementById('videoMinTime').value = data.minWatchTime || 10;
-                window.previewVideo(data.content || '');
+                window.previewVideo(data.content || '', data.m3u8 || '');
             } else if (data.type === 'pdf') {
                 if(data.content && data.content.includes('drive.google.com')) {
                     document.querySelector('input[name="pdfSource"][value="drive"]').checked = true;
@@ -3035,6 +3109,46 @@ function renderCurriculumTree() {
         };
         
         // [MỚI] Xử lý thời gian xem tối thiểu
+        const selHls = document.getElementById('hlsVideoSelect');
+        if (selHls) {
+            selHls.onchange = (e) => {
+                const vidId = e.target.value;
+                const found = cachedHlsLibrary.find(v => v.id === vidId);
+                if (!found || activeItemIdx < 0) return;
+                const curItem = currentCurriculum[activeChapIdx].lessons[activeLesIdx].items[activeItemIdx];
+                curItem.videoType = 'hls';
+                curItem.m3u8 = found.m3u8;
+                curItem.content = `${found.workerDomain || 'https://tg-hls.phamngockhanh-942001.workers.dev'}/playlist/${found.id}.m3u8`;
+                curItem.duration = found.duration;
+                curItem.chunkCount = found.chunkCount;
+                curItem.minWatchTime = Math.max(1, Math.round((found.duration || 600) / 120));
+                
+                const minTimeInput = document.getElementById('videoMinTime');
+                if (minTimeInput) minTimeInput.value = curItem.minWatchTime;
+                const m3u8Input = document.getElementById('hlsM3u8Input');
+                if (m3u8Input) m3u8Input.value = found.m3u8;
+                
+                window.previewVideo('', found.m3u8);
+            };
+        }
+
+        const inpM3u8 = document.getElementById('hlsM3u8Input');
+        if (inpM3u8) {
+            inpM3u8.oninput = (e) => {
+                if (activeItemIdx < 0) return;
+                const val = e.target.value.trim();
+                const curItem = currentCurriculum[activeChapIdx].lessons[activeLesIdx].items[activeItemIdx];
+                curItem.videoType = 'hls';
+                if (val.startsWith('#EXTM3U')) {
+                    curItem.m3u8 = val;
+                    curItem.content = '';
+                } else {
+                    curItem.content = val;
+                }
+                window.previewVideo(val.startsWith('#EXTM3U') ? '' : val, val.startsWith('#EXTM3U') ? val : '');
+            };
+        }
+
         document.getElementById('videoMinTime').oninput = (e) => {
             if(activeItemIdx > -1) {
                 // Lưu giá trị vào biến data, nếu trống thì mặc định là 10
@@ -3064,14 +3178,131 @@ function renderCurriculumTree() {
             document.getElementById(type==='video'?'panelVideo':(type==='pdf'?'panelPdf':'panelQuiz')).classList.remove('hidden');
         };
 
-        window.previewVideo = (url) => {
-            if(!url) return document.getElementById('videoPreviewArea').classList.add('hidden');
+        let cachedHlsLibrary = [];
+        let mgrHlsInstance = null;
+        let mgrBlobUrl = null;
+
+        window.toggleVideoSource = () => {
+            const radio = document.querySelector('input[name="videoSource"]:checked');
+            const source = radio ? radio.value : 'youtube';
+            const isHls = source === 'telegram_hls';
+            
+            const ytArea = document.getElementById('videoYoutubeArea');
+            const hlsArea = document.getElementById('videoHlsArea');
+            if (ytArea) ytArea.classList.toggle('hidden', isHls);
+            if (hlsArea) hlsArea.classList.toggle('hidden', !isHls);
+
+            if (isHls && cachedHlsLibrary.length === 0) {
+                window.loadHlsVideoLibrary();
+            }
+
+            if (activeItemIdx > -1) {
+                const curItem = currentCurriculum[activeChapIdx].lessons[activeLesIdx].items[activeItemIdx];
+                curItem.videoType = isHls ? 'hls' : 'youtube';
+            }
+        };
+
+        window.loadHlsVideoLibrary = async () => {
+            try {
+                const selectEl = document.getElementById('hlsVideoSelect');
+                if (!selectEl) return;
+                selectEl.innerHTML = '<option value="">⏳ Đang nạp danh sách video từ Supabase...</option>';
+
+                const { data: rows, error } = await supabase
+                    .from('configurations')
+                    .select('id, raw_data, updated_at')
+                    .like('id', 'hls_video_%')
+                    .order('updated_at', { ascending: false })
+                    .limit(50);
+
+                if (error) throw error;
+
+                cachedHlsLibrary = (rows || []).map(r => r.raw_data || {}).filter(v => !!v.m3u8);
+                selectEl.innerHTML = '<option value="">-- Chọn video trong kho HLS đã tải lên --</option>';
+
+                cachedHlsLibrary.forEach(v => {
+                    const opt = document.createElement('option');
+                    opt.value = v.id;
+                    const dur = v.duration ? `${Math.round(v.duration / 60)} phút` : '';
+                    const size = v.size ? `${(v.size / (1024 * 1024)).toFixed(1)}MB` : '';
+                    const info = [dur, size].filter(Boolean).join(' - ');
+                    opt.textContent = `🎬 ${v.title || 'Video HLS'} ${info ? '(' + info + ')' : ''}`;
+                    selectEl.appendChild(opt);
+                });
+            } catch (e) {
+                console.warn("Lỗi nạp danh sách HLS Video:", e);
+                const selectEl = document.getElementById('hlsVideoSelect');
+                if (selectEl) selectEl.innerHTML = '<option value="">❌ Không thể tải danh sách video</option>';
+            }
+        };
+
+        window.previewVideo = (url, m3u8Str) => {
+            const previewArea = document.getElementById('videoPreviewArea');
+            const iframe = document.getElementById('videoFrame');
+            const hlsVideo = document.getElementById('mgrHlsVideo');
+
+            if (mgrHlsInstance) {
+                mgrHlsInstance.destroy();
+                mgrHlsInstance = null;
+            }
+            if (mgrBlobUrl) {
+                URL.revokeObjectURL(mgrBlobUrl);
+                mgrBlobUrl = null;
+            }
+
+            const isHls = (m3u8Str && typeof m3u8Str === 'string' && m3u8Str.trim().startsWith('#EXTM3U')) ||
+                          (url && typeof url === 'string' && (url.includes('.m3u8') || url.includes('/chunk/') || url.includes('/playlist/')));
+
+            if (isHls) {
+                if (iframe) {
+                    iframe.classList.add('hidden');
+                    iframe.src = '';
+                }
+                if (hlsVideo) {
+                    hlsVideo.classList.remove('hidden');
+                    hlsVideo.removeAttribute('src');
+                    hlsVideo.load();
+                }
+                if (previewArea) previewArea.classList.remove('hidden');
+
+                let src = url;
+                if (m3u8Str && typeof m3u8Str === 'string' && m3u8Str.trim().startsWith('#EXTM3U')) {
+                    const blob = new Blob([m3u8Str], { type: 'application/vnd.apple.mpegurl' });
+                    mgrBlobUrl = URL.createObjectURL(blob);
+                    src = mgrBlobUrl;
+                }
+
+                if (window.Hls && Hls.isSupported() && src && hlsVideo) {
+                    mgrHlsInstance = new Hls({ maxBufferLength: 15 });
+                    mgrHlsInstance.loadSource(src);
+                    mgrHlsInstance.attachMedia(hlsVideo);
+                } else if (hlsVideo && hlsVideo.canPlayType('application/vnd.apple.mpegurl') && src) {
+                    hlsVideo.src = src;
+                }
+                return;
+            }
+
+            // Preview YouTube
+            if (hlsVideo) {
+                hlsVideo.classList.add('hidden');
+                try { hlsVideo.pause(); } catch(e){}
+                hlsVideo.removeAttribute('src');
+            }
+
+            if (!url) {
+                if (previewArea) previewArea.classList.add('hidden');
+                return;
+            }
+
             const m = url.match(/^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/);
-            if(m && m[2].length === 11) {
-                document.getElementById('videoFrame').src = `https://www.youtube.com/embed/${m[2]}`;
-                document.getElementById('videoPreviewArea').classList.remove('hidden');
+            if (m && m[2].length === 11) {
+                if (iframe) {
+                    iframe.src = `https://www.youtube.com/embed/${m[2]}`;
+                    iframe.classList.remove('hidden');
+                }
+                if (previewArea) previewArea.classList.remove('hidden');
             } else {
-                document.getElementById('videoPreviewArea').classList.add('hidden');
+                if (previewArea) previewArea.classList.add('hidden');
             }
         };
 
@@ -4997,10 +5228,19 @@ window.selectItem = (cIdx, lIdx, iIdx) => {
 
     // Bind dữ liệu riêng từng loại
     if(data.type === 'video') {
-        document.getElementById('videoUrlInput').value = data.content || '';
-        document.getElementById('videoMinTime').value = data.minWatchTime || 10; 
-        window.previewVideo(data.content || '');
-    } else if (data.type === 'pdf') {
+                const isHls = data.videoType === 'hls' || !!data.m3u8 || (data.content && data.content.includes('/chunk/'));
+                const radioYt = document.querySelector('input[name="videoSource"][value="youtube"]');
+                const radioHls = document.querySelector('input[name="videoSource"][value="telegram_hls"]');
+                if (isHls && radioHls) radioHls.checked = true;
+                else if (radioYt) radioYt.checked = true;
+                window.toggleVideoSource();
+
+                document.getElementById('videoUrlInput').value = isHls ? '' : (data.content || '');
+                const m3u8El = document.getElementById('hlsM3u8Input');
+                if (m3u8El) m3u8El.value = data.m3u8 || (isHls ? (data.content || '') : '');
+                document.getElementById('videoMinTime').value = data.minWatchTime || 10;
+                window.previewVideo(data.content || '', data.m3u8 || '');
+            } else if (data.type === 'pdf') {
         if(data.content && data.content.includes('drive.google.com')) {
             document.querySelector('input[name="pdfSource"][value="drive"]').checked = true;
             document.getElementById('driveUrlInput').value = data.content;
