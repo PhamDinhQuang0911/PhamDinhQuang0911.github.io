@@ -2796,7 +2796,10 @@
                         if (typeof u === 'object' && Object.keys(u).length > 0 && q.statements && q.statements.length > 0) {
                             let stmtCorrectCount = 0;
                             q.statements.forEach((s, si) => { 
-                                if (u[si] !== undefined && u[si] === s.isTrue) {
+                                const rawVal = u[si] !== undefined ? u[si] : u[String(si)];
+                                const isUserT = rawVal === true || rawVal === 'true' || rawVal === 1 || rawVal === '1';
+                                const isStmtT = s.isTrue === true || s.isTrue === 'true' || s.isTrue === 1 || s.isTrue === '1';
+                                if (rawVal !== undefined && rawVal !== null && isUserT === isStmtT) {
                                     stmtCorrectCount++;
                                 }
                             }); 
@@ -2908,6 +2911,8 @@
                 studentName: currentUser.displayName || currentUser.email, 
                 studentPhotoURL: currentUser.photoURL || null, 
                 score, 
+                mcScore: score,
+                tfGradedVersion: 2025,
                 answers: userAnswers, 
                 shuffleConfig: savedConfig, 
                 cheatCount, 
@@ -3354,35 +3359,73 @@
                     </div>`;
                 }
                 else if (q.type==='tf') { 
-                    matches=0; ansHtml='<ul class="text-sm mt-2 space-y-1">'; 
+                    matches = 0; 
                     let displayIndices = (examData.shuffle && q.shuffleMapTF) ? q.shuffleMapTF : (q.statements||[]).map((_,k)=>k); 
+                    const stmts = q.statements || [];
+                    let rowsHtml = '';
                     
                     displayIndices.forEach((realIdx, displayOrder) => {
-                        const s = q.statements[realIdx];
+                        const s = stmts[realIdx];
                         if (!s) return;
                         const charLabel = String.fromCharCode(97 + displayOrder);
-                        const uc = (u && u[realIdx] !== undefined) ? (u[realIdx] ? 'Đ' : 'S') : '_';
-                        const tc = s.isTrue ? 'Đ' : 'S';
-                        const m = (u && u[realIdx] === s.isTrue);
+                        const rawVal = (u && typeof u === 'object') ? (u[realIdx] !== undefined ? u[realIdx] : u[String(realIdx)]) : undefined;
+                        const hasAnswer = rawVal !== undefined && rawVal !== null && rawVal !== "";
+                        const isUserT = hasAnswer && (rawVal === true || rawVal === 'true' || rawVal === 1 || rawVal === '1');
+                        const isStmtT = s.isTrue === true || s.isTrue === 'true' || s.isTrue === 1 || s.isTrue === '1';
+                        const m = hasAnswer && (isUserT === isStmtT);
                         if (m) matches++;
-                        ansHtml += `<li><b>${charLabel})</b> ${window.formatContent(s.text)}: <b class="${m?'text-green-600':'text-red-500'}">${uc}</b> (Đúng: ${tc})</li>`;
+
+                        const userBadge = !hasAnswer 
+                            ? `<span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold bg-gray-100 text-gray-500 border border-gray-200">Chưa chọn</span>`
+                            : (isUserT 
+                                ? `<span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">Đúng</span>`
+                                : `<span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold bg-rose-50 text-rose-800 border border-rose-200">Sai</span>`);
+
+                        const keyBadge = isStmtT 
+                            ? `<span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-100/70 text-emerald-900 border border-emerald-300">Đúng</span>`
+                            : `<span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold bg-rose-100/70 text-rose-900 border border-rose-300">Sai</span>`;
+
+                        const statusBadge = m 
+                            ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-600 text-white shadow-2xs"><i class="fa-solid fa-check text-[10px]"></i> Đạt</span>`
+                            : `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold bg-rose-600 text-white shadow-2xs"><i class="fa-solid fa-xmark text-[10px]"></i> Sai</span>`;
+
+                        rowsHtml += `
+                            <div class="p-3 rounded-xl border ${m ? 'bg-emerald-50/40 border-emerald-200/80' : 'bg-rose-50/30 border-rose-200/70'} flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 transition-all">
+                                <div class="flex items-start gap-2.5 flex-1 min-w-0">
+                                    <span class="inline-flex items-center justify-center w-6 h-6 rounded-lg ${m ? 'bg-emerald-600 text-white' : 'bg-gray-200 text-gray-700'} font-bold text-xs shrink-0">${charLabel})</span>
+                                    <div class="text-sm text-gray-800 leading-snug math-content flex-1">${window.formatContent(s.text)}</div>
+                                </div>
+                                <div class="flex items-center gap-2 text-xs shrink-0 ml-8 sm:ml-0">
+                                    <span class="text-gray-500 font-medium">Bạn: ${userBadge}</span>
+                                    <span class="text-gray-300">|</span>
+                                    <span class="text-gray-500 font-medium">Đ/A: ${keyBadge}</span>
+                                    ${statusBadge}
+                                </div>
+                            </div>
+                        `;
                     });
-                    ansHtml += '</ul>';
-                    isCorrect = (matches === (q.statements ? q.statements.length : 0));
+
+                    isCorrect = (matches === stmts.length);
                     let earnedFraction = 0;
-                    if (q.statements && q.statements.length === 4) {
+                    if (stmts.length === 4) {
                         if (matches === 1) earnedFraction = 0.10;
                         else if (matches === 2) earnedFraction = 0.25;
                         else if (matches === 3) earnedFraction = 0.50;
                         else if (matches === 4) earnedFraction = 1.00;
-                    } else if (q.statements && q.statements.length > 0) {
-                        earnedFraction = matches / q.statements.length;
+                    } else if (stmts.length > 0) {
+                        earnedFraction = matches / stmts.length;
                     }
                     earnedPt = (qMaxPt * earnedFraction).toFixed(2);
-                    ansHtml += `<div class="mt-2.5 pt-2 border-t border-gray-200/80 text-xs font-bold flex items-center justify-between ${matches===4?'text-emerald-700':(matches>0?'text-amber-700':'text-rose-600')}">
-                        <span><i class="fa-solid fa-award mr-1"></i>Đúng ${matches}/${q.statements ? q.statements.length : 4} ý (${Math.round(earnedFraction*100)}% số điểm)</span>
-                        <span class="px-2 py-0.5 rounded bg-white border font-mono">+${earnedPt} / ${qMaxPt.toFixed(2)}đ</span>
-                    </div>`; 
+
+                    ansHtml = `
+                        <div class="space-y-2 mt-2">
+                            <div class="space-y-2">${rowsHtml}</div>
+                            <div class="mt-3 pt-2.5 border-t border-gray-200 flex items-center justify-between flex-wrap gap-2 text-xs font-bold ${matches===stmts.length?'text-emerald-700':(matches>0?'text-amber-800':'text-rose-600')}">
+                                <span class="flex items-center gap-1.5"><i class="fa-solid fa-award"></i> Đúng ${matches}/${stmts.length} ý (${Math.round(earnedFraction*100)}% số điểm câu)</span>
+                                <span class="px-2.5 py-1 rounded-lg bg-white border border-gray-300 shadow-2xs font-mono text-gray-800">+${earnedPt} / ${qMaxPt.toFixed(2)}đ</span>
+                            </div>
+                        </div>
+                    `;
                 }
                 else { ansHtml = `<div class="text-gray-500 italic">Câu hỏi tự luận (Cần giáo viên chấm)</div>${u ? `<div class="mt-2 text-xs bg-gray-50 p-2 border">Đã nộp bài</div>` : ''}`; }
 
@@ -4436,7 +4479,10 @@ window.requestResubmit = async () => {
                                     let isAllCorrect = true;
                                     let stmtCorrectCount = 0;
                                     q.statements.forEach((s, si) => { 
-                                        if (u[si] !== undefined && u[si] === s.isTrue) {
+                                        const rawVal = u[si] !== undefined ? u[si] : u[String(si)];
+                                        const isUserT = rawVal === true || rawVal === 'true' || rawVal === 1 || rawVal === '1';
+                                        const isStmtT = s.isTrue === true || s.isTrue === 'true' || s.isTrue === 1 || s.isTrue === '1';
+                                        if (rawVal !== undefined && rawVal !== null && isUserT === isStmtT) {
                                             stmtCorrectCount++;
                                         } else {
                                             isAllCorrect = false;
@@ -4449,8 +4495,8 @@ window.requestResubmit = async () => {
                                         else if (stmtCorrectCount === 2) earnedPointFraction = 0.25;
                                         else if (stmtCorrectCount === 3) earnedPointFraction = 0.5;
                                         else if (stmtCorrectCount === 4) earnedPointFraction = 1.0;
-                                    } else {
-                                        earnedPointFraction = isAllCorrect ? 1.0 : 0;
+                                    } else if (q.statements.length > 0) {
+                                        earnedPointFraction = stmtCorrectCount / q.statements.length;
                                     }
                                 }
                             }

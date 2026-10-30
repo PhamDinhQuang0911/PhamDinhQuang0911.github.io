@@ -3272,15 +3272,41 @@
             if (!q || !box || u === undefined) return;
 
             let isCorrect = false;
+            let earnedFraction = 0;
+            let tfSummary = '';
             if (q.type === 'mc') {
                 isCorrect = (Number(u) === Number(q.correct));
+                earnedFraction = isCorrect ? 1.0 : 0;
             } else if (q.type === 'short') {
                 isCorrect = Boolean(q.answer && window.shortMatch && window.shortMatch(u, q.answer));
+                earnedFraction = isCorrect ? 1.0 : 0;
+            } else if (q.type === 'tf') {
+                const stmts = q.statements || [];
+                let cc = 0;
+                stmts.forEach((stmt, sIdx) => {
+                    const val = (typeof u === 'object' && u !== null) ? (u[sIdx] !== undefined ? u[sIdx] : u[String(sIdx)]) : undefined;
+                    const isUserT = val === true || val === 'true' || val === 1 || val === '1';
+                    const isStmtT = stmt.isTrue === true || stmt.isTrue === 'true' || stmt.isTrue === 1 || stmt.isTrue === '1';
+                    if (val !== undefined && isUserT === isStmtT) cc++;
+                });
+                if (cc === stmts.length) isCorrect = true;
+                if (stmts.length === 4) {
+                    if (cc === 1) earnedFraction = 0.10;
+                    else if (cc === 2) earnedFraction = 0.25;
+                    else if (cc === 3) earnedFraction = 0.50;
+                    else if (cc === 4) earnedFraction = 1.00;
+                    else earnedFraction = 0;
+                } else if (stmts.length > 0) {
+                    earnedFraction = cc / stmts.length;
+                }
+                tfSummary = ` (Đúng ${cc}/${stmts.length} ý - đạt ${Math.round(earnedFraction * 100)}% điểm)`;
             }
 
             let msg = isCorrect
-                ? '<div class="p-3 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 rounded-2xl text-emerald-700 dark:text-emerald-300 font-black text-xs flex items-center gap-2"><i class="fa-solid fa-circle-check text-emerald-500 text-base"></i> Chính xác! Tuyệt vời.</div>'
-                : '<div class="p-3 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 rounded-2xl text-rose-700 dark:text-rose-300 font-black text-xs flex items-center gap-2"><i class="fa-solid fa-circle-xmark text-rose-500 text-base"></i> Chưa chính xác. Xem lời giải bên dưới để hiểu rõ hơn.</div>';
+                ? `<div class="p-3 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 rounded-2xl text-emerald-700 dark:text-emerald-300 font-black text-xs flex items-center gap-2"><i class="fa-solid fa-circle-check text-emerald-500 text-base"></i> Chính xác! Tuyệt vời.${tfSummary}</div>`
+                : (earnedFraction > 0
+                    ? `<div class="p-3 bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 rounded-2xl text-amber-800 dark:text-amber-300 font-black text-xs flex items-center gap-2"><i class="fa-solid fa-triangle-exclamation text-amber-500 text-base"></i> Đạt một phần điểm${tfSummary}. Xem lời giải bên dưới để hiểu rõ hơn.</div>`
+                    : '<div class="p-3 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 rounded-2xl text-rose-700 dark:text-rose-300 font-black text-xs flex items-center gap-2"><i class="fa-solid fa-circle-xmark text-rose-500 text-base"></i> Chưa chính xác. Xem lời giải bên dưới để hiểu rõ hơn.</div>');
 
             if (q.solution) {
                 msg += `
@@ -3319,26 +3345,47 @@
         window.finishPractice = () => {
             if (timerInterval) clearInterval(timerInterval);
             let correctCount = 0;
+            let earnedUnits = 0;
 
             window.practiceQuestions.forEach((q, idx) => {
                 const u = window.userAnswers[idx];
                 if (u !== undefined && u !== null && u !== "") {
                     if (q.type === 'mc') {
-                        if (Number(u) === Number(q.correct)) correctCount++;
+                        if (Number(u) === Number(q.correct)) {
+                            correctCount++;
+                            earnedUnits += 1.0;
+                        }
                     } else if (q.type === 'short') {
-                        if (q.answer && window.shortMatch && window.shortMatch(u, q.answer)) correctCount++;
+                        if (q.answer && window.shortMatch && window.shortMatch(u, q.answer)) {
+                            correctCount++;
+                            earnedUnits += 1.0;
+                        }
                     } else if (q.type === 'tf') {
-                        let ok = true;
-                        (q.statements || []).forEach((stmt, sIdx) => {
-                            if (u[sIdx] === undefined || u[sIdx] !== stmt.isTrue) ok = false;
+                        const stmts = q.statements || [];
+                        let cc = 0;
+                        stmts.forEach((stmt, sIdx) => {
+                            const val = (typeof u === 'object' && u !== null) ? (u[sIdx] !== undefined ? u[sIdx] : u[String(sIdx)]) : undefined;
+                            const isUserT = val === true || val === 'true' || val === 1 || val === '1';
+                            const isStmtT = stmt.isTrue === true || stmt.isTrue === 'true' || stmt.isTrue === 1 || stmt.isTrue === '1';
+                            if (val !== undefined && isUserT === isStmtT) cc++;
                         });
-                        if (ok) correctCount++;
+                        let frac = 0;
+                        if (stmts.length === 4) {
+                            if (cc === 1) frac = 0.10;
+                            else if (cc === 2) frac = 0.25;
+                            else if (cc === 3) frac = 0.50;
+                            else if (cc === 4) frac = 1.00;
+                        } else if (stmts.length > 0) {
+                            frac = cc / stmts.length;
+                        }
+                        if (cc === stmts.length) correctCount++;
+                        earnedUnits += frac;
                     }
                 }
             });
 
             const totalQ = window.practiceQuestions.length;
-            const score = totalQ > 0 ? (correctCount / totalQ) * 10 : 0;
+            const score = totalQ > 0 ? (earnedUnits / totalQ) * 10 : 0;
             const fixedScore = score.toFixed(1);
 
             const currentUser = auth.currentUser;
@@ -3435,6 +3482,55 @@
                     feedbackHtml = isCorrect
                         ? '<div class="mt-3 p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-700 font-bold text-xs"><i class="fa-solid fa-check mr-2"></i>Chính xác!</div>'
                         : `<div class="mt-3 p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 font-bold text-xs"><i class="fa-solid fa-xmark mr-2"></i>Sai. Đáp án đúng: ${displayAns || q.answer}</div>`;
+                } else if (q.type === 'tf') {
+                    const stmts = q.statements || [];
+                    let cc = 0;
+                    let rowsHtml = '';
+                    stmts.forEach((stmt, sIdx) => {
+                        const val = (typeof u === 'object' && u !== null) ? (u[sIdx] !== undefined ? u[sIdx] : u[String(sIdx)]) : undefined;
+                        const isUserT = val === true || val === 'true' || val === 1 || val === '1';
+                        const isStmtT = stmt.isTrue === true || stmt.isTrue === 'true' || stmt.isTrue === 1 || stmt.isTrue === '1';
+                        const isMatch = val !== undefined && isUserT === isStmtT;
+                        if (isMatch) cc++;
+                        const uBadge = val === undefined 
+                            ? '<span class="text-gray-400 font-bold">Chưa chọn</span>'
+                            : (isUserT ? '<span class="text-emerald-700 font-bold">Đúng</span>' : '<span class="text-rose-600 font-bold">Sai</span>');
+                        const keyBadge = isStmtT ? '<span class="text-emerald-700 font-bold">Đúng</span>' : '<span class="text-rose-600 font-bold">Sai</span>';
+                        const matchIcon = isMatch 
+                            ? '<span class="inline-flex items-center gap-1 text-emerald-700 font-bold text-xs"><i class="fa-solid fa-check text-emerald-600"></i> Đúng</span>'
+                            : '<span class="inline-flex items-center gap-1 text-rose-600 font-bold text-xs"><i class="fa-solid fa-xmark text-rose-500"></i> Sai</span>';
+
+                        rowsHtml += `
+                            <div class="flex items-center justify-between gap-3 p-2 rounded-lg ${isMatch ? 'bg-emerald-50/60 dark:bg-emerald-950/20' : 'bg-rose-50/60 dark:bg-rose-950/20'} border ${isMatch ? 'border-emerald-200/60 dark:border-emerald-900/40' : 'border-rose-200/60 dark:border-rose-900/40'} text-xs">
+                                <div class="font-bold text-gray-700 dark:text-gray-300 w-6">${String.fromCharCode(97 + sIdx)})</div>
+                                <div class="flex-1 text-gray-800 dark:text-gray-200 math-content">${window.formatContent(stmt.text)}</div>
+                                <div class="flex items-center gap-3 shrink-0">
+                                    <span>Bạn: ${uBadge}</span>
+                                    <span>ĐA: ${keyBadge}</span>
+                                    <span>${matchIcon}</span>
+                                </div>
+                            </div>
+                        `;
+                    });
+                    let frac = 0;
+                    if (stmts.length === 4) {
+                        if (cc === 1) frac = 0.10;
+                        else if (cc === 2) frac = 0.25;
+                        else if (cc === 3) frac = 0.50;
+                        else if (cc === 4) frac = 1.00;
+                    } else if (stmts.length > 0) {
+                        frac = cc / stmts.length;
+                    }
+                    feedbackHtml = `
+                        <div class="mt-3 p-3.5 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl space-y-2">
+                            <div class="flex items-center justify-between text-xs font-bold pb-2 border-b border-gray-100 dark:border-slate-700">
+                                <span class="${cc === stmts.length ? 'text-emerald-700' : (cc > 0 ? 'text-amber-700' : 'text-rose-600')}">
+                                    <i class="fa-solid fa-award mr-1"></i> Đúng ${cc}/${stmts.length} ý (${Math.round(frac * 100)}% điểm câu)
+                                </span>
+                            </div>
+                            <div class="space-y-1.5">${rowsHtml}</div>
+                        </div>
+                    `;
                 }
 
                 if (q.solution) {
