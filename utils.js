@@ -765,16 +765,23 @@ export const convertArrayToMatrix = (content) => {
   return content;
 };
 
-export const autoScaleTables = () => {
-    document.querySelectorAll('.js-scale-wrapper').forEach(wrap => {
+export const autoScaleTables = (root = document) => {
+    const scope = root && root.querySelectorAll ? root : document;
+    scope.querySelectorAll('.js-scale-wrapper').forEach(wrap => {
         const table = wrap.querySelector('table');
         if (!table) return;
-        table.style.transform = 'none'; table.style.width = 'auto'; wrap.style.height = 'auto';
-        if (table.scrollWidth > wrap.offsetWidth) {
-            const scale = wrap.offsetWidth / table.scrollWidth;
-            table.style.transform = `scale(${scale})`;
-            wrap.style.height = `${table.scrollHeight * scale}px`;
-            wrap.style.overflow = 'hidden'; 
+        table.style.transform = 'none'; 
+        table.style.width = 'auto'; 
+        wrap.style.height = 'auto';
+        wrap.style.overflowX = 'auto';
+        const wrapWidth = wrap.clientWidth || wrap.offsetWidth;
+        if (wrapWidth > 0 && table.scrollWidth > wrapWidth) {
+            const scale = Math.max(wrapWidth / table.scrollWidth, 0.7);
+            if (scale < 0.99) {
+                table.style.transformOrigin = 'top left';
+                table.style.transform = `scale(${scale})`;
+                wrap.style.height = `${Math.ceil(table.scrollHeight * scale)}px`;
+            }
         }
     });
 };

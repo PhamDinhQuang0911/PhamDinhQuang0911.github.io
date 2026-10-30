@@ -437,6 +437,25 @@
             vertical-align: top;
         }
 
+        /* Đảm bảo bảng, công thức MathJax và hình ảnh không bao giờ tràn hoặc bị cắt trên màn hình nhỏ */
+        .latex-container {
+            max-width: 100%;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+        .latex-container .js-scale-wrapper {
+            max-width: 100%;
+            overflow-x: auto !important;
+            -webkit-overflow-scrolling: touch;
+        }
+        .latex-container table {
+            max-width: 100%;
+        }
+        .latex-container img {
+            max-width: 100% !important;
+            height: auto !important;
+        }
+
         /* 2. Xử lý MathJax Inline (Công thức cùng dòng) */
         mjx-container:not([display="true"]) {
             margin: 0 2px !important; 
@@ -8702,7 +8721,7 @@
                     const el = document.getElementById(`grade-q-${idx}`);
                     if (el) {
                         el.style.display = '';
-                        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
                     }
                     if (window.innerWidth < 768 && window.toggleMobileNavList) {
                         window.toggleMobileNavList(false);
@@ -8733,7 +8752,7 @@
                         const el = document.getElementById(`grade-q-${idx}`);
                         if (el) {
                             el.style.display = '';
-                            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            el.scrollIntoView({ behavior: 'smooth', block: 'start' });
                             chipsMobile.querySelectorAll('button').forEach(c => c.classList.remove('ring-2', 'ring-slate-900', 'scale-105'));
                             chip.classList.add('ring-2', 'ring-slate-900', 'scale-105');
                         }
@@ -8744,7 +8763,7 @@
                 const card = document.createElement('div');
                 card.id = `grade-q-${idx}`;
                 card.setAttribute('data-status', qStatus);
-                card.className = "bg-white rounded-2xl shadow-xs border border-slate-200 overflow-hidden scroll-mt-6 transition-all hover:border-slate-300";
+                card.className = "bg-white rounded-2xl shadow-xs border border-slate-200 overflow-hidden scroll-mt-4 transition-all hover:border-slate-300";
                 
                 let answerHtml = '';
                 if (q.type === 'essay') {
@@ -9043,6 +9062,21 @@
                     if (q.type === 'tf') scoreDesc = '<span class="text-[11px] font-sans font-bold text-rose-600 ml-1">(Chưa đúng ý nào - 0% điểm)</span>';
                 }
 
+                let extraImgHtml = '';
+                const candidateImages = [];
+                if (q.image) candidateImages.push(q.image);
+                if (q.imageUrl) candidateImages.push(q.imageUrl);
+                if (q.img) candidateImages.push(q.img);
+                if (Array.isArray(q.images)) {
+                    q.images.forEach(img => { if (img && !candidateImages.includes(img)) candidateImages.push(img); });
+                }
+                const unrenderedImgs = candidateImages.filter(src => typeof src === 'string' && src.trim() && !(q.content && q.content.includes(src)));
+                if (unrenderedImgs.length > 0) {
+                    extraImgHtml = `<div class="flex flex-wrap justify-center gap-3 my-3">` +
+                        unrenderedImgs.map(src => `<img src="${src}" class="max-h-[300px] max-w-full object-contain rounded-lg shadow-sm border border-slate-200" loading="lazy">`).join('') +
+                        `</div>`;
+                }
+
                 card.innerHTML = `
                     <div class="flex items-center justify-between p-4 bg-slate-50/70 border-b border-slate-200 flex-wrap gap-2">
                         <div class="flex items-center gap-2 flex-wrap">
@@ -9061,7 +9095,7 @@
                             `}
                         </div>
                     </div>
-                    <div class="p-4 md:p-5 text-slate-800 latex-container font-medium text-sm md:text-base leading-relaxed">${window.formatContent ? window.formatContent(q.content) : q.content}</div>
+                    <div class="p-4 md:p-5 text-slate-800 latex-container font-medium text-sm md:text-base leading-relaxed overflow-x-auto max-w-full">${window.formatContent ? window.formatContent(q.content) : q.content}${extraImgHtml}</div>
                     ${answerHtml}
                 `;
                 if (q.type === 'essay') {
@@ -9274,22 +9308,38 @@
 
                 if (window.updateTotalScore) window.updateTotalScore();
                 
-                // Render MathJax inside grading container safely with retry
+                // Render MathJax inside grading container safely with retry, TikZ và bảng tự co giãn
                 const triggerGradingMath = () => {
                     if (window.MathJax && window.MathJax.typesetPromise) {
                         if (window.MathJax.typesetClear) {
                             try { window.MathJax.typesetClear([container]); } catch (_) {}
                         }
-                        window.MathJax.typesetPromise([container]).catch(err => {
-                            console.warn("Grading MathJax retry:", err);
-                            setTimeout(() => {
-                                try { window.MathJax.typesetPromise([container]); } catch (_) {}
-                            }, 120);
-                        });
+                        window.MathJax.typesetPromise([container])
+                            .then(() => {
+                                if (window.renderTikz) window.renderTikz(container);
+                                if (window.autoScaleTables) window.autoScaleTables(container);
+                            })
+                            .catch(err => {
+                                console.warn("Grading MathJax retry:", err);
+                                setTimeout(() => {
+                                    try { 
+                                        window.MathJax.typesetPromise([container]).then(() => {
+                                            if (window.renderTikz) window.renderTikz(container);
+                                            if (window.autoScaleTables) window.autoScaleTables(container);
+                                        }); 
+                                    } catch (_) {}
+                                }, 120);
+                            });
+                    } else {
+                        if (window.renderTikz) window.renderTikz(container);
+                        if (window.autoScaleTables) window.autoScaleTables(container);
                     }
                 };
                 triggerGradingMath();
                 setTimeout(triggerGradingMath, 150);
+                setTimeout(() => {
+                    if (window.autoScaleTables) window.autoScaleTables(container);
+                }, 450);
             } catch (gradingErr) {
                 console.error("renderGradingView error:", gradingErr);
             }
