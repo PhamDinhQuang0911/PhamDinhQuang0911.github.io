@@ -1121,20 +1121,31 @@
             <button onclick="window.toggleRightGrading()" title="Thu gọn/Mở rộng công cụ chấm" class="hidden md:flex fixed top-[45%] right-[384px] z-[110] w-7 h-12 bg-white border-2 border-primary-200 shadow-xl rounded-l-xl items-center justify-center hover:bg-primary-50 transition-all duration-300 text-primary-600 cursor-pointer" id="btnToggleRightNav"><i id="rightGradingIcon" class="fa-solid fa-chevron-right text-xs"></i></button>
 <div class="grading-workspace flex-1 min-h-0 flex flex-col md:flex-row overflow-hidden bg-gray-100 relative">
                 <!-- Left Sidebar: Nav List -->
-                <div id="leftNavSidebar" class="w-full md:w-56 lg:w-64 bg-white border-b md:border-b-0 md:border-r border-gray-200 flex flex-col shrink-0 max-h-52 md:max-h-full transition-all duration-300">
-                    <div class="p-3 bg-gray-50 border-b border-gray-200 shrink-0">
+                <div id="leftNavSidebar" class="w-full md:w-56 lg:w-64 bg-white border-b md:border-b-0 md:border-r border-gray-200 flex flex-col shrink-0 transition-all duration-300">
+                    <div class="p-2.5 md:p-3 bg-gray-50 border-b border-gray-200 shrink-0">
                         <div class="flex items-center justify-between mb-2">
-                            <h4 class="font-bold text-gray-700 text-xs uppercase flex items-center gap-1.5"><i class="fa-solid fa-route text-indigo-500"></i> Điều hướng</h4>
-                            <span id="gradingNavCounter" class="text-[10px] font-bold text-slate-500 bg-white px-2 py-0.5 rounded-full border border-slate-200">0 câu</span>
+                            <div class="flex items-center gap-1.5 cursor-pointer select-none" onclick="window.toggleMobileNavList && window.toggleMobileNavList()">
+                                <h4 class="font-bold text-gray-700 text-xs uppercase flex items-center gap-1.5"><i class="fa-solid fa-route text-indigo-500"></i> Điều hướng</h4>
+                                <span id="gradingNavCounter" class="text-[10px] font-bold text-slate-500 bg-white px-2 py-0.5 rounded-full border border-slate-200">0 câu</span>
+                            </div>
+                            <button type="button" onclick="window.toggleMobileNavList()" id="btnToggleNavListMobile" class="md:hidden px-2 py-0.5 bg-white border border-slate-200 rounded-lg text-[10px] font-bold text-slate-600 hover:bg-slate-100 flex items-center gap-1 shadow-2xs">
+                                <span id="mobileNavToggleText">Xem chi tiết</span>
+                                <i id="mobileNavToggleIcon" class="fa-solid fa-chevron-down text-[9px] transition-transform"></i>
+                            </button>
                         </div>
                         <div class="grid grid-cols-4 gap-1 text-[10px] font-bold">
-                            <button type="button" onclick="window.filterGradingQuestions('all', this)" class="grading-filter-btn px-1 py-1 rounded bg-slate-800 text-white text-center hover:opacity-90 transition-all">Tất cả</button>
-                            <button type="button" onclick="window.filterGradingQuestions('wrong', this)" class="grading-filter-btn px-1 py-1 rounded bg-white text-rose-700 border border-rose-200 text-center hover:bg-rose-50 transition-all">Sai</button>
-                            <button type="button" onclick="window.filterGradingQuestions('partial', this)" class="grading-filter-btn px-1 py-1 rounded bg-white text-amber-700 border border-amber-200 text-center hover:bg-amber-50 transition-all">1 phần</button>
-                            <button type="button" onclick="window.filterGradingQuestions('correct', this)" class="grading-filter-btn px-1 py-1 rounded bg-white text-emerald-700 border border-emerald-200 text-center hover:bg-emerald-50 transition-all">Đúng</button>
+                            <button type="button" onclick="window.filterGradingQuestions('all', this)" class="grading-filter-btn px-1 py-1 rounded bg-slate-800 text-white text-center hover:opacity-90 transition-all cursor-pointer">Tất cả</button>
+                            <button type="button" onclick="window.filterGradingQuestions('wrong', this)" class="grading-filter-btn px-1 py-1 rounded bg-white text-rose-700 border border-rose-200 text-center hover:bg-rose-50 transition-all cursor-pointer">Sai</button>
+                            <button type="button" onclick="window.filterGradingQuestions('partial', this)" class="grading-filter-btn px-1 py-1 rounded bg-white text-amber-700 border border-amber-200 text-center hover:bg-amber-50 transition-all cursor-pointer">1 phần</button>
+                            <button type="button" onclick="window.filterGradingQuestions('correct', this)" class="grading-filter-btn px-1 py-1 rounded bg-white text-emerald-700 border border-emerald-200 text-center hover:bg-emerald-50 transition-all cursor-pointer">Đúng</button>
+                        </div>
+                        <!-- Compact Horizontal Quick-Jump Chips (Visible on Mobile only) -->
+                        <div id="gradingNavChipsMobile" class="md:hidden mt-2 pt-2 border-t border-slate-200 flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
+                            <!-- Populated dynamically by renderGradingView() -->
                         </div>
                     </div>
-                    <div class="p-3 bg-gray-50 flex-1 overflow-y-auto custom-scrollbar flex flex-col">
+                    <!-- Detailed Vertical Question List (Collapsible on Mobile, always visible on Desktop) -->
+                    <div id="gradingNavListContainer" class="hidden md:flex p-2.5 md:p-3 bg-gray-50 flex-1 overflow-y-auto custom-scrollbar flex-col max-h-56 md:max-h-full">
                         <div id="gradingNavList" class="space-y-1 pb-2"></div>
                     </div>
                 </div>
@@ -8257,6 +8268,27 @@
             }
         };
 
+        window.toggleMobileNavList = (forceOpen) => {
+            const listContainer = document.getElementById('gradingNavListContainer');
+            const toggleIcon = document.getElementById('mobileNavToggleIcon');
+            const toggleText = document.getElementById('mobileNavToggleText');
+            if (!listContainer) return;
+            
+            const isCurrentlyHidden = listContainer.classList.contains('hidden');
+            const shouldOpen = forceOpen !== undefined ? forceOpen : isCurrentlyHidden;
+            if (shouldOpen) {
+                listContainer.classList.remove('hidden');
+                listContainer.classList.add('flex');
+                if (toggleIcon) toggleIcon.className = 'fa-solid fa-chevron-up text-[9px] transition-transform';
+                if (toggleText) toggleText.textContent = 'Thu gọn';
+            } else {
+                listContainer.classList.add('hidden');
+                listContainer.classList.remove('flex');
+                if (toggleIcon) toggleIcon.className = 'fa-solid fa-chevron-down text-[9px] transition-transform';
+                if (toggleText) toggleText.textContent = 'Xem chi tiết';
+            }
+        };
+
         window.filterGradingQuestions = (filter, btn) => {
             document.querySelectorAll('.grading-filter-btn').forEach(b => {
                 b.className = 'grading-filter-btn px-1 py-1 rounded bg-white text-slate-700 border border-slate-200 text-center hover:bg-slate-50 transition-all cursor-pointer';
@@ -8266,6 +8298,7 @@
             }
             const cards = document.querySelectorAll('#gradingQuestionList [id^="grade-q-"]');
             const navItems = document.querySelectorAll('#gradingNavList button[data-status]');
+            const chipItems = document.querySelectorAll('#gradingNavChipsMobile button[data-status]');
             cards.forEach(card => {
                 const status = card.getAttribute('data-status');
                 if (filter === 'all' || status === filter) card.style.display = '';
@@ -8275,6 +8308,11 @@
                 const status = item.getAttribute('data-status');
                 if (filter === 'all' || status === filter) item.style.display = '';
                 else item.style.display = 'none';
+            });
+            chipItems.forEach(chip => {
+                const status = chip.getAttribute('data-status');
+                if (filter === 'all' || status === filter) chip.style.display = '';
+                else chip.style.display = 'none';
             });
         };
 
@@ -8370,12 +8408,14 @@
             window.setTool('cursor'); // Reset tool to cursor when opening grading view
             const container = document.getElementById('gradingQuestionList');
             const nav = document.getElementById('gradingNavList');
+            const chipsMobile = document.getElementById('gradingNavChipsMobile');
             
             // Hide global AI buttons if it's mixed or essay, to avoid duplication
             const btnOnly = document.getElementById('btnAIGradeOnly');
             if (btnOnly) btnOnly.classList.remove('hidden');
 
             container.innerHTML = `
+                <div id="topGradingSummaryBanner" class="w-full mb-3"></div>
                 <div id="mcContainer" class="flex flex-col gap-5 w-full"></div>
                 <div id="essayHeader" class="flex items-center justify-between mb-4 mt-8 hidden flex-wrap gap-2 border-t-2 border-slate-200 pt-6 w-full">
                     <div id="ai-inline-progress" class="hidden items-center gap-2 order-2 md:order-none md:mr-auto"><div class="w-24 h-2 bg-gray-200 rounded-full overflow-hidden"><div id="ai-inline-progress-bar" class="h-full bg-slate-800 transition-all" style="width:0%"></div></div><span id="ai-inline-progress-count" class="text-xs font-black text-slate-800 whitespace-nowrap">0/0 câu</span></div>
@@ -8385,6 +8425,10 @@
                 <div id="essayContainer" class="flex flex-col gap-5 w-full"></div>
             `;
             nav.innerHTML = '';
+            if (chipsMobile) chipsMobile.innerHTML = '';
+            if (window.toggleMobileNavList && window.innerWidth < 768) {
+                window.toggleMobileNavList(false);
+            }
             
             const mcContainer = document.getElementById('mcContainer');
             const essayContainer = document.getElementById('essayContainer');
@@ -8469,10 +8513,15 @@
             if (unconfiguredCount > 0) defaultPointPerQuestion = Math.max(0, cfgTnScore - configuredPoints) / unconfiguredCount;
             else if (configuredPoints === 0 && totalMcqQuestions > 0) defaultPointPerQuestion = cfgTnScore / totalMcqQuestions;
 
-            // Thống kê câu hỏi phục vụ Panel tóm tắt
+            // Thống kê câu hỏi & điểm phục vụ Panel tóm tắt (Đủ 3 phần Trắc nghiệm)
             let countTotalMC = 0, countCorrectMC = 0;
             let countTotalTF = 0, countFullTF = 0, countPartialTF = 0, countTotalTfStmts = 0, countCorrectTfStmts = 0;
             let countTotalShort = 0, countCorrectShort = 0;
+            
+            let earnedMcScore = 0, maxMcScore = 0;
+            let earnedTfScore = 0, maxTfScore = 0;
+            let earnedShortScore = 0, maxShortScore = 0;
+
             let totalEarnedMcScore = 0;
             let totalMaxMcScore = 0;
 
@@ -8498,16 +8547,21 @@
                 
                 if (q.type === 'mc') {
                     countTotalMC++;
+                    maxMcScore += maxPoint;
                     if (u !== undefined && u !== null && u !== '' && Number(u) === Number(q.correct)) {
                         isCorrect = true; earnedFraction = 1.0; countCorrectMC++;
                     }
+                    earnedMcScore += maxPoint * earnedFraction;
                 } else if (q.type === 'short') {
                     countTotalShort++;
+                    maxShortScore += maxPoint;
                     if (q.answer !== undefined && q.answer !== null && u !== undefined && u !== null && String(u).trim() !== "" && window.shortMatch(u, q.answer)) {
                         isCorrect = true; earnedFraction = 1.0; countCorrectShort++;
                     }
+                    earnedShortScore += maxPoint * earnedFraction;
                 } else if (q.type === 'tf' || (q.statements && q.statements.length > 0)) {
                     countTotalTF++;
+                    maxTfScore += maxPoint;
                     const stmts = q.statements || [];
                     tfTotalStmts = stmts.length;
                     const tfValues = normalizeTfAnswers(u, stmts.length);
@@ -8531,6 +8585,7 @@
                         if (correctCount === stmts.length) { isCorrect = true; countFullTF++; }
                         else if (correctCount > 0) { isPartial = true; countPartialTF++; }
                     }
+                    earnedTfScore += maxPoint * earnedFraction;
                 }
 
                 if (q.type !== 'essay') {
@@ -8649,8 +8704,42 @@
                         el.style.display = '';
                         el.scrollIntoView({ behavior: 'smooth', block: 'center' });
                     }
+                    if (window.innerWidth < 768 && window.toggleMobileNavList) {
+                        window.toggleMobileNavList(false);
+                    }
                 };
                 nav.appendChild(navItem);
+
+                // Thêm chip điều hướng nhanh nằm ngang trên mobile
+                if (chipsMobile) {
+                    const chip = document.createElement('button');
+                    chip.type = 'button';
+                    chip.setAttribute('data-status', qStatus);
+                    let chipClass = 'bg-rose-50 text-rose-700 border-rose-300';
+                    let chipScoreText = '0đ';
+                    if (q.type === 'essay') {
+                        chipClass = 'bg-slate-100 text-slate-700 border-slate-300';
+                        chipScoreText = 'TL';
+                    } else if (isCorrect) {
+                        chipClass = 'bg-emerald-50 text-emerald-800 border-emerald-400 font-extrabold';
+                        chipScoreText = `+${earnedPointsStr}đ`;
+                    } else if (isPartial || earnedFraction > 0) {
+                        chipClass = 'bg-amber-50 text-amber-900 border-amber-400 font-extrabold';
+                        chipScoreText = `+${earnedPointsStr}đ`;
+                    }
+                    chip.className = `shrink-0 px-2.5 py-1 rounded-lg text-xs font-bold border transition-all active:scale-90 flex items-center gap-1 shadow-2xs cursor-pointer ${chipClass}`;
+                    chip.innerHTML = `<span>C${localNumber}</span><span class="text-[9px] font-mono opacity-80">(${chipScoreText})</span>`;
+                    chip.onclick = () => {
+                        const el = document.getElementById(`grade-q-${idx}`);
+                        if (el) {
+                            el.style.display = '';
+                            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            chipsMobile.querySelectorAll('button').forEach(c => c.classList.remove('ring-2', 'ring-slate-900', 'scale-105'));
+                            chip.classList.add('ring-2', 'ring-slate-900', 'scale-105');
+                        }
+                    };
+                    chipsMobile.appendChild(chip);
+                }
 
                 const card = document.createElement('div');
                 card.id = `grade-q-${idx}`;
@@ -8997,61 +9086,134 @@
             if (toolPalette) toolPalette.style.display = isMcOnlyExam ? 'none' : '';
             if (aiPalette) aiPalette.style.display = isMcOnlyExam ? 'none' : '';
 
-            if (summaryPanel) {
-                const scaledScore = (cfgTnScore > 0 && totalMaxMcScore > 0 && Math.abs(totalMaxMcScore - cfgTnScore) > 0.01) ?
-                    parseFloat(((totalEarnedMcScore / totalMaxMcScore) * cfgTnScore).toFixed(2)) : parseFloat(totalEarnedMcScore.toFixed(2));
-                const maxDisplayScore = cfgTnScore > 0 ? cfgTnScore : totalMaxMcScore;
-                const passScore = currentGradingAttempt.passScoreSnapshot !== undefined ? Number(currentGradingAttempt.passScoreSnapshot) : 5;
-                const isPassed = scaledScore >= passScore;
-                const pct = Math.round((scaledScore / (maxDisplayScore || 1)) * 100);
+            // Build the comprehensive 3-part Objective Score Summary (Trắc nghiệm 4 LC, Trắc nghiệm Đúng/Sai, Trắc nghiệm Trả lời ngắn)
+            const scaleFactor = (cfgTnScore > 0 && totalMaxMcScore > 0 && Math.abs(totalMaxMcScore - cfgTnScore) > 0.01) ? (cfgTnScore / totalMaxMcScore) : 1;
+            const dispEarnedMC = parseFloat((earnedMcScore * scaleFactor).toFixed(2));
+            const dispMaxMC = parseFloat((maxMcScore * scaleFactor).toFixed(2));
+            const dispEarnedTF = parseFloat((earnedTfScore * scaleFactor).toFixed(2));
+            const dispMaxTF = parseFloat((maxTfScore * scaleFactor).toFixed(2));
+            const dispEarnedShort = parseFloat((earnedShortScore * scaleFactor).toFixed(2));
+            const dispMaxShort = parseFloat((maxShortScore * scaleFactor).toFixed(2));
 
-                summaryPanel.classList.remove('hidden');
-                let statsCols = 'grid-cols-2';
-                let shortCardHtml = '';
-                if (countTotalShort > 0) {
-                    statsCols = 'grid-cols-3';
-                    shortCardHtml = `
-                        <div class="p-2.5 bg-white rounded-lg border border-slate-200 shadow-2xs">
-                            <div class="text-[10px] font-bold text-slate-400 uppercase">Trả lời ngắn</div>
-                            <div class="text-sm font-black text-slate-800 mt-1">${countCorrectShort} / ${countTotalShort} câu</div>
-                            <div class="text-[10px] text-slate-500 font-medium">${Math.round(countCorrectShort / (countTotalShort || 1) * 100)}% đúng</div>
+            const scaledScore = (cfgTnScore > 0 && totalMaxMcScore > 0 && Math.abs(totalMaxMcScore - cfgTnScore) > 0.01) ?
+                parseFloat(((totalEarnedMcScore / totalMaxMcScore) * cfgTnScore).toFixed(2)) : parseFloat(totalEarnedMcScore.toFixed(2));
+            const maxDisplayScore = cfgTnScore > 0 ? cfgTnScore : parseFloat(totalMaxMcScore.toFixed(2));
+            const passScore = currentGradingAttempt.passScoreSnapshot !== undefined ? Number(currentGradingAttempt.passScoreSnapshot) : 5;
+            const isPassed = scaledScore >= passScore;
+            const pct = Math.round((scaledScore / (maxDisplayScore || 1)) * 100);
+
+            const activePartsCount = (countTotalMC > 0 ? 1 : 0) + (countTotalTF > 0 ? 1 : 0) + (countTotalShort > 0 ? 1 : 0);
+            let statsCols = 'grid-cols-1 md:grid-cols-3';
+            if (activePartsCount === 2) statsCols = 'grid-cols-1 md:grid-cols-2';
+            else if (activePartsCount === 1) statsCols = 'grid-cols-1';
+
+            const mcCardHtml = countTotalMC > 0 ? `
+                <div class="p-3 bg-white rounded-xl border border-slate-200/90 shadow-2xs flex flex-col justify-between">
+                    <div>
+                        <div class="flex items-center justify-between">
+                            <span class="text-[10px] font-extrabold uppercase tracking-wider text-slate-600 flex items-center gap-1.5">
+                                <i class="fa-solid fa-list-ol text-blue-600"></i> Phần I · 4 Phương án
+                            </span>
+                            <span class="text-[9px] font-bold text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200 font-mono">Trắc nghiệm</span>
                         </div>
-                    `;
-                }
+                        <div class="text-xl font-black text-slate-800 font-mono mt-1">
+                            ${dispEarnedMC} <span class="text-xs font-bold text-slate-400">/ ${dispMaxMC} điểm</span>
+                        </div>
+                        <div class="text-[11px] font-semibold text-slate-600 mt-1 flex items-center justify-between">
+                            <span>${countCorrectMC}/${countTotalMC} câu đúng</span>
+                            <span class="font-bold text-slate-500 font-mono">${Math.round(countCorrectMC / (countTotalMC || 1) * 100)}%</span>
+                        </div>
+                    </div>
+                    <div class="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden mt-2">
+                        <div class="h-full bg-blue-600 rounded-full transition-all" style="width: ${Math.round(countCorrectMC / (countTotalMC || 1) * 100)}%"></div>
+                    </div>
+                </div>
+            ` : '';
 
-                        summaryPanel.innerHTML = `
-                            <div class="space-y-3">
-                                <div class="p-3 bg-white rounded-xl border border-slate-200 shadow-2xs flex items-center justify-between">
-                                    <div>
-                                        <div class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Điểm trắc nghiệm</div>
-                                        <div class="text-2xl font-black text-slate-800 font-mono mt-0.5">
-                                            ${scaledScore} <span class="text-xs font-semibold text-slate-400">/ ${maxDisplayScore}đ</span>
-                                        </div>
-                                        <div class="text-[11px] font-bold ${isPassed ? 'text-emerald-700' : 'text-rose-600'} mt-0.5 flex items-center gap-1">
-                                            <i class="fa-solid ${isPassed ? 'fa-circle-check text-emerald-500' : 'fa-circle-xmark text-rose-500'}"></i>
-                                            ${isPassed ? 'Đạt yêu cầu' : 'Chưa đạt'}
-                                        </div>
-                                    </div>
-                                    <div class="w-12 h-12 rounded-xl ${isPassed ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-rose-50 text-rose-700 border border-rose-200'} flex flex-col items-center justify-center">
-                                        <span class="text-xs font-black">${pct}%</span>
-                                    </div>
-                                </div>
+            const tfCardHtml = countTotalTF > 0 ? `
+                <div class="p-3 bg-white rounded-xl border border-slate-200/90 shadow-2xs flex flex-col justify-between">
+                    <div>
+                        <div class="flex items-center justify-between">
+                            <span class="text-[10px] font-extrabold uppercase tracking-wider text-slate-600 flex items-center gap-1.5">
+                                <i class="fa-solid fa-square-check text-indigo-600"></i> Phần II · Đúng / Sai
+                            </span>
+                            <span class="text-[9px] font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-200 font-mono">Trắc nghiệm</span>
+                        </div>
+                        <div class="text-xl font-black text-slate-800 font-mono mt-1">
+                            ${dispEarnedTF} <span class="text-xs font-bold text-slate-400">/ ${dispMaxTF} điểm</span>
+                        </div>
+                        <div class="text-[11px] font-semibold text-slate-600 mt-1 flex items-center justify-between">
+                            <span>${countFullTF} đủ · ${countPartialTF} phần</span>
+                            <span class="font-bold text-slate-500 font-mono">${countCorrectTfStmts}/${countTotalTfStmts} ý đúng</span>
+                        </div>
+                    </div>
+                    <div class="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden mt-2">
+                        <div class="h-full bg-indigo-600 rounded-full transition-all" style="width: ${Math.min(100, Math.round((earnedTfScore / (maxTfScore || 1)) * 100))}%"></div>
+                    </div>
+                </div>
+            ` : '';
 
-                                <div class="grid ${statsCols} gap-2 text-xs">
-                                    <div class="p-2.5 bg-white rounded-lg border border-slate-200 shadow-2xs">
-                                        <div class="text-[10px] font-bold text-slate-400 uppercase">Trắc nghiệm 4 LC</div>
-                                        <div class="text-sm font-black text-slate-800 mt-1">${countCorrectMC} / ${countTotalMC} câu</div>
-                                    </div>
-                                    <div class="p-2.5 bg-white rounded-lg border border-slate-200 shadow-2xs">
-                                        <div class="text-[10px] font-bold text-slate-400 uppercase">Đúng / Sai 4 ý</div>
-                                        <div class="text-sm font-black text-slate-800 mt-1">${countFullTF} đủ · ${countPartialTF} phần</div>
-                                        <div class="text-[10px] text-slate-500 font-medium">${countCorrectTfStmts}/${countTotalTfStmts} ý đúng</div>
-                                    </div>
-                                    ${shortCardHtml}
-                                </div>
+            const shortCardHtml = countTotalShort > 0 ? `
+                <div class="p-3 bg-white rounded-xl border border-slate-200/90 shadow-2xs flex flex-col justify-between">
+                    <div>
+                        <div class="flex items-center justify-between">
+                            <span class="text-[10px] font-extrabold uppercase tracking-wider text-slate-600 flex items-center gap-1.5">
+                                <i class="fa-solid fa-keyboard text-emerald-600"></i> Phần III · Trả lời ngắn
+                            </span>
+                            <span class="text-[9px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 font-mono">Trắc nghiệm</span>
+                        </div>
+                        <div class="text-xl font-black text-slate-800 font-mono mt-1">
+                            ${dispEarnedShort} <span class="text-xs font-bold text-slate-400">/ ${dispMaxShort} điểm</span>
+                        </div>
+                        <div class="text-[11px] font-semibold text-slate-600 mt-1 flex items-center justify-between">
+                            <span>${countCorrectShort}/${countTotalShort} câu đúng</span>
+                            <span class="font-bold text-slate-500 font-mono">${Math.round(countCorrectShort / (countTotalShort || 1) * 100)}%</span>
+                        </div>
+                    </div>
+                    <div class="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden mt-2">
+                        <div class="h-full bg-emerald-600 rounded-full transition-all" style="width: ${Math.round(countCorrectShort / (countTotalShort || 1) * 100)}%"></div>
+                    </div>
+                </div>
+            ` : '';
+
+            const fullGradingSummaryHtml = `
+                <div class="p-4 bg-gradient-to-br from-slate-50 via-white to-blue-50/20 rounded-2xl border border-slate-200 shadow-sm space-y-3">
+                    <div class="p-3.5 bg-white rounded-xl border border-slate-200/90 shadow-2xs flex items-center justify-between flex-wrap gap-2">
+                        <div>
+                            <div class="text-[10px] font-black uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+                                <i class="fa-solid fa-award text-amber-500"></i> Tổng hợp điểm trắc nghiệm (${activePartsCount} phần)
                             </div>
-                        `;
-                    }
+                            <div class="text-2xl md:text-3xl font-black text-slate-800 font-mono mt-0.5">
+                                ${scaledScore} <span class="text-xs md:text-sm font-bold text-slate-400">/ ${maxDisplayScore} điểm</span>
+                            </div>
+                            <div class="text-[11px] font-bold ${isPassed ? 'text-emerald-700' : 'text-rose-600'} mt-0.5 flex items-center gap-1.5">
+                                <i class="fa-solid ${isPassed ? 'fa-circle-check text-emerald-500' : 'fa-circle-xmark text-rose-500'}"></i>
+                                ${isPassed ? 'Đạt yêu cầu' : 'Chưa đạt'} (Điểm chuẩn: ${passScore}đ)
+                            </div>
+                        </div>
+                        <div class="w-12 h-12 md:w-14 md:h-14 rounded-2xl ${isPassed ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-rose-50 text-rose-700 border border-rose-200'} flex flex-col items-center justify-center shadow-2xs p-1">
+                            <span class="text-xs md:text-sm font-black font-mono leading-none">${pct}%</span>
+                            <span class="text-[8px] uppercase tracking-wider font-bold opacity-80 mt-0.5">Tỷ lệ</span>
+                        </div>
+                    </div>
+
+                    <div class="grid ${statsCols} gap-2 text-xs">
+                        ${mcCardHtml}
+                        ${tfCardHtml}
+                        ${shortCardHtml}
+                    </div>
+                </div>
+            `;
+
+            if (summaryPanel) {
+                summaryPanel.classList.remove('hidden');
+                summaryPanel.innerHTML = fullGradingSummaryHtml;
+            }
+
+            const topSummaryBanner = document.getElementById('topGradingSummaryBanner');
+            if (topSummaryBanner) {
+                topSummaryBanner.innerHTML = fullGradingSummaryHtml;
+            }
 
                 const navCounter = document.getElementById('gradingNavCounter');
                 if (navCounter) navCounter.textContent = `${window.gradingQuestions.length} câu`;
