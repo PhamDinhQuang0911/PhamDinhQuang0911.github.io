@@ -927,17 +927,30 @@
                         </div>
                     </div>
                 </div> </div> <div id="tab-classes" class="tab-content hidden animate-fade-in">
-                <div class="mb-6 flex flex-col md:flex-row md:items-end justify-between gap-2 md:gap-4">
+                <div class="mb-6 flex flex-col md:flex-row md:items-center justify-between gap-3 md:gap-4">
                     <div>
-                        <h2 class="text-3xl font-black text-gray-800 mb-1">Lớp học của tôi</h2>
-                        <p class="text-gray-500 text-sm">Danh sách các lớp bạn đang tham gia</p>
+                        <h2 class="text-2xl md:text-3xl font-black text-gray-800 mb-1 flex items-center gap-2">
+                            <span>Lớp học của tôi</span>
+                            <span id="studentClassesCountBadge" class="text-xs font-bold px-2.5 py-0.5 rounded-full bg-primary-100 text-primary-700">0 lớp</span>
+                        </h2>
+                        <p class="text-gray-500 text-xs md:text-sm">Danh sách các lớp bạn đang tham gia theo năm học</p>
                     </div>
-                    <div class="bg-white p-1 rounded-xl border border-primary-100 shadow-sm flex shrink-0 self-start md:self-auto">
-                        <button onclick="window.switchDisplayMode('classes', 'grid')" id="btn-view-classes-grid" class="p-2 rounded-lg text-primary-600 bg-primary-50 shadow-sm transition-all w-10 h-10 flex items-center justify-center"><i class="fa-solid fa-border-all"></i></button>
-                        <button onclick="window.switchDisplayMode('classes', 'list')" id="btn-view-classes-list" class="p-2 rounded-lg text-gray-400 hover:text-primary-600 transition-all w-10 h-10 flex items-center justify-center"><i class="fa-solid fa-list-ul"></i></button>
+                    <div class="flex items-center gap-2 md:gap-3 self-start md:self-auto flex-wrap">
+                        <!-- Bộ lọc năm học phong cách Apple EdTech -->
+                        <div class="relative flex items-center">
+                            <select id="studentAcademicYearSelect" onchange="window.changeStudentAcademicYear(this.value)" class="appearance-none bg-white border border-gray-200/90 text-gray-700 font-bold text-xs md:text-sm rounded-xl px-3.5 py-2 pr-8 shadow-2xs hover:border-primary-400 focus:outline-none focus:ring-2 focus:ring-primary-500/20 cursor-pointer transition-all">
+                                <option value="all">📚 Tất cả năm học</option>
+                            </select>
+                            <i class="fa-solid fa-chevron-down text-xs text-primary-500 absolute right-3 pointer-events-none"></i>
+                        </div>
+                        <!-- Chuyển đổi Grid / List -->
+                        <div class="bg-white p-1 rounded-xl border border-gray-200/90 shadow-2xs flex shrink-0">
+                            <button onclick="window.switchDisplayMode('classes', 'grid')" id="btn-view-classes-grid" class="p-2 rounded-lg text-primary-600 bg-primary-50 shadow-2xs transition-all w-9 h-9 md:w-10 md:h-10 flex items-center justify-center" title="Dạng lưới"><i class="fa-solid fa-border-all text-sm"></i></button>
+                            <button onclick="window.switchDisplayMode('classes', 'list')" id="btn-view-classes-list" class="p-2 rounded-lg text-gray-400 hover:text-primary-600 transition-all w-9 h-9 md:w-10 md:h-10 flex items-center justify-center" title="Dạng danh sách"><i class="fa-solid fa-list-ul text-sm"></i></button>
+                        </div>
                     </div>
                 </div>
-                <div id="myClassesList" class="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-6"></div>
+                <div id="myClassesList" class="pb-6"></div>
             </div>
             
             <div id="tab-history" class="tab-content hidden animate-fade-in">
@@ -2370,46 +2383,155 @@
             }
         }
 
+        window.getNormalizedAcademicYear = (cl) => {
+            if (cl.academicYear && String(cl.academicYear).trim()) {
+                const raw = String(cl.academicYear).trim();
+                if (/^\d{2}-\d{2}$/.test(raw)) return '20' + raw.replace('-', '-20');
+                return raw;
+            }
+            const name = cl.name || '';
+            const mFull = name.match(/20\d{2}[-_/]?20\d{2}/);
+            if (mFull) return mFull[0].replace(/[_/]/, '-');
+            const mShort = name.match(/(?:2k\d{1,2}[-_])?(\d{2})[-_](\d{2})/i);
+            if (mShort) return `20${mShort[1]}-20${mShort[2]}`;
+            return '2026-2027';
+        };
+
+        window.changeStudentAcademicYear = (year) => {
+            try {
+                localStorage.setItem('student_selected_academic_year', year);
+            } catch (_) {}
+            renderClassesUI();
+        };
+
         function renderClassesUI() {
             const container = document.getElementById('myClassesList');
-            if(!container) return;
-            const data = window.dataCache.classes;
-            const mode = window.viewState.classes;
+            if (!container) return;
+            const data = Array.isArray(window.dataCache.classes) ? window.dataCache.classes : [];
+            const mode = window.viewState.classes || 'grid';
+
+            const badgeEl = document.getElementById('studentClassesCountBadge');
+            if (badgeEl) badgeEl.textContent = `${data.length} lớp`;
 
             if (data.length === 0) {
-                container.innerHTML = '<div class="col-span-full text-center py-12 bg-white rounded-2xl border border-dashed border-gray-300"><p class="text-gray-500 font-bold">Bạn chưa tham gia lớp nào.</p></div>';
+                container.className = "flex flex-col animate-fade-in";
+                container.innerHTML = '<div class="text-center py-16 bg-white rounded-3xl border border-dashed border-gray-200 shadow-xs"><div class="w-16 h-16 rounded-2xl bg-amber-50 text-amber-500 flex items-center justify-center text-2xl mx-auto mb-3"><i class="fa-solid fa-chalkboard"></i></div><p class="text-gray-700 font-extrabold text-base mb-1">Bạn chưa tham gia lớp học nào</p><p class="text-gray-400 text-xs">Vui lòng liên hệ Thầy Choang hoặc nhập mã tham gia lớp.</p></div>';
                 return;
             }
 
-            if (mode === 'grid') container.className = "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-fade-in pb-2 md:pb-6";
-            else container.className = "flex flex-col gap-4 animate-fade-in pb-2 md:pb-6";
-
-            let html = '';
+            // Tính toán và chuẩn hóa danh sách năm học
+            const yearCounts = {};
             data.forEach(cl => {
+                const y = window.getNormalizedAcademicYear(cl);
+                yearCounts[y] = (yearCounts[y] || 0) + 1;
+            });
+            const sortedYears = Object.keys(yearCounts).sort((a, b) => b.localeCompare(a));
+
+            // Cập nhật thẻ Select năm học
+            const yearSelect = document.getElementById('studentAcademicYearSelect');
+            let savedYear = 'all';
+            try { savedYear = localStorage.getItem('student_selected_academic_year') || 'all'; } catch (_) {}
+            if (yearSelect) {
+                let selectHtml = `<option value="all">📚 Tất cả năm học (${data.length})</option>`;
+                sortedYears.forEach(y => {
+                    selectHtml += `<option value="${y}">🎓 Năm học ${y} (${yearCounts[y]})</option>`;
+                });
+                yearSelect.innerHTML = selectHtml;
+                if (savedYear === 'all' || sortedYears.includes(savedYear)) {
+                    yearSelect.value = savedYear;
+                } else if (sortedYears.length > 0) {
+                    yearSelect.value = sortedYears[0];
+                    savedYear = sortedYears[0];
+                }
+            }
+
+            const currentFilterYear = (yearSelect && yearSelect.value) ? yearSelect.value : savedYear;
+
+            const renderCard = (cl) => {
+                const yr = window.getNormalizedAcademicYear(cl);
+                const safeName = String(cl.name || '').replace(/'/g, "\\'");
                 if (mode === 'grid') {
-                    html += `
-                    <div class="bg-white p-3 md:p-6 rounded-2xl shadow-sm border border-primary-50 hover:border-primary-300 hover:shadow-md transition-all cursor-pointer group flex flex-col h-full" onclick="window.openClassDetail('${cl.id}', '${cl.name}')">
-                        <div class="flex justify-between mb-4">
-                            <div class="w-12 h-12 rounded-xl bg-primary-100 text-primary-600 flex items-center justify-center font-bold text-xl"><i class="fa-solid fa-chalkboard"></i></div>
-                            <div class="w-8 h-8 rounded-full bg-gray-50 flex items-center justify-center text-gray-300 group-hover:bg-primary-500 group-hover:text-white transition-colors"><i class="fa-solid fa-arrow-right"></i></div>
+                    return `
+                    <div class="bg-white p-4 md:p-6 rounded-2xl md:rounded-3xl shadow-xs hover:shadow-lg border border-gray-100 hover:border-primary-300 transition-all duration-200 cursor-pointer group flex flex-col h-full relative" onclick="window.openClassDetail('${cl.id}', '${safeName}')">
+                        <div class="flex items-center justify-between gap-3 mb-4">
+                            <div class="w-12 h-12 rounded-2xl bg-gradient-to-tr from-primary-500/10 to-primary-500/20 text-primary-600 flex items-center justify-center font-bold text-xl group-hover:scale-105 transition-transform shrink-0">
+                                <i class="fa-solid fa-chalkboard"></i>
+                            </div>
+                            <span class="px-2.5 py-1 rounded-full text-xs font-bold bg-primary-50 text-primary-700 border border-primary-200/60 flex items-center gap-1.5 shadow-2xs shrink-0">
+                                <i class="fa-regular fa-calendar-check text-[10px]"></i> ${yr}
+                            </span>
                         </div>
-                        <h3 class="font-bold text-xl text-gray-800 mb-1 group-hover:text-primary-700 transition-colors truncate">${cl.name} ${cl.academicYear ? `<span class="text-xs text-gray-500 font-normal ml-1">(${cl.academicYear})</span>` : ''}</h3>
-                        <p class="text-sm text-gray-500 font-medium mb-6 flex items-center gap-2"><i class="fa-solid fa-user-tie text-primary-500"></i> GV: ${cl.teacherName || "Thầy Choang"}</p>
-                        <div class="mt-auto w-full py-3 bg-primary-50 text-primary-700 font-bold text-sm rounded-xl text-center group-hover:bg-primary-600 group-hover:text-white transition-all shadow-sm">Vào lớp học</div>
+                        <h3 class="font-black text-lg md:text-xl text-gray-800 mb-1.5 group-hover:text-primary-600 transition-colors line-clamp-2 leading-snug">
+                            ${cl.name}
+                        </h3>
+                        <p class="text-xs md:text-sm text-gray-500 font-medium mb-6 flex items-center gap-1.5">
+                            <i class="fa-solid fa-user-tie text-primary-500"></i> GV: ${cl.teacherName || "Thầy Choang"}
+                        </p>
+                        <div class="mt-auto w-full py-2.5 px-4 bg-primary-50 group-hover:bg-primary-600 text-primary-700 group-hover:text-white font-bold text-xs md:text-sm rounded-xl text-center transition-all duration-200 shadow-2xs flex items-center justify-center gap-2">
+                            <span>Vào lớp học</span>
+                            <i class="fa-solid fa-arrow-right text-xs transition-transform group-hover:translate-x-1"></i>
+                        </div>
                     </div>`;
                 } else {
-                    html += `
-                    <div class="bg-white p-2 md:p-4 rounded-xl shadow-sm border border-primary-50 hover:border-primary-300 hover:shadow-md transition-all cursor-pointer group flex items-center gap-2 md:gap-4" onclick="window.openClassDetail('${cl.id}', '${cl.name}')">
-                        <div class="w-14 h-14 md:w-16 md:h-16 rounded-xl bg-primary-100 text-primary-600 flex items-center justify-center font-bold text-xl md:text-2xl shrink-0"><i class="fa-solid fa-chalkboard"></i></div>
-                        <div class="flex-1 min-w-0">
-                            <h3 class="font-bold text-lg text-gray-800 mb-0.5 group-hover:text-primary-700 transition-colors truncate">${cl.name} ${cl.academicYear ? `<span class="text-xs text-gray-500 font-normal ml-1">(${cl.academicYear})</span>` : ''}</h3>
-                            <p class="text-xs text-gray-500 font-medium"><i class="fa-solid fa-user-tie text-primary-500 mr-1"></i> GV: ${cl.teacherName || "Thầy Choang"}</p>
+                    return `
+                    <div class="bg-white p-3.5 md:p-4 rounded-2xl shadow-xs hover:shadow-md border border-gray-100 hover:border-primary-300 transition-all duration-200 cursor-pointer group flex items-center gap-3 md:gap-4" onclick="window.openClassDetail('${cl.id}', '${safeName}')">
+                        <div class="w-12 h-12 md:w-14 md:h-14 rounded-2xl bg-gradient-to-tr from-primary-500/10 to-primary-500/20 text-primary-600 flex items-center justify-center font-bold text-lg md:text-xl shrink-0 group-hover:scale-105 transition-transform">
+                            <i class="fa-solid fa-chalkboard"></i>
                         </div>
-                        <div class="hidden md:block px-6 py-2 bg-primary-50 text-primary-700 font-bold text-sm rounded-lg group-hover:bg-primary-600 group-hover:text-white transition-all whitespace-nowrap">Vào lớp</div>
-                        <i class="fa-solid fa-chevron-right text-gray-300 md:hidden"></i>
+                        <div class="flex-1 min-w-0">
+                            <div class="flex items-center gap-2 flex-wrap mb-1">
+                                <h3 class="font-black text-base md:text-lg text-gray-800 group-hover:text-primary-600 transition-colors truncate">
+                                    ${cl.name}
+                                </h3>
+                                <span class="px-2.5 py-0.5 rounded-full text-[11px] md:text-xs font-bold bg-primary-50 text-primary-700 border border-primary-200/60 inline-flex items-center gap-1 shadow-2xs">
+                                    <i class="fa-regular fa-calendar-check text-[10px]"></i> ${yr}
+                                </span>
+                            </div>
+                            <p class="text-xs text-gray-500 font-medium flex items-center gap-1.5">
+                                <i class="fa-solid fa-user-tie text-primary-500 text-[11px]"></i> GV: ${cl.teacherName || "Thầy Choang"}
+                            </p>
+                        </div>
+                        <div class="hidden sm:flex items-center gap-1.5 px-4 py-2 bg-primary-50 group-hover:bg-primary-600 text-primary-700 group-hover:text-white font-bold text-xs md:text-sm rounded-xl transition-all shadow-2xs shrink-0">
+                            <span>Vào lớp</span>
+                            <i class="fa-solid fa-arrow-right text-xs transition-transform group-hover:translate-x-1"></i>
+                        </div>
+                        <i class="fa-solid fa-chevron-right text-gray-300 group-hover:text-primary-500 sm:hidden pr-1"></i>
                     </div>`;
                 }
-            });
+            };
+
+            let html = '';
+            if (currentFilterYear === 'all') {
+                // Gom nhóm theo từng năm học
+                sortedYears.forEach(year => {
+                    const classesInYear = data.filter(cl => window.getNormalizedAcademicYear(cl) === year);
+                    if (classesInYear.length === 0) return;
+                    html += `
+                    <div class="mb-6 last:mb-0">
+                        <div class="flex items-center gap-2.5 mb-3.5 mt-2">
+                            <span class="w-2.5 h-2.5 rounded-full bg-primary-500 shadow-2xs"></span>
+                            <h3 class="font-black text-sm md:text-base text-gray-800 tracking-tight">Năm học ${year}</h3>
+                            <span class="text-xs font-bold px-2 py-0.5 rounded-full bg-primary-50 text-primary-600 border border-primary-200/60">${classesInYear.length} lớp</span>
+                            <div class="flex-1 h-px bg-gray-200/80"></div>
+                        </div>
+                        <div class="${mode === 'grid' ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6' : 'flex flex-col gap-3'}">
+                            ${classesInYear.map(renderCard).join('')}
+                        </div>
+                    </div>`;
+                });
+            } else {
+                const classesInYear = data.filter(cl => window.getNormalizedAcademicYear(cl) === currentFilterYear);
+                if (classesInYear.length === 0) {
+                    html = '<div class="text-center py-12 bg-white rounded-3xl border border-dashed border-gray-200"><p class="text-gray-500 font-bold text-sm">Không có lớp học nào trong năm học này.</p></div>';
+                } else {
+                    html = `
+                    <div class="${mode === 'grid' ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6' : 'flex flex-col gap-3'}">
+                        ${classesInYear.map(renderCard).join('')}
+                    </div>`;
+                }
+            }
+
+            container.className = "flex flex-col animate-fade-in pb-2 md:pb-6";
             container.innerHTML = html;
         }
 
@@ -3843,20 +3965,23 @@
                 modal.id = 'studentLessonViewerModal';
                 modal.className = 'fixed inset-0 z-[120] bg-black/85 backdrop-blur-xs flex flex-col hidden';
                 modal.innerHTML = 
-                    '<div class="h-11 bg-slate-900 border-b border-slate-800 px-3 sm:px-4 flex items-center justify-between text-white shrink-0">' +
+                    '<div class="h-12 bg-slate-900 border-b border-slate-800 px-3 sm:px-4 flex items-center justify-between text-white shrink-0">' +
                         '<div class="flex items-center gap-2 min-w-0">' +
-                            '<span class="w-6 h-6 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center text-xs shrink-0"><i class="fa-solid fa-book-open-reader"></i></span>' +
+                            '<button type="button" onclick="window.closeStudentLessonViewer()" class="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 active:scale-95 text-xs font-bold text-slate-200 hover:text-white flex items-center gap-1.5 transition mr-1 cursor-pointer shrink-0">' +
+                                '<i class="fa-solid fa-arrow-left"></i> <span>Quay lại</span>' +
+                            '</button>' +
+                            '<span class="w-7 h-7 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center text-xs shrink-0"><i class="fa-solid fa-book-open-reader"></i></span>' +
                             '<h3 id="studentLessonViewerTitle" class="font-bold text-xs sm:text-sm truncate">Bài giảng</h3>' +
                         '</div>' +
                         '<div class="flex items-center gap-1.5 sm:gap-2 shrink-0">' +
-                            '<a id="studentLessonViewerPdfBtn" href="#" target="_blank" class="px-2.5 py-1 rounded-lg bg-emerald-600/30 hover:bg-emerald-600/50 border border-emerald-400/30 text-xs font-bold text-emerald-200 flex items-center gap-1">' +
+                            '<a id="studentLessonViewerPdfBtn" href="#" target="_blank" class="px-2.5 py-1.5 rounded-xl bg-emerald-600/30 hover:bg-emerald-600/50 border border-emerald-400/30 text-xs font-bold text-emerald-200 flex items-center gap-1">' +
                                 '<i class="fa-solid fa-file-pdf"></i> <span class="hidden sm:inline">Xuất PDF</span>' +
                             '</a>' +
-                            '<a id="studentLessonViewerNewTab" href="#" target="_blank" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-200 flex items-center gap-1">' +
+                            '<a id="studentLessonViewerNewTab" href="#" target="_blank" class="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-200 flex items-center gap-1">' +
                                 '<i class="fa-solid fa-up-right-from-square"></i> <span class="hidden sm:inline">Toàn màn hình</span>' +
                             '</a>' +
-                            '<button type="button" onclick="window.closeStudentLessonViewer()" class="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-slate-800 hover:bg-rose-600 text-slate-200 hover:text-white flex items-center justify-center cursor-pointer transition">' +
-                                '<i class="fa-solid fa-xmark text-xs"></i>' +
+                            '<button type="button" onclick="window.closeStudentLessonViewer()" class="w-8 h-8 rounded-xl bg-slate-800 hover:bg-rose-600 text-slate-200 hover:text-white flex items-center justify-center cursor-pointer transition">' +
+                                '<i class="fa-solid fa-xmark text-sm"></i>' +
                             '</button>' +
                         '</div>' +
                     '</div>' +
@@ -3869,6 +3994,10 @@
             document.getElementById('studentLessonViewerPdfBtn').href = viewerUrl + '&export=pdf';
             document.getElementById('studentLessonViewerIframe').src = viewerUrl;
             modal.classList.remove('hidden');
+
+            try {
+                history.pushState({ modal: 'student_lesson_viewer' }, '');
+            } catch (_) {}
 
             // Ghi nhận lượt xem bài giảng của học sinh
             if (user && user.uid) {
@@ -3885,14 +4014,26 @@
             }
         };
 
-        window.closeStudentLessonViewer = () => {
+        window.closeStudentLessonViewer = (fromHistoryPop = false) => {
             const modal = document.getElementById('studentLessonViewerModal');
             if (modal) {
                 modal.classList.add('hidden');
                 const iframe = document.getElementById('studentLessonViewerIframe');
                 if (iframe) iframe.src = 'about:blank';
             }
+            if (!fromHistoryPop && history.state && history.state.modal === 'student_lesson_viewer') {
+                try {
+                    history.back();
+                } catch (_) {}
+            }
         };
+
+        window.addEventListener('popstate', (e) => {
+            const modal = document.getElementById('studentLessonViewerModal');
+            if (modal && !modal.classList.contains('hidden')) {
+                window.closeStudentLessonViewer(true);
+            }
+        });
 
 
 // --- HÀM RENDER DANH SÁCH BÀI TẬP (GRID + LIST ĐẦY ĐỦ - APPLE / MODERN EDTECH UI) ---
