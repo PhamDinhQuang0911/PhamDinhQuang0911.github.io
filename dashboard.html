@@ -1362,7 +1362,7 @@
             }
         }
     </style>
-    <link rel="stylesheet" href="/styles.css?v=74">
+    <link rel="stylesheet" href="/styles.css?v=75">
     <!-- Hls.js Library: HLS Video Streaming cho video bài giảng không giới hạn dung lượng -->
     <script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
 
@@ -9818,6 +9818,9 @@
                             <h3 id="teacherLessonPreviewTitle" class="font-bold text-xs sm:text-sm truncate">Bài giảng</h3>
                         </div>
                         <div class="flex items-center gap-1.5 sm:gap-2 shrink-0">
+                            <button id="teacherLessonPreviewVideoBtn" type="button" class="hidden px-2.5 py-1 rounded-lg bg-purple-600/30 hover:bg-purple-600/50 border border-purple-400/40 text-xs font-bold text-purple-200 flex items-center gap-1 cursor-pointer transition shadow-xs active:scale-95" title="Phát video bài giảng">
+                                <i class="fa-solid fa-circle-play text-purple-300"></i> <span class="hidden sm:inline">Xem video</span>
+                            </button>
                             <a id="teacherLessonPreviewPdfBtn" href="#" target="_blank" class="px-2.5 py-1 rounded-lg bg-emerald-600/30 hover:bg-emerald-600/50 border border-emerald-400/30 text-xs font-bold text-emerald-200 flex items-center gap-1">
                                 <i class="fa-solid fa-file-pdf"></i> <span class="hidden sm:inline">Xuất PDF</span>
                             </a>
@@ -9839,6 +9842,39 @@
             const pdfBtn = document.getElementById('teacherLessonPreviewPdfBtn');
             if (pdfBtn) pdfBtn.href = viewerUrl + '&export=pdf';
             document.getElementById('teacherLessonPreviewIframe').src = viewerUrl;
+
+            // Xử lý nút Xem video cạnh nút Xuất PDF đối với bài giảng có video
+            const videoBtn = document.getElementById('teacherLessonPreviewVideoBtn');
+            if (videoBtn) {
+                const lessons = window._activeClassLessons || [];
+                let found = lessons.find(l => l.id === lessonId);
+                const hasVid = !!(found && (found.video || found.hasVideo));
+                if (hasVid) {
+                    videoBtn.classList.remove('hidden');
+                    videoBtn.onclick = () => window.openTeacherVideoPlayer(lessonId);
+                } else {
+                    videoBtn.classList.add('hidden');
+                    (async () => {
+                        try {
+                            const cfgRes = await fetch('https://cuniqanbumcrqcdlcvad.supabase.co/rest/v1/configurations?id=eq.lesson_' + encodeURIComponent(lessonId) + '&select=raw_data', {
+                                headers: {
+                                    apikey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN1bmlxYW5idW1jcnFjZGxjdmFkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg5NDE4MTMsImV4cCI6MjEwNDUxNzgxM30.MWSv1QKVlQ9r-8r0hkrqWsmm75hULq_VjPCbTqXDe-o',
+                                    Authorization: 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN1bmlxYW5idW1jcnFjZGxjdmFkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg5NDE4MTMsImV4cCI6MjEwNDUxNzgxM30.MWSv1QKVlQ9r-8r0hkrqWsmm75hULq_VjPCbTqXDe-o'
+                                }
+                            });
+                            if (cfgRes.ok) {
+                                const rows = await cfgRes.json();
+                                if (rows && rows[0] && rows[0].raw_data && rows[0].raw_data.video) {
+                                    if (found) found.video = rows[0].raw_data.video;
+                                    videoBtn.classList.remove('hidden');
+                                    videoBtn.onclick = () => window.openTeacherVideoPlayer(lessonId);
+                                }
+                            }
+                        } catch (_) {}
+                    })();
+                }
+            }
+
             modal.classList.remove('hidden');
         };
 
@@ -9853,7 +9889,28 @@
 
         window.openTeacherVideoPlayer = async function(lessonId) {
             const lessons = window._activeClassLessons || [];
-            const lesson = lessons.find(l => l.id === lessonId);
+            let lesson = lessons.find(l => l.id === lessonId);
+            if (!lesson || !lesson.video) {
+                try {
+                    const cfgRes = await fetch('https://cuniqanbumcrqcdlcvad.supabase.co/rest/v1/configurations?id=eq.lesson_' + encodeURIComponent(lessonId) + '&select=raw_data', {
+                        headers: {
+                            apikey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN1bmlxYW5idW1jcnFjZGxjdmFkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg5NDE4MTMsImV4cCI6MjEwNDUxNzgxM30.MWSv1QKVlQ9r-8r0hkrqWsmm75hULq_VjPCbTqXDe-o',
+                            Authorization: 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN1bmlxYW5idW1jcnFjZGxjdmFkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg5NDE4MTMsImV4cCI6MjEwNDUxNzgxM30.MWSv1QKVlQ9r-8r0hkrqWsmm75hULq_VjPCbTqXDe-o'
+                        }
+                    });
+                    if (cfgRes.ok) {
+                        const rows = await cfgRes.json();
+                        if (rows && rows[0] && rows[0].raw_data && rows[0].raw_data.video) {
+                            if (!lesson) {
+                                lesson = { id: lessonId, ...rows[0].raw_data };
+                                lessons.push(lesson);
+                            } else {
+                                lesson.video = rows[0].raw_data.video;
+                            }
+                        }
+                    }
+                } catch (_) {}
+            }
             if (!lesson || !lesson.video) {
                 alert('Không tìm thấy video bài giảng!');
                 return;
@@ -23757,8 +23814,8 @@ window.deleteTag = async (id) => {
     </div>
 </div>
 
-<script src="/sw-register.js?v=74"></script>
-<script src="/season-theme.js?v=74"></script>
+<script src="/sw-register.js?v=75"></script>
+<script src="/season-theme.js?v=75"></script>
 <script src="/app-installer.js?v=2"></script>
 
 <script>
