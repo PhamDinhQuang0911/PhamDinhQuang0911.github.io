@@ -4054,17 +4054,129 @@
                 }
             }
 
-            // 4. Telegram video
+            // 4. Telegram video & Multi-part Segmented Telegram Video
+            const BOT_TOKEN = '8662985318:AAHIweMUW706XKIXFi-bFisaFoE7hZaMHDo';
+            let chunks = (Array.isArray(video.chunks) && video.chunks.length > 0) ? video.chunks : null;
+            
+            if (!chunks && (video.videoId || video.id)) {
+                try {
+                    const cfgId = video.videoId || video.id;
+                    const sbRes = await fetch('https://cuniqanbumcrqcdlcvad.supabase.co/rest/v1/configurations?id=eq.' + encodeURIComponent(cfgId) + '&select=raw_data', {
+                        headers: {
+                            apikey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN1bmlxYW5idW1jcnFjZGxjdmFkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg5NDE4MTMsImV4cCI6MjEwNDUxNzgxM30.MWSv1QKVlQ9r-8r0hkrqWsmm75hULq_VjPCbTqXDe-o',
+                            Authorization: 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN1bmlxYW5idW1jcnFjZGxjdmFkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg5NDE4MTMsImV4cCI6MjEwNDUxNzgxM30.MWSv1QKVlQ9r-8r0hkrqWsmm75hULq_VjPCbTqXDe-o'
+                        }
+                    });
+                    if (sbRes.ok) {
+                        const rows = await sbRes.json();
+                        const rd = rows?.[0]?.raw_data;
+                        if (rd && Array.isArray(rd.chunks) && rd.chunks.length > 0) {
+                            chunks = rd.chunks;
+                        }
+                    }
+                } catch (_) {}
+            }
+
+            if (chunks && chunks.length > 1) {
+                loaderEl.classList.remove('hidden');
+                try {
+                    const resolvePromises = chunks.map(async (c, idx) => {
+                        const fId = c.fileId || c.file_id;
+                        if (!fId) return null;
+                        try {
+                            const res = await fetch('https://api.telegram.org/bot' + BOT_TOKEN + '/getFile?file_id=' + encodeURIComponent(fId));
+                            const data = await res.json();
+                            if (data.ok && data.result && data.result.file_path) {
+                                return {
+                                    part: idx + 1,
+                                    durationSec: c.durationSec || 60,
+                                    url: 'https://api.telegram.org/file/bot' + BOT_TOKEN + '/' + data.result.file_path
+                                };
+                            }
+                            return null;
+                        } catch {
+                            return null;
+                        }
+                    });
+
+                    const resolvedParts = (await Promise.all(resolvePromises)).filter(Boolean);
+                    if (resolvedParts.length > 0) {
+                        loaderEl.classList.add('hidden');
+                        videoEl.classList.remove('hidden');
+
+                        let curPart = 0;
+                        const totalParts = resolvedParts.length;
+
+                        let partContainer = document.getElementById('studentVpPartBar');
+                        if (!partContainer) {
+                            partContainer = document.createElement('div');
+                            partContainer.id = 'studentVpPartBar';
+                            partContainer.className = 'px-3 py-2 bg-slate-900 border-b border-slate-800 flex items-center gap-1.5 overflow-x-auto text-xs shrink-0 select-none';
+                            const topHeader = modal.querySelector('.h-12, .h-14');
+                            if (topHeader && topHeader.parentNode) {
+                                topHeader.insertAdjacentElement('afterend', partContainer);
+                            }
+                        }
+                        partContainer.classList.remove('hidden');
+
+                        const preloader = new Audio();
+
+                        const updatePartUI = () => {
+                            partContainer.innerHTML = '<span class="text-slate-400 font-bold mr-1 shrink-0"><i class="fa-solid fa-layer-group text-purple-400 mr-1"></i>Phân đoạn (' + (curPart + 1) + '/' + totalParts + '):</span>' +
+                                resolvedParts.map((p, idx) => {
+                                    const active = idx === curPart;
+                                    const durText = p.durationSec ? (' (~' + Math.floor(p.durationSec / 60) + 'p' + String(p.durationSec % 60).padStart(2, '0') + 's)') : '';
+                                    return '<button type="button" class="px-2.5 py-1 rounded-lg font-extrabold text-xs transition cursor-pointer shrink-0 ' + 
+                                        (active ? 'bg-purple-600 text-white shadow-md shadow-purple-600/30 ring-1 ring-purple-400' : 'bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white') + 
+                                        '" onclick="window.__studentPlayPart(' + idx + ')">Phần ' + (idx + 1) + durText + (active ? ' ▶' : '') + '</button>';
+                                }).join('');
+
+                            const subEl = document.getElementById('studentVpSubtitle');
+                            if (subEl) {
+                                subEl.textContent = 'Đang phát: Phần ' + (curPart + 1) + '/' + totalParts + ' • Tự động nối tiếp';
+                            }
+
+                            const nextIdx = curPart + 1;
+                            if (nextIdx < totalParts) {
+                                preloader.src = resolvedParts[nextIdx].url;
+                                preloader.load();
+                            }
+                        };
+
+                        window.__studentPlayPart = (partIdx) => {
+                            if (partIdx >= 0 && partIdx < resolvedParts.length) {
+                                curPart = partIdx;
+                                videoEl.src = resolvedParts[curPart].url;
+                                videoEl.play().catch(() => {});
+                                updatePartUI();
+                            }
+                        };
+
+                        videoEl.onended = () => {
+                            if (curPart + 1 < resolvedParts.length) {
+                                window.__studentPlayPart(curPart + 1);
+                            }
+                        };
+
+                        window.__studentPlayPart(0);
+                        return;
+                    }
+                } catch(err) {
+                    console.warn("Lỗi phân giải luồng video phân đoạn:", err);
+                }
+            }
+
+            const singlePartBar = document.getElementById('studentVpPartBar');
+            if (singlePartBar) singlePartBar.classList.add('hidden');
+
             if (video.fileId) {
                 loaderEl.classList.remove('hidden');
                 try {
-                    const BOT_TOKEN = '8662985318:AAHIweMUW706XKIXFi-bFisaFoE7hZaMHDo';
                     const res = await fetch('https://api.telegram.org/bot' + BOT_TOKEN + '/getFile?file_id=' + encodeURIComponent(video.fileId));
                     const data = await res.json();
                     loaderEl.classList.add('hidden');
 
                     if (data.ok && data.result && data.result.file_path) {
-                        // File <= 20MB: phát trực tiếp 100% qua Telegram Bot CDN
                         const tgStream = 'https://api.telegram.org/file/bot' + BOT_TOKEN + '/' + data.result.file_path;
                         video.streamUrl = tgStream;
                         videoEl.classList.remove('hidden');
@@ -4098,6 +4210,9 @@
             if (tmeBtn) tmeBtn.href = video.tmeUrl || webUrl;
         };
 
+        window.__studentPlayPart = null;
+        const _pb = document.getElementById('studentVpPartBar');
+        if (_pb) _pb.classList.add('hidden');
         window.closeStudentVideoPlayer = (fromHistoryPop = false) => {
             const modal = document.getElementById('studentVideoPlayerModal');
             if (modal) {
