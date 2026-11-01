@@ -10,7 +10,7 @@ colors:
   spring-rose: "#db2777"
   summer-ocean: "#1d4ed8"
   autumn-amber: "#ea580c"
-  winter-indigo: "#4f46e5"
+  winter-ocean: "#1d4ed8"
   video-emerald: "#059669"
   video-emerald-bg: "#ecfdf5"
   pdf-rose: "#e11d48"
@@ -25,6 +25,48 @@ colors:
   dark-card: "#1e293b"
   dark-border: "#334155"
   dark-text: "#f8fafc"
+  slate-50: "#f8fafc"
+  slate-100: "#f1f5f9"
+  slate-200: "#e2e8f0"
+  slate-300: "#cbd5e1"
+  slate-400: "#94a3b8"
+  slate-500: "#64748b"
+  slate-600: "#475569"
+  slate-700: "#334155"
+  slate-800: "#1e293b"
+  slate-900: "#0f172a"
+  blue-50: "#eff6ff"
+  blue-100: "#dbeafe"
+  blue-200: "#bfdbfe"
+  blue-300: "#93c5fd"
+  blue-500: "#3b82f6"
+  blue-600: "#2563eb"
+  blue-700: "#1d4ed8"
+  blue-800: "#1e40af"
+  emerald-50: "#ecfdf5"
+  emerald-100: "#d1fae5"
+  emerald-200: "#a7f3d0"
+  emerald-500: "#10b981"
+  emerald-600: "#059669"
+  emerald-700: "#047857"
+  emerald-800: "#065f46"
+  emerald-900: "#064e3b"
+  amber-50: "#fffbeb"
+  amber-100: "#fef3c7"
+  amber-200: "#fde68a"
+  amber-300: "#fcd34d"
+  amber-500: "#f59e0b"
+  amber-600: "#d97706"
+  amber-700: "#b45309"
+  amber-800: "#92400e"
+  amber-900: "#78350f"
+  rose-50: "#fff1f2"
+  rose-100: "#ffe4e6"
+  rose-200: "#fecdd3"
+  rose-500: "#f43f5e"
+  rose-600: "#e11d48"
+  rose-700: "#be123c"
+  rose-800: "#9f1239"
 typography:
   display:
     fontFamily: '"Be Vietnam Pro", system-ui, -apple-system, sans-serif'
@@ -44,11 +86,29 @@ typography:
     fontWeight: 700
     lineHeight: 1.35
     letterSpacing: "-0.01em"
+  subtitle:
+    fontFamily: '"Be Vietnam Pro", system-ui, -apple-system, sans-serif'
+    fontSize: "1rem"
+    fontWeight: 700
+    lineHeight: 1.4
+    letterSpacing: "-0.01em"
   body:
     fontFamily: '"Be Vietnam Pro", system-ui, -apple-system, sans-serif'
     fontSize: "0.9375rem"
     fontWeight: 500
     lineHeight: 1.55
+    letterSpacing: "0em"
+  body-sm:
+    fontFamily: '"Be Vietnam Pro", system-ui, -apple-system, sans-serif'
+    fontSize: "0.875rem"
+    fontWeight: 500
+    lineHeight: 1.5
+    letterSpacing: "0em"
+  caption:
+    fontFamily: '"Be Vietnam Pro", system-ui, -apple-system, sans-serif'
+    fontSize: "0.8125rem"
+    fontWeight: 500
+    lineHeight: 1.45
     letterSpacing: "0em"
   label:
     fontFamily: '"Be Vietnam Pro", system-ui, -apple-system, sans-serif'
@@ -56,12 +116,21 @@ typography:
     fontWeight: 700
     lineHeight: 1
     letterSpacing: "0.02em"
+  mono:
+    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace'
+    fontSize: "0.75rem"
+    fontWeight: 600
+    lineHeight: 1.4
+    letterSpacing: "0em"
 rounded:
+  xs: "4px"
   sm: "6px"
-  md: "10px"
-  lg: "14px"
-  xl: "18px"
-  2xl: "24px"
+  md: "8px"
+  base: "10px"
+  lg: "12px"
+  xl: "14px"
+  2xl: "16px"
+  3xl: "24px"
   full: "9999px"
 spacing:
   xs: "4px"

@@ -209,41 +209,41 @@
             modal.style.cssText = 'position: fixed !important; inset: 0 !important; z-index: 9999999 !important; background-color: rgba(15, 23, 42, 0.75) !important; backdrop-filter: blur(4px); display: none; align-items: center; justify-content: center; padding: 12px;';
             
             modal.innerHTML = `
-                <div class="bg-white rounded-2xl shadow-2xl border border-gray-200 w-full max-w-2xl flex flex-col max-h-[94vh] overflow-hidden transform scale-95 transition-transform duration-200" style="position: relative !important; z-index: 10000000 !important;">
+                <div class="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-2xl flex flex-col max-h-[94vh] overflow-hidden transform scale-95 transition-transform duration-200" style="position: relative !important; z-index: 10000000 !important;">
                     <!-- Header -->
-                    <div class="px-5 py-3.5 bg-gradient-to-r from-indigo-700 via-purple-700 to-indigo-800 text-white flex items-center justify-between shadow-xs">
+                    <div class="px-5 py-3.5 bg-white border-b border-slate-200 text-slate-900 flex items-center justify-between">
                         <div class="flex items-center gap-2.5">
-                            <div class="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center backdrop-blur-xs shadow-inner">
-                                <i class="fa-solid fa-square-root-variable text-amber-300 text-base"></i>
+                            <div class="w-8 h-8 rounded-xl bg-slate-900 text-white flex items-center justify-center shadow-xs">
+                                <i class="fa-solid fa-square-root-variable text-amber-400 text-base"></i>
                             </div>
                             <div>
-                                <h3 class="font-bold text-sm leading-tight text-white flex items-center gap-1.5">
+                                <h3 class="font-bold text-sm leading-tight text-slate-900 flex items-center gap-1.5">
                                     Soạn thảo Công thức MathType (Trực quan)
                                 </h3>
-                                <p class="text-[11px] text-indigo-200 leading-none mt-0.5">Nhấp chọn mẫu công thức (Phân số, Căn, Hệ PT...) & Nhập trực tiếp vào các ô trống</p>
+                                <p class="text-xs text-slate-500 leading-none mt-0.5">Nhấp chọn mẫu công thức (Phân số, Căn, Hệ PT...) & Nhập trực tiếp vào các ô trống</p>
                             </div>
                         </div>
-                        <button type="button" class="w-8 h-8 rounded-lg bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition cursor-pointer" onclick="window.MathPalette.closeFormulaDialog()">
+                        <button type="button" class="w-8 h-8 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 flex items-center justify-center transition cursor-pointer" onclick="window.MathPalette.closeFormulaDialog()">
                             <i class="fa-solid fa-xmark text-sm"></i>
                         </button>
                     </div>
 
                     <!-- Category Tabs -->
-                    <div class="border-b border-gray-200 bg-gray-50/90 px-3 py-1.5 flex items-center gap-1 overflow-x-auto no-scrollbar" id="modalPaletteTabs">
+                    <div class="border-b border-slate-200 bg-slate-50/90 px-3 py-1.5 flex items-center gap-1 overflow-x-auto no-scrollbar" id="modalPaletteTabs">
                         ${PALETTE_GROUPS.map((g, idx) => `
-                            <button type="button" class="modal-palette-tab-btn px-2.5 py-1 rounded-lg text-xs font-bold transition-all shrink-0 flex items-center gap-1.5 ${idx === 0 ? 'bg-white text-indigo-700 shadow-2xs border border-gray-200' : 'text-gray-600 hover:text-indigo-600 hover:bg-gray-100'}" data-group="${g.id}">
-                                <i class="${g.icon} text-[11px]"></i>
+                            <button type="button" class="modal-palette-tab-btn px-2.5 py-1 rounded-lg text-xs font-bold transition-all shrink-0 flex items-center gap-1.5 ${idx === 0 ? 'bg-white text-blue-700 shadow-2xs border border-slate-200' : 'text-slate-600 hover:text-blue-600 hover:bg-slate-100'}" data-group="${g.id}">
+                                <i class="${g.icon} text-xs"></i>
                                 <span>${g.name}</span>
                             </button>
                         `).join('')}
                     </div>
 
                     <!-- Symbol Grid Body -->
-                    <div class="p-3 bg-gray-50/50 border-b border-gray-200 max-h-36 overflow-y-auto custom-scrollbar" id="modalPaletteSymbolArea">
+                    <div class="p-3 bg-slate-50/50 border-b border-slate-200 max-h-36 overflow-y-auto custom-scrollbar" id="modalPaletteSymbolArea">
                         ${PALETTE_GROUPS.map((g, idx) => `
                             <div class="modal-group-grid grid grid-cols-6 sm:grid-cols-8 md:grid-cols-10 lg:grid-cols-12 gap-1.5 ${idx === 0 ? '' : 'hidden'}" id="modal-grid-${g.id}">
                                 ${g.templates.map(tpl => `
-                                    <button type="button" class="modal-sym-btn h-8 px-1.5 bg-white hover:bg-indigo-50 text-gray-800 hover:text-indigo-700 border border-gray-200 rounded-lg flex items-center justify-center font-bold text-xs transition-colors shadow-2xs hover:border-indigo-300 transform active:scale-95 cursor-pointer" title="${tpl.desc || tpl.label}" data-latex="${tpl.latex.replace(/"/g, '&quot;')}">
+                                    <button type="button" class="modal-sym-btn h-8 px-1.5 bg-white hover:bg-blue-50 text-slate-800 hover:text-blue-700 border border-slate-200 rounded-lg flex items-center justify-center font-bold text-xs transition-colors shadow-2xs hover:border-blue-300 transform active:scale-95 cursor-pointer" title="${tpl.desc || tpl.label}" data-latex="${tpl.latex.replace(/"/g, '&quot;')}">
                                         <span class="font-serif leading-none">${tpl.label}</span>
                                     </button>
                                 `).join('')}
@@ -253,35 +253,35 @@
 
                     <!-- Sandbox WYSIWYG MathLive Field -->
                     <div class="p-4 space-y-3 flex-1 overflow-y-auto bg-white">
-                        <div class="bg-indigo-50/40 p-3.5 rounded-2xl border-2 border-indigo-200">
+                        <div class="bg-slate-50/70 p-3.5 rounded-xl border border-slate-200">
                             <div class="flex items-center justify-between mb-2">
-                                <label class="text-xs font-bold text-indigo-900 flex items-center gap-1.5 uppercase tracking-wide">
-                                    <i class="fa-solid fa-shapes text-indigo-600"></i> Khung Soạn thảo Trực quan (MathType):
+                                <label class="text-xs font-bold text-slate-800 flex items-center gap-1.5 uppercase tracking-wide">
+                                    <i class="fa-solid fa-shapes text-blue-600"></i> Khung Soạn thảo Trực quan (MathType):
                                 </label>
-                                <button type="button" onclick="window.MathPalette.clearModalInput()" class="px-2.5 py-1 bg-white hover:bg-red-50 text-red-600 text-[11px] font-bold rounded-lg border border-red-200 shadow-2xs transition flex items-center gap-1 cursor-pointer" title="Xóa toàn bộ">
+                                <button type="button" onclick="window.MathPalette.clearModalInput()" class="px-2.5 py-1 bg-white hover:bg-rose-50 text-rose-600 text-xs font-bold rounded-lg border border-rose-200 shadow-2xs transition flex items-center gap-1 cursor-pointer" title="Xóa toàn bộ">
                                     <i class="fa-solid fa-trash-can"></i> Xóa trắng
                                 </button>
                             </div>
                             
                             <!-- BẢNG NHẬP WYSIWYG MATHLIVE -->
-                            <div class="bg-white rounded-xl border border-indigo-300 shadow-inner p-3 min-h-[96px] flex items-center focus-within:ring-2 focus-within:ring-indigo-500 focus-within:border-indigo-500">
-                                <math-field id="modalMathField" class="w-full font-serif text-gray-900 leading-relaxed" style="font-size: 1.55rem; min-height: 52px; outline: none; border: none; background: transparent;"></math-field>
+                            <div class="bg-white rounded-xl border border-slate-300 shadow-inner p-3 min-h-[96px] flex items-center focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-blue-500">
+                                <math-field id="modalMathField" class="w-full font-serif text-slate-900 leading-relaxed" style="font-size: 1.55rem; min-height: 52px; outline: none; border: none; background: transparent;"></math-field>
                             </div>
 
                             <!-- Dòng hiển thị mã LaTeX tương ứng -->
-                            <div class="mt-2.5 pt-2 border-t border-indigo-100 flex items-center justify-between flex-wrap gap-2 text-xs">
-                                <div class="flex items-center gap-1.5 text-gray-600 font-mono text-[11px] overflow-hidden">
-                                    <span class="font-bold text-indigo-700 font-sans">Mã LaTeX:</span>
-                                    <code id="modalMathFieldLatexPreview" class="bg-white px-2 py-0.5 rounded border border-gray-200 text-indigo-800 text-[11px] truncate max-w-sm italic">...</code>
+                            <div class="mt-2.5 pt-2 border-t border-slate-200 flex items-center justify-between flex-wrap gap-2 text-xs">
+                                <div class="flex items-center gap-1.5 text-slate-600 font-mono text-xs overflow-hidden">
+                                    <span class="font-bold text-blue-700 font-sans">Mã LaTeX:</span>
+                                    <code id="modalMathFieldLatexPreview" class="bg-white px-2 py-0.5 rounded border border-slate-200 text-slate-800 text-xs truncate max-w-sm italic">...</code>
                                 </div>
-                                <span class="text-[11px] text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full font-bold border border-emerald-200 flex items-center gap-1">
-                                    <i class="fa-solid fa-wand-magic-sparkles text-[10px]"></i> Điền trực tiếp vào ô vuông
+                                <span class="text-xs text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full font-bold border border-emerald-200 flex items-center gap-1">
+                                    <i class="fa-solid fa-wand-magic-sparkles text-xs"></i> Điền trực tiếp vào ô vuông
                                 </span>
                             </div>
                         </div>
 
                         <!-- Hướng dẫn thao tác nhanh -->
-                        <div class="bg-amber-50/60 border border-amber-200 rounded-xl p-2.5 flex items-start gap-2 text-[11px] text-amber-800">
+                        <div class="bg-amber-50/60 border border-amber-200 rounded-xl p-2.5 flex items-start gap-2 text-xs text-amber-800">
                             <i class="fa-solid fa-lightbulb text-amber-600 mt-0.5 shrink-0"></i>
                             <div>
                                 <strong>Mẹo thao tác MathType:</strong> Bấm chọn mẫu (ví dụ <strong>a/b</strong> hoặc <strong>{ Hệ</strong>), các ô trống <span class="border border-dashed border-amber-500 px-1 rounded bg-white font-mono">[ ]</span> sẽ xuất hiện để bạn nhập số hoặc chữ. Dùng phím mũi tên <strong>← → ↑ ↓</strong> hoặc <strong>Tab</strong> để chuyển đổi giữa tử số và mẫu số!
@@ -290,15 +290,15 @@
                     </div>
 
                     <!-- Footer Action Bar -->
-                    <div class="px-5 py-3 bg-gray-50 border-t border-gray-200 flex items-center justify-between gap-3">
-                        <span class="text-[11px] text-gray-500 hidden sm:inline flex items-center gap-1">
+                    <div class="px-5 py-3 bg-white border-t border-slate-200 flex items-center justify-between gap-3">
+                        <span class="text-xs text-slate-500 hidden sm:inline flex items-center gap-1">
                             <i class="fa-solid fa-circle-info text-blue-500"></i> Tự động bọc chuẩn $...$ khi chèn vào bài viết
                         </span>
                         <div class="flex items-center gap-2 ml-auto">
-                            <button type="button" onclick="window.MathPalette.closeFormulaDialog()" class="px-4 py-2 border border-gray-300 text-gray-700 hover:bg-gray-100 rounded-xl font-bold text-xs transition cursor-pointer">
+                            <button type="button" onclick="window.MathPalette.closeFormulaDialog()" class="px-4 py-2 border border-slate-300 text-slate-700 hover:bg-slate-100 rounded-xl font-bold text-xs transition cursor-pointer">
                                 Hủy bỏ
                             </button>
-                            <button type="button" onclick="window.MathPalette.confirmInsertFormula()" class="px-5 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white rounded-xl font-bold text-xs shadow-md hover:shadow-lg transition flex items-center gap-1.5 cursor-pointer transform active:scale-95">
+                            <button type="button" onclick="window.MathPalette.confirmInsertFormula()" class="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-xs shadow-xs transition flex items-center gap-1.5 cursor-pointer active:scale-95">
                                 <i class="fa-solid fa-check"></i> Chèn vào bài
                             </button>
                         </div>
@@ -314,11 +314,11 @@
                     e.preventDefault();
                     const groupId = btn.dataset.group;
                     modal.querySelectorAll('.modal-palette-tab-btn').forEach(b => {
-                        b.classList.remove('bg-white', 'text-indigo-700', 'shadow-2xs', 'border', 'border-gray-200');
-                        b.classList.add('text-gray-600', 'hover:text-indigo-600', 'hover:bg-gray-100');
+                        b.classList.remove('bg-white', 'text-blue-700', 'shadow-2xs', 'border', 'border-slate-200');
+                        b.classList.add('text-slate-600', 'hover:text-blue-600', 'hover:bg-slate-100');
                     });
-                    btn.classList.add('bg-white', 'text-indigo-700', 'shadow-2xs', 'border', 'border-gray-200');
-                    btn.classList.remove('text-gray-600', 'hover:text-indigo-600', 'hover:bg-gray-100');
+                    btn.classList.add('bg-white', 'text-blue-700', 'shadow-2xs', 'border', 'border-slate-200');
+                    btn.classList.remove('text-slate-600', 'hover:text-blue-600', 'hover:bg-slate-100');
 
                     modal.querySelectorAll('.modal-group-grid').forEach(g => g.classList.add('hidden'));
                     const targetGrid = document.getElementById(`modal-grid-${groupId}`);

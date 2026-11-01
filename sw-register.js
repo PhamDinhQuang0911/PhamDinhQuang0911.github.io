@@ -1,5 +1,4 @@
-// Đăng ký Service Worker thống nhất. Trên localhost luôn tắt cache offline để
-// giáo viên thấy ngay mã mới sau khi tải lại trang.
+// Đăng ký Service Worker thống nhất và kích hoạt tức thì phiên bản mới
 (async () => {
     if (!('serviceWorker' in navigator)) return;
     const isLocal = ['localhost', '127.0.0.1'].includes(location.hostname);
@@ -14,17 +13,18 @@
         return;
     }
 
-    // Tự động dọn dẹp các cache phiên bản cũ để trình duyệt nạp mã mới ngay lập tức
+    // Tự động dọn dẹp các cache phiên bản cũ để nạp ngay bản mới v67
+    const CURRENT_VERSION = 'qmath-v70';
     if ('caches' in window) {
         caches.keys().then((keys) => {
             keys.forEach((key) => {
-                if (key.startsWith('qmath-') && !key.startsWith('qmath-v59')) {
+                if (key.startsWith('qmath-') && !key.startsWith(CURRENT_VERSION)) {
                     caches.delete(key);
                 }
             });
         }).catch(() => {});
     }
 
-    const registration = await navigator.serviceWorker.register('/sw.js?v=59', { updateViaCache: 'none' });
+    const registration = await navigator.serviceWorker.register('/sw.js?v=67', { updateViaCache: 'none' });
     registration.update().catch(() => {});
 })().catch(() => {});
