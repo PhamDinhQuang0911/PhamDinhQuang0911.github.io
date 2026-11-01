@@ -10091,25 +10091,106 @@
                 return;
             }
 
-            // 4. Telegram video
-            if (video.fileId) {
+            // 4. Telegram video Multi-Part (Phát nối tiếp tự động không độ trễ)
+            const chunkList = (video.chunks && video.chunks.length > 0) ? video.chunks : (video.fileId ? [{ index: 0, fileId: video.fileId }] : []);
+            if (chunkList.length > 0) {
                 loaderEl.classList.remove('hidden');
                 try {
-                    const BOT_TOKEN = '8662985318:AAHIweMUW706XKIXFi-bFisaFoE7hZaMHDo';
-                    const res = await fetch('https://api.telegram.org/bot' + BOT_TOKEN + '/getFile?file_id=' + encodeURIComponent(video.fileId));
-                    const data = await res.json();
-                    loaderEl.classList.add('hidden');
+                    const BOT_TOKENS = [
+                        '8662985318:AAHIweMUW706XKIXFi-bFisaFoE7hZaMHDo',
+                        '8662985318:AAHIweMUW706XKIXFi-bFisaFoE7hZaMHDo'
+                    ];
 
-                    if (data.ok && data.result && data.result.file_path) {
-                        // File <= 20MB: phát trực tiếp 100% qua Telegram Bot CDN
-                        const tgStream = 'https://api.telegram.org/file/bot' + BOT_TOKEN + '/' + data.result.file_path;
-                        video.streamUrl = tgStream;
+                    const resolveUrl = async (chunk, idx) => {
+                        const token = BOT_TOKENS[idx % BOT_TOKENS.length];
+                        const res = await fetch('https://api.telegram.org/bot' + token + '/getFile?file_id=' + encodeURIComponent(chunk.fileId));
+                        const data = await res.json();
+                        if (data.ok && data.result && data.result.file_path) {
+                            return 'https://api.telegram.org/file/bot' + token + '/' + data.result.file_path;
+                        }
+                        return null;
+                    };
+
+                    const resolvedUrls = await Promise.all(chunkList.map((c, i) => resolveUrl(c, i)));
+                    const validUrls = resolvedUrls.filter(Boolean);
+
+                    if (validUrls.length > 0) {
+                        loaderEl.classList.add('hidden');
                         videoEl.classList.remove('hidden');
-                        videoEl.src = tgStream;
-                        videoEl.play().catch(() => {});
+
+                        let curPart = 0;
+                        const totalParts = validUrls.length;
+
+                        // Tạo hoặc cập nhật thanh nút chọn phân đoạn
+                        let partContainer = document.getElementById('teacherVpPartBar');
+                        if (!partContainer) {
+                            partContainer = document.createElement('div');
+                            partContainer.id = 'teacherVpPartBar';
+                            partContainer.className = 'px-3 py-2 bg-slate-900 border-b border-slate-800 flex items-center gap-1.5 overflow-x-auto text-xs shrink-0 select-none';
+                            const topHeader = modal.querySelector('.h-12, .h-14');
+                            if (topHeader && topHeader.parentNode) {
+                                topHeader.insertAdjacentElement('afterend', partContainer);
+                            }
+                        }
+
+                        const updatePartUI = () => {
+                            if (totalParts <= 1) {
+                                partContainer.classList.add('hidden');
+                                return;
+                            }
+                            partContainer.classList.remove('hidden');
+                            partContainer.innerHTML = '<span class="text-slate-400 font-bold mr-1 shrink-0"><i class="fa-solid fa-layer-group text-purple-400 mr-1"></i>Phân đoạn (' + (curPart + 1) + '/' + totalParts + '):</span>' +
+                                validUrls.map((_, idx) => {
+                                    const active = idx === curPart;
+                                    return '<button type="button" class="px-2.5 py-1 rounded-lg font-extrabold text-xs transition cursor-pointer shrink-0 ' + 
+                                        (active ? 'bg-purple-600 text-white shadow-md shadow-purple-600/30 ring-1 ring-purple-400' : 'bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white') + 
+                                        '" onclick="window.__teacherPlayPart(' + idx + ')">Phần ' + (idx + 1) + (active ? ' ▶' : '') + '</button>';
+                                }).join('');
+
+                            const subEl = document.getElementById('teacherVpSubtitle');
+                            if (subEl) {
+                                subEl.textContent = totalParts > 1 ? ('Đang phát: Phần ' + (curPart + 1) + '/' + totalParts + ' • Tự động nối tiếp') : 'Phát trực tiếp từ Kho Lưu Trữ Telegram';
+                            }
+                        };
+
+                        let preloader = null;
+                        const preloadNext = (nextIdx) => {
+                            if (nextIdx < validUrls.length) {
+                                if (!preloader) {
+                                    preloader = document.createElement('video');
+                                    preloader.preload = 'auto';
+                                }
+                                preloader.src = validUrls[nextIdx];
+                                preloader.load();
+                            }
+                        };
+
+                        window.__teacherPlayPart = (partIdx) => {
+                            if (partIdx >= 0 && partIdx < validUrls.length) {
+                                curPart = partIdx;
+                                videoEl.src = validUrls[curPart];
+                                videoEl.play().catch(() => {});
+                                updatePartUI();
+                                preloadNext(curPart + 1);
+                            }
+                        };
+
+                        // Tự động nối tiếp phân đoạn kế tiếp khi phân đoạn hiện tại phát xong
+                        videoEl.onended = () => {
+                            if (curPart + 1 < validUrls.length) {
+                                window.__teacherPlayPart(curPart + 1);
+                            }
+                        };
+
+                        // Khởi động phát phần 1
+                        window.__teacherPlayPart(0);
                         return;
                     }
                 } catch(err) {
+                    loaderEl.classList.add('hidden');
+                    console.warn("Lỗi phân giải luồng video Telegram:", err);
+                }
+            } catch(err) {
                     loaderEl.classList.add('hidden');
                     console.warn("Lỗi phân giải luồng video Telegram:", err);
                 }
@@ -10135,7 +10216,7 @@
             if (tmeBtn) tmeBtn.href = video.tmeUrl || webUrl;
         };
 
-        window.closeTeacherVideoPlayer = function(fromHistoryPop) {
+        window.__teacherPlayPart = null; const _pb = document.getElementById('teacherVpPartBar'); if (_pb) _pb.classList.add('hidden'); window.closeTeacherVideoPlayer = function(fromHistoryPop) {
             const modal = document.getElementById('teacherVideoPlayerModal');
             if (modal) {
                 modal.classList.add('hidden');
