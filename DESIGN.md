@@ -8,7 +8,7 @@ colors:
   primary-hover: "rgb(var(--color-primary-700))"
   primary-deep: "rgb(var(--color-primary-800))"
   spring-rose: "#db2777"
-  summer-ocean: "#2563eb"
+  summer-ocean: "#1d4ed8"
   autumn-amber: "#ea580c"
   winter-indigo: "#4f46e5"
   video-emerald: "#059669"

@@ -1421,7 +1421,8 @@ const VIRTUAL_CONFIG_PREFIX = {
     lesson_notes: 'lnote_',
     parent_watch_tokens: 'pwt_',
     lesson_views: 'lview_',
-    exam_live_events: 'evlive_'
+    exam_live_events: 'evlive_',
+    teacher_vault_questions: 'tvq_'
 };
 
 export async function getDoc(docRef) {
