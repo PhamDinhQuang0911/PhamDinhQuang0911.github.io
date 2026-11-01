@@ -93,7 +93,7 @@
             filter: grayscale(1);
         }
     </style>
-    <link rel="stylesheet" href="/styles.css?v=5">
+    <link rel="stylesheet" href="/styles.css?v=71">
 <meta name="view-transition" content="same-origin" /></head>
 <body class="bg-darker h-screen flex text-gray-800 overflow-hidden">
 
@@ -142,8 +142,8 @@
         </div>
 
         <div class="p-4 border-t border-gray-100 bg-gray-50 text-center shrink-0">
-            <a href="student.html" class="inline-flex items-center gap-2 text-sm font-bold text-gray-500 hover:text-brand transition-colors">
-                <i class="fa-solid fa-arrow-left"></i> Quay lại Dashboard
+            <a href="student.html?tab=my-courses" onclick="window.goBackToStudentCourses(event)" class="inline-flex items-center gap-2 text-sm font-bold text-gray-600 hover:text-brand transition-colors cursor-pointer">
+                <i class="fa-solid fa-arrow-left"></i> Quay lại Góc học tập
             </a>
         </div>
     </aside>
@@ -152,9 +152,14 @@
 
     <main class="flex-1 flex flex-col relative w-full h-full bg-darker transition-all min-w-0">
         
-        <header class="h-16 bg-dark border-b border-gray-800 flex items-center justify-between px-4 md:px-6 shrink-0 z-30 shadow-lg">
-            <div class="flex items-center gap-4 overflow-hidden">
-                <button onclick="toggleSidebar()" class="text-gray-400 hover:text-white p-2 rounded-lg hover:bg-gray-800 transition-colors" title="Đóng/Mở Sidebar">
+        <header class="h-16 bg-dark border-b border-gray-800 flex items-center justify-between px-3 md:px-6 shrink-0 z-30 shadow-lg">
+            <div class="flex items-center gap-2 sm:gap-4 overflow-hidden">
+                <button type="button" onclick="window.goBackToStudentCourses()" class="text-gray-300 hover:text-white p-2 rounded-lg hover:bg-gray-800 transition-colors flex items-center gap-1.5 text-xs font-bold shrink-0 cursor-pointer" title="Quay lại danh sách khóa học">
+                    <i class="fa-solid fa-arrow-left text-sm"></i>
+                    <span class="hidden sm:inline">Quay lại</span>
+                </button>
+                <div class="w-[1px] h-6 bg-gray-700"></div>
+                <button onclick="toggleSidebar()" class="text-gray-400 hover:text-white p-2 rounded-lg hover:bg-gray-800 transition-colors shrink-0" title="Đóng/Mở Sidebar">
                     <i class="fa-solid fa-bars text-xl"></i>
                 </button>
                 <div class="w-[1px] h-6 bg-gray-700 hidden md:block"></div>
@@ -716,7 +721,35 @@
                             if (timerInterval) clearInterval(timerInterval);
                         };
 
+                        let isCourseSeeking = false;
+                        videoEl.onseeking = () => {
+                            isCourseSeeking = true;
+                            if (hlsInstance) {
+                                try { hlsInstance.startLoad(videoEl.currentTime); } catch(e){}
+                            }
+                        };
+                        videoEl.onseeked = () => {
+                            setTimeout(() => { isCourseSeeking = false; }, 600);
+                        };
+
                         videoEl.onended = () => {
+                            // [FIX LỖI 1] Bỏ qua kết thúc giả khi đang tua video
+                            if (isCourseSeeking) {
+                                console.warn("Bỏ qua kết thúc giả do đang tua video");
+                                return;
+                            }
+                            // [FIX LỖI 2] Video 4p56 bị kết thúc non ở giây thứ 50 do mất kết nối hoặc stall
+                            const duration = videoEl.duration || 0;
+                            const curTime = videoEl.currentTime || 0;
+                            if (duration > 10 && curTime < duration - 3) {
+                                console.warn(`Video kết thúc non tại ${curTime}/${duration}s - Tự động tiếp tục phát...`);
+                                try {
+                                    if (hlsInstance) hlsInstance.startLoad(curTime);
+                                    videoEl.play().catch(() => {});
+                                } catch(e){}
+                                return;
+                            }
+
                             if (timerInterval) clearInterval(timerInterval);
                             if (isVideoCompleted && currentItemIndex < flatItems.length - 1) {
                                 window.showToast("Đang chuyển sang bài tiếp theo...", "success");
@@ -726,18 +759,49 @@
                     };
 
                     if (window.Hls && Hls.isSupported() && streamSrc) {
-                        hlsInstance = new Hls({ maxBufferLength: 30, enableWorker: true });
+                        hlsInstance = new Hls({
+                            enableWorker: true,
+                            lowLatencyMode: false,
+                            maxBufferLength: 60,
+                            maxMaxBufferLength: 600,
+                            maxBufferSize: 60 * 1024 * 1024,
+                            maxBufferHole: 0.8,
+                            highBufferWatchdogPeriod: 2,
+                            nudgeOffset: 0.1,
+                            nudgeMaxRetry: 10,
+                            startFragPrefetch: true,
+                            testBandwidth: false,
+                            fragLoadingTimeOut: 30000,
+                            fragLoadingMaxRetry: 6,
+                            fragLoadingRetryDelay: 1000,
+                            fragLoadingMaxRetryTimeout: 64000,
+                            manifestLoadingTimeOut: 30000,
+                            manifestLoadingMaxRetry: 6,
+                            manifestLoadingRetryDelay: 1000,
+                            levelLoadingTimeOut: 30000,
+                            levelLoadingMaxRetry: 6,
+                            levelLoadingRetryDelay: 1000
+                        });
                         hlsInstance.loadSource(streamSrc);
                         hlsInstance.attachMedia(videoEl);
                         hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
                             setupHlsPlyrTracking();
                         });
                         hlsInstance.on(Hls.Events.ERROR, (event, data) => {
+                            if (data.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR) {
+                                console.warn('HLS Buffer Stalled - Tự động tải tiếp phân đoạn...');
+                                try { hlsInstance.startLoad(); } catch(e){}
+                                return;
+                            }
+                            if (data.details === Hls.ErrorDetails.BUFFER_SEEK_OVER_HOLE) {
+                                console.warn('HLS Buffer seek over hole - Đẩy qua lỗ hổng buffer');
+                                return;
+                            }
                             if (data.fatal) {
                                 console.error("HLS Fatal Error:", data);
                                 if (data.type === Hls.ErrorTypes.NETWORK_ERROR) hlsInstance.startLoad();
                                 else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) hlsInstance.recoverMediaError();
-                                else hlsInstance.destroy();
+                                else try { hlsInstance.destroy(); } catch(e){}
                             }
                         });
                     } else if (videoEl.canPlayType('application/vnd.apple.mpegurl') && streamSrc) {
@@ -1355,5 +1419,23 @@ if ('serviceWorker' in navigator) {
 }
 </script>
 <script src="/security-shield.js?v=4"></script>
+<script>
+    // [FIX LỖI 4] Điều hướng an toàn về trang học sinh khi bấm nút Back hoặc nút Quay lại trên mobile
+    window.goBackToStudentCourses = function(e) {
+        if (e) e.preventDefault();
+        try { localStorage.setItem('qmath_role_mode', 'student'); } catch(_) {}
+        window.location.replace('student.html?tab=my-courses');
+    };
+
+    // Đẩy 1 frame history state để bắt sự kiện Back vật lý của điện thoại
+    try {
+        history.pushState({ page: 'course_player' }, '');
+    } catch (_) {}
+
+    window.addEventListener('popstate', (e) => {
+        // Khi người dùng bấm nút Back của điện thoại, điều hướng an toàn về student.html
+        window.goBackToStudentCourses();
+    });
+</script>
 </body>
 </html>
