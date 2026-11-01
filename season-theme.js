@@ -46,19 +46,47 @@
             <path d="M36 100c4-4 4-8 2-12M128 96c-3-5-2-9 1-13" stroke="#EA580C" stroke-width="4" stroke-linecap="round"/>
             <ellipse cx="80" cy="113" rx="46" ry="6" fill="#FDBA74" opacity="0.6"/>
         </svg>`,
-        // Người tuyết mùa đông
-        winter: `<svg viewBox="0 0 160 120" fill="none">
-            <ellipse cx="80" cy="110" rx="60" ry="9" fill="#E0F2FE"/>
-            <circle cx="80" cy="86" r="24" fill="#F8FAFC"/>
-            <circle cx="80" cy="50" r="17" fill="#F8FAFC"/>
-            <rect x="66" y="26" width="28" height="5" rx="2.5" fill="#334155"/>
-            <rect x="71" y="10" width="18" height="18" rx="3" fill="#DC2626"/>
-            <circle cx="74" cy="47" r="2.5" fill="#0F172A"/><circle cx="86" cy="47" r="2.5" fill="#0F172A"/>
-            <path d="M80 52l5 4-5 2z" fill="#F97316"/>
-            <path d="M78 60c2 2 6 2 8 0" stroke="#0F172A" stroke-width="1.6" stroke-linecap="round"/>
-            <circle cx="80" cy="80" r="2.5" fill="#0F172A"/><circle cx="80" cy="90" r="2.5" fill="#0F172A"/>
-            <path d="M58 78L40 66M102 78l18-12" stroke="#92400E" stroke-width="4" stroke-linecap="round"/>
-            <path d="M120 96c5-4 11-4 16 0M28 92c4-4 10-4 15 0" stroke="#BAE6FD" stroke-width="3" stroke-linecap="round"/>
+        // Người tuyết mùa đông kèm chi tiết tuyết rơi từ đỉnh xuống chân
+        winter: `<svg viewBox="0 0 200 160" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="70" cy="15" r="2.2" fill="#FFFFFF" opacity="0.9"/>
+            <path d="M70 11v8M66 15h8M67 12l6 6M73 12l-6 6" stroke="#FFFFFF" stroke-width="0.8" opacity="0.9"/>
+            <circle cx="130" cy="10" r="2.5" fill="#FFFFFF" opacity="0.9"/>
+            <path d="M130 6v8M126 10h8M127 7l6 6M133 7l-6 6" stroke="#FFFFFF" stroke-width="0.8" opacity="0.9"/>
+            <circle cx="100" cy="20" r="2" fill="#FFFFFF" opacity="0.85"/>
+            <circle cx="48" cy="35" r="1.8" fill="#FFFFFF" opacity="0.9"/>
+            <circle cx="152" cy="30" r="2.2" fill="#FFFFFF" opacity="0.85"/>
+            <circle cx="85" cy="40" r="1.5" fill="#FFFFFF" opacity="0.95"/>
+            <circle cx="118" cy="45" r="1.8" fill="#FFFFFF" opacity="0.8"/>
+            <circle cx="58" cy="24" r="1.5" fill="#FFFFFF" opacity="0.8"/>
+            <circle cx="142" cy="36" r="1.6" fill="#FFFFFF" opacity="0.75"/>
+            <circle cx="42" cy="65" r="1.8" fill="#FFFFFF" opacity="0.85"/>
+            <circle cx="158" cy="68" r="1.6" fill="#FFFFFF" opacity="0.75"/>
+            <circle cx="52" cy="102" r="2" fill="#FFFFFF" opacity="0.9"/>
+            <circle cx="148" cy="112" r="1.8" fill="#FFFFFF" opacity="0.9"/>
+            <circle cx="32" cy="125" r="2.4" fill="#FFFFFF" opacity="0.95"/>
+            <circle cx="168" cy="128" r="2.2" fill="#FFFFFF" opacity="0.95"/>
+            <ellipse cx="100" cy="148" rx="72" ry="11" fill="#E0F2FE" opacity="0.95"/>
+            <ellipse cx="100" cy="149" rx="55" ry="7" fill="#FFFFFF"/>
+            <circle cx="100" cy="120" r="28" fill="#F8FAFC"/>
+            <circle cx="100" cy="78" r="20" fill="#F8FAFC"/>
+            <rect x="83" y="50" width="34" height="6" rx="3" fill="#1E293B"/>
+            <rect x="89" y="30" width="22" height="22" rx="3" fill="#DC2626"/>
+            <rect x="89" y="47" width="22" height="4" fill="#FBBF24"/>
+            <circle cx="93" cy="74" r="2.8" fill="#0F172A"/>
+            <circle cx="107" cy="74" r="2.8" fill="#0F172A"/>
+            <circle cx="94" cy="73" r="0.9" fill="#FFFFFF"/>
+            <circle cx="108" cy="73" r="0.9" fill="#FFFFFF"/>
+            <polygon points="100,79 100,83 112,81" fill="#F97316"/>
+            <path d="M94 88c3 3 9 3 12 0" stroke="#0F172A" stroke-width="1.8" stroke-linecap="round"/>
+            <path d="M86 92c8 4 20 4 28 0" stroke="#DC2626" stroke-width="6" stroke-linecap="round"/>
+            <path d="M106 94v14" stroke="#DC2626" stroke-width="5" stroke-linecap="round"/>
+            <circle cx="100" cy="112" r="2.8" fill="#0F172A"/>
+            <circle cx="100" cy="124" r="2.8" fill="#0F172A"/>
+            <circle cx="100" cy="136" r="2.8" fill="#0F172A"/>
+            <path d="M74 110L52 96M52 96l8-6M52 96l2 8" stroke="#78350F" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M126 110l22-14M148 96l-8-6M148 96l-2 8" stroke="#78350F" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+            <ellipse cx="60" cy="148" rx="8" ry="3" fill="#FFFFFF" opacity="0.9"/>
+            <ellipse cx="140" cy="148" rx="10" ry="3.5" fill="#FFFFFF" opacity="0.9"/>
         </svg>`
     };
 
