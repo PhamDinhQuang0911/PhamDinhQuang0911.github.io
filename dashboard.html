@@ -10185,9 +10185,29 @@
             }
         };
 
+                // =========================================================================
+        // TRÌNH PHÁT VIDEO LIỀN MẠCH (SEAMLESS DUAL-ENGINE VIDEO PLAYER)
+        // Ghép toàn bộ phân đoạn thành 1 thanh timeline duy nhất (Giáo viên)
+        // Độ trễ chuyển phân đoạn gần như 0ms - Nạp trước đệm ping-pong
+        // =========================================================================
+        window._tgStreamUrlCache = window._tgStreamUrlCache || {};
+        window._tgStreamUrlPromises = window._tgStreamUrlPromises || {};
+        window._activeSeamlessPlayer = window._activeSeamlessPlayer || null;
+
         window.openTeacherVideoPlayer = async function(lessonId) {
-            const lessons = window._activeClassLessons || [];
-            let lesson = lessons.find(l => l.id === lessonId);
+            try {
+                history.pushState({ modal: 'teacher_video_player' }, '');
+            } catch (_) {}
+
+            let lesson = null;
+            if (false) {
+                const lessons = (window.currentStudentClassId && window.studentClassLessonsMap && window.studentClassLessonsMap[window.currentStudentClassId]) || [];
+                lesson = lessons.find(l => l.id === lessonId);
+            } else {
+                const lessons = window._activeClassLessons || [];
+                lesson = lessons.find(l => l.id === lessonId);
+            }
+
             if (!lesson || !lesson.video) {
                 try {
                     const cfgRes = await fetch('https://cuniqanbumcrqcdlcvad.supabase.co/rest/v1/configurations?id=eq.lesson_' + encodeURIComponent(lessonId) + '&select=raw_data', {
@@ -10201,7 +10221,6 @@
                         if (rows && rows[0] && rows[0].raw_data && rows[0].raw_data.video) {
                             if (!lesson) {
                                 lesson = { id: lessonId, ...rows[0].raw_data };
-                                lessons.push(lesson);
                             } else {
                                 lesson.video = rows[0].raw_data.video;
                             }
@@ -10209,6 +10228,7 @@
                     }
                 } catch (_) {}
             }
+
             if (!lesson || !lesson.video) {
                 alert('Không tìm thấy video bài giảng!');
                 return;
@@ -10222,237 +10242,116 @@
                 modal = document.createElement('div');
                 modal.id = 'teacherVideoPlayerModal';
                 modal.className = 'fixed inset-0 z-[160] bg-black/92 backdrop-blur-md flex flex-col justify-center items-center p-2 sm:p-4 md:p-6 hidden animate-fade-in select-none';
-                modal.innerHTML = 
-                    '<div class="w-full max-w-4xl bg-slate-900 rounded-2xl md:rounded-3xl border border-slate-800 shadow-2xl overflow-hidden flex flex-col max-h-[96vh]">' +
-                        '<!-- Top Header -->' +
-                        '<div class="h-12 md:h-14 bg-slate-950 border-b border-slate-800 px-3 md:px-5 flex items-center justify-between text-white shrink-0">' +
-                            '<div class="flex items-center gap-2 md:gap-3 min-w-0">' +
-                                '<span class="w-7 h-7 md:w-8 md:h-8 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center text-xs md:text-sm shrink-0 shadow-inner">' +
-                                    '<i class="fa-solid fa-circle-play"></i>' +
-                                '</span>' +
-                                '<div class="min-w-0">' +
-                                    '<h3 id="teacherVpTitle" class="font-extrabold text-xs md:text-sm text-slate-100 truncate">Video Bài Giảng</h3>' +
-                                    '<p id="teacherVpSubtitle" class="text-[10px] md:text-[11px] text-slate-400 truncate">Phát trực tiếp trên Web LMS</p>' +
-                                '</div>' +
-                            '</div>' +
-                            '<div class="flex items-center gap-2 shrink-0">' +
-                                '<button type="button" id="teacherVpPipBtn" class="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center justify-center text-xs transition cursor-pointer" title="Hình trong hình (PiP)">' +
-                                    '<i class="fa-solid fa-clone"></i>' +
-                                '</button>' +
-                                '<button type="button" id="teacherVpFsBtn" class="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center justify-center text-xs transition cursor-pointer" title="Toàn màn hình">' +
-                                    '<i class="fa-solid fa-expand"></i>' +
-                                '</button>' +
-                                '<button type="button" onclick="window.closeTeacherVideoPlayer()" class="w-8 h-8 md:w-9 md:h-9 rounded-xl bg-slate-800 hover:bg-rose-600 text-slate-300 hover:text-white flex items-center justify-center text-sm transition cursor-pointer">' +
-                                    '<i class="fa-solid fa-xmark"></i>' +
-                                '</button>' +
+                modal.innerHTML = '<div id="teacherVpContainer" class="w-full max-w-4xl bg-slate-900 rounded-2xl md:rounded-3xl border border-slate-800 shadow-2xl overflow-hidden flex flex-col max-h-[96vh] relative">' +
+                    '<!-- Top Header -->' +
+                    '<div class="h-12 md:h-14 bg-slate-950 border-b border-slate-800 px-3 md:px-5 flex items-center justify-between text-white shrink-0">' +
+                        '<div class="flex items-center gap-2 md:gap-3 min-w-0">' +
+                            '<span class="w-7 h-7 md:w-8 md:h-8 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center text-xs md:text-sm shrink-0 shadow-inner"><i class="fa-solid fa-circle-play"></i></span>' +
+                            '<div class="min-w-0">' +
+                                '<h3 id="teacherVpTitle" class="font-extrabold text-xs md:text-sm text-slate-100 truncate">Video Bài Giảng</h3>' +
+                                '<p id="teacherVpSubtitle" class="text-[10px] md:text-[11px] text-slate-400 truncate">Phát trực tiếp liền mạch</p>' +
                             '</div>' +
                         '</div>' +
-
-                        '<!-- Video Screen Container -->' +
-                        '<div class="relative bg-black flex items-center justify-center overflow-hidden min-h-[220px] sm:min-h-[340px] md:min-h-[440px]">' +
-                            '<div id="teacherVpLoader" class="absolute inset-0 flex flex-col items-center justify-center text-white bg-black/85 z-10 hidden">' +
-                                '<i class="fa-solid fa-circle-notch fa-spin text-3xl md:text-4xl text-purple-400 mb-3"></i>' +
-                                '<p class="text-xs md:text-sm font-semibold text-slate-200">Đang kết nối luồng phát trực tiếp...</p>' +
-                                '<p class="text-[11px] text-slate-400 mt-1">Vui lòng chờ trong giây lát</p>' +
-                            '</div>' +
-
-                            '<video id="teacherVideoEl" controls controlslist="nodownload" playsinline webkit-playsinline autoplay class="w-full max-h-[64vh] md:max-h-[68vh] bg-black block outline-none"></video>' +
-
-                            '<iframe id="teacherVideoIframe" class="w-full h-[64vh] md:h-[68vh] border-0 hidden" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen" allowfullscreen></iframe>' +
-
-                            '<!-- Fallback when video exceeds 20MB -->' +
-                            '<div id="teacherVpFallback" class="p-6 md:p-8 flex flex-col items-center justify-center text-center max-w-lg hidden text-white">' +
-                                '<div class="w-14 h-14 md:w-16 md:h-16 rounded-2xl bg-amber-600/20 text-amber-400 flex items-center justify-center text-2xl md:text-3xl mb-3 shadow-inner">' +
-                                    '<i class="fa-solid fa-cloud-arrow-down"></i>' +
-                                '</div>' +
-                                '<h4 class="font-extrabold text-sm md:text-base text-slate-100 mb-1">Video Bài Giảng Dung Lượng Lớn</h4>' +
-                                '<p id="teacherFallbackNotice" class="text-xs text-slate-400 mb-4 leading-relaxed">Do chính sách bảo vệ tài nguyên của Telegram, video dài trên 20 MB cần mở qua Web Telegram hoặc tải về máy để xem trực tiếp với chất lượng gốc.</p>' +
-                                '<div class="flex flex-col sm:flex-row items-center gap-2.5 w-full justify-center">' +
-                                    '<a id="teacherFallbackWebBtn" href="#" target="_blank" class="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-extrabold text-xs flex items-center justify-center gap-2 transition shadow-lg shadow-purple-600/30">' +
-                                        '<i class="fa-solid fa-globe"></i> Xem trên Web Telegram' +
-                                    '</a>' +
-                                    '<a id="teacherFallbackTmeBtn" href="#" target="_blank" class="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs flex items-center justify-center gap-2 transition border border-slate-700">' +
-                                        '<i class="fa-solid fa-arrow-down"></i> Tải về máy xem ngay' +
-                                    '</a>' +
-                                '</div>' +
+                        '<div class="flex items-center gap-2 shrink-0">' +
+                            '' +
+                            '<button type="button" id="teacherVpPipBtn" class="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center justify-center text-xs transition cursor-pointer" title="Hình trong hình (PiP)"><i class="fa-solid fa-clone"></i></button>' +
+                            '<button type="button" id="teacherVpFsBtn" class="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center justify-center text-xs transition cursor-pointer" title="Toàn màn hình"><i class="fa-solid fa-expand"></i></button>' +
+                            '<button type="button" onclick="window.closeTeacherVideoPlayer()" class="w-8 h-8 md:w-9 md:h-9 rounded-xl bg-slate-800 hover:bg-rose-600 text-slate-300 hover:text-white flex items-center justify-center text-sm transition cursor-pointer" title="Đóng (Esc)"><i class="fa-solid fa-xmark"></i></button>' +
+                        '</div>' +
+                    '</div>' +
+                    '<!-- Video Stage -->' +
+                    '<div id="teacherVpScreenWrap" class="relative bg-black flex items-center justify-center overflow-hidden min-h-[220px] sm:min-h-[340px] md:min-h-[440px] group cursor-pointer">' +
+                        '<video id="teacherVideoA" class="w-full max-h-[64vh] md:max-h-[68vh] bg-black block outline-none transition-opacity duration-150" playsinline webkit-playsinline></video>' +
+                        '<video id="teacherVideoB" class="w-full max-h-[64vh] md:max-h-[68vh] bg-black absolute inset-0 outline-none opacity-0 pointer-events-none transition-opacity duration-150" playsinline webkit-playsinline></video>' +
+                        '<div id="teacherVpLoader" class="absolute inset-0 flex flex-col items-center justify-center text-white bg-black/85 z-20 hidden">' +
+                            '<i class="fa-solid fa-circle-notch fa-spin text-3xl md:text-4xl text-purple-400 mb-3"></i>' +
+                            '<p id="teacherVpLoaderText" class="text-xs md:text-sm font-semibold text-slate-200">Đang nạp luồng video...</p>' +
+                            '<p class="text-[11px] text-slate-400 mt-1">Đang tối ưu độ trễ 0ms</p>' +
+                        '</div>' +
+                        '<iframe id="teacherVideoIframe" class="w-full h-[64vh] md:h-[68vh] border-0 hidden z-10" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen" allowfullscreen></iframe>' +
+                        '<div id="teacherVpFallback" class="p-6 md:p-8 flex flex-col items-center justify-center text-center max-w-lg hidden text-white z-10">' +
+                            '<div class="w-14 h-14 md:w-16 md:h-16 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center text-2xl md:text-3xl mb-3 shadow-inner"><i class="fa-solid fa-cloud-arrow-down"></i></div>' +
+                            '<h4 class="font-extrabold text-sm md:text-base text-slate-100 mb-1">Video Bài Giảng Dung Lượng Lớn</h4>' +
+                            '<p id="teacherFallbackNotice" class="text-xs text-slate-400 mb-4 leading-relaxed">Video này cần mở qua Web Telegram hoặc tải về máy để xem trực tiếp với chất lượng gốc.</p>' +
+                            '<div class="flex flex-col sm:flex-row items-center gap-2.5 w-full justify-center">' +
+                                '<a id="teacherFallbackWebBtn" href="#" target="_blank" class="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-extrabold text-xs flex items-center justify-center gap-2 transition shadow-lg shadow-purple-600/30"><i class="fa-solid fa-globe"></i> Xem trên Web Telegram</a>' +
+                                '<a id="teacherFallbackTmeBtn" href="#" target="_blank" class="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs flex items-center justify-center gap-2 transition border border-slate-700"><i class="fa-solid fa-arrow-down"></i> Tải về máy xem ngay</a>' +
                             '</div>' +
                         '</div>' +
-
-                        '<!-- Bottom Control & Speed Bar -->' +
-                        '<div class="p-2.5 md:p-3 bg-slate-950 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2 shrink-0 text-white">' +
-                            '<div class="flex items-center gap-1.5 flex-wrap">' +
-                                '<span class="text-[11px] text-slate-400 font-bold mr-1 hidden sm:inline"><i class="fa-solid fa-gauge-high mr-1"></i>Tốc độ:</span>' +
-                                '<button type="button" class="teacher-vp-speed-btn px-2.5 py-1 rounded-lg text-[11px] font-bold border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer" data-spd="0.75">0.75x</button>' +
-                                '<button type="button" class="teacher-vp-speed-btn px-2.5 py-1 rounded-lg text-[11px] font-bold border border-purple-500 bg-purple-600 text-white cursor-pointer" data-spd="1">1.0x</button>' +
-                                '<button type="button" class="teacher-vp-speed-btn px-2.5 py-1 rounded-lg text-[11px] font-bold border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer" data-spd="1.25">1.25x</button>' +
-                                '<button type="button" class="teacher-vp-speed-btn px-2.5 py-1 rounded-lg text-[11px] font-bold border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer" data-spd="1.5">1.5x</button>' +
-                                '<button type="button" class="teacher-vp-speed-btn px-2.5 py-1 rounded-lg text-[11px] font-bold border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer" data-spd="2">2.0x</button>' +
+                    '</div>' +
+                    '<!-- UNIFIED CONTINUOUS TIMELINE CONTROL BAR (SINGLE 11m20s SCRUBBER) -->' +
+                    '<div id="teacherVpCustomControls" class="p-3 bg-slate-950 border-t border-slate-800 flex flex-col gap-2 shrink-0 text-white select-none">' +
+                        '<div class="relative w-full flex items-center group/timeline py-1">' +
+                            '<div id="teacherVpTrackBg" class="absolute left-0 right-0 h-1.5 bg-slate-800 rounded-full overflow-hidden pointer-events-none">' +
+                                '<div id="teacherVpBufferFill" class="h-full bg-slate-700/60 rounded-full transition-all duration-300" style="width: 0%;"></div>' +
                             '</div>' +
-
+                            '<div id="teacherVpProgressFill" class="absolute left-0 h-1.5 bg-gradient-to-r from-purple-500 via-indigo-500 to-amber-400 rounded-full pointer-events-none" style="width: 0%;"></div>' +
+                            '<input id="teacherVpScrubber" type="range" min="0" max="100" value="0" step="0.1" class="w-full h-3 opacity-0 cursor-pointer z-10 relative" />' +
+                        '</div>' +
+                        '<div class="flex flex-wrap items-center justify-between gap-2 text-xs">' +
                             '<div class="flex items-center gap-2">' +
-                                
-                                '<button type="button" onclick="window.closeTeacherVideoPlayer()" class="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold cursor-pointer transition">' +
-                                    'Đóng (Esc)' +
-                                '</button>' +
+                                '<button type="button" id="teacherVpPlayPauseBtn" class="w-8 h-8 rounded-xl bg-purple-600 hover:bg-purple-500 text-white flex items-center justify-center text-xs cursor-pointer transition shadow-md shadow-purple-600/30 active:scale-95" title="Phát / Tạm dừng (Space)"><i class="fa-solid fa-play"></i></button>' +
+                                '<button type="button" id="teacherVpRewind10Btn" class="w-7 h-7 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center justify-center text-[10px] cursor-pointer transition" title="Lùi 10 giây (←)"><i class="fa-solid fa-rotate-left"></i></button>' +
+                                '<button type="button" id="teacherVpForward10Btn" class="w-7 h-7 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center justify-center text-[10px] cursor-pointer transition" title="Tua tới 10 giây (→)"><i class="fa-solid fa-rotate-right"></i></button>' +
+                                '<div class="flex items-center gap-1 font-mono text-xs font-bold text-slate-300 ml-1">' +
+                                    '<span id="teacherVpCurTimeText" class="text-white">00:00</span>' +
+                                    '<span class="text-slate-500">/</span>' +
+                                    '<span id="teacherVpTotalTimeText" class="text-slate-400">00:00</span>' +
+                                '</div>' +
+                            '</div>' +
+                            '<div class="flex items-center gap-1.5">' +
+                                '<span class="text-[11px] text-slate-400 font-bold mr-0.5 hidden sm:inline">Tốc độ:</span>' +
+                                '<button type="button" class="teacher-vp-spd-btn px-2 py-0.5 rounded-lg text-[11px] font-bold border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer" data-spd="0.75">0.75x</button>' +
+                                '<button type="button" class="teacher-vp-spd-btn px-2 py-0.5 rounded-lg text-[11px] font-bold border border-purple-500 bg-purple-600 text-white cursor-pointer" data-spd="1">1.0x</button>' +
+                                '<button type="button" class="teacher-vp-spd-btn px-2 py-0.5 rounded-lg text-[11px] font-bold border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer" data-spd="1.25">1.25x</button>' +
+                                '<button type="button" class="teacher-vp-spd-btn px-2 py-0.5 rounded-lg text-[11px] font-bold border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer" data-spd="1.5">1.5x</button>' +
+                                '<button type="button" class="teacher-vp-spd-btn px-2 py-0.5 rounded-lg text-[11px] font-bold border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer" data-spd="2">2.0x</button>' +
+                                '<button type="button" onclick="window.closeTeacherVideoPlayer()" class="ml-1 px-3 py-1 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold cursor-pointer transition">Đóng (Esc)</button>' +
                             '</div>' +
                         '</div>' +
-                    '</div>';
+                    '</div>' +
+                '</div>';
                 document.body.appendChild(modal);
 
-                // Speed buttons event listeners
-                modal.querySelectorAll('.teacher-vp-speed-btn').forEach(btn => {
-                    btn.addEventListener('click', () => {
-                        const spd = parseFloat(btn.getAttribute('data-spd'));
-                        const vidEl = document.getElementById('teacherVideoEl');
-                        if (vidEl) vidEl.playbackRate = spd;
-                        modal.querySelectorAll('.teacher-vp-speed-btn').forEach(b => {
-                            b.className = 'teacher-vp-speed-btn px-2.5 py-1 rounded-lg text-[11px] font-bold border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer';
-                        });
-                        btn.className = 'teacher-vp-speed-btn px-2.5 py-1 rounded-lg text-[11px] font-bold border border-purple-500 bg-purple-600 text-white cursor-pointer';
-                    });
-                });
-
-                // PiP button
-                document.getElementById('teacherVpPipBtn').onclick = async () => {
-                    const vidEl = document.getElementById('teacherVideoEl');
-                    if (vidEl && document.pictureInPictureEnabled) {
-                        try {
-                            if (document.pictureInPictureElement) await document.exitPictureInPicture();
-                            else await vidEl.requestPictureInPicture();
-                        } catch(e) {}
-                    }
-                };
-
-                // Fullscreen button
-                document.getElementById('teacherVpFsBtn').onclick = () => {
-                    const vidEl = document.getElementById('teacherVideoEl');
-                    if (!vidEl) return;
-                    if (vidEl.requestFullscreen) vidEl.requestFullscreen();
-                    else if (vidEl.webkitRequestFullscreen) vidEl.webkitRequestFullscreen();
-                };
-
                 // Keyboard listener
-                window.addEventListener('keydown', (e) => {
-                    if (modal && !modal.classList.contains('hidden') && e.key === 'Escape') {
-                        window.closeTeacherVideoPlayer();
+                window.addEventListener("keydown", (e) => {
+                    if (modal && !modal.classList.contains("hidden")) {
+                        if (e.key === 'Escape') {
+                            window.closeTeacherVideoPlayer();
+                        } else if (e.key === ' ' || e.code === 'Space') {
+                            e.preventDefault();
+                            if (window._activeSeamlessPlayer) window._activeSeamlessPlayer.togglePlay();
+                        } else if (e.key === 'ArrowLeft') {
+                            e.preventDefault();
+                            if (window._activeSeamlessPlayer) window._activeSeamlessPlayer.seekRelative(-10);
+                        } else if (e.key === 'ArrowRight') {
+                            e.preventDefault();
+                            if (window._activeSeamlessPlayer) window._activeSeamlessPlayer.seekRelative(10);
+                        }
                     }
                 });
             }
 
-            document.getElementById('teacherVpTitle').textContent = title;
-            const durText = video.duration ? (Math.floor(video.duration / 60) + 'm ' + (video.duration % 60) + 's') : '';
-            const sizeMb = video.size ? (video.size / (1024 * 1024)).toFixed(1) + ' MB' : '';
-            document.getElementById('teacherVpSubtitle').textContent = [durText, sizeMb, 'Phát trực tiếp'].filter(Boolean).join(' • ');
-
-            
-
-            const videoEl = document.getElementById('teacherVideoEl');
-            const iframeEl = document.getElementById('teacherVideoIframe');
-            const fallbackEl = document.getElementById('teacherVpFallback');
-            const loaderEl = document.getElementById('teacherVpLoader');
-
-            videoEl.classList.add('hidden');
-            iframeEl.classList.add('hidden');
-            fallbackEl.classList.add('hidden');
-            loaderEl.classList.add('hidden');
-            videoEl.pause();
-            videoEl.src = '';
-            iframeEl.src = 'about:blank';
             modal.classList.remove('hidden');
 
-            const rawUrl = video.streamUrl || video.url || video.tmeUrl || '';
-
-            // 0. Chuẩn HLS (HTTP Live Streaming) - Hỗ trợ video lớn 1GB - 2GB phát trực tiếp không giật lag
-            if (video.type === 'hls' || video.m3u8 || /\.m3u8(\?.*)?$/i.test(rawUrl)) {
-                loaderEl.classList.remove('hidden');
-                videoEl.classList.remove('hidden');
-
-                let hlsSource = rawUrl;
-                if (video.m3u8) {
-                    const blob = new Blob([video.m3u8], { type: 'application/vnd.apple.mpegurl' });
-                    window._currentTeacherHlsBlob = URL.createObjectURL(blob);
-                    hlsSource = window._currentTeacherHlsBlob;
+            function formatVpTime(sec) {
+                sec = Math.max(0, Math.round(sec || 0));
+                const h = Math.floor(sec / 3600);
+                const m = Math.floor((sec % 3600) / 60);
+                const s = sec % 60;
+                if (h > 0) {
+                    return h + ':' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
                 }
-
-                if (typeof Hls !== 'undefined' && Hls.isSupported()) {
-                    const hls = new Hls({
-                        enableWorker: true,
-                        lowLatencyMode: false,
-                        backBufferLength: 60,
-                        maxBufferLength: 30,
-                        maxMaxBufferLength: 600
-                    });
-                    window._teacherHlsInstance = hls;
-                    hls.loadSource(hlsSource);
-                    hls.attachMedia(videoEl);
-                    hls.on(Hls.Events.MANIFEST_PARSED, () => {
-                        loaderEl.classList.add('hidden');
-                        videoEl.play().catch(() => {});
-                    });
-                    hls.on(Hls.Events.ERROR, (event, data) => {
-                        if (data.fatal) {
-                            console.warn('Lỗi luồng HLS fatal:', data);
-                            loaderEl.classList.add('hidden');
-                            switch (data.type) {
-                                case Hls.ErrorTypes.NETWORK_ERROR:
-                                    hls.startLoad();
-                                    break;
-                                case Hls.ErrorTypes.MEDIA_ERROR:
-                                    hls.recoverMediaError();
-                                    break;
-                                default:
-                                    hls.destroy();
-                                    break;
-                            }
-                        }
-                    });
-                    return;
-                } else if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
-                    videoEl.src = hlsSource;
-                    videoEl.addEventListener('loadedmetadata', () => {
-                        loaderEl.classList.add('hidden');
-                        videoEl.play().catch(() => {});
-                    }, { once: true });
-                    return;
-                }
+                return String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
             }
 
-            // 1. YouTube video (Unlisted or Public)
-            const ytMatch = rawUrl.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})/);
-            if (ytMatch) {
-                iframeEl.classList.remove('hidden');
-                iframeEl.src = 'https://www.youtube-nocookie.com/embed/' + ytMatch[1] + '?autoplay=1&rel=0';
-                return;
-            }
+            const BOT_TOKEN = '8662985318:AAHIweMUW706XKIXFi-bFisaFoE7hZaMHDo';
+            let chunks = (Array.isArray(video.chunks) && video.chunks.length > 0) ? [...video.chunks] : null;
 
-            // 2. Google Drive video preview
-            const driveMatch = rawUrl.match(/drive\.google\.com\/file\/d\/([-\w]{25,})/);
-            if (driveMatch) {
-                iframeEl.classList.remove('hidden');
-                iframeEl.src = 'https://drive.google.com/file/d/' + driveMatch[1] + '/preview';
-                return;
-            }
-
-            // 3. Direct Video Stream (.mp4 / .webm / Cloudflare R2 Edge CDN - Phát trực tiếp 100%, tua mượt mọi vị trí)
-            const directVideoUrl = video.r2Url || (rawUrl && (rawUrl.includes('r2.dev') || /\.(mp4|webm|mov)(\?.*)?$/i.test(rawUrl)) ? rawUrl : '');
-            if (directVideoUrl) {
-                loaderEl.classList.remove('hidden');
-                videoEl.classList.remove('hidden');
-                videoEl.src = directVideoUrl;
-                const hideLoader = () => { loaderEl.classList.add('hidden'); };
-                videoEl.onloadedmetadata = hideLoader;
-                videoEl.oncanplay = hideLoader;
-                videoEl.onplaying = hideLoader;
-                videoEl.play().catch(() => {});
-                return;
-            }
-
-            // 3.5. Tự động kiểm tra luồng video Chunked / R2 CDN lưu trong Supabase
-            if (video.isChunked || (video.chunkCount && video.chunkCount > 1) || (video.videoId && video.videoId.startsWith('hls_video_'))) {
-                loaderEl.classList.remove('hidden');
+            if (!chunks && (video.videoId || video.id)) {
                 try {
-                    const cfgId = video.videoId || `hls_video_${video.id}`;
-                    const sbRes = await fetch(`https://cuniqanbumcrqcdlcvad.supabase.co/rest/v1/configurations?id=eq.${encodeURIComponent(cfgId)}&select=raw_data`, {
+                    const cfgId = video.videoId || video.id;
+                    const sbRes = await fetch('https://cuniqanbumcrqcdlcvad.supabase.co/rest/v1/configurations?id=eq.' + encodeURIComponent(cfgId) + '&select=raw_data', {
                         headers: {
                             apikey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN1bmlxYW5idW1jcnFjZGxjdmFkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg5NDE4MTMsImV4cCI6MjEwNDUxNzgxM30.MWSv1QKVlQ9r-8r0hkrqWsmm75hULq_VjPCbTqXDe-o',
                             Authorization: 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN1bmlxYW5idW1jcnFjZGxjdmFkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg5NDE4MTMsImV4cCI6MjEwNDUxNzgxM30.MWSv1QKVlQ9r-8r0hkrqWsmm75hULq_VjPCbTqXDe-o'
@@ -10461,83 +10360,398 @@
                     if (sbRes.ok) {
                         const rows = await sbRes.json();
                         const rd = rows?.[0]?.raw_data;
-                        const fastUrl = rd?.r2Url || rd?.url || rd?.streamUrl;
-                        if (fastUrl && (fastUrl.includes('r2.dev') || /\.(mp4|webm)(\?.*)?$/i.test(fastUrl))) {
-                            videoEl.classList.remove('hidden');
-                            videoEl.src = fastUrl;
-                            const hideL = () => { loaderEl.classList.add('hidden'); };
-                            videoEl.onloadedmetadata = hideL;
-                            videoEl.oncanplay = hideL;
-                            videoEl.onplaying = hideL;
-                            videoEl.play().catch(() => {});
-                            return;
+                        if (rd && Array.isArray(rd.chunks) && rd.chunks.length > 0) {
+                            chunks = [...rd.chunks];
                         }
                     }
-                } catch (e) {
-                    console.warn("Lỗi kiểm tra stream chunked:", e);
-                }
+                } catch (_) {}
             }
 
-            // 4. Telegram video
-            if (video.fileId) {
-                loaderEl.classList.remove('hidden');
+            const vidA = document.getElementById('teacherVideoA');
+            const vidB = document.getElementById('teacherVideoB');
+            const iframeEl = document.getElementById('teacherVideoIframe');
+            const fallbackEl = document.getElementById('teacherVpFallback');
+            const loaderEl = document.getElementById('teacherVpLoader');
+            const loaderText = document.getElementById('teacherVpLoaderText');
+            const scrubber = document.getElementById('teacherVpScrubber');
+            const progressFill = document.getElementById('teacherVpProgressFill');
+            const bufferFill = document.getElementById('teacherVpBufferFill');
+            const curTimeText = document.getElementById('teacherVpCurTimeText');
+            const totalTimeText = document.getElementById('teacherVpTotalTimeText');
+            const playPauseBtn = document.getElementById('teacherVpPlayPauseBtn');
+            const titleEl = document.getElementById('teacherVpTitle');
+            const subtitleEl = document.getElementById('teacherVpSubtitle');
+            const screenWrap = document.getElementById('teacherVpScreenWrap');
+            const controlsEl = document.getElementById('teacherVpCustomControls');
+
+            vidA.pause(); vidA.src = ''; vidA.style.opacity = '1'; vidA.style.zIndex = '2'; vidA.style.pointerEvents = 'auto';
+            vidB.pause(); vidB.src = ''; vidB.style.opacity = '0'; vidB.style.zIndex = '1'; vidB.style.pointerEvents = 'none';
+            iframeEl.classList.add('hidden'); iframeEl.src = 'about:blank';
+            fallbackEl.classList.add('hidden');
+            controlsEl.classList.remove('hidden');
+            loaderEl.classList.remove('hidden');
+            if (loaderText) loaderText.textContent = 'Đang nạp luồng phát video...';
+
+            titleEl.textContent = title;
+
+            async function resolveStreamUrl(chunkOrFileId) {
+                if (!chunkOrFileId) return null;
+                const fId = typeof chunkOrFileId === 'string' ? chunkOrFileId : (chunkOrFileId.fileId || chunkOrFileId.file_id);
+                if (!fId) return chunkOrFileId.url || chunkOrFileId.streamUrl || null;
+                if (window._tgStreamUrlCache[fId]) {
+                    return window._tgStreamUrlCache[fId];
+                }
                 try {
-                    const BOT_TOKEN = '8662985318:AAHIweMUW706XKIXFi-bFisaFoE7hZaMHDo';
-                    const res = await fetch('https://api.telegram.org/bot' + BOT_TOKEN + '/getFile?file_id=' + encodeURIComponent(video.fileId));
-                    const data = await res.json();
-                    loaderEl.classList.add('hidden');
-
-                    if (data.ok && data.result && data.result.file_path) {
-                        // File <= 20MB: phát trực tiếp 100% qua Telegram Bot CDN
-                        const tgStream = 'https://api.telegram.org/file/bot' + BOT_TOKEN + '/' + data.result.file_path;
-                        video.streamUrl = tgStream;
-                        videoEl.classList.remove('hidden');
-                        videoEl.src = tgStream;
-                        videoEl.play().catch(() => {});
-                        return;
+                    const saved = sessionStorage.getItem('tg_stream_' + fId);
+                    if (saved) {
+                        window._tgStreamUrlCache[fId] = saved;
+                        return saved;
                     }
-                } catch(err) {
+                } catch (_) {}
+                if (window._tgStreamUrlPromises[fId]) {
+                    return await window._tgStreamUrlPromises[fId];
+                }
+                const fetchPromise = (async () => {
+                    try {
+                        const res = await fetch('https://api.telegram.org/bot' + BOT_TOKEN + '/getFile?file_id=' + encodeURIComponent(fId));
+                        const data = await res.json();
+                        if (data.ok && data.result && data.result.file_path) {
+                            const direct = 'https://api.telegram.org/file/bot' + BOT_TOKEN + '/' + data.result.file_path;
+                            window._tgStreamUrlCache[fId] = direct;
+                            try { sessionStorage.setItem('tg_stream_' + fId, direct); } catch (_) {}
+                            return direct;
+                        }
+                    } catch (e) {
+                        console.warn('Lỗi phân giải file Telegram:', fId, e);
+                    } finally {
+                        delete window._tgStreamUrlPromises[fId];
+                    }
+                    return null;
+                })();
+                window._tgStreamUrlPromises[fId] = fetchPromise;
+                return await fetchPromise;
+            }
+
+            const isChunked = chunks && chunks.length > 1;
+
+            if (isChunked) {
+                const cumulativeTimes = [];
+                let running = 0;
+                for (let i = 0; i < chunks.length; i++) {
+                    cumulativeTimes.push(running);
+                    running += Number(chunks[i].durationSec || 60);
+                }
+                const totalDuration = (video.duration && video.duration >= running - 5) ? video.duration : running;
+
+                scrubber.min = 0;
+                scrubber.max = totalDuration;
+                scrubber.value = 0;
+                totalTimeText.textContent = formatVpTime(totalDuration);
+                subtitleEl.textContent = '⏱️ ' + formatVpTime(totalDuration) + ' • ' + chunks.length + ' phân đoạn liền mạch • Độ trễ 0ms';
+
+                let activeVid = vidA;
+                let standbyVid = vidB;
+                let activeIdx = 0;
+                let isScrubbing = false;
+                let isHandingOver = false;
+                let currentPlaybackRate = 1.0;
+
+                const playerController = {
+                    togglePlay: () => {
+                        if (activeVid.paused) {
+                            activeVid.play().catch(() => {});
+                            playPauseBtn.innerHTML = '<i class="fa-solid fa-pause"></i>';
+                        } else {
+                            activeVid.pause();
+                            playPauseBtn.innerHTML = '<i class="fa-solid fa-play"></i>';
+                        }
+                    },
+                    seekRelative: (delta) => {
+                        const curGlobal = cumulativeTimes[activeIdx] + activeVid.currentTime;
+                        playerController.seekGlobal(curGlobal + delta);
+                    },
+                    seekGlobal: async (targetSec) => {
+                        targetSec = Math.max(0, Math.min(targetSec, totalDuration - 0.1));
+                        let targetIdx = 0;
+                        for (let i = chunks.length - 1; i >= 0; i--) {
+                            if (targetSec >= cumulativeTimes[i]) {
+                                targetIdx = i;
+                                break;
+                            }
+                        }
+                        const offset = targetSec - cumulativeTimes[targetIdx];
+
+                        if (targetIdx === activeIdx) {
+                            activeVid.currentTime = offset;
+                            updateTimelineUI(targetSec);
+                        } else {
+                            loaderEl.classList.remove('hidden');
+                            if (loaderText) loaderText.textContent = 'Đang chuyển đến ' + formatVpTime(targetSec) + '...';
+                            const url = await resolveStreamUrl(chunks[targetIdx]);
+                            if (url) {
+                                activeIdx = targetIdx;
+                                activeVid.src = url;
+                                if (offset > 0.05) {
+                                    const applyOffset = () => {
+                                        try { activeVid.currentTime = offset; } catch (_) {}
+                                        activeVid.removeEventListener('loadedmetadata', applyOffset);
+                                        activeVid.removeEventListener('canplay', applyOffset);
+                                    };
+                                    activeVid.addEventListener('loadedmetadata', applyOffset, { once: true });
+                                    activeVid.addEventListener('canplay', applyOffset, { once: true });
+                                }
+                                activeVid.currentTime = offset;
+                                activeVid.playbackRate = currentPlaybackRate;
+                                activeVid.play().catch(() => {});
+                                loaderEl.classList.add('hidden');
+                                updateTimelineUI(targetSec);
+                                preloadNextChunk(activeIdx + 1);
+                            }
+                        }
+                    }
+                };
+                window._activeSeamlessPlayer = playerController;
+
+                function updateTimelineUI(globalTime) {
+                    if (isScrubbing) return;
+                    scrubber.value = globalTime;
+                    const pct = (globalTime / totalDuration) * 100;
+                    progressFill.style.width = pct + '%';
+                    curTimeText.textContent = formatVpTime(globalTime);
+                }
+
+                async function preloadNextChunk(nextIdx) {
+                    if (nextIdx < chunks.length) {
+                        const nextUrl = await resolveStreamUrl(chunks[nextIdx]);
+                        if (nextUrl && standbyVid.src !== nextUrl) {
+                            standbyVid.src = nextUrl;
+                            standbyVid.currentTime = 0;
+                            standbyVid.playbackRate = currentPlaybackRate;
+                            standbyVid.preload = 'auto';
+                            standbyVid.load();
+                        }
+                    }
+                }
+
+                function setupVideoEvents(videoEl) {
+                    videoEl.ontimeupdate = () => {
+                        if (videoEl !== activeVid) return;
+                        const curT = videoEl.currentTime || 0;
+                        const chunkDur = Number(chunks[activeIdx]?.durationSec || 60);
+                        const globalTime = cumulativeTimes[activeIdx] + curT;
+                        updateTimelineUI(globalTime);
+                        if (curT >= chunkDur - 0.25 && activeIdx + 1 < chunks.length) {
+                            doHandover();
+                        }
+                    };
+
+                    videoEl.onended = () => {
+                        if (videoEl !== activeVid) return;
+                        if (activeIdx + 1 < chunks.length) {
+                            doHandover();
+                        } else {
+                            playPauseBtn.innerHTML = '<i class="fa-solid fa-rotate-left"></i>';
+                        }
+                    };
+
+                    videoEl.onwaiting = () => {
+                        if (videoEl === activeVid) loaderEl.classList.remove('hidden');
+                    };
+                    videoEl.onplaying = () => {
+                        if (videoEl === activeVid) {
+                            loaderEl.classList.add('hidden');
+                            playPauseBtn.innerHTML = '<i class="fa-solid fa-pause"></i>';
+                        }
+                    };
+                }
+
+                async function doHandover() {
+                    if (isHandingOver) return;
+                    const nextIdx = activeIdx + 1;
+                    if (nextIdx >= chunks.length) return;
+                    isHandingOver = true;
+                    try {
+                        if (!standbyVid.src || standbyVid.src === '' || standbyVid.src === window.location.href) {
+                            loaderEl.classList.remove('hidden');
+                            const nextUrl = await resolveStreamUrl(chunks[nextIdx]);
+                            if (nextUrl) {
+                                standbyVid.src = nextUrl;
+                                standbyVid.currentTime = 0;
+                                standbyVid.load();
+                            }
+                        }
+                        standbyVid.playbackRate = currentPlaybackRate;
+                        try { await standbyVid.play(); } catch (_) {}
+                        standbyVid.style.opacity = '1';
+                        standbyVid.style.zIndex = '2';
+                        standbyVid.style.pointerEvents = 'auto';
+
+                        activeVid.style.opacity = '0';
+                        activeVid.style.zIndex = '1';
+                        activeVid.style.pointerEvents = 'none';
+                        activeVid.pause();
+
+                        const prevVid = activeVid;
+                        activeVid = standbyVid;
+                        standbyVid = prevVid;
+                        activeIdx = nextIdx;
+
+                        preloadNextChunk(activeIdx + 1);
+                    } finally {
+                        isHandingOver = false;
+                    }
+                }
+
+                setupVideoEvents(vidA);
+                setupVideoEvents(vidB);
+
+                scrubber.oninput = () => {
+                    isScrubbing = true;
+                    const val = parseFloat(scrubber.value);
+                    progressFill.style.width = (val / totalDuration * 100) + '%';
+                    curTimeText.textContent = formatVpTime(val);
+                };
+                scrubber.onchange = () => {
+                    isScrubbing = false;
+                    const val = parseFloat(scrubber.value);
+                    playerController.seekGlobal(val);
+                };
+
+                screenWrap.onclick = (e) => {
+                    if (e.target.closest('#teacherVpCustomControls')) return;
+                    playerController.togglePlay();
+                };
+
+                playPauseBtn.onclick = () => playerController.togglePlay();
+                document.getElementById('teacherVpRewind10Btn').onclick = () => playerController.seekRelative(-10);
+                document.getElementById('teacherVpForward10Btn').onclick = () => playerController.seekRelative(10);
+
+                modal.querySelectorAll('.teacher-vp-spd-btn').forEach(btn => {
+                    btn.onclick = () => {
+                        const spd = parseFloat(btn.getAttribute('data-spd'));
+                        currentPlaybackRate = spd;
+                        vidA.playbackRate = spd;
+                        vidB.playbackRate = spd;
+                        modal.querySelectorAll('.teacher-vp-spd-btn').forEach(b => {
+                            b.className = 'teacher-vp-spd-btn px-2 py-0.5 rounded-lg text-[11px] font-bold border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer';
+                        });
+                        btn.className = 'teacher-vp-spd-btn px-2 py-0.5 rounded-lg text-[11px] font-bold border border-purple-500 bg-purple-600 text-white cursor-pointer';
+                    };
+                });
+
+                document.getElementById('teacherVpPipBtn').onclick = async () => {
+                    if (document.pictureInPictureEnabled && activeVid) {
+                        try {
+                            if (document.pictureInPictureElement) await document.exitPictureInPicture();
+                            else await activeVid.requestPictureInPicture();
+                        } catch (_) {}
+                    }
+                };
+                document.getElementById('teacherVpFsBtn').onclick = () => {
+                    const c = document.getElementById('teacherVpContainer');
+                    if (!c) return;
+                    if (!document.fullscreenElement) c.requestFullscreen().catch(() => {});
+                    else document.exitFullscreen().catch(() => {});
+                };
+
+                const firstUrl = await resolveStreamUrl(chunks[0]);
+                if (firstUrl) {
                     loaderEl.classList.add('hidden');
-                    console.warn("Lỗi phân giải luồng video Telegram:", err);
+                    activeVid.src = firstUrl;
+                    activeVid.playbackRate = currentPlaybackRate;
+                    activeVid.play().catch(() => {});
+                    playPauseBtn.innerHTML = '<i class="fa-solid fa-pause"></i>';
+                    preloadNextChunk(1);
+                    (async () => {
+                        for (let i = 2; i < chunks.length; i++) {
+                            await resolveStreamUrl(chunks[i]);
+                        }
+                    })();
+                } else {
+                    loaderEl.classList.add('hidden');
+                    fallbackEl.classList.remove('hidden');
+                }
+            } else {
+                const rawUrl = video.r2Url || video.streamUrl || video.url || video.tmeUrl || '';
+                const ytMatch = rawUrl.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})/);
+                if (ytMatch) {
+                    loaderEl.classList.add('hidden');
+                    iframeEl.classList.remove('hidden');
+                    iframeEl.src = 'https://www.youtube-nocookie.com/embed/' + ytMatch[1] + '?autoplay=1&rel=0';
+                    controlsEl.classList.add('hidden');
+                    return;
+                }
+                const driveMatch = rawUrl.match(/drive\.google\.com\/file\/d\/([-\w]{25,})/);
+                if (driveMatch) {
+                    loaderEl.classList.add('hidden');
+                    iframeEl.classList.remove('hidden');
+                    iframeEl.src = 'https://drive.google.com/file/d/' + driveMatch[1] + '/preview';
+                    controlsEl.classList.add('hidden');
+                    return;
+                }
+                let streamUrl = rawUrl;
+                if (!streamUrl && video.fileId) {
+                    streamUrl = await resolveStreamUrl(video.fileId);
+                }
+                if (streamUrl) {
+                    loaderEl.classList.add('hidden');
+                    vidA.src = streamUrl;
+                    vidA.playbackRate = 1.0;
+                    vidA.play().catch(() => {});
+                    playPauseBtn.innerHTML = '<i class="fa-solid fa-pause"></i>';
+                    vidA.onloadedmetadata = () => {
+                        const dur = vidA.duration || video.duration || 0;
+                        scrubber.min = 0;
+                        scrubber.max = dur;
+                        totalTimeText.textContent = formatVpTime(dur);
+                        subtitleEl.textContent = '⏱️ ' + formatVpTime(dur) + ' • Phát trực tiếp';
+                    };
+                    vidA.ontimeupdate = () => {
+                        const cur = vidA.currentTime || 0;
+                        const dur = vidA.duration || video.duration || 1;
+                        scrubber.value = cur;
+                        progressFill.style.width = (cur / dur * 100) + '%';
+                        curTimeText.textContent = formatVpTime(cur);
+                    };
+                    const singleController = {
+                        togglePlay: () => {
+                            if (vidA.paused) { vidA.play(); playPauseBtn.innerHTML = '<i class="fa-solid fa-pause"></i>'; }
+                            else { vidA.pause(); playPauseBtn.innerHTML = '<i class="fa-solid fa-play"></i>'; }
+                        },
+                        seekRelative: (d) => { vidA.currentTime = Math.max(0, Math.min(vidA.duration || 0, vidA.currentTime + d)); },
+                        seekGlobal: (t) => { vidA.currentTime = t; }
+                    };
+                    window._activeSeamlessPlayer = singleController;
+                    scrubber.oninput = () => {
+                        const val = parseFloat(scrubber.value);
+                        vidA.currentTime = val;
+                    };
+                    playPauseBtn.onclick = () => singleController.togglePlay();
+                    screenWrap.onclick = (e) => {
+                        if (e.target.closest('#teacherVpCustomControls')) return;
+                        singleController.togglePlay();
+                    };
+                } else {
+                    loaderEl.classList.add('hidden');
+                    fallbackEl.classList.remove('hidden');
                 }
             }
-
-            // Fallback for Telegram videos > 20MB
-            loaderEl.classList.add('hidden');
-            fallbackEl.classList.remove('hidden');
-            const match = (video.tmeUrl || '').match(/t\.me\/([^/]+)\/(\d+)/);
-            const channel = match ? match[1] : 'kho_video_qmath_2026';
-            const msgId = match ? match[2] : '';
-
-            const webUrl = msgId ? ('https://web.telegram.org/k/#' + (channel.startsWith('@') ? '' : '@') + channel + '/' + msgId) : (video.tmeUrl || 'https://web.telegram.org');
-            const noticeEl = document.getElementById('teacherFallbackNotice');
-            if (noticeEl) {
-                noticeEl.textContent = 'Video này có dung lượng ' + (sizeMb || 'lớn hơn 20 MB') + '. Telegram giới hạn luồng phát trực tiếp qua bot đối với file quá 20MB. Học sinh có thể xem trực tiếp ngay trên Web Telegram hoặc tải về máy để xem.';
-            }
-
-            const webBtn = document.getElementById('teacherFallbackWebBtn');
-            if (webBtn) webBtn.href = webUrl;
-
-            const tmeBtn = document.getElementById('teacherFallbackTmeBtn');
-            if (tmeBtn) tmeBtn.href = video.tmeUrl || webUrl;
         };
 
-        window.closeTeacherVideoPlayer = function() {
+        window.closeTeacherVideoPlayer = function(fromHistoryPop = false) {
             const modal = document.getElementById('teacherVideoPlayerModal');
             if (modal) {
                 modal.classList.add('hidden');
-                const vid = document.getElementById('teacherVideoEl');
-                if (vid) { vid.pause(); vid.src = ''; }
+                const vidA = document.getElementById('teacherVideoA');
+                if (vidA) { vidA.pause(); vidA.src = ''; }
+                const vidB = document.getElementById('teacherVideoB');
+                if (vidB) { vidB.pause(); vidB.src = ''; }
                 const ifr = document.getElementById('teacherVideoIframe');
-                if (ifr) ifr.src = 'about:blank';
+                if (ifr) { ifr.src = 'about:blank'; }
             }
-            if (window._teacherHlsInstance) {
-                window._teacherHlsInstance.destroy();
-                window._teacherHlsInstance = null;
-            }
-            if (window._currentTeacherHlsBlob) {
-                URL.revokeObjectURL(window._currentTeacherHlsBlob);
-                window._currentTeacherHlsBlob = null;
+            window._activeSeamlessPlayer = null;
+            if (!fromHistoryPop && history.state && history.state.modal === 'teacher_video_player') {
+                try { history.back(); } catch (_) {}
             }
         };
 
