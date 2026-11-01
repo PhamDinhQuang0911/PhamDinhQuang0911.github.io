@@ -247,7 +247,7 @@
                 height: auto !important;
                 max-height: none !important;
                 overflow: visible !important;
-                padding-bottom: calc(2.2rem + env(safe-area-inset-bottom, 0px)) !important;
+                padding-bottom: calc(7.5rem + env(safe-area-inset-bottom, 0px)) !important;
             }
             .tab-content {
                 height: auto !important;
@@ -616,7 +616,7 @@
             if (content) { content.classList.add('scale-95'); content.classList.remove('scale-100'); }
         };
     </script>
-    <link rel="stylesheet" href="/styles.css?v=71">
+    <link rel="stylesheet" href="/styles.css?v=72">
 <meta name="view-transition" content="same-origin" />    <!-- Hls.js Library: HLS Video Streaming cho học sinh -->
     <script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
 </head>
@@ -1019,7 +1019,7 @@
                 </div>
             </div>
 
-            <div id="tab-class-detail" class="tab-content hidden animate-fade-in flex flex-col h-full">
+            <div id="tab-class-detail" class="tab-content hidden animate-fade-in flex flex-col min-h-full pb-32 md:pb-8">
                 <div class="flex flex-col gap-4 mb-6 bg-white p-4 rounded-2xl shadow-sm border border-primary-50">
                     <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
                         <div class="flex items-center gap-2 md:gap-4">
@@ -1081,6 +1081,8 @@
                 </div>
                 <div id="classExamList" class="pb-2 md:pb-4"></div>
                 <div id="classLessonList" class="hidden pb-4 space-y-6"></div>
+                <!-- Khoảng đệm thoáng đãng dưới đáy điện thoại tránh bị che bởi Bottom Nav -->
+                <div class="h-28 md:hidden pointer-events-none shrink-0" aria-hidden="true"></div>
             </div>
 
             <div id="tab-my-courses" class="tab-content hidden animate-fade-in">
@@ -3986,114 +3988,70 @@
                 return;
             }
 
-            // 3. Direct HTML5 video URL (.mp4 / .webm)
-            if (/\.(mp4|webm|mov)(\?.*)?$/i.test(rawUrl)) {
+            // 3. Direct Video Stream (.mp4 / .webm / Cloudflare R2 Edge CDN - Phát trực tiếp 100%, tua mượt mọi vị trí)
+            const directVideoUrl = video.r2Url || (rawUrl && (rawUrl.includes('r2.dev') || /\.(mp4|webm|mov)(\?.*)?$/i.test(rawUrl)) ? rawUrl : '');
+            if (directVideoUrl) {
+                loaderEl.classList.remove('hidden');
                 videoEl.classList.remove('hidden');
-                videoEl.src = rawUrl;
+                videoEl.src = directVideoUrl;
+                const hideLoader = () => { loaderEl.classList.add('hidden'); };
+                videoEl.onloadedmetadata = hideLoader;
+                videoEl.oncanplay = hideLoader;
+                videoEl.onplaying = hideLoader;
                 videoEl.play().catch(() => {});
                 return;
             }
 
-            // 4. Telegram video Multi-Part (Phát nối tiếp tự động không độ trễ)
-            const chunkList = (video.chunks && video.chunks.length > 0) ? video.chunks : (video.fileId ? [{ index: 0, fileId: video.fileId }] : []);
-            if (chunkList.length > 0) {
+            // 3.5. Tự động kiểm tra luồng video Chunked / R2 CDN lưu trong Supabase
+            if (video.isChunked || (video.chunkCount && video.chunkCount > 1) || (video.videoId && video.videoId.startsWith('hls_video_'))) {
                 loaderEl.classList.remove('hidden');
                 try {
-                    const BOT_TOKENS = [
-                        '8662985318:AAHIweMUW706XKIXFi-bFisaFoE7hZaMHDo',
-                        '8662985318:AAHIweMUW706XKIXFi-bFisaFoE7hZaMHDo'
-                    ];
-
-                    const resolveUrl = async (chunk, idx) => {
-                        const token = BOT_TOKENS[idx % BOT_TOKENS.length];
-                        const res = await fetch('https://api.telegram.org/bot' + token + '/getFile?file_id=' + encodeURIComponent(chunk.fileId));
-                        const data = await res.json();
-                        if (data.ok && data.result && data.result.file_path) {
-                            return 'https://api.telegram.org/file/bot' + token + '/' + data.result.file_path;
+                    const cfgId = video.videoId || `hls_video_${video.id}`;
+                    const sbRes = await fetch(`https://cuniqanbumcrqcdlcvad.supabase.co/rest/v1/configurations?id=eq.${encodeURIComponent(cfgId)}&select=raw_data`, {
+                        headers: {
+                            apikey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN1bmlxYW5idW1jcnFjZGxjdmFkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg5NDE4MTMsImV4cCI6MjEwNDUxNzgxM30.MWSv1QKVlQ9r-8r0hkrqWsmm75hULq_VjPCbTqXDe-o',
+                            Authorization: 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN1bmlxYW5idW1jcnFjZGxjdmFkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg5NDE4MTMsImV4cCI6MjEwNDUxNzgxM30.MWSv1QKVlQ9r-8r0hkrqWsmm75hULq_VjPCbTqXDe-o'
                         }
-                        return null;
-                    };
+                    });
+                    if (sbRes.ok) {
+                        const rows = await sbRes.json();
+                        const rd = rows?.[0]?.raw_data;
+                        const fastUrl = rd?.r2Url || rd?.url || rd?.streamUrl;
+                        if (fastUrl && (fastUrl.includes('r2.dev') || /\.(mp4|webm)(\?.*)?$/i.test(fastUrl))) {
+                            videoEl.classList.remove('hidden');
+                            videoEl.src = fastUrl;
+                            const hideL = () => { loaderEl.classList.add('hidden'); };
+                            videoEl.onloadedmetadata = hideL;
+                            videoEl.oncanplay = hideL;
+                            videoEl.onplaying = hideL;
+                            videoEl.play().catch(() => {});
+                            return;
+                        }
+                    }
+                } catch (e) {
+                    console.warn("Lỗi kiểm tra stream chunked:", e);
+                }
+            }
 
-                    const resolvedUrls = await Promise.all(chunkList.map((c, i) => resolveUrl(c, i)));
-                    const validUrls = resolvedUrls.filter(Boolean);
+            // 4. Telegram video
+            if (video.fileId) {
+                loaderEl.classList.remove('hidden');
+                try {
+                    const BOT_TOKEN = '8662985318:AAHIweMUW706XKIXFi-bFisaFoE7hZaMHDo';
+                    const res = await fetch('https://api.telegram.org/bot' + BOT_TOKEN + '/getFile?file_id=' + encodeURIComponent(video.fileId));
+                    const data = await res.json();
+                    loaderEl.classList.add('hidden');
 
-                    if (validUrls.length > 0) {
-                        loaderEl.classList.add('hidden');
+                    if (data.ok && data.result && data.result.file_path) {
+                        // File <= 20MB: phát trực tiếp 100% qua Telegram Bot CDN
+                        const tgStream = 'https://api.telegram.org/file/bot' + BOT_TOKEN + '/' + data.result.file_path;
+                        video.streamUrl = tgStream;
                         videoEl.classList.remove('hidden');
-
-                        let curPart = 0;
-                        const totalParts = validUrls.length;
-
-                        // Tạo hoặc cập nhật thanh nút chọn phân đoạn
-                        let partContainer = document.getElementById('studentVpPartBar');
-                        if (!partContainer) {
-                            partContainer = document.createElement('div');
-                            partContainer.id = 'studentVpPartBar';
-                            partContainer.className = 'px-3 py-2 bg-slate-900 border-b border-slate-800 flex items-center gap-1.5 overflow-x-auto text-xs shrink-0 select-none';
-                            const topHeader = modal.querySelector('.h-12, .h-14');
-                            if (topHeader && topHeader.parentNode) {
-                                topHeader.insertAdjacentElement('afterend', partContainer);
-                            }
-                        }
-
-                        const updatePartUI = () => {
-                            if (totalParts <= 1) {
-                                partContainer.classList.add('hidden');
-                                return;
-                            }
-                            partContainer.classList.remove('hidden');
-                            partContainer.innerHTML = '<span class="text-slate-400 font-bold mr-1 shrink-0"><i class="fa-solid fa-layer-group text-purple-400 mr-1"></i>Phân đoạn (' + (curPart + 1) + '/' + totalParts + '):</span>' +
-                                validUrls.map((_, idx) => {
-                                    const active = idx === curPart;
-                                    return '<button type="button" class="px-2.5 py-1 rounded-lg font-extrabold text-xs transition cursor-pointer shrink-0 ' + 
-                                        (active ? 'bg-purple-600 text-white shadow-md shadow-purple-600/30 ring-1 ring-purple-400' : 'bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white') + 
-                                        '" onclick="window.__studentPlayPart(' + idx + ')">Phần ' + (idx + 1) + (active ? ' ▶' : '') + '</button>';
-                                }).join('');
-
-                            const subEl = document.getElementById('studentVpSubtitle');
-                            if (subEl) {
-                                subEl.textContent = totalParts > 1 ? ('Đang phát: Phần ' + (curPart + 1) + '/' + totalParts + ' • Tự động nối tiếp') : 'Phát trực tiếp từ Kho Lưu Trữ Telegram';
-                            }
-                        };
-
-                        let preloader = null;
-                        const preloadNext = (nextIdx) => {
-                            if (nextIdx < validUrls.length) {
-                                if (!preloader) {
-                                    preloader = document.createElement('video');
-                                    preloader.preload = 'auto';
-                                }
-                                preloader.src = validUrls[nextIdx];
-                                preloader.load();
-                            }
-                        };
-
-                        window.__studentPlayPart = (partIdx) => {
-                            if (partIdx >= 0 && partIdx < validUrls.length) {
-                                curPart = partIdx;
-                                videoEl.src = validUrls[curPart];
-                                videoEl.play().catch(() => {});
-                                updatePartUI();
-                                preloadNext(curPart + 1);
-                            }
-                        };
-
-                        // Tự động nối tiếp phân đoạn kế tiếp khi phân đoạn hiện tại phát xong
-                        videoEl.onended = () => {
-                            if (curPart + 1 < validUrls.length) {
-                                window.__studentPlayPart(curPart + 1);
-                            }
-                        };
-
-                        // Khởi động phát phần 1
-                        window.__studentPlayPart(0);
+                        videoEl.src = tgStream;
+                        videoEl.play().catch(() => {});
                         return;
                     }
                 } catch(err) {
-                    loaderEl.classList.add('hidden');
-                    console.warn("Lỗi phân giải luồng video Telegram:", err);
-                }
-            } catch(err) {
                     loaderEl.classList.add('hidden');
                     console.warn("Lỗi phân giải luồng video Telegram:", err);
                 }
@@ -4119,7 +4077,7 @@
             if (tmeBtn) tmeBtn.href = video.tmeUrl || webUrl;
         };
 
-        window.__studentPlayPart = null; const _pb = document.getElementById('studentVpPartBar'); if (_pb) _pb.classList.add('hidden'); window.closeStudentVideoPlayer = (fromHistoryPop = false) => {
+        window.closeStudentVideoPlayer = (fromHistoryPop = false) => {
             const modal = document.getElementById('studentVideoPlayerModal');
             if (modal) {
                 modal.classList.add('hidden');
@@ -4288,7 +4246,7 @@
 
             // --- 1. GIAO DIỆN LƯỚI (GRID) ---
             if (currentViewMode === 'grid') {
-                container.className = "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-5 pb-3 md:pb-6";
+                container.className = "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-5 pb-28 sm:pb-32 md:pb-8";
                 
                 visibleExams.forEach(exam => {
                     const res = studentResultsMap[exam.id]; 
@@ -4400,7 +4358,7 @@
             
             // --- 2. GIAO DIỆN DANH SÁCH (LIST) ---
             else {
-                container.className = "space-y-2.5 pb-3 md:pb-6";
+                container.className = "space-y-2.5 pb-28 sm:pb-32 md:pb-8";
                 
                 visibleExams.forEach(exam => {
                     const res = studentResultsMap[exam.id]; 
@@ -11347,7 +11305,7 @@
             </div>
         </div>
     </div>
-<script src="/season-theme.js?v=71"></script>
+<script src="/season-theme.js?v=72"></script>
 <script>
 // (Theme mua da chuyen sang file dung chung o goc du an)
 window.toggleDarkMode = () => {
@@ -11634,12 +11592,12 @@ window.handleQrScanResult = function(rawText) {
     alert(`Nội dung mã QR quét được:\n${text}`);
 };
 </script>
-<script src="/sw-register.js?v=71"></script>
+<script src="/sw-register.js?v=72"></script>
 <script src="/app-installer.js?v=2"></script>
 <script src="/security-shield.js?v=4"></script>
 
 <script>
-// Tự động ẩn/hiện thanh Bottom Navigation khi lướt trang trên điện thoại
+// Tự động ẩn/hiện thanh Bottom Navigation khi lướt trang trên điện thoại (Tối ưu vuốt chạm & khoảng cuộn)
 (function initStudentAutoHidingBottomNav() {
     function setupScroll() {
         const nav = document.getElementById('studentMobileBottomNav');
@@ -11647,24 +11605,41 @@ window.handleQrScanResult = function(rawText) {
         if (!nav) return;
 
         let lastY = 0;
+        let touchStartY = 0;
         let ticking = false;
 
+        function getScrollY() {
+            const areaY = (scrollArea && scrollArea.scrollTop) || 0;
+            const winY = window.pageYOffset || document.documentElement.scrollTop || document.body.scrollTop || 0;
+            return Math.max(areaY, winY);
+        }
+
+        function showNav() {
+            nav.classList.remove('translate-y-full');
+            nav.classList.add('translate-y-0');
+        }
+
+        function hideNav() {
+            nav.classList.remove('translate-y-0');
+            nav.classList.add('translate-y-full');
+        }
+
+        window.showStudentMobileBottomNav = showNav;
+        window.hideStudentMobileBottomNav = hideNav;
+
         function handleScrollEvent() {
-            const currentY = scrollArea ? scrollArea.scrollTop : window.scrollY;
+            const currentY = getScrollY();
             const delta = currentY - lastY;
 
-            // Nếu ở gần đỉnh (<= 30px), luôn luôn hiển thị menu
-            if (currentY <= 30) {
-                nav.classList.remove('translate-y-full');
-                nav.classList.add('translate-y-0');
-            } else if (delta > 8 && currentY > 60) {
-                // Lướt ngón tay lên trên (cuộn xuống đọc nội dung) -> Ẩn menu để tối ưu không gian
-                nav.classList.remove('translate-y-0');
-                nav.classList.add('translate-y-full');
+            // Nếu ở gần đỉnh (<= 40px), luôn luôn hiển thị menu
+            if (currentY <= 40) {
+                showNav();
+            } else if (delta > 8 && currentY > 50) {
+                // Lướt ngón tay lên trên (cuộn xuống xem bài tập) -> Ẩn menu để bài tập rộng thoáng
+                hideNav();
             } else if (delta < -8) {
-                // Lướt xuống (cuộn lên trên để điều hướng) -> Hiện lại menu ngay lập tức
-                nav.classList.remove('translate-y-full');
-                nav.classList.add('translate-y-0');
+                // Lướt ngón tay xuống (cuộn lên trên) -> Hiện lại menu ngay lập tức
+                showNav();
             }
 
             lastY = Math.max(0, currentY);
@@ -11682,6 +11657,31 @@ window.handleQrScanResult = function(rawText) {
             scrollArea.addEventListener('scroll', onScroll, { passive: true });
         }
         window.addEventListener('scroll', onScroll, { passive: true });
+        document.addEventListener('scroll', onScroll, { passive: true });
+
+        // Nhận diện vuốt chạm màn hình cảm ứng mượt mà nhạy bén 60fps trên điện thoại
+        window.addEventListener('touchstart', (e) => {
+            if (e.touches && e.touches.length === 1) {
+                touchStartY = e.touches[0].clientY;
+            }
+        }, { passive: true });
+
+        window.addEventListener('touchmove', (e) => {
+            if (!e.touches || e.touches.length !== 1) return;
+            const currentTouchY = e.touches[0].clientY;
+            const diff = touchStartY - currentTouchY;
+            const scrollY = getScrollY();
+
+            if (scrollY <= 40) {
+                showNav();
+            } else if (diff > 12) {
+                // Vuốt ngón tay lên trên -> Ẩn menu
+                hideNav();
+            } else if (diff < -12) {
+                // Vuốt ngón tay xuống -> Hiện menu
+                showNav();
+            }
+        }, { passive: true });
     }
 
     if (document.readyState === 'loading') {

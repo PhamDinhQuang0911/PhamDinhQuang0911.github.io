@@ -1362,7 +1362,7 @@
             }
         }
     </style>
-    <link rel="stylesheet" href="/styles.css?v=71">
+    <link rel="stylesheet" href="/styles.css?v=72">
     <!-- Hls.js Library: HLS Video Streaming cho video bài giảng không giới hạn dung lượng -->
     <script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
 
@@ -6235,11 +6235,6 @@
         };
 
         window.addEventListener('popstate', (e) => {
-            const teacherVidModal = document.getElementById('teacherVideoPlayerModal');
-            if (teacherVidModal && !teacherVidModal.classList.contains('hidden')) {
-                window.closeTeacherVideoPlayer(true);
-                return;
-            }
             // Khi người dùng vuốt cạnh màn hình để Back trên thiết bị di động:
             // Ưu tiên đóng các bottom sheet / modal đang mở thay vì nhảy view đột ngột
             const examActionSheet = document.getElementById('mobileExamActionBottomSheet');
@@ -10008,7 +10003,7 @@
             videoEl.pause();
             videoEl.src = '';
             iframeEl.src = 'about:blank';
-            modal.classList.remove('hidden'); try { history.pushState({ modal: 'teacher_video_player' }, ''); } catch(_) {}
+            modal.classList.remove('hidden');
 
             const rawUrl = video.streamUrl || video.url || video.tmeUrl || '';
 
@@ -10083,114 +10078,70 @@
                 return;
             }
 
-            // 3. Direct HTML5 video URL (.mp4 / .webm)
-            if (/\.(mp4|webm|mov)(\?.*)?$/i.test(rawUrl) || rawUrl.includes('r2.dev') || rawUrl.includes('workers.dev')) {
+            // 3. Direct Video Stream (.mp4 / .webm / Cloudflare R2 Edge CDN - Phát trực tiếp 100%, tua mượt mọi vị trí)
+            const directVideoUrl = video.r2Url || (rawUrl && (rawUrl.includes('r2.dev') || /\.(mp4|webm|mov)(\?.*)?$/i.test(rawUrl)) ? rawUrl : '');
+            if (directVideoUrl) {
+                loaderEl.classList.remove('hidden');
                 videoEl.classList.remove('hidden');
-                videoEl.src = rawUrl;
+                videoEl.src = directVideoUrl;
+                const hideLoader = () => { loaderEl.classList.add('hidden'); };
+                videoEl.onloadedmetadata = hideLoader;
+                videoEl.oncanplay = hideLoader;
+                videoEl.onplaying = hideLoader;
                 videoEl.play().catch(() => {});
                 return;
             }
 
-            // 4. Telegram video Multi-Part (Phát nối tiếp tự động không độ trễ)
-            const chunkList = (video.chunks && video.chunks.length > 0) ? video.chunks : (video.fileId ? [{ index: 0, fileId: video.fileId }] : []);
-            if (chunkList.length > 0) {
+            // 3.5. Tự động kiểm tra luồng video Chunked / R2 CDN lưu trong Supabase
+            if (video.isChunked || (video.chunkCount && video.chunkCount > 1) || (video.videoId && video.videoId.startsWith('hls_video_'))) {
                 loaderEl.classList.remove('hidden');
                 try {
-                    const BOT_TOKENS = [
-                        '8662985318:AAHIweMUW706XKIXFi-bFisaFoE7hZaMHDo',
-                        '8662985318:AAHIweMUW706XKIXFi-bFisaFoE7hZaMHDo'
-                    ];
-
-                    const resolveUrl = async (chunk, idx) => {
-                        const token = BOT_TOKENS[idx % BOT_TOKENS.length];
-                        const res = await fetch('https://api.telegram.org/bot' + token + '/getFile?file_id=' + encodeURIComponent(chunk.fileId));
-                        const data = await res.json();
-                        if (data.ok && data.result && data.result.file_path) {
-                            return 'https://api.telegram.org/file/bot' + token + '/' + data.result.file_path;
+                    const cfgId = video.videoId || `hls_video_${video.id}`;
+                    const sbRes = await fetch(`https://cuniqanbumcrqcdlcvad.supabase.co/rest/v1/configurations?id=eq.${encodeURIComponent(cfgId)}&select=raw_data`, {
+                        headers: {
+                            apikey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN1bmlxYW5idW1jcnFjZGxjdmFkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg5NDE4MTMsImV4cCI6MjEwNDUxNzgxM30.MWSv1QKVlQ9r-8r0hkrqWsmm75hULq_VjPCbTqXDe-o',
+                            Authorization: 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN1bmlxYW5idW1jcnFjZGxjdmFkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg5NDE4MTMsImV4cCI6MjEwNDUxNzgxM30.MWSv1QKVlQ9r-8r0hkrqWsmm75hULq_VjPCbTqXDe-o'
                         }
-                        return null;
-                    };
+                    });
+                    if (sbRes.ok) {
+                        const rows = await sbRes.json();
+                        const rd = rows?.[0]?.raw_data;
+                        const fastUrl = rd?.r2Url || rd?.url || rd?.streamUrl;
+                        if (fastUrl && (fastUrl.includes('r2.dev') || /\.(mp4|webm)(\?.*)?$/i.test(fastUrl))) {
+                            videoEl.classList.remove('hidden');
+                            videoEl.src = fastUrl;
+                            const hideL = () => { loaderEl.classList.add('hidden'); };
+                            videoEl.onloadedmetadata = hideL;
+                            videoEl.oncanplay = hideL;
+                            videoEl.onplaying = hideL;
+                            videoEl.play().catch(() => {});
+                            return;
+                        }
+                    }
+                } catch (e) {
+                    console.warn("Lỗi kiểm tra stream chunked:", e);
+                }
+            }
 
-                    const resolvedUrls = await Promise.all(chunkList.map((c, i) => resolveUrl(c, i)));
-                    const validUrls = resolvedUrls.filter(Boolean);
+            // 4. Telegram video
+            if (video.fileId) {
+                loaderEl.classList.remove('hidden');
+                try {
+                    const BOT_TOKEN = '8662985318:AAHIweMUW706XKIXFi-bFisaFoE7hZaMHDo';
+                    const res = await fetch('https://api.telegram.org/bot' + BOT_TOKEN + '/getFile?file_id=' + encodeURIComponent(video.fileId));
+                    const data = await res.json();
+                    loaderEl.classList.add('hidden');
 
-                    if (validUrls.length > 0) {
-                        loaderEl.classList.add('hidden');
+                    if (data.ok && data.result && data.result.file_path) {
+                        // File <= 20MB: phát trực tiếp 100% qua Telegram Bot CDN
+                        const tgStream = 'https://api.telegram.org/file/bot' + BOT_TOKEN + '/' + data.result.file_path;
+                        video.streamUrl = tgStream;
                         videoEl.classList.remove('hidden');
-
-                        let curPart = 0;
-                        const totalParts = validUrls.length;
-
-                        // Tạo hoặc cập nhật thanh nút chọn phân đoạn
-                        let partContainer = document.getElementById('teacherVpPartBar');
-                        if (!partContainer) {
-                            partContainer = document.createElement('div');
-                            partContainer.id = 'teacherVpPartBar';
-                            partContainer.className = 'px-3 py-2 bg-slate-900 border-b border-slate-800 flex items-center gap-1.5 overflow-x-auto text-xs shrink-0 select-none';
-                            const topHeader = modal.querySelector('.h-12, .h-14');
-                            if (topHeader && topHeader.parentNode) {
-                                topHeader.insertAdjacentElement('afterend', partContainer);
-                            }
-                        }
-
-                        const updatePartUI = () => {
-                            if (totalParts <= 1) {
-                                partContainer.classList.add('hidden');
-                                return;
-                            }
-                            partContainer.classList.remove('hidden');
-                            partContainer.innerHTML = '<span class="text-slate-400 font-bold mr-1 shrink-0"><i class="fa-solid fa-layer-group text-purple-400 mr-1"></i>Phân đoạn (' + (curPart + 1) + '/' + totalParts + '):</span>' +
-                                validUrls.map((_, idx) => {
-                                    const active = idx === curPart;
-                                    return '<button type="button" class="px-2.5 py-1 rounded-lg font-extrabold text-xs transition cursor-pointer shrink-0 ' + 
-                                        (active ? 'bg-purple-600 text-white shadow-md shadow-purple-600/30 ring-1 ring-purple-400' : 'bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white') + 
-                                        '" onclick="window.__teacherPlayPart(' + idx + ')">Phần ' + (idx + 1) + (active ? ' ▶' : '') + '</button>';
-                                }).join('');
-
-                            const subEl = document.getElementById('teacherVpSubtitle');
-                            if (subEl) {
-                                subEl.textContent = totalParts > 1 ? ('Đang phát: Phần ' + (curPart + 1) + '/' + totalParts + ' • Tự động nối tiếp') : 'Phát trực tiếp từ Kho Lưu Trữ Telegram';
-                            }
-                        };
-
-                        let preloader = null;
-                        const preloadNext = (nextIdx) => {
-                            if (nextIdx < validUrls.length) {
-                                if (!preloader) {
-                                    preloader = document.createElement('video');
-                                    preloader.preload = 'auto';
-                                }
-                                preloader.src = validUrls[nextIdx];
-                                preloader.load();
-                            }
-                        };
-
-                        window.__teacherPlayPart = (partIdx) => {
-                            if (partIdx >= 0 && partIdx < validUrls.length) {
-                                curPart = partIdx;
-                                videoEl.src = validUrls[curPart];
-                                videoEl.play().catch(() => {});
-                                updatePartUI();
-                                preloadNext(curPart + 1);
-                            }
-                        };
-
-                        // Tự động nối tiếp phân đoạn kế tiếp khi phân đoạn hiện tại phát xong
-                        videoEl.onended = () => {
-                            if (curPart + 1 < validUrls.length) {
-                                window.__teacherPlayPart(curPart + 1);
-                            }
-                        };
-
-                        // Khởi động phát phần 1
-                        window.__teacherPlayPart(0);
+                        videoEl.src = tgStream;
+                        videoEl.play().catch(() => {});
                         return;
                     }
                 } catch(err) {
-                    loaderEl.classList.add('hidden');
-                    console.warn("Lỗi phân giải luồng video Telegram:", err);
-                }
-            } catch(err) {
                     loaderEl.classList.add('hidden');
                     console.warn("Lỗi phân giải luồng video Telegram:", err);
                 }
@@ -10216,7 +10167,7 @@
             if (tmeBtn) tmeBtn.href = video.tmeUrl || webUrl;
         };
 
-        window.__teacherPlayPart = null; const _pb = document.getElementById('teacherVpPartBar'); if (_pb) _pb.classList.add('hidden'); window.closeTeacherVideoPlayer = function(fromHistoryPop) {
+        window.closeTeacherVideoPlayer = function() {
             const modal = document.getElementById('teacherVideoPlayerModal');
             if (modal) {
                 modal.classList.add('hidden');
@@ -10232,9 +10183,6 @@
             if (window._currentTeacherHlsBlob) {
                 URL.revokeObjectURL(window._currentTeacherHlsBlob);
                 window._currentTeacherHlsBlob = null;
-            }
-            if (!fromHistoryPop && history.state && history.state.modal === 'teacher_video_player') {
-                try { history.back(); } catch(_) {}
             }
         };
 
@@ -23809,8 +23757,8 @@ window.deleteTag = async (id) => {
     </div>
 </div>
 
-<script src="/sw-register.js?v=71"></script>
-<script src="/season-theme.js?v=71"></script>
+<script src="/sw-register.js?v=72"></script>
+<script src="/season-theme.js?v=72"></script>
 <script src="/app-installer.js?v=2"></script>
 
 <script>
