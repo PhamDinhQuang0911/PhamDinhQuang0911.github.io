@@ -2088,9 +2088,16 @@
                                 <span class="text-xs font-extrabold text-slate-600 uppercase tracking-wider">Danh sách bài giảng</span>
                                 <span id="classLessonsCount" class="badge-season text-[11px] font-extrabold px-2.5 py-0.5 rounded-lg">0 bài giảng</span>
                             </div>
-                            <select id="filterClassLessonChapter" onchange="window.filterRenderedClassLessons()" class="px-3 py-1.5 border border-gray-200 rounded-xl text-xs font-bold text-gray-700 bg-gray-50 outline-none cursor-pointer max-w-full">
-                                <option value="all">📚 Tất cả chương / chuyên đề</option>
-                            </select>
+                            <div class="flex items-center gap-2 flex-wrap">
+                                <button id="teacherLessonDateFilterBtn" type="button" onclick="window.openLessonCalendarPicker('teacher', event)" class="px-3 py-1.5 border border-gray-200 rounded-xl text-xs font-bold text-gray-700 bg-gray-50 hover:bg-gray-100 transition flex items-center gap-1.5 cursor-pointer shadow-2xs">
+                                    <i class="fa-regular fa-calendar-days text-amber-600"></i>
+                                    <span id="teacherLessonDateFilterLabel">Tất cả ngày</span>
+                                    <i class="fa-solid fa-chevron-down text-[10px] opacity-60"></i>
+                                </button>
+                                <select id="filterClassLessonChapter" onchange="window.filterRenderedClassLessons()" class="px-3 py-1.5 border border-gray-200 rounded-xl text-xs font-bold text-gray-700 bg-gray-50 outline-none cursor-pointer max-w-full">
+                                    <option value="all">📚 Tất cả chương / chuyên đề</option>
+                                </select>
+                            </div>
                         </div>
                         <div id="classLessonsList" class="space-y-6"></div>
                         <div id="emptyClassLessonsMsg" class="flex flex-col items-center justify-center py-12 text-slate-500">
@@ -9648,6 +9655,276 @@
             }
         };
 
+        // =========================================================
+        // BỘ LỌC THỜI GIAN THEO NGÀY CHO BÀI GIẢNG DẠNG LỊCH (TEACHER)
+        // =========================================================
+        window.teacherLessonSelectedDate = null;
+        if (!window._calendarState) {
+            window._calendarState = {
+                year: new Date().getFullYear(),
+                month: new Date().getMonth(),
+                role: 'teacher'
+            };
+        }
+
+        if (typeof getLessonDateStr !== 'function') {
+            function getLessonDateStr(l) {
+                if (!l) return '';
+                if (l.lessonDate) return String(l.lessonDate).slice(0, 10);
+                if (l.updatedAt) {
+                    try {
+                        const d = new Date(l.updatedAt);
+                        const y = d.getFullYear();
+                        const m = String(d.getMonth() + 1).padStart(2, '0');
+                        const day = String(d.getDate()).padStart(2, '0');
+                        return `${y}-${m}-${day}`;
+                    } catch (_) {}
+                }
+                if (l.createdAt) {
+                    try {
+                        const d = new Date(l.createdAt);
+                        const y = d.getFullYear();
+                        const m = String(d.getMonth() + 1).padStart(2, '0');
+                        const day = String(d.getDate()).padStart(2, '0');
+                        return `${y}-${m}-${day}`;
+                    } catch (_) {}
+                }
+                return '';
+            }
+            window.getLessonDateStr = getLessonDateStr;
+        }
+
+        if (typeof window.openLessonCalendarPicker !== 'function') {
+            window.openLessonCalendarPicker = (role = 'teacher', event) => {
+                if (event) event.stopPropagation();
+                window._calendarState.role = role;
+                const curDate = (role === 'teacher') ? window.teacherLessonSelectedDate : window.studentLessonSelectedDate;
+                if (curDate) {
+                    const parts = curDate.split('-').map(Number);
+                    window._calendarState.year = parts[0];
+                    window._calendarState.month = parts[1] - 1;
+                } else {
+                    const now = new Date();
+                    window._calendarState.year = now.getFullYear();
+                    window._calendarState.month = now.getMonth();
+                }
+                window.renderLessonCalendarPickerModal();
+            };
+
+            window.renderLessonCalendarPickerModal = () => {
+                let modal = document.getElementById('qmathLessonCalendarModal');
+                if (!modal) {
+                    modal = document.createElement('div');
+                    modal.id = 'qmathLessonCalendarModal';
+                    modal.className = 'fixed inset-0 z-[99999] bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 animate-fade-in';
+                    modal.onclick = (e) => {
+                        if (e.target === modal) window.closeLessonCalendarPicker();
+                    };
+                    document.body.appendChild(modal);
+                }
+
+                const { year, month, role } = window._calendarState;
+                const curSelected = (role === 'teacher') ? window.teacherLessonSelectedDate : window.studentLessonSelectedDate;
+                
+                let lessons = window._activeClassLessons || [];
+                const lessonDatesSet = new Set(lessons.map(window.getLessonDateStr).filter(Boolean));
+
+                let headerTitle = 'Tất cả các bài giảng';
+                if (curSelected) {
+                    try {
+                        const [sy, sm, sd] = curSelected.split('-').map(Number);
+                        const dObj = new Date(sy, sm - 1, sd);
+                        const dayNames = ['Chủ nhật', 'Thứ hai', 'Thứ ba', 'Thứ tư', 'Thứ năm', 'Thứ sáu', 'Thứ bảy'];
+                        headerTitle = `${dayNames[dObj.getDay()]}, ${sd} tháng ${sm}`;
+                    } catch (_) {
+                        headerTitle = curSelected;
+                    }
+                }
+
+                const monthNames = [
+                    'Tháng 1', 'Tháng 2', 'Tháng 3', 'Tháng 4', 'Tháng 5', 'Tháng 6',
+                    'Tháng 7', 'Tháng 8', 'Tháng 9', 'Tháng 10', 'Tháng 11', 'Tháng 12'
+                ];
+
+                const firstDayIndex = new Date(year, month, 1).getDay();
+                const totalDaysInMonth = new Date(year, month + 1, 0).getDate();
+                const prevMonthDays = new Date(year, month, 0).getDate();
+                const todayIso = new Date().toISOString().slice(0, 10);
+
+                let daysHtml = '';
+
+                // Previous month trailing days
+                for (let i = firstDayIndex - 1; i >= 0; i--) {
+                    const dayNum = prevMonthDays - i;
+                    const prevM = month === 0 ? 12 : month;
+                    const prevY = month === 0 ? year - 1 : year;
+                    const dStr = `${prevY}-${String(prevM).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
+                    const hasLesson = lessonDatesSet.has(dStr);
+                    daysHtml += `
+                        <div onclick="window.selectLessonCalendarDate('${dStr}')" class="h-9 w-9 mx-auto flex flex-col items-center justify-center rounded-full text-slate-500 hover:text-slate-300 hover:bg-slate-800/60 cursor-pointer text-xs font-semibold relative transition">
+                            <span>${dayNum}</span>
+                            ${hasLesson ? '<span class="w-1.5 h-1.5 rounded-full bg-emerald-500 absolute bottom-0.5"></span>' : ''}
+                        </div>
+                    `;
+                }
+
+                // Current month days
+                for (let day = 1; day <= totalDaysInMonth; day++) {
+                    const dStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                    const isSelected = (curSelected === dStr);
+                    const isToday = (todayIso === dStr);
+                    const hasLesson = lessonDatesSet.has(dStr);
+
+                    let cellClass = 'h-9 w-9 mx-auto flex flex-col items-center justify-center rounded-full cursor-pointer text-xs transition relative ';
+                    if (isSelected) {
+                        cellClass += 'bg-amber-300 text-slate-950 font-black shadow-md scale-105';
+                    } else if (isToday) {
+                        cellClass += 'text-amber-400 font-extrabold border-2 border-amber-400/80 hover:bg-slate-800';
+                    } else if (hasLesson) {
+                        cellClass += 'text-white font-bold hover:bg-slate-800';
+                    } else {
+                        cellClass += 'text-slate-300 font-medium hover:bg-slate-800 hover:text-white';
+                    }
+
+                    daysHtml += `
+                        <div onclick="window.selectLessonCalendarDate('${dStr}')" class="${cellClass}" title="${dStr}${hasLesson ? ' (Có bài giảng)' : ''}">
+                            <span>${day}</span>
+                            ${(hasLesson && !isSelected) ? '<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 absolute bottom-0.5"></span>' : ''}
+                        </div>
+                    `;
+                }
+
+                // Next month leading days
+                const filledCells = firstDayIndex + totalDaysInMonth;
+                const remaining = (filledCells % 7 === 0) ? 0 : 7 - (filledCells % 7);
+                for (let day = 1; day <= remaining; day++) {
+                    const nextM = month === 11 ? 1 : month + 2;
+                    const nextY = month === 11 ? year + 1 : year;
+                    const dStr = `${nextY}-${String(nextM).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                    const hasLesson = lessonDatesSet.has(dStr);
+                    daysHtml += `
+                        <div onclick="window.selectLessonCalendarDate('${dStr}')" class="h-9 w-9 mx-auto flex flex-col items-center justify-center rounded-full text-slate-500 hover:text-slate-300 hover:bg-slate-800/60 cursor-pointer text-xs font-semibold relative transition">
+                            <span>${day}</span>
+                            ${hasLesson ? '<span class="w-1.5 h-1.5 rounded-full bg-emerald-500 absolute bottom-0.5"></span>' : ''}
+                        </div>
+                    `;
+                }
+
+                modal.innerHTML = `
+                    <div class="bg-[#18181b] border border-slate-700/80 rounded-2xl shadow-2xl p-4 sm:p-5 w-full max-w-[340px] text-white flex flex-col gap-3 font-sans select-none animate-scale-up" onclick="event.stopPropagation()">
+                        <!-- Top Selected Preview Bar -->
+                        <div class="flex items-center justify-between border-b border-slate-800 pb-2.5">
+                            <div class="flex items-center gap-2 min-w-0">
+                                <span class="w-7 h-7 rounded-lg bg-amber-400/20 text-amber-300 flex items-center justify-center text-xs shrink-0">
+                                    <i class="fa-regular fa-calendar-check"></i>
+                                </span>
+                                <span class="font-extrabold text-xs sm:text-sm text-slate-100 truncate">${headerTitle}</span>
+                            </div>
+                            <button type="button" onclick="window.closeLessonCalendarPicker()" class="w-7 h-7 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center text-xs cursor-pointer transition">
+                                <i class="fa-solid fa-xmark"></i>
+                            </button>
+                        </div>
+
+                        <!-- Month and Year Switcher -->
+                        <div class="flex items-center justify-between px-1">
+                            <span class="font-black text-sm text-slate-100 tracking-wide">${monthNames[month]} ${year}</span>
+                            <div class="flex items-center gap-1">
+                                <button type="button" onclick="window.changeCalendarMonth(-1)" class="w-7 h-7 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center justify-center text-xs cursor-pointer transition active:scale-90" title="Tháng trước">
+                                    <i class="fa-solid fa-chevron-up"></i>
+                                </button>
+                                <button type="button" onclick="window.changeCalendarMonth(1)" class="w-7 h-7 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center justify-center text-xs cursor-pointer transition active:scale-90" title="Tháng sau">
+                                    <i class="fa-solid fa-chevron-down"></i>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Weekdays Header (Su, Mo, Tu, We, Th, Fr, Sa) -->
+                        <div class="grid grid-cols-7 text-center text-slate-400 text-xs font-bold pt-1">
+                            <div>Su</div>
+                            <div>Mo</div>
+                            <div>Tu</div>
+                            <div>We</div>
+                            <div>Th</div>
+                            <div>Fr</div>
+                            <div>Sa</div>
+                        </div>
+
+                        <!-- Days Grid -->
+                        <div class="grid grid-cols-7 gap-y-1.5 gap-x-0.5 text-center">
+                            ${daysHtml}
+                        </div>
+
+                        <!-- Bottom Action Controls -->
+                        <div class="pt-2.5 border-t border-slate-800 flex items-center justify-between gap-2 mt-1">
+                            <button type="button" onclick="window.selectLessonCalendarToday()" class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer">
+                                <i class="fa-regular fa-clock text-amber-400"></i> Hôm nay
+                            </button>
+                            <button type="button" onclick="window.clearLessonCalendarFilter()" class="flex-1 px-3 py-1.5 rounded-xl bg-amber-400 hover:bg-amber-300 active:scale-95 text-slate-950 text-xs font-black transition flex items-center justify-center gap-1.5 cursor-pointer shadow-xs">
+                                <i class="fa-solid fa-rotate-left text-[11px]"></i> Tất cả ngày
+                            </button>
+                        </div>
+                    </div>
+                `;
+                modal.classList.remove('hidden');
+            };
+
+            window.closeLessonCalendarPicker = () => {
+                const modal = document.getElementById('qmathLessonCalendarModal');
+                if (modal) modal.remove();
+            };
+
+            window.changeCalendarMonth = (delta) => {
+                let { year, month } = window._calendarState;
+                month += delta;
+                if (month < 0) {
+                    month = 11;
+                    year -= 1;
+                } else if (month > 11) {
+                    month = 0;
+                    year += 1;
+                }
+                window._calendarState.year = year;
+                window._calendarState.month = month;
+                window.renderLessonCalendarPickerModal();
+            };
+
+            window.selectLessonCalendarDate = (dateStr) => {
+                window.teacherLessonSelectedDate = dateStr;
+                const label = document.getElementById('teacherLessonDateFilterLabel');
+                if (label) {
+                    const [y, m, d] = dateStr.split('-').map(Number);
+                    label.textContent = `${d}/${m}/${y}`;
+                }
+                const btn = document.getElementById('teacherLessonDateFilterBtn');
+                if (btn) {
+                    btn.classList.add('bg-amber-100', 'text-amber-900', 'border-amber-300');
+                }
+                window.closeLessonCalendarPicker();
+                if (typeof window.filterRenderedClassLessons === 'function') {
+                    window.filterRenderedClassLessons();
+                }
+            };
+
+            window.selectLessonCalendarToday = () => {
+                const todayStr = new Date().toISOString().slice(0, 10);
+                window.selectLessonCalendarDate(todayStr);
+            };
+
+            window.clearLessonCalendarFilter = () => {
+                window.teacherLessonSelectedDate = null;
+                const label = document.getElementById('teacherLessonDateFilterLabel');
+                if (label) label.textContent = 'Tất cả ngày';
+                const btn = document.getElementById('teacherLessonDateFilterBtn');
+                if (btn) {
+                    btn.classList.remove('bg-amber-100', 'text-amber-900', 'border-amber-300');
+                }
+                window.closeLessonCalendarPicker();
+                if (typeof window.filterRenderedClassLessons === 'function') {
+                    window.filterRenderedClassLessons();
+                }
+            };
+        }
+
         window.filterRenderedClassLessons = function() {
             const listEl = document.getElementById('classLessonsList');
             const countEl = document.getElementById('classLessonsCount');
@@ -9657,13 +9934,34 @@
 
             const allLessons = window._activeClassLessons || [];
             const selectedChapter = chapterSelect ? chapterSelect.value : 'all';
-            const filtered = selectedChapter === 'all'
+            let filtered = selectedChapter === 'all'
                 ? allLessons
                 : allLessons.filter(l => (l.chapter || 'Bài giảng chung').trim() === selectedChapter);
 
-            if (countEl) countEl.textContent = filtered.length + ' bài giảng';
+            if (window.teacherLessonSelectedDate) {
+                filtered = filtered.filter(l => (typeof window.getLessonDateStr === 'function' ? window.getLessonDateStr(l) : getLessonDateStr(l)) === window.teacherLessonSelectedDate);
+            }
+
+            if (countEl) {
+                const filterTag = window.teacherLessonSelectedDate ? ' (đã lọc ngày)' : '';
+                countEl.textContent = filtered.length + ' bài giảng' + filterTag;
+            }
 
             if (filtered.length === 0) {
+                if (window.teacherLessonSelectedDate) {
+                    const [y, m, d] = window.teacherLessonSelectedDate.split('-').map(Number);
+                    listEl.innerHTML = `
+                        <div class="flex flex-col items-center justify-center py-10 text-slate-500">
+                            <i class="fa-regular fa-calendar-xmark text-4xl mb-2 text-amber-500"></i>
+                            <p class="font-bold text-gray-700 text-sm">Không có bài giảng nào vào ngày ${d}/${m}/${y}.</p>
+                            <button type="button" onclick="window.clearLessonCalendarFilter()" class="mt-2.5 px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-black transition cursor-pointer shadow-xs">
+                                <i class="fa-solid fa-rotate-left mr-1"></i> Xem tất cả bài giảng
+                            </button>
+                        </div>
+                    `;
+                    if (emptyEl) emptyEl.classList.add('hidden');
+                    return;
+                }
                 listEl.innerHTML = '';
                 if (emptyEl) emptyEl.classList.remove('hidden');
                 return;
@@ -10180,129 +10478,17 @@
                 }
             }
 
-            // 4. Telegram video & Multi-part Segmented Telegram Video
-            const BOT_TOKEN = '8662985318:AAHIweMUW706XKIXFi-bFisaFoE7hZaMHDo';
-            let chunks = (Array.isArray(video.chunks) && video.chunks.length > 0) ? video.chunks : null;
-            
-            if (!chunks && (video.videoId || video.id)) {
-                try {
-                    const cfgId = video.videoId || video.id;
-                    const sbRes = await fetch('https://cuniqanbumcrqcdlcvad.supabase.co/rest/v1/configurations?id=eq.' + encodeURIComponent(cfgId) + '&select=raw_data', {
-                        headers: {
-                            apikey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN1bmlxYW5idW1jcnFjZGxjdmFkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg5NDE4MTMsImV4cCI6MjEwNDUxNzgxM30.MWSv1QKVlQ9r-8r0hkrqWsmm75hULq_VjPCbTqXDe-o',
-                            Authorization: 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN1bmlxYW5idW1jcnFjZGxjdmFkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg5NDE4MTMsImV4cCI6MjEwNDUxNzgxM30.MWSv1QKVlQ9r-8r0hkrqWsmm75hULq_VjPCbTqXDe-o'
-                        }
-                    });
-                    if (sbRes.ok) {
-                        const rows = await sbRes.json();
-                        const rd = rows?.[0]?.raw_data;
-                        if (rd && Array.isArray(rd.chunks) && rd.chunks.length > 0) {
-                            chunks = rd.chunks;
-                        }
-                    }
-                } catch (_) {}
-            }
-
-            if (chunks && chunks.length > 1) {
-                loaderEl.classList.remove('hidden');
-                try {
-                    const resolvePromises = chunks.map(async (c, idx) => {
-                        const fId = c.fileId || c.file_id;
-                        if (!fId) return null;
-                        try {
-                            const res = await fetch('https://api.telegram.org/bot' + BOT_TOKEN + '/getFile?file_id=' + encodeURIComponent(fId));
-                            const data = await res.json();
-                            if (data.ok && data.result && data.result.file_path) {
-                                return {
-                                    part: idx + 1,
-                                    durationSec: c.durationSec || 60,
-                                    url: 'https://api.telegram.org/file/bot' + BOT_TOKEN + '/' + data.result.file_path
-                                };
-                            }
-                            return null;
-                        } catch {
-                            return null;
-                        }
-                    });
-
-                    const resolvedParts = (await Promise.all(resolvePromises)).filter(Boolean);
-                    if (resolvedParts.length > 0) {
-                        loaderEl.classList.add('hidden');
-                        videoEl.classList.remove('hidden');
-
-                        let curPart = 0;
-                        const totalParts = resolvedParts.length;
-
-                        let partContainer = document.getElementById('teacherVpPartBar');
-                        if (!partContainer) {
-                            partContainer = document.createElement('div');
-                            partContainer.id = 'teacherVpPartBar';
-                            partContainer.className = 'px-3 py-2 bg-slate-900 border-b border-slate-800 flex items-center gap-1.5 overflow-x-auto text-xs shrink-0 select-none';
-                            const topHeader = modal.querySelector('.h-12, .h-14');
-                            if (topHeader && topHeader.parentNode) {
-                                topHeader.insertAdjacentElement('afterend', partContainer);
-                            }
-                        }
-                        partContainer.classList.remove('hidden');
-
-                        const preloader = new Audio();
-
-                        const updatePartUI = () => {
-                            partContainer.innerHTML = '<span class="text-slate-400 font-bold mr-1 shrink-0"><i class="fa-solid fa-layer-group text-purple-400 mr-1"></i>Phân đoạn (' + (curPart + 1) + '/' + totalParts + '):</span>' +
-                                resolvedParts.map((p, idx) => {
-                                    const active = idx === curPart;
-                                    const durText = p.durationSec ? (' (~' + Math.floor(p.durationSec / 60) + 'p' + String(p.durationSec % 60).padStart(2, '0') + 's)') : '';
-                                    return '<button type="button" class="px-2.5 py-1 rounded-lg font-extrabold text-xs transition cursor-pointer shrink-0 ' + 
-                                        (active ? 'bg-purple-600 text-white shadow-md shadow-purple-600/30 ring-1 ring-purple-400' : 'bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white') + 
-                                        '" onclick="window.__teacherPlayPart(' + idx + ')">Phần ' + (idx + 1) + durText + (active ? ' ▶' : '') + '</button>';
-                                }).join('');
-
-                            const subEl = document.getElementById('teacherVpSubtitle');
-                            if (subEl) {
-                                subEl.textContent = 'Đang phát: Phần ' + (curPart + 1) + '/' + totalParts + ' • Tự động nối tiếp';
-                            }
-
-                            const nextIdx = curPart + 1;
-                            if (nextIdx < totalParts) {
-                                preloader.src = resolvedParts[nextIdx].url;
-                                preloader.load();
-                            }
-                        };
-
-                        window.__teacherPlayPart = (partIdx) => {
-                            if (partIdx >= 0 && partIdx < resolvedParts.length) {
-                                curPart = partIdx;
-                                videoEl.src = resolvedParts[curPart].url;
-                                videoEl.play().catch(() => {});
-                                updatePartUI();
-                            }
-                        };
-
-                        videoEl.onended = () => {
-                            if (curPart + 1 < resolvedParts.length) {
-                                window.__teacherPlayPart(curPart + 1);
-                            }
-                        };
-
-                        window.__teacherPlayPart(0);
-                        return;
-                    }
-                } catch(err) {
-                    console.warn("Lỗi phân giải luồng video phân đoạn:", err);
-                }
-            }
-
-            const singlePartBar = document.getElementById('teacherVpPartBar');
-            if (singlePartBar) singlePartBar.classList.add('hidden');
-
+            // 4. Telegram video
             if (video.fileId) {
                 loaderEl.classList.remove('hidden');
                 try {
+                    const BOT_TOKEN = '8662985318:AAHIweMUW706XKIXFi-bFisaFoE7hZaMHDo';
                     const res = await fetch('https://api.telegram.org/bot' + BOT_TOKEN + '/getFile?file_id=' + encodeURIComponent(video.fileId));
                     const data = await res.json();
                     loaderEl.classList.add('hidden');
 
                     if (data.ok && data.result && data.result.file_path) {
+                        // File <= 20MB: phát trực tiếp 100% qua Telegram Bot CDN
                         const tgStream = 'https://api.telegram.org/file/bot' + BOT_TOKEN + '/' + data.result.file_path;
                         video.streamUrl = tgStream;
                         videoEl.classList.remove('hidden');
@@ -10336,9 +10522,6 @@
             if (tmeBtn) tmeBtn.href = video.tmeUrl || webUrl;
         };
 
-        window.__teacherPlayPart = null;
-        const _tpb = document.getElementById('teacherVpPartBar');
-        if (_tpb) _tpb.classList.add('hidden');
         window.closeTeacherVideoPlayer = function() {
             const modal = document.getElementById('teacherVideoPlayerModal');
             if (modal) {

@@ -14,7 +14,7 @@
     }
 
     // Tự động dọn dẹp các cache phiên bản cũ để nạp ngay bản mới v67
-    const CURRENT_VERSION = 'qmath-v75';
+    const CURRENT_VERSION = 'qmath-v76';
     if ('caches' in window) {
         caches.keys().then((keys) => {
             keys.forEach((key) => {
