@@ -10392,6 +10392,83 @@ YÊU CẦU NỘI DUNG LỜI PHÊ:
         // --- HỢP NHẤT: CẤP MÃ CCCD SỐ & NẠP VÀO NGÂN HÀNG (R2) QUA BANKSERVICE ---
         // ============================================================
         
+        // Helper kiểm tra quyền Super Admin & Quản lý ngân hàng thống nhất
+        const getBankAuthRole = async () => {
+            const user = (typeof currentUser !== 'undefined' && currentUser) || (typeof auth !== 'undefined' && auth?.currentUser) || window.auth?.currentUser;
+            const userEmail = ((user?.email) || '').toLowerCase().trim();
+            const teacherUid = user?.uid || window.currentUserUid || window.examData?.teacherId || 'anonymous_teacher';
+
+            const ROOT_SUPER_ADMINS = [
+                'phamdinhquang0911@gmail.com',
+                'phamquang09112001@gmail.com',
+                'phamngockhanh.942001@gmail.com',
+                'phamngockhanh.942002@gmail.com'
+            ];
+
+            if (userEmail && ROOT_SUPER_ADMINS.includes(userEmail)) {
+                return { isSuper: true, canManageOwnBank: true, userEmail, teacherUid };
+            }
+
+            let isSuper = false;
+            let canManageOwnBank = false;
+
+            // 1. Kiểm tra configurations/admin_roles
+            try {
+                const cfgRef = doc(db, "configurations", "admin_roles");
+                const cfgSnap = await getDoc(cfgRef);
+                if (cfgSnap.exists()) {
+                    const accounts = cfgSnap.data().accounts || [];
+                    const me = accounts.find(a => (a.email || '').toLowerCase().trim() === userEmail || (teacherUid && a.id === teacherUid));
+                    if (me) {
+                        if (me.role === 'super_admin' || me.isRoot === true) {
+                            return { isSuper: true, canManageOwnBank: true, userEmail, teacherUid };
+                        }
+                        const perms = Array.isArray(me.permissions) ? me.permissions : [];
+                        if (perms.includes('bank.manage_own') || perms.includes('bank.manage_system') || perms.includes('bank.manage') || perms.includes('bank.use_shared')) {
+                            canManageOwnBank = true;
+                        }
+                    }
+                }
+            } catch(e) {}
+
+            // 2. Kiểm tra collection admin_accounts
+            if (!isSuper && userEmail) {
+                try {
+                    const qAcc = query(collection(db, "admin_accounts"), where("email", "==", userEmail));
+                    const snapAcc = await getDocs(qAcc);
+                    if (!snapAcc.empty) {
+                        const data = snapAcc.docs[0].data();
+                        if (data.role === 'super_admin') {
+                            return { isSuper: true, canManageOwnBank: true, userEmail, teacherUid };
+                        }
+                        const perms = Array.isArray(data.permissions) ? data.permissions : [];
+                        if (perms.includes('bank.manage_own') || perms.includes('bank.manage_system') || perms.includes('bank.manage') || perms.includes('bank.use_shared')) {
+                            canManageOwnBank = true;
+                        }
+                    }
+                } catch(e) {}
+            }
+
+            // 3. Kiểm tra collection users
+            if (!isSuper && teacherUid && teacherUid !== 'anonymous_teacher') {
+                try {
+                    const uSnap = await getDoc(doc(db, "users", teacherUid));
+                    if (uSnap.exists()) {
+                        const uData = uSnap.data();
+                        if (uData.role === 'super_admin' || uData.isSuperAdmin === true) {
+                            return { isSuper: true, canManageOwnBank: true, userEmail, teacherUid };
+                        }
+                        const perms = Array.isArray(uData.permissions) ? uData.permissions : [];
+                        if (perms.includes('bank.manage_own') || perms.includes('bank.manage_system') || perms.includes('bank.manage') || perms.includes('bank.use_shared')) {
+                            canManageOwnBank = true;
+                        }
+                    }
+                } catch(e) {}
+            }
+
+            return { isSuper, canManageOwnBank, userEmail, teacherUid };
+        };
+
         // --- [MỚI] LƯU & GHI ĐÈ 1 CÂU HỎI TRỰC TIẾP VÀO NGÂN HÀNG R2 ---
         window.saveSingleQuestionToBank = async (index, listType = 'normal') => {
             // 1. Lưu dữ liệu từ form hiện tại vào bộ nhớ RAM
@@ -10408,23 +10485,8 @@ YÊU CẦU NỘI DUNG LỜI PHÊ:
                 return;
             }
 
-            const userEmail = (((window.auth && window.auth.currentUser ? window.auth.currentUser.email : '') || (typeof currentUser !== 'undefined' && currentUser?.email ? currentUser.email : ''))).toLowerCase().trim();
-            const ROOT_SUPER_ADMINS_LIST = ['phamngockhanh.942001@gmail.com', 'phamdinhquang0911@gmail.com'];
-            let isSuperSingle = ROOT_SUPER_ADMINS_LIST.includes(userEmail);
-            let canManageOwnBankSingle = isSuperSingle;
-            if (!isSuperSingle) {
-                try {
-                    const cfgSnap = await getDoc(doc(db, "configurations", "admin_roles"));
-                    if (cfgSnap.exists()) {
-                        const accs = cfgSnap.data().accounts || [];
-                        const me = accs.find(a => (a.email || '').toLowerCase().trim() === userEmail);
-                        if (me && Array.isArray(me.permissions)) {
-                            canManageOwnBankSingle = me.permissions.includes('bank.manage_own') || me.permissions.includes('bank.use_shared');
-                        }
-                    }
-                } catch(e) {}
-            }
-            if (!isSuperSingle && !canManageOwnBankSingle) {
+            const authRoleSingle = await getBankAuthRole();
+            if (!authRoleSingle.isSuper && !authRoleSingle.canManageOwnBank) {
                 window.customAlert("⛔ Thầy/Cô chưa được Super Admin cấp quyền tạo & quản lý Ngân hàng câu hỏi riêng!", "error");
                 return;
             }
@@ -10544,29 +10606,11 @@ YÊU CẦU NỘI DUNG LỜI PHÊ:
                 return;
             }
 
-            const teacherUid = currentUser?.uid || window.currentUserUid || window.examData?.teacherId || 'anonymous_teacher';
-            const userEmail = ((currentUser?.email || (window.auth && window.auth.currentUser ? window.auth.currentUser.email : '')) || '').toLowerCase().trim();
-            const ROOT_SUPER_ADMINS = ['phamngockhanh.942001@gmail.com', 'phamdinhquang0911@gmail.com'];
-            let isSuper = ROOT_SUPER_ADMINS.includes(userEmail);
-
-            let canManageOwnBank = isSuper;
-            if (!isSuper && currentUser?.uid) {
-                try {
-                    const adminSnap = await getDoc(doc(db, "admin_users", currentUser.uid));
-                    if (adminSnap.exists()) {
-                        const data = adminSnap.data();
-                        if (data.role === 'super_admin') {
-                            isSuper = true;
-                            canManageOwnBank = true;
-                        } else {
-                            const perms = Array.isArray(data.permissions) ? data.permissions : [];
-                            if (perms.includes('bank.manage_own') || perms.includes('bank.manage_system')) {
-                                canManageOwnBank = true;
-                            }
-                        }
-                    }
-                } catch(e) {}
-            }
+            const authRole = await getBankAuthRole();
+            const teacherUid = authRole.teacherUid;
+            const userEmail = authRole.userEmail;
+            const isSuper = authRole.isSuper;
+            const canManageOwnBank = authRole.canManageOwnBank;
 
             // --- KIỂM TRA PHÂN QUYỀN TẠO NGÂN HÀNG RIÊNG ---
             if (!isSuper && !canManageOwnBank) {
