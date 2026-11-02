@@ -1,0 +1,632 @@
+/* ==========================================================
+ * BỘ NHẬN DIỆN PHIẾU TÔ QUANG HỌC OMR (THUẦN JAVASCRIPT)
+ * Quy trình:
+ * 1. Chuyển ảnh xám (Grayscale conversion)
+ * 2. Tìm 12 mốc vuông đen trên các góc và viền phiếu
+ * 3. Tính ma trận phép chiếu Homography để nắn phẳng toạ độ
+ * 4. Đo độ đậm nhạt từng ô tô và nhận diện đáp án, SBD, mã đề
+ * ========================================================== */
+
+/* Bộ nhận diện phiếu tô (thuần JavaScript, không phụ thuộc thư viện).
+ *
+ * Quy trình:  ảnh xám -> tìm 12 mốc vuông đen -> phép chiếu (homography)
+ *             -> đo độ đậm từng ô -> quyết định ô được tô.
+ * Toạ độ mẫu phiếu tính bằng cm (xem templates.json), H biến (cm) -> (pixel ảnh).
+ */
+var OMR = (function () {
+  'use strict';
+
+  // ---------- ảnh xám ----------
+  function xam(img) {
+    var s = img.data, n = img.width * img.height, d = new Uint8Array(n);
+    for (var i = 0, j = 0; i < n; i++, j += 4) d[i] = (s[j] * 77 + s[j + 1] * 150 + s[j + 2] * 29) >> 8;
+    return { w: img.width, h: img.height, d: d };
+  }
+
+  // ---------- đại số ----------
+  function giai(A, b) {            // khử Gauss có chọn trụ, A: n x n
+    var n = b.length, i, j, k;
+    for (i = 0; i < n; i++) {
+      var p = i;
+      for (k = i + 1; k < n; k++) if (Math.abs(A[k][i]) > Math.abs(A[p][i])) p = k;
+      if (Math.abs(A[p][i]) < 1e-12) return null;
+      var t = A[i]; A[i] = A[p]; A[p] = t; var tb = b[i]; b[i] = b[p]; b[p] = tb;
+      for (k = i + 1; k < n; k++) {
+        var f = A[k][i] / A[i][i];
+        if (!f) continue;
+        for (j = i; j < n; j++) A[k][j] -= f * A[i][j];
+        b[k] -= f * b[i];
+      }
+    }
+    var x = new Array(n);
+    for (i = n - 1; i >= 0; i--) {
+      var s = b[i];
+      for (j = i + 1; j < n; j++) s -= A[i][j] * x[j];
+      x[i] = s / A[i][i];
+    }
+    return x;
+  }
+
+  // Phép chiếu bình phương tối thiểu từ >= 4 cặp điểm  a[i] -> b[i]
+  // (chuẩn hoá toạ độ hai phía về quanh gốc, cỡ ~1 để hệ phương trình ổn định)
+  function chuan(p) {
+    var n = p.length, mx = 0, my = 0, s = 0, i;
+    for (i = 0; i < n; i++) { mx += p[i][0]; my += p[i][1]; }
+    mx /= n; my /= n;
+    for (i = 0; i < n; i++) s += Math.hypot(p[i][0] - mx, p[i][1] - my);
+    s = s / n || 1;
+    return [mx, my, s];
+  }
+  function phepChieu(a, b) {
+    var n = a.length, i, j, k, ca = chuan(a), cb = chuan(b);
+    var M = [], v = [];
+    for (i = 0; i < 8; i++) { M.push([0, 0, 0, 0, 0, 0, 0, 0]); v.push(0); }
+    for (i = 0; i < n; i++) {
+      var x = (a[i][0] - ca[0]) / ca[2], y = (a[i][1] - ca[1]) / ca[2];
+      var u = (b[i][0] - cb[0]) / cb[2], w = (b[i][1] - cb[1]) / cb[2];
+      var r1 = [x, y, 1, 0, 0, 0, -u * x, -u * y], r2 = [0, 0, 0, x, y, 1, -w * x, -w * y];
+      for (j = 0; j < 8; j++) {
+        for (k = 0; k < 8; k++) M[j][k] += r1[j] * r1[k] + r2[j] * r2[k];
+        v[j] += r1[j] * u + r2[j] * w;
+      }
+    }
+    var h = giai(M, v);
+    if (!h) return null;
+    // H = Tb^-1 * Hn * Ta
+    var sa = 1 / ca[2], g = [h[0] * sa, h[1] * sa, h[2] - (h[0] * ca[0] + h[1] * ca[1]) * sa,
+      h[3] * sa, h[4] * sa, h[5] - (h[3] * ca[0] + h[4] * ca[1]) * sa,
+      h[6] * sa, h[7] * sa, 1 - (h[6] * ca[0] + h[7] * ca[1]) * sa];
+    var H = [cb[2] * g[0] + cb[0] * g[6], cb[2] * g[1] + cb[0] * g[7], cb[2] * g[2] + cb[0] * g[8],
+      cb[2] * g[3] + cb[1] * g[6], cb[2] * g[4] + cb[1] * g[7], cb[2] * g[5] + cb[1] * g[8], g[6], g[7], g[8]];
+    if (Math.abs(H[8]) < 1e-9) return null;
+    for (i = 0; i < 9; i++) H[i] /= g[8];
+    return H;
+  }
+
+  function ap(H, x, y) {
+    var w = H[6] * x + H[7] * y + H[8];
+    return [(H[0] * x + H[1] * y + H[2]) / w, (H[3] * x + H[4] * y + H[5]) / w];
+  }
+
+  function tiLe(H, k) { return [H[0] * k, H[1] * k, H[2] * k, H[3] * k, H[4] * k, H[5] * k, H[6], H[7], H[8]]; }
+
+  // ---------- tìm các khối vuông đen ----------
+  function timKhoi(g) {
+    var w = g.w, h = g.h, d = g.d, W = w + 1, x, y;
+    var I = new Int32Array(W * (h + 1));
+    for (y = 0; y < h; y++) {
+      var rs = 0, o = (y + 1) * W, op = y * W, od = y * w;
+      for (x = 0; x < w; x++) { rs += d[od + x]; I[o + x + 1] = I[op + x + 1] + rs; }
+    }
+    var s = Math.max(6, Math.round(Math.min(w, h) / 14));
+    var bin = new Uint8Array(w * h);
+    for (y = 0; y < h; y++) {
+      var y0 = y - s < 0 ? 0 : y - s, y1 = y + s + 1 > h ? h : y + s + 1;
+      for (x = 0; x < w; x++) {
+        var x0 = x - s < 0 ? 0 : x - s, x1 = x + s + 1 > w ? w : x + s + 1;
+        var tong = I[y1 * W + x1] - I[y0 * W + x1] - I[y1 * W + x0] + I[y0 * W + x0];
+        if (d[y * w + x] * (x1 - x0) * (y1 - y0) * 100 < tong * 68) bin[y * w + x] = 1;
+      }
+    }
+    var ds = [], st = new Int32Array(w * h), lon = Math.min(w, h) / 7;
+    for (var p0 = 0; p0 < w * h; p0++) {
+      if (bin[p0] !== 1) continue;
+      var sp = 0, dt = 0, sx = 0, sy = 0, mnx = w, mxx = 0, mny = h, mxy = 0;
+      st[sp++] = p0; bin[p0] = 2;
+      while (sp) {
+        var p = st[--sp], px = p % w, py = (p - px) / w;
+        dt++; sx += px; sy += py;
+        if (px < mnx) mnx = px; if (px > mxx) mxx = px; if (py < mny) mny = py; if (py > mxy) mxy = py;
+        if (px > 0 && bin[p - 1] === 1) { bin[p - 1] = 2; st[sp++] = p - 1; }
+        if (px < w - 1 && bin[p + 1] === 1) { bin[p + 1] = 2; st[sp++] = p + 1; }
+        if (py > 0 && bin[p - w] === 1) { bin[p - w] = 2; st[sp++] = p - w; }
+        if (py < h - 1 && bin[p + w] === 1) { bin[p + w] = 2; st[sp++] = p + w; }
+      }
+      var bw = mxx - mnx + 1, bh = mxy - mny + 1;
+      if (dt < 12 || bw < 4 || bh < 4 || bw > lon || bh > lon) continue;
+      if (bw > bh * 1.9 || bh > bw * 1.9) continue;
+      if (dt < bw * bh * 0.5) continue;
+      ds.push({ x: sx / dt, y: sy / dt, c: Math.sqrt(dt) });
+    }
+    return ds;
+  }
+
+  // ---------- tìm mốc trên ảnh (nên dùng ảnh đã thu nhỏ ~700px) ----------
+  // Thứ tự mốc trong mẫu: TL, TR, BR, BL, ML, MR, T1, T2, M1, M2, B1, B2.
+  // Thử từng cặp khối làm (TL, TR); cặp đúng phải có T1, T2 ở đúng chỗ, rồi lần ra
+  // các mốc còn lại. Cách này không phụ thuộc nền bàn hay chiều xoay của phiếu.
+  function timMoc(g, tpl) {
+    var ks = timKhoi(g), N = ks.length;
+    if (N < 9) return null;
+    var O = 20, gw = Math.ceil(g.w / O), gh = Math.ceil(g.h / O), luoi = new Array(gw * gh), i, j;
+    for (i = 0; i < N; i++) {
+      var o = ((ks[i].y / O) | 0) * gw + ((ks[i].x / O) | 0);
+      (luoi[o] || (luoi[o] = [])).push(ks[i]);
+    }
+    function gan(x, y, dung, canh) {      // khối gần (x,y) nhất trong bán kính, cỡ hợp với cạnh mốc
+      var x0 = Math.max(0, ((x - dung) / O) | 0), x1 = Math.min(gw - 1, ((x + dung) / O) | 0);
+      var y0 = Math.max(0, ((y - dung) / O) | 0), y1 = Math.min(gh - 1, ((y + dung) / O) | 0), tot = null, td = dung;
+      if (x < -dung || y < -dung) return null;
+      for (var gy = y0; gy <= y1; gy++) for (var gx = x0; gx <= x1; gx++) {
+        var l = luoi[gy * gw + gx];
+        if (!l) continue;
+        for (var t = 0; t < l.length; t++) {
+          var k = l[t], d = Math.hypot(k.x - x, k.y - y);
+          if (d < td && k.c > canh * 0.5 && k.c < canh * 1.9) { td = d; tot = k; }
+        }
+      }
+      return tot;
+    }
+    // mốc nhỏ hàng trên (T1, T2 – phiếu 28-3 / 24-4 chỉ có một ô T ở giữa) dùng để xác nhận cặp (TL, TR)
+    var M = tpl.moc, TL = M[0], TR = M[1], nM = M.length, dsT = [];
+    for (i = 0; i < nM; i++) if (/^T\d/.test(M[i].ten || '')) dsT.push(i);
+    if (!dsT.length) dsT = [6, 7];
+    var bx = TR.x - TL.x, by = TR.y - TL.y, b2 = bx * bx + by * by, day = Math.sqrt(b2);
+    var dMin = 0.28 * Math.min(g.w, g.h), tot = null;
+
+    // Các cặp khối có thể là (mốc trái, mốc phải) của một hàng: phải song song với TL-TR
+    // và dài xấp xỉ. duL/duR: hàm cho biết một khối có nằm trong vùng dự đoán không
+    // (trả về khoảng lệch, hoặc -1). Trả về tối đa 4 cặp gần dự đoán nhất.
+    function capHang(mL, duL, duR, pxcm, ux, uy, d, gL, gH, gG) {
+      var us = [[], []], e, q, r, ds = [];
+      for (e = 0; e < N; e++) {
+        q = ks[e];
+        if (q.c > mL.s * pxcm * 0.5 && q.c < mL.s * pxcm * 1.9) {
+          r = duL(q); if (r >= 0) us[0].push([q, r]);
+          r = duR(q); if (r >= 0) us[1].push([q, r]);
+        }
+      }
+      for (e = 0; e < us[0].length; e++) for (q = 0; q < us[1].length; q++) {
+        var vx = us[1][q][0].x - us[0][e][0].x, vy = us[1][q][0].y - us[0][e][0].y, dv = Math.hypot(vx, vy);
+        if (dv < d * gL || dv > d * gH) continue;
+        if (Math.abs(vx * uy - vy * ux) > gG * dv * d) continue;
+        ds.push([us[0][e][0], us[1][q][0], us[0][e][1] + us[1][q][1]]);
+      }
+      ds.sort(function (p, q2) { return p[2] - q2[2]; });
+      return ds.slice(0, 6);
+    }
+    function tron(c, r) { return function (q) { var dq = Math.hypot(q.x - c[0], q.y - c[1]); return dq < r ? dq : -1; }; }
+    // khối nằm trên đường thẳng P->Q kéo dài tới hệ số kk (phép chiếu giữ tính thẳng hàng)
+    function doc(P, Q, kk, pxcm) {
+      var dx = Q.x - P.x, dy = Q.y - P.y, L = Math.hypot(dx, dy), cx = P.x + dx * kk, cy = P.y + dy * kk;
+      return function (q) {
+        if (Math.abs((q.x - P.x) * dy - (q.y - P.y) * dx) / L > 0.45 * pxcm) return -1;
+        var dq = Math.hypot(q.x - cx, q.y - cy);
+        return dq < 0.17 * L * kk ? dq : -1;
+      };
+    }
+    function diem(m, k) { return [[m.x, m.y], [k.x, k.y]]; }
+    function chieu(cap) { return phepChieu(cap.map(function (c) { return c[0]; }), cap.map(function (c) { return c[1]; })); }
+
+    for (i = 0; i < N; i++) for (j = 0; j < N; j++) {
+      if (i === j) continue;
+      var A = ks[i], B = ks[j], ux = B.x - A.x, uy = B.y - A.y, d = Math.hypot(ux, uy);
+      if (d < dMin) continue;
+      var pxcm = d / day, cg = TL.s * pxcm;
+      if (A.c < cg * 0.55 || A.c > cg * 1.8 || B.c < cg * 0.55 || B.c > cg * 1.8) continue;
+      // phép đồng dạng (số phức): z = (B-A)/(TR-TL)
+      var zr = (ux * bx + uy * by) / b2, zi = (uy * bx - ux * by) / b2;
+      var cap0 = [diem(TL, A), diem(TR, B)], ok = true, t, m, k, p;
+      for (var ti = 0; ti < dsT.length && ok; ti++) {   // T1, T2 phải có ở đúng chỗ
+        m = M[dsT[ti]]; p = [A.x + zr * (m.x - TL.x) - zi * (m.y - TL.y), A.y + zi * (m.x - TL.x) + zr * (m.y - TL.y)];
+        k = gan(p[0], p[1], (0.38 + 0.13 * Math.abs(m.y - TL.y)) * pxcm, m.s * pxcm);
+        if (k) cap0.push(diem(m, k)); else ok = false;
+      }
+      if (!ok) continue;
+      // vùng tìm ML/MR theo phép đồng dạng: ảnh xoay ngược + phối cảnh mạnh lệch tới ~15% khoảng cách (hệ số 0,1 từng trượt);
+      // ứng viên sai đều bị loại ở bước khớp toàn bộ mốc bên dưới nên nới rộng chỉ tốn thêm chút tính toán
+      var rM = (0.45 + 0.13 * Math.abs(M[4].y - TL.y)) * pxcm, pL, pR;
+      m = M[4]; pL = [A.x + zr * (m.x - TL.x) - zi * (m.y - TL.y), A.y + zi * (m.x - TL.x) + zr * (m.y - TL.y)];
+      m = M[5]; pR = [A.x + zr * (m.x - TL.x) - zi * (m.y - TL.y), A.y + zi * (m.x - TL.x) + zr * (m.y - TL.y)];
+      var cM = capHang(M[4], tron(pL, rM), tron(pR, rM), pxcm, ux, uy, d, 0.74, 1.35, 0.14);
+      for (var a = 0; a < cM.length; a++) {
+        var kk = (M[3].y - TL.y) / (M[4].y - TL.y);
+        var cB = capHang(M[3], doc(A, cM[a][0], kk, pxcm), doc(B, cM[a][1], kk, pxcm), pxcm, ux, uy, d, 0.62, 1.45, 0.16);
+        for (var c = 0; c < cB.length; c++) {
+          var cap = cap0.concat([diem(M[4], cM[a][0]), diem(M[5], cM[a][1]), diem(M[3], cB[c][0]), diem(M[2], cB[c][1])]);
+          var H = chieu(cap);
+          if (!H) continue;
+          // khớp lại mọi mốc theo phép chiếu, sai lệch cho phép nhỏ (mốc góc + hàng trên chặt hơn); thiếu tối đa 2 mốc
+          var nk = 0, lech = 0, cap2 = [], du;
+          for (t = 0; t < nM; t++) {
+            m = M[t]; du = ap(H, m.x, m.y);
+            k = gan(du[0], du[1], (t < 6 || dsT.indexOf(t) >= 0 ? 0.25 : 0.4) * pxcm, m.s * pxcm);
+            if (k) { nk++; lech += Math.hypot(k.x - du[0], k.y - du[1]); cap2.push(diem(m, k)); }
+          }
+          if (nk >= nM - 2 && (!tot || nk > tot.nk || (nk === tot.nk && lech / nk < tot.lech))) {
+            tot = { nk: nk, lech: lech / nk, cap: cap2, pxcm: pxcm, xoay: Math.atan2(zi, zr) };
+          }
+        }
+      }
+    }
+    if (!tot) return null;
+    var H2 = chieu(tot.cap);
+    if (!H2) return null;
+    var goc = [];
+    for (i = 0; i < 4; i++) goc.push(ap(H2, M[i].x, M[i].y));
+    return { H: H2, soMoc: tot.nk, xoay: Math.round(tot.xoay * 180 / Math.PI), pxcm: tot.pxcm, goc: goc };
+  }
+
+  // ---------- tinh chỉnh mốc trên ảnh đủ phân giải ----------
+  function tinhChinh(G, H, tpl) {
+    var w = G.w, h = G.h, d = G.d, cap = [], den = 0, nden = 0, soGoc = 0;
+    for (var i = 0; i < tpl.moc.length; i++) {
+      var m = tpl.moc[i], c = ap(H, m.x, m.y), e = ap(H, m.x + 1, m.y), f = ap(H, m.x, m.y + 1);
+      var pxcm = (Math.hypot(e[0] - c[0], e[1] - c[1]) + Math.hypot(f[0] - c[0], f[1] - c[1])) / 2;
+      var canh = m.s * pxcm, cx = c[0], cy = c[1], ok = false, tb = 0;
+      for (var lan = 0; lan < 4; lan++) {
+        var le = lan === 0 ? 0.32 * pxcm : 0.13 * pxcm, R = canh / 2 + le;
+        var x0 = Math.max(0, Math.round(cx - R)), x1 = Math.min(w - 1, Math.round(cx + R));
+        var y0 = Math.max(0, Math.round(cy - R)), y1 = Math.min(h - 1, Math.round(cy + R));
+        if (x1 - x0 < 4 || y1 - y0 < 4) { ok = false; break; }
+        var mn = 255, mx = 0, x, y, v;
+        for (y = y0; y <= y1; y++) for (x = x0; x <= x1; x++) { v = d[y * w + x]; if (v < mn) mn = v; if (v > mx) mx = v; }
+        if (mx - mn < 40) { ok = false; break; }
+        var ng = (mn + mx) / 2, n = 0, sx = 0, sy = 0, sv = 0;
+        for (y = y0; y <= y1; y++) for (x = x0; x <= x1; x++) {
+          v = d[y * w + x];
+          if (v < ng) { n++; sx += x; sy += y; sv += v; }
+        }
+        if (!n) { ok = false; break; }
+        cx = sx / n; cy = sy / n; tb = sv / n;
+        var tl = n / (canh * canh);
+        // ô nhỏ trên ảnh nhỏ (cạnh ~10 px, vd. ảnh scan phiếu 40 câu ngang, ô S1 sát nét kẻ lưới): viền mờ + nét kẻ bên cạnh
+        // làm tỉ lệ đen vượt 1,45 (đo được 1,453) → cho thêm ~1,5 px viền quanh ô, tối đa 1,7 (tay / bóng che kín ô ~4 vẫn bị loại);
+        // ô cỡ vừa / lớn vẫn giữ giới hạn 1,45
+        ok = tl > 0.5 && tl < Math.min(1.7, Math.max(1.45, Math.pow((canh + 3) / canh, 2)));
+      }
+      if (ok && Math.hypot(cx - c[0], cy - c[1]) < 0.45 * pxcm) {
+        cap.push([[m.x, m.y], [cx, cy]]); den += tb; nden++;
+        if (i < 4) soGoc++;
+      }
+    }
+    if (cap.length < 7 || soGoc < 3) return null;
+    var H2 = phepChieu(cap.map(function (c) { return c[0]; }), cap.map(function (c) { return c[1]; }));
+    if (!H2) return null;
+    return { H: H2, soMoc: cap.length, den: den / nden };
+  }
+
+  // ---------- độ nét: bề rộng mép các ô vuông đen (cm). Ảnh nét ~0,03-0,06; ảnh mờ thì lớn dần ----------
+  var hg = new Int32Array(256);
+  function doNet(G, H, tpl) {
+    var w = G.w, h = G.h, d = G.d, ds = [];
+    for (var i = 0; i < tpl.moc.length; i++) {
+      var m = tpl.moc[i], c = ap(H, m.x, m.y), e = ap(H, m.x + 1, m.y), f = ap(H, m.x, m.y + 1);
+      var pxcm = (Math.hypot(e[0] - c[0], e[1] - c[1]) + Math.hypot(f[0] - c[0], f[1] - c[1])) / 2, R = (m.s / 2 + 0.12) * pxcm;
+      var x0 = Math.max(1, Math.round(c[0] - R)), x1 = Math.min(w - 2, Math.round(c[0] + R));
+      var y0 = Math.max(1, Math.round(c[1] - R)), y1 = Math.min(h - 2, Math.round(c[1] + R));
+      if (x1 - x0 < 6 || y1 - y0 < 6) continue;
+      var mn = 255, mx = 0, n = 0, x, y, p;
+      hg.fill(0);
+      for (y = y0; y <= y1; y++) for (x = x0; x <= x1; x++) {
+        p = y * w + x;
+        var v = d[p]; if (v < mn) mn = v; if (v > mx) mx = v;
+        var g = Math.max(Math.abs(d[p + 1] - d[p - 1]), Math.abs(d[p + w] - d[p - w])) >> 1;
+        hg[g]++; n++;
+      }
+      if (mx - mn < 50) continue;
+      // phân vị 98 của độ dốc ~ độ dốc tại mép ô vuông
+      var can = n * 0.02, g98 = 255, acc = 0;
+      for (; g98 > 0; g98--) { acc += hg[g98]; if (acc >= can) break; }
+      ds.push((mx - mn) / Math.max(1, g98) / pxcm);
+    }
+    if (!ds.length) return 1;
+    ds.sort(function (a, b) { return a - b; });
+    return ds[ds.length >> 1];
+  }
+
+  // ---------- có vật che phiếu (bàn tay, ngón tay, bóng đen) / phiếu quá tối? ----------
+  // Đo các điểm giấy trắng nằm GIỮA hai ô tròn liền nhau (Phần I, II theo hàng; Phần III, SBD, mã đề theo cột).
+  // Phiếu thật (bản photo, nét in đậm, chữ số in cạnh cột, vết bút chì) làm rải rác vài điểm tối → KHÔNG tính là che.
+  // Chỉ coi là có vật che khi:
+  //  - có MÀU DA: điểm tối hơn giấy và ngả đỏ hơn hẳn màu giấy (cần rgb = ImageData gốc), chiếm ≥ 5% số điểm; hoặc
+  //  - một MẢNG liền (1 trong 3×4 ô chia đều tờ phiếu) có ≥ 60% điểm rất tối (vd. ống tay áo, vật đen đè lên).
+  // Trả về { giay: độ sáng giấy (0–255), che: true/false, tiLeToi, tiLeDa, khoi: số mảng bị che }.
+  function kiemChe(G, H, tpl, rgb) {
+    var w = G.w, h = G.h, d = G.d, a = rgb && rgb.data && rgb.width === w ? rgb.data : null;
+    var diem = tpl._diemGiay || (tpl._diemGiay = diemGiay(tpl));     // tính một lần cho mỗi mẫu phiếu
+    var gt = [], cr = [];
+    diem.forEach(function (p) {
+      var q = ap(H, p[0], p[1]), x0 = Math.round(q[0]), y0 = Math.round(q[1]), s = 0, c = 0, n = 0;
+      for (var y = y0 - 1; y <= y0 + 1; y++) for (var x = x0 - 1; x <= x0 + 1; x++) if (x >= 0 && y >= 0 && x < w && y < h) {
+        s += d[y * w + x]; if (a) c += a[(y * w + x) * 4] - a[(y * w + x) * 4 + 2]; n++;
+      }
+      gt.push(n ? s / n : 0); cr.push(n ? c / n : 0);
+    });
+    var xep = gt.slice().sort(function (u, v) { return u - v; }), giay = xep[Math.floor(xep.length * 0.8)] || 0;
+    // màu giấy (đèn vàng làm giấy ngả vàng): trung vị độ "đỏ – lam" của các điểm sáng
+    var crGiay = cr.filter(function (v, i) { return gt[i] >= giay * 0.85; }).sort(function (u, v) { return u - v; });
+    crGiay = crGiay.length ? crGiay[crGiay.length >> 1] : 0;
+    var da = cr.map(function (c) { return !!a && c - crGiay > 22; });   // tay sáng gần bằng giấy nên chỉ xét màu
+    // ngón tay đè lên các ô tròn (chỗ làm sai bài) – xét thêm màu ở tâm mọi ô (bút chì, giấy đều không có màu)
+    var soDaO = 0;
+    if (a) {
+      var tam = tpl._tamO || (tpl._tamO = (function () {
+        var ra = [];
+        [tpl.p1, tpl.p2, tpl.sbd, tpl.made].forEach(function (g) { g.forEach(function (os) { os.forEach(function (x) { ra.push(x); }); }); });
+        tpl.p3.forEach(function (c) { c.forEach(function (os) { os.forEach(function (x) { ra.push(x); }); }); });
+        return ra;
+      })());
+      tam.forEach(function (p) {
+        var q = ap(H, p[0], p[1]), x = Math.round(q[0]), y = Math.round(q[1]);
+        if (x < 0 || y < 0 || x >= w || y >= h) return;
+        var j = (y * w + x) * 4;
+        if (a[j] - a[j + 2] - crGiay > 22) soDaO++;
+      });
+    }
+    var toi = gt.map(function (v) { return v < giay * 0.45; });      // rất tối (vật đen); bóng đổ thường chỉ ~0,6–0,8 giấy
+    // gom theo 3×4 mảng của khung phiếu
+    var k = tpl.khung, mang = {};
+    diem.forEach(function (p, i) {
+      var m = Math.min(2, Math.max(0, Math.floor((p[0] - k[0]) / (k[2] - k[0]) * 3))) + 3 * Math.min(3, Math.max(0, Math.floor((p[1] - k[1]) / (k[3] - k[1]) * 4)));
+      var o = mang[m] || (mang[m] = { n: 0, t: 0 }); o.n++; if (toi[i] || da[i]) o.t++;
+    });
+    var khoi = Object.keys(mang).filter(function (m) { return mang[m].n >= 6 && mang[m].t / mang[m].n >= 0.4; }).length;
+    var soDa = da.filter(Boolean).length, soToi = toi.filter(Boolean).length, n = gt.length || 1;
+    OMR._diemChe = diem.map(function (p, i) { return [p[0], p[1], da[i] ? 2 : toi[i] ? 1 : 0]; });   // để gỡ lỗi
+    // giấy trắng / bản photo không bao giờ có điểm màu da → chỉ cần vài điểm là chắc có tay
+    return { giay: giay, che: soDa + soDaO >= 3 || khoi > 0, tiLeToi: soToi / n, soDa: soDa + soDaO, khoi: khoi, soDiem: gt.length };
+  }
+  function diemGiay(tpl) {
+    var ung = [], o = [], i, j;
+    // ứng viên: giữa hai ô liền nhau trong một nhóm, và giữa hai câu liền nhau (cùng lựa chọn)
+    function giua(a, b) { ung.push([(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]); }
+    function hang(os) { for (var t = 1; t < os.length; t++) giua(os[t - 1], os[t]); }
+    function doc_(ds) { for (var t = 1; t < ds.length; t++) for (var u = 0; u < Math.min(ds[t].length, ds[t - 1].length); u++) giua(ds[t - 1][u], ds[t][u]); }
+    for (i = 0; i < tpl.p1.length; i++) hang(tpl.p1[i]);
+    for (i = 0; i < tpl.p2.length; i++) hang(tpl.p2[i]);
+    doc_(tpl.p1); doc_(tpl.p2);
+    for (i = 0; i < tpl.p3.length; i++) for (j = 0; j < tpl.p3[i].length; j++) hang(tpl.p3[i][j]);
+    for (i = 0; i < tpl.sbd.length; i++) hang(tpl.sbd[i]);
+    for (i = 0; i < tpl.made.length; i++) hang(tpl.made[i]);
+    // chỉ giữ điểm cách xa mọi ô tròn (≥ 1,4 bán kính): điểm sát nhau rơi trúng viền ô thì luôn tối
+    [tpl.p1, tpl.p2, tpl.sbd, tpl.made].forEach(function (g) { g.forEach(function (os) { os.forEach(function (x) { o.push(x); }); }); });
+    tpl.p3.forEach(function (c) { c.forEach(function (os) { os.forEach(function (x) { o.push(x); }); }); });
+    var xa = tpl.r * 1.4, diem = ung.filter(function (p, k) {
+      if (ung.slice(0, k).some(function (q) { return Math.abs(q[0] - p[0]) < 0.05 && Math.abs(q[1] - p[1]) < 0.05; })) return false;    // trùng
+      for (var t = 0; t < o.length; t++) if (Math.abs(o[t][0] - p[0]) < xa && Math.abs(o[t][1] - p[1]) < xa && Math.hypot(o[t][0] - p[0], o[t][1] - p[1]) < xa) return false;
+      return true;
+    }).filter(function (p) {                       // bỏ điểm giữa hai khối cách xa nhau (vd. câu 13 → 14 ở hai cột khác)
+      return o.some(function (x) { return Math.hypot(x[0] - p[0], x[1] - p[1]) < 0.9; });
+    });
+    return diem;
+  }
+
+  // ---------- đo độ đậm một ô ----------
+  var hist = new Int32Array(256);
+  function doO(G, H, x, y, r, den) {
+    var w = G.w, h = G.h, d = G.d;
+    var c = ap(H, x, y), e = ap(H, x + r, y), f = ap(H, x, y + r);
+    var rp = (Math.hypot(e[0] - c[0], e[1] - c[1]) + Math.hypot(f[0] - c[0], f[1] - c[1])) / 2;
+    var ri = 0.66 * rp, ri2 = ri * ri, cx = c[0], cy = c[1], s = 0, n = 0, px, py;
+    var x0 = Math.max(0, Math.ceil(cx - ri)), x1 = Math.min(w - 1, Math.floor(cx + ri));
+    var y0 = Math.max(0, Math.ceil(cy - ri)), y1 = Math.min(h - 1, Math.floor(cy + ri));
+    for (py = y0; py <= y1; py++) for (px = x0; px <= x1; px++) {
+      var dx = px - cx, dy = py - cy;
+      if (dx * dx + dy * dy <= ri2) { s += d[py * w + px]; n++; }
+    }
+    if (!n) return 0;
+    // nền giấy quanh ô: phân vị 85 trong ô vuông cạnh ~5r
+    var R = 2.6 * rp, buoc = rp > 9 ? 2 : 1, m = 0;
+    x0 = Math.max(0, Math.round(cx - R)); x1 = Math.min(w - 1, Math.round(cx + R));
+    y0 = Math.max(0, Math.round(cy - R)); y1 = Math.min(h - 1, Math.round(cy + R));
+    hist.fill(0);
+    for (py = y0; py <= y1; py += buoc) for (px = x0; px <= x1; px += buoc) { hist[d[py * w + px]]++; m++; }
+    var can = m * 0.15, tr = 255;
+    for (var acc = 0; tr > 0; tr--) { acc += hist[tr]; if (acc >= can) break; }
+    var v = (tr - s / n) / Math.max(40, tr - den);
+    return v < 0 ? 0 : v > 1 ? 1 : v;
+  }
+
+  // ---------- chọn ô được tô trong một nhóm chỉ-chọn-một ----------
+  // ng = {cao, thap}: ngưỡng đã chỉnh theo độ đậm bút chì của chính tờ phiếu.
+  // trả về {i: chỉ số (-1 bỏ trống, -2 tô nhiều ô), nghi: có ô lưng chừng}
+  // motO: nhóm bắt buộc tô đúng 1 ô (cột SBD, mã đề) – ô tô nhạt vẫn nhận nếu nổi bật hẳn so với các ô còn lại.
+  // "nghi" (ô chưa rõ) chỉ bật khi thật sự lưng chừng, để không báo nhầm trên phiếu tô bình thường.
+  // Phần I (theo yêu cầu người dùng): ô đậm nhất trong câu là đáp án, so với chính các ô còn lại của câu.
+  // Chỉ tính "tô 2 đáp án" khi có ô thứ hai đậm gần bằng ô đậm nhất (vết tẩy mờ không tính).
+  function chonP1(fs, ng) {
+    var x = fs.map(function (v, i) { return [v, i]; }).sort(function (a, b) { return b[0] - a[0]; }), n = x.length;
+    var nen = (x[n - 1][0] + x[n - 2][0]) / 2;                     // mức ô trống của chính câu này (2 ô nhạt nhất)
+    var d1 = x[0][0] - nen, d2 = x[1][0] - nen;
+    // không ô nào nổi lên: bỏ trống. Mức tối thiểu còn tính theo độ đậm tô điển hình của tờ phiếu (F): ảnh có bóng tối ở góc
+    // làm ô trống lên ~0,1 trong khi ô tô thật ~0,5 – trước đây ngưỡng cố định 0,08 nhận nhầm thành đáp án
+    if (d1 < Math.max(0.08, 0.35 * ng.thap, 0.2 * (ng.F || 0))) return { i: -1, nghi: d1 >= 0.06, cac: [] };
+    var cac = x.filter(function (o) { var v = o[0] - nen; return v >= ng.cao || (v >= 0.6 * d1 && v >= ng.thap); }).map(function (o) { return o[1]; });
+    if (cac.length > 1) return { i: -2, nghi: d2 < 0.9 * d1, cac: cac };
+    return { i: x[0][1], nghi: d1 < 0.6 * ng.thap || d2 >= 0.45 * d1, cac: [x[0][1]] };
+  }
+  function chon(fs, ng, motO) {
+    if (motO === 3 && fs.length >= 3) return chonP1(fs, ng);
+    var top = 0, it = -1, nhi = 0, i;
+    for (i = 0; i < fs.length; i++) if (fs[i] > top) { nhi = top; top = fs[i]; it = i; } else if (fs[i] > nhi) nhi = fs[i];
+    if (top < ng.thap) {
+      // ô nhạt nhưng nổi bật hẳn so với các ô còn lại trong cùng câu/cột: vẫn nhận (đánh dấu để xem lại)
+      if (motO && top >= (motO === 2 ? 0.75 : 0.6) * ng.thap && top >= 2.5 * Math.max(nhi, 0.03)) return { i: it, nghi: true, cac: [it] };
+      return { i: -1, nghi: top > ng.thap * 0.9, cac: [] };
+    }
+    var giua = (ng.thap + ng.cao) / 2, dem = 0, nghi = top < giua, cac = [];
+    for (i = 0; i < fs.length; i++) {
+      if (fs[i] >= ng.cao || (fs[i] >= ng.thap && fs[i] >= 0.72 * top)) { dem++; cac.push(i); }
+      else if (i !== it && fs[i] >= ng.thap * 0.9) nghi = true;
+    }
+    return { i: dem === 1 ? it : -2, nghi: nghi, cac: cac };
+  }
+
+  // Ngưỡng theo tờ phiếu: trừ mức nền của ô trống, lấy mức "ô tô điển hình" làm chuẩn.
+  // Fdu: mức "ô tô điển hình" dự phòng khi vùng có quá ít ô được tô.
+  function nguong(tat, Fdu) {
+    var v = Array.prototype.slice.call(tat).sort(function (a, b) { return a - b; }), n = v.length;
+    var nen = v[Math.floor(n * 0.3)];            // ô trống (Phần II tô đủ thì một nửa số ô là ô tô: lấy phân vị 30%)
+    if (nen > 0.2) nen = 0.2;
+    var to = [];
+    for (var i = 0; i < n; i++) if (v[i] - nen > 0.22) to.push(v[i] - nen);
+    var F = to.length >= 4 ? to[to.length >> 1] : (Fdu || 0.75);
+    return { nen: nen, cao: Math.min(0.5, Math.max(0.24, 0.6 * F)), thap: Math.min(0.3, Math.max(0.17, 0.4 * F)), F: F };
+  }
+
+  // ---------- đọc toàn bộ phiếu ----------
+  function vung(loai) { return loai === 'SBD.' || loai === 'Mã đề.' ? 'ID' : loai; }
+  // 1) đo độ đậm tất cả các ô + ngưỡng từng vùng (phần tốn thời gian; quyết định ô tô làm riêng ở quyetDinh)
+  function doCacO(G, H, tpl, den) {
+    var r = tpl.r, i, j;
+    var ds = [], nh = [];                        // nh: [loại, nhãn, vị trí đầu, số ô]
+    function them(os, loai, vt) { nh.push([loai, vt, ds.length, os.length]); for (var t = 0; t < os.length; t++) ds.push(os[t]); }
+    for (i = 0; i < tpl.p1.length; i++) them(tpl.p1[i], 'I.', i + 1);
+    for (i = 0; i < tpl.p2.length; i++) them(tpl.p2[i], 'II.', (i >> 2) + 1 + 'abcd'[i & 3]);
+    for (i = 0; i < tpl.p3.length; i++) for (j = 0; j < tpl.p3[i].length; j++) them(tpl.p3[i][j], 'III.', (i + 1) + '/' + (j + 1));
+    for (i = 0; i < tpl.sbd.length; i++) them(tpl.sbd[i], 'SBD.', i + 1);
+    for (i = 0; i < tpl.made.length; i++) them(tpl.made[i], 'Mã đề.', i + 1);
+    var fs = new Float32Array(ds.length);
+    for (i = 0; i < ds.length; i++) fs[i] = doO(G, H, ds[i][0], ds[i][1], r, den);
+    var ng = nguong(fs);
+    // Ngưỡng riêng cho từng vùng (Phần I, II, III, SBD + mã đề): học sinh thường tô các phần đậm nhạt khác nhau,
+    // một ngưỡng chung theo vùng tô đậm sẽ bỏ sót các ô tô nhạt ở vùng khác.
+    var NGV = {}, gt = {};
+    for (i = 0; i < nh.length; i++) { var vv = vung(nh[i][0]); gt[vv] = gt[vv] || []; for (j = 0; j < nh[i][3]; j++) gt[vv].push(fs[nh[i][2] + j]); }
+    for (var tv in gt) NGV[tv] = nguong(gt[tv], ng.F);
+    // Phần III: ô trống hay dính vết bút / chữ viết tràn từ ô ghi số phía trên (phiếu thật đo được tới ~0,2),
+    // ô tô thật ≥ ~0,4 → ngưỡng thấp đặt ở GIỮA ô trống và ô tô điển hình của chính tờ phiếu (50% mức tô).
+    var g3 = NGV['III.'];
+    if (g3) { g3.thap = Math.max(g3.thap, 0.5 * g3.F); g3.cao = Math.max(g3.cao, 1.25 * g3.thap); }
+    return { nh: nh, fs: fs, NGV: NGV, F: ng.F };
+  }
+  // 2) quyết định từng nhóm. he: hệ số nhân ngưỡng (1 = bình thường; < 1 nhạy hơn với ô tô nhạt, > 1 khắt khe hơn)
+  function quyetDinh(M, tpl, he) {
+    he = he || 1;
+    var nh = M.nh, fs = M.fs, kq = [], cac = [], ngh = [], i, j;
+    for (i = 0; i < nh.length; i++) {
+      // Phần III không dùng mức "nhạy hơn" (he < 1): ở đó vết bẩn dễ bị nhận nhầm thành ô tô
+      var heV = nh[i][0] === 'III.' ? Math.max(1, he) : he;
+      var f = [], g = M.NGV[vung(nh[i][0])], ngv = heV === 1 ? g : { nen: g.nen, cao: g.cao * heV, thap: g.thap * heV, F: g.F };
+      for (j = 0; j < nh[i][3]; j++) f.push(fs[nh[i][2] + j] - ngv.nen);
+      var c = chon(f, ngv, nh[i][0] === 'SBD.' || nh[i][0] === 'Mã đề.' ? 1 : nh[i][0] === 'III.' ? 0 : nh[i][0] === 'I.' ? 3 : 2);
+      kq.push(c.i); cac.push(c.cac); ngh.push(!!c.nghi);
+    }
+    return ghepDoc(kq, cac, ngh, M, tpl);
+  }
+  function docPhieu(G, H, tpl, den) { return quyetDinh(doCacO(G, H, tpl, den), tpl, 1); }
+
+  // Bỏ phiếu giữa nhiều lần đọc (nhiều khung hình × nhiều mức ngưỡng) của cùng một tờ phiếu – chế độ "Tự động tối ưu".
+  //  - Mọi lần đọc giống nhau: lấy kết quả đó, không còn "chưa chắc".
+  //  - Chỉ khác nhau giữa "bỏ trống" và MỘT ô: lấy ô đó nếu ít nhất 30% số lần đọc thấy (không bỏ sót ô tô nhạt), ghi "chưa chắc".
+  //  - Khác nhau kiểu khác (2 ô khác nhau, 1 ô / tô 2 ô): lấy theo đa số (hoà thì theo lần đọc chuẩn), ghi "chưa chắc".
+  // docs[0] là lần đọc chuẩn (khung hình nét nhất, ngưỡng bình thường).
+  function bauChon(docs, tpl) {
+    var goc = docs[0], N = docs.length, kq = [], cac = [], ngh = [], g, t;
+    for (g = 0; g < goc._kq.length; g++) {
+      var dem = {}, mau = {};
+      for (t = 0; t < N; t++) {
+        var v = docs[t]._kq[g], kh = v >= 0 ? 'o' + v : v === -1 ? '-' : '*' + docs[t]._cac[g].join(',');
+        dem[kh] = (dem[kh] || 0) + 1; if (!mau[kh]) mau[kh] = t;
+      }
+      var khoa = Object.keys(dem), chonK;
+      if (khoa.length === 1) chonK = khoa[0];
+      else {
+        var don = khoa.filter(function (x) { return x[0] === 'o'; });
+        // Phần III phải quá nửa số lần đọc thấy ô mới nhận (tránh vết bẩn); phần khác 30% (không bỏ sót ô tô nhạt)
+        var du = goc._M.nh[g][0] === 'III.' ? function (n) { return n > N / 2; } : function (n) { return n >= Math.ceil(N * 0.3); };
+        if (khoa.length === 2 && dem['-'] && don.length === 1) chonK = du(dem[don[0]]) ? don[0] : '-';
+        else {
+          var kGoc = goc._kq[g] >= 0 ? 'o' + goc._kq[g] : goc._kq[g] === -1 ? '-' : '*' + goc._cac[g].join(',');
+          chonK = kGoc;
+          khoa.forEach(function (x) { if (dem[x] > dem[chonK]) chonK = x; });
+        }
+      }
+      var tu = docs[mau[chonK]];
+      kq.push(tu._kq[g]); cac.push(tu._cac[g]); ngh.push(khoa.length > 1);
+    }
+    var o = ghepDoc(kq, cac, ngh, goc._M, tpl);
+    o.soLanDoc = N;
+    return o;
+  }
+
+  // Ghép kết quả từng nhóm thành bài làm: p1, p2 (chuỗi), p3 (mảng), sbd, mã đề, các ô "chưa chắc".
+  function ghepDoc(kq, cac, ngh, M, tpl) {
+    var nh = M.nh, nghi = [], i, j;
+    for (i = 0; i < nh.length; i++) if (ngh[i]) nghi.push(nh[i][0] + nh[i][1]);
+    // p1n/p2n/p3n: các ô đã tô của từng nhóm (dùng để đánh dấu cả hai ô khi tô hai đáp án)
+    var o = { p1m: [], p2m: [], p3m: [], sbdm: [], madem: [], p1n: [], p2n: [], p3n: [] }, q = 0;
+    for (i = 0; i < tpl.p1.length; i++) { o.p1n.push(cac[q]); o.p1m.push(kq[q++]); }
+    for (i = 0; i < tpl.p2.length; i++) { o.p2n.push(cac[q]); o.p2m.push(kq[q++]); }
+    for (i = 0; i < tpl.p3.length; i++) {
+      var cot = [], cotn = [];
+      for (j = 0; j < tpl.p3[i].length; j++) { cotn.push(cac[q]); cot.push(kq[q++]); }
+      o.p3m.push(cot); o.p3n.push(cotn);
+    }
+    for (i = 0; i < tpl.sbd.length; i++) o.sbdm.push(kq[q++]);
+    for (i = 0; i < tpl.made.length; i++) o.madem.push(kq[q++]);
+
+    var L = 'ABCDE';
+    o.p1 = o.p1m.map(function (v) { return v === -1 ? '-' : v === -2 ? '*' : L[v]; }).join('');
+    o.p2 = o.p2m.map(function (v) { return v === -1 ? '-' : v === -2 ? '*' : 'DS'[v]; }).join('');
+    o.p3 = o.p3m.map(function (cot) {
+      return cot.map(function (v) { return v === -1 ? '' : v === -2 ? '*' : tpl.p3hang[v]; }).join('');
+    });
+    o.sbd = o.sbdm.map(function (v) { return v === -1 ? '_' : v === -2 ? '*' : tpl.sbdNhan[v]; }).join('');
+    o.made = o.madem.map(function (v) { return v === -1 ? '_' : v === -2 ? '*' : tpl.madeNhan[v]; }).join('');
+    if (/^_+$/.test(o.made)) o.made = '';
+    o.nghi = nghi;
+    o.doDam = M.F;
+    o.khoa = [o.made, o.sbd, o.p1, o.p2, o.p3.join(';')].join('|');
+    // dữ liệu thô để bỏ phiếu giữa nhiều lần đọc (không gửi lên máy chủ)
+    Object.defineProperty(o, '_kq', { value: kq }); Object.defineProperty(o, '_cac', { value: cac }); Object.defineProperty(o, '_M', { value: M });
+    return o;
+  }
+
+  // ---------- nắn phẳng vùng phiếu thành ảnh xám RGBA ----------
+  function nan(G, H, tpl, pxcm) {
+    var k = tpl.khung, W = Math.round((k[2] - k[0]) * pxcm), Hh = Math.round((k[3] - k[1]) * pxcm);
+    var out = new ImageData(W, Hh), o = out.data, w = G.w, h = G.h, d = G.d;
+    for (var y = 0; y < Hh; y++) {
+      var Y = k[1] + (y + 0.5) / pxcm;
+      for (var x = 0; x < W; x++) {
+        var X = k[0] + (x + 0.5) / pxcm;
+        var ww = H[6] * X + H[7] * Y + H[8];
+        var u = (H[0] * X + H[1] * Y + H[2]) / ww, v = (H[3] * X + H[4] * Y + H[5]) / ww, g = 128;
+        if (u >= 0 && v >= 0 && u < w - 1 && v < h - 1) {
+          var ui = u | 0, vi = v | 0, fu = u - ui, fv = v - vi, p = vi * w + ui;
+          g = (d[p] * (1 - fu) + d[p + 1] * fu) * (1 - fv) + (d[p + w] * (1 - fu) + d[p + w + 1] * fu) * fv;
+        }
+        var q = (y * W + x) * 4;
+        o[q] = o[q + 1] = o[q + 2] = g; o[q + 3] = 255;
+      }
+    }
+    return out;
+  }
+
+  // Đọc trọn một ảnh tĩnh: G là ảnh xám đủ phân giải.
+  function docAnh(G, tpl, nho) {
+    var k = 1, g = G;
+    if (nho) { g = nho.g; k = nho.k; }
+    var m = timMoc(g, tpl);
+    if (!m) { OMR.loi = 'moc'; return null; }
+    var t = tinhChinh(G, tiLe(m.H, k), tpl);
+    if (!t) { OMR.loi = 'tinhchinh'; return null; }
+    var doc = docPhieu(G, t.H, tpl, t.den);
+    doc.H = t.H; doc.den = t.den; doc.soMoc = t.soMoc; doc.xoay = m.xoay; doc.net = doNet(G, t.H, tpl);
+    return doc;
+  }
+
+  // Thu nhỏ ảnh xám theo hệ số nguyên (lấy trung bình khối)
+  function thuNho(G, canhMax) {
+    var f = Math.max(1, Math.ceil(Math.max(G.w, G.h) / canhMax));
+    if (f === 1) return { g: G, k: 1 };
+    var w = Math.floor(G.w / f), h = Math.floor(G.h / f), d = new Uint8Array(w * h), s = G.d, W = G.w, f2 = f * f;
+    for (var y = 0; y < h; y++) for (var x = 0; x < w; x++) {
+      var t = 0, o = y * f * W + x * f;
+      for (var b = 0; b < f; b++) for (var a = 0; a < f; a++) t += s[o + b * W + a];
+      d[y * w + x] = t / f2;
+    }
+    return { g: { w: w, h: h, d: d }, k: f };
+  }
+
+  return {
+    timKhoi: timKhoi, doNet: doNet, xam: xam, phepChieu: phepChieu, ap: ap, tiLe: tiLe, timMoc: timMoc, tinhChinh: tinhChinh,
+    docPhieu: docPhieu, doCacO: doCacO, kiemChe: kiemChe, quyetDinh: quyetDinh, bauChon: bauChon, doO: doO, chon: chon, nan: nan, docAnh: docAnh, thuNho: thuNho
+  };
+})();
+if (typeof module !== 'undefined') module.exports = OMR;
+
+if (typeof window !== 'undefined') window.OMR = OMR;
+if (typeof module !== 'undefined') module.exports = OMR;
