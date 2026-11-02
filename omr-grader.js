@@ -380,20 +380,26 @@ function updateOverviewStats() {
 // ========================================================
 window.setScanMode = (mode) => {
     const isUpload = mode === 'upload';
-    document.getElementById('scanUploadArea').classList.toggle('hidden', !isUpload);
-    document.getElementById('scanCameraArea').classList.toggle('hidden', isUpload);
-    
-    document.getElementById('btnModeUpload').className = isUpload 
-        ? "px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all bg-white dark:bg-slate-800 text-emerald-600 shadow-xs"
-        : "px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all text-slate-500 hover:text-slate-800 dark:text-slate-400";
-    document.getElementById('btnModeCamera').className = !isUpload 
-        ? "px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all bg-white dark:bg-slate-800 text-emerald-600 shadow-xs"
-        : "px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all text-slate-500 hover:text-slate-800 dark:text-slate-400";
+    const uploadArea = document.getElementById('scanUploadArea');
+    const cameraArea = document.getElementById('scanCameraArea');
+    const btnUpload = document.getElementById('btnModeUpload');
+    const btnCamera = document.getElementById('btnModeCamera');
 
-    if (!isUpload) {
-        window.startCameraStream();
+    if (isUpload) {
+        window.closeCameraScanner();
     } else {
-        window.stopCameraStream();
+        if (!state.exam) {
+            Swal.fire('Lưu ý', 'Vui lòng chọn hoặc tạo bài thi trước khi quét camera!', 'warning');
+            return;
+        }
+        if (uploadArea) uploadArea.classList.add('hidden');
+        if (cameraArea) {
+            cameraArea.classList.remove('hidden');
+            document.body.style.overflow = 'hidden';
+        }
+        if (btnUpload) btnUpload.className = "px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all text-slate-500 hover:text-slate-800 dark:text-slate-400";
+        if (btnCamera) btnCamera.className = "px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all bg-white dark:bg-slate-800 text-emerald-600 shadow-xs";
+        window.startCameraStream();
     }
 };
 
@@ -492,8 +498,8 @@ async function processSingleSheet(fileOrBlob) {
     // Display in Last Result Inspector
     displayLastResultInspector(submission, rawResult);
 
-    // Auto save if enabled
-    const autoSave = document.getElementById('autoSaveToggle')?.checked ?? true;
+    // Auto save if enabled (check both main toggle and camera HUD toggle)
+    const autoSave = document.getElementById('cameraAutoSave')?.checked ?? (document.getElementById('autoSaveToggle')?.checked ?? true);
     if (autoSave) {
         await saveSubmissionToStore(submission);
     }
@@ -847,10 +853,49 @@ function playBeepSound() {
 }
 
 // ========================================================
-// 5. LIVE CAMERA STREAM CONTROLLER
+// 5. LIVE FULLSCREEN CAMERA STREAM CONTROLLER & SCANNER
 // ========================================================
 state.cameraZoom = 1.0;
 state.isTorchOn = false;
+state.backCameras = [];
+state.activeCameraIndex = 0;
+state.currentCameraDeviceId = null;
+
+async function getAvailableCameras() {
+    try {
+        if (!navigator.mediaDevices?.enumerateDevices) return [];
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const videoInputs = devices.filter(d => d.kind === 'videoinput');
+        
+        // Filter back cameras
+        const rear = videoInputs.filter(d => {
+            const lbl = (d.label || '').toLowerCase();
+            return lbl.includes('back') || lbl.includes('rear') || lbl.includes('sau') || lbl.includes('environment') || lbl.includes('camera2 0') || lbl.includes('camera2 2') || lbl.includes('camera2 3');
+        });
+        
+        state.backCameras = rear.length > 0 ? rear : videoInputs;
+        console.log("Danh sách camera quét:", state.backCameras);
+        return state.backCameras;
+    } catch(e) {
+        console.warn("Không liệt kê được danh sách camera:", e);
+        return [];
+    }
+}
+
+function updateZoomUI(zoomVal, caps) {
+    const badge = document.getElementById('cameraZoomBadge');
+    if (badge) {
+        badge.textContent = (typeof zoomVal === 'number' ? zoomVal.toFixed(1) : zoomVal) + 'x';
+    }
+    document.querySelectorAll('.zoom-btn').forEach(btn => {
+        const bVal = parseFloat(btn.textContent);
+        if (Math.abs(bVal - zoomVal) < 0.25) {
+            btn.className = 'zoom-btn w-10 h-10 rounded-full bg-emerald-600 text-white text-xs font-black backdrop-blur-md border border-emerald-400 transition-all active:scale-90 shadow-lg';
+        } else {
+            btn.className = 'zoom-btn w-10 h-10 rounded-full bg-black/70 hover:bg-black/90 text-white text-xs font-black backdrop-blur-md border border-white/20 transition-all active:scale-90 shadow-md';
+        }
+    });
+}
 
 window.startCameraStream = async () => {
     const video = document.getElementById('cameraVideo');
@@ -859,47 +904,69 @@ window.startCameraStream = async () => {
     window.stopCameraStream();
 
     try {
-        const constraints = {
-            video: {
-                facingMode: { ideal: state.currentFacingMode },
-                width: { ideal: 1920, min: 1280 },
-                height: { ideal: 1080, min: 720 },
-                aspectRatio: { ideal: 1.333333 } // 4:3 preferred for documents/tablets
-            },
-            audio: false
+        // High resolution constraints WITHOUT forced aspect ratio crop (preserves full native camera sensor view)
+        const videoConstraints = {
+            width: { ideal: 1920, max: 2560 },
+            height: { ideal: 1440, max: 1920 }
         };
 
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        if (state.currentCameraDeviceId) {
+            videoConstraints.deviceId = { exact: state.currentCameraDeviceId };
+        } else {
+            videoConstraints.facingMode = { ideal: state.currentFacingMode || 'environment' };
+        }
+
+        const stream = await navigator.mediaDevices.getUserMedia({
+            video: videoConstraints,
+            audio: false
+        });
+
         state.currentCameraStream = stream;
         video.srcObject = stream;
         await video.play();
 
-        // Inspect lens capabilities (Zoom, Torch, Focus)
+        // Enumerate devices once permission is granted
+        await getAvailableCameras();
+
+        // Check if multiple rear cameras exist to show/hide cycle lens button
+        const cycleBtn = document.getElementById('btnCycleCamera');
+        if (cycleBtn) {
+            cycleBtn.classList.toggle('hidden', state.backCameras.length <= 1);
+        }
+
+        // Inspect track capabilities (Zoom, Torch, Focus)
         const [track] = stream.getVideoTracks();
         if (track && track.getCapabilities) {
             const caps = track.getCapabilities();
             state.cameraCapabilities = caps;
 
-            // 1. Zoom control setup
+            // 1. Zoom control setup - ALWAYS DEFAULT TO MINIMUM ZOOM (widest possible field of view)
             const zoomControls = document.getElementById('cameraZoomControls');
-            const zoomBadge = document.getElementById('cameraZoomBadge');
-            if (caps.zoom && caps.zoom.max > 1) {
+            if (caps.zoom && typeof caps.zoom.min === 'number') {
+                const minZoom = caps.zoom.min;
+                try {
+                    await track.applyConstraints({ advanced: [{ zoom: minZoom }] });
+                    state.cameraZoom = minZoom;
+                } catch(e) {
+                    console.warn("Không set được zoom min:", e);
+                }
+                updateZoomUI(minZoom, caps);
                 if (zoomControls) zoomControls.classList.remove('hidden');
-                if (zoomBadge) zoomBadge.classList.remove('hidden');
             } else {
-                if (zoomControls) zoomControls.classList.add('hidden');
+                if (zoomControls) zoomControls.classList.remove('hidden'); // allow lens switching / fallback
+                updateZoomUI(1.0, {});
             }
 
             // 2. Torch control setup
             const torchBtn = document.getElementById('btnCameraTorch');
-            if (caps.torch && torchBtn) {
-                torchBtn.classList.remove('hidden');
+            if (torchBtn) {
+                torchBtn.classList.toggle('hidden', !caps.torch);
             }
         }
     } catch(err) {
         console.error("Không mở được camera:", err);
         Swal.fire('Lỗi Camera', 'Không thể truy cập camera. Vui lòng cấp quyền camera trong cài đặt trình duyệt hoặc chuyển sang chế độ tải ảnh phiếu!', 'error');
-        window.setScanMode('upload');
+        window.closeCameraScanner();
     }
 };
 
@@ -913,10 +980,46 @@ window.stopCameraStream = () => {
     state.isTorchOn = false;
 };
 
-window.switchCameraLens = () => {
-    state.currentFacingMode = state.currentFacingMode === 'environment' ? 'user' : 'environment';
-    window.startCameraStream();
+window.closeCameraScanner = () => {
+    window.stopCameraStream();
+    window.dismissCameraResultSheet();
+    const cameraArea = document.getElementById('scanCameraArea');
+    if (cameraArea) cameraArea.classList.add('hidden');
+    document.body.style.overflow = '';
+    
+    // Update scan mode buttons
+    const btnUpload = document.getElementById('btnModeUpload');
+    const btnCamera = document.getElementById('btnModeCamera');
+    if (btnUpload) btnUpload.className = "px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all bg-white dark:bg-slate-800 text-emerald-600 shadow-xs";
+    if (btnCamera) btnCamera.className = "px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all text-slate-500 hover:text-slate-800 dark:text-slate-400";
+    
+    const uploadArea = document.getElementById('scanUploadArea');
+    if (uploadArea) uploadArea.classList.remove('hidden');
 };
+
+window.cycleBackCamera = async () => {
+    if (state.backCameras.length > 1) {
+        state.activeCameraIndex = (state.activeCameraIndex + 1) % state.backCameras.length;
+        const target = state.backCameras[state.activeCameraIndex];
+        state.currentCameraDeviceId = target.deviceId;
+        
+        // Show notification on HUD
+        const statusBadge = document.getElementById('cameraScanStatus');
+        if (statusBadge) {
+            statusBadge.innerHTML = `<i class="fa-solid fa-camera-rotate text-emerald-400"></i> ${target.label ? target.label.slice(0, 18) : ('Cam ' + (state.activeCameraIndex + 1))}`;
+            statusBadge.classList.remove('hidden');
+            setTimeout(() => statusBadge.classList.add('hidden'), 2000);
+        }
+        await window.startCameraStream();
+    } else {
+        // Fallback toggle environment / user
+        state.currentFacingMode = state.currentFacingMode === 'environment' ? 'user' : 'environment';
+        state.currentCameraDeviceId = null;
+        await window.startCameraStream();
+    }
+};
+
+window.switchCameraLens = window.cycleBackCamera;
 
 window.setCameraZoom = async (val) => {
     if (!state.currentCameraStream) return;
@@ -924,22 +1027,25 @@ window.setCameraZoom = async (val) => {
     if (!track || !track.applyConstraints) return;
 
     try {
-        const caps = track.getCapabilities ? track.getCapabilities() : {};
+        const caps = state.cameraCapabilities || (track.getCapabilities ? track.getCapabilities() : {});
         if (caps.zoom) {
-            const targetZoom = Math.max(caps.zoom.min || 1, Math.min(caps.zoom.max || 5, val));
+            const minZ = caps.zoom.min || 1.0;
+            const maxZ = caps.zoom.max || 5.0;
+            const targetZoom = Math.max(minZ, Math.min(maxZ, val));
             await track.applyConstraints({ advanced: [{ zoom: targetZoom }] });
             state.cameraZoom = targetZoom;
-            const badge = document.getElementById('cameraZoomBadge');
-            if (badge) badge.textContent = targetZoom.toFixed(1) + 'x';
-            
-            document.querySelectorAll('.zoom-btn').forEach(btn => {
-                const bVal = parseFloat(btn.textContent);
-                if (bVal === val) {
-                    btn.className = 'zoom-btn w-9 h-9 rounded-full bg-emerald-600 text-white text-xs font-black backdrop-blur-md border border-emerald-400 transition-all active:scale-90';
-                } else {
-                    btn.className = 'zoom-btn w-9 h-9 rounded-full bg-black/70 hover:bg-black/90 text-white text-xs font-black backdrop-blur-md border border-white/20 transition-all active:scale-90';
+            updateZoomUI(targetZoom, caps);
+        } else {
+            // If device has ultra-wide back camera, 0.5x can switch camera!
+            if (val <= 0.8 && state.backCameras.length > 1) {
+                const wideCam = state.backCameras.find(c => c.label.toLowerCase().includes('ultra') || c.label.toLowerCase().includes('wide') || c.label.toLowerCase().includes('0.5') || c.label.toLowerCase().includes('0'));
+                if (wideCam && wideCam.deviceId !== state.currentCameraDeviceId) {
+                    state.currentCameraDeviceId = wideCam.deviceId;
+                    await window.startCameraStream();
+                    return;
                 }
-            });
+            }
+            updateZoomUI(val, {});
         }
     } catch(e) {
         console.warn("Lỗi chỉnh zoom camera:", e);
@@ -957,42 +1063,145 @@ window.toggleCameraTorch = async () => {
         const icon = document.getElementById('torchIcon');
         const btn = document.getElementById('btnCameraTorch');
         if (icon) {
-            icon.className = state.isTorchOn ? 'fa-solid fa-bolt text-amber-400' : 'fa-solid fa-bolt text-white';
+            icon.className = state.isTorchOn ? 'fa-solid fa-bolt text-amber-300' : 'fa-solid fa-bolt text-white';
         }
         if (btn) {
             btn.className = state.isTorchOn 
-                ? 'w-8 h-8 rounded-full bg-amber-500/80 text-black flex items-center justify-center text-xs backdrop-blur-md shadow-md transition-all active:scale-95 cursor-pointer'
-                : 'w-8 h-8 rounded-full bg-black/60 hover:bg-black/80 text-white flex items-center justify-center text-xs backdrop-blur-md shadow-md transition-all active:scale-95 cursor-pointer';
+                ? 'w-10 h-10 rounded-full bg-amber-500 text-black flex items-center justify-center text-sm backdrop-blur-md shadow-lg transition-all active:scale-95 cursor-pointer border border-amber-300'
+                : 'w-10 h-10 rounded-full bg-black/60 hover:bg-black/80 text-white flex items-center justify-center text-sm backdrop-blur-md shadow-lg transition-all active:scale-95 cursor-pointer border border-white/20';
         }
     } catch(e) {
         console.warn("Lỗi bật đèn pin:", e);
     }
 };
 
+function showCameraResultSheet(sub) {
+    const sheet = document.getElementById('cameraResultSheet');
+    if (!sheet) return;
+
+    const nameEl = document.getElementById('camResStudentName');
+    const sbdEl = document.getElementById('camResSbd');
+    const codeEl = document.getElementById('camResCode');
+    const scoreEl = document.getElementById('camResScore');
+    const breakdownEl = document.getElementById('camResPartBreakdown');
+
+    if (nameEl) nameEl.textContent = sub.student_name || 'Thí sinh (Tự động)';
+    if (sbdEl) sbdEl.textContent = 'SBD: ' + (sub.student_no || '---');
+    if (codeEl) codeEl.textContent = 'Mã: ' + (sub.code || '---');
+    if (scoreEl) scoreEl.textContent = (typeof sub.score === 'number' ? sub.score.toFixed(2) : sub.score);
+    if (breakdownEl) {
+        breakdownEl.textContent = `P.I: ${sub.part1_score ?? 0}đ | P.II: ${sub.part2_score ?? 0}đ | P.III: ${sub.part3_score ?? 0}đ`;
+    }
+
+    sheet.classList.remove('hidden');
+    void sheet.offsetHeight; // Trigger reflow for slide animation
+    sheet.classList.remove('translate-y-full');
+}
+
+window.dismissCameraResultSheet = () => {
+    const sheet = document.getElementById('cameraResultSheet');
+    if (!sheet) return;
+    sheet.classList.add('translate-y-full');
+    setTimeout(() => {
+        sheet.classList.add('hidden');
+    }, 280);
+};
+
+window.viewDetailedLastResult = () => {
+    window.dismissCameraResultSheet();
+    window.closeCameraScanner();
+    const card = document.getElementById('lastResultCard');
+    if (card) {
+        card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+};
+
 window.captureCameraFrame = async () => {
     const video = document.getElementById('cameraVideo');
+    const guide = document.getElementById('cameraA4Guide');
     if (!video || !state.currentCameraStream) return;
 
+    // Haptic feedback
+    if (navigator.vibrate) {
+        try { navigator.vibrate(35); } catch(e) {}
+    }
+
+    // Dismiss any previously open bottom sheet
+    window.dismissCameraResultSheet();
+
+    // Flash animation on viewfinder
+    const flash = document.getElementById('cameraFlashOverlay');
+    if (flash) {
+        flash.classList.remove('opacity-0');
+        flash.classList.add('opacity-80');
+        setTimeout(() => {
+            flash.classList.remove('opacity-80');
+            flash.classList.add('opacity-0');
+        }, 120);
+    }
+
+    // Precise cropping to A4 guide area
+    const vr = video.getBoundingClientRect();
+    const gr = guide ? guide.getBoundingClientRect() : null;
+
     const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth || 1920;
-    canvas.height = video.videoHeight || 1080;
+    let sx = 0, sy = 0, sw = video.videoWidth || 1920, sh = video.videoHeight || 1440;
+
+    if (gr && vr.width > 0 && vr.height > 0 && video.videoWidth > 0 && video.videoHeight > 0) {
+        const scale = Math.min(vr.width / video.videoWidth, vr.height / video.videoHeight);
+        const drawW = video.videoWidth * scale;
+        const drawH = video.videoHeight * scale;
+        const offsetX = (vr.width - drawW) / 2;
+        const offsetY = (vr.height - drawH) / 2;
+
+        let computedSx = (gr.left - vr.left - offsetX) / scale;
+        let computedSy = (gr.top - vr.top - offsetY) / scale;
+        let computedSw = gr.width / scale;
+        let computedSh = gr.height / scale;
+
+        // 5% safety margin padding so outer corner markers are not clipped
+        const padX = computedSw * 0.05;
+        const padY = computedSh * 0.05;
+        computedSx = Math.max(0, computedSx - padX);
+        computedSy = Math.max(0, computedSy - padY);
+        computedSw = Math.min(video.videoWidth - computedSx, computedSw + padX * 2);
+        computedSh = Math.min(video.videoHeight - computedSy, computedSh + padY * 2);
+
+        if (computedSw > 200 && computedSh > 200) {
+            sx = computedSx;
+            sy = computedSy;
+            sw = computedSw;
+            sh = computedSh;
+        }
+    }
+
+    canvas.width = Math.round(sw);
+    canvas.height = Math.round(sh);
     const ctx = canvas.getContext('2d');
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    ctx.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+
+    const statusBadge = document.getElementById('cameraScanStatus');
+    if (statusBadge) {
+        statusBadge.innerHTML = '<i class="fa-solid fa-spinner fa-spin text-emerald-400"></i> Đang nhận diện...';
+        statusBadge.classList.remove('hidden');
+    }
 
     canvas.toBlob(async (blob) => {
         if (!blob) return;
         try {
-            Swal.showLoading();
-            await processSingleSheet(blob);
-            Swal.close();
+            const sub = await processSingleSheet(blob);
+            if (statusBadge) {
+                statusBadge.innerHTML = '<i class="fa-solid fa-check text-emerald-400"></i> Đã nhận diện!';
+                setTimeout(() => statusBadge.classList.add('hidden'), 2000);
+            }
+            showCameraResultSheet(sub);
         } catch(err) {
-            Swal.close();
-            Swal.fire({
-                icon: 'warning',
-                title: 'Chưa căn chỉnh đúng phiếu',
-                text: err.message || 'Hãy đảm bảo 4 mốc đen góc phiếu nằm rõ trong khung hình và đủ ánh sáng!',
-                timer: 2800
-            });
+            console.warn("Scan frame error:", err);
+            if (statusBadge) {
+                statusBadge.innerHTML = '<i class="fa-solid fa-triangle-exclamation text-amber-400"></i> Căn 4 góc đen chưa rõ, thử lại';
+                statusBadge.classList.remove('hidden');
+                setTimeout(() => statusBadge.classList.add('hidden'), 3500);
+            }
         }
     }, 'image/jpeg', 0.95);
 };
@@ -1667,3 +1876,13 @@ window.confirmCreateExam = async () => {
     window.switchTab('keys');
     Swal.fire('Thành công', 'Đã tạo bài thi mới! Hãy thiết lập đáp án cho các mã đề.', 'success');
 };
+
+// Sync autoSave checkboxes between Main View and Camera HUD
+setTimeout(() => {
+    const autoSaveMain = document.getElementById('autoSaveToggle');
+    const autoSaveCam = document.getElementById('cameraAutoSave');
+    if (autoSaveMain && autoSaveCam) {
+        autoSaveMain.addEventListener('change', () => { autoSaveCam.checked = autoSaveMain.checked; });
+        autoSaveCam.addEventListener('change', () => { autoSaveMain.checked = autoSaveCam.checked; });
+    }
+}, 500);
