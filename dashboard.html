@@ -6163,8 +6163,29 @@
 
             // [TỐI ƯU] Tải Kho câu hỏi tức thì
             if (viewName === 'questionbank') {
-                if (typeof window.loadQuestionBank === 'function') {
-                    window.loadQuestionBank();
+                const isSuper = window.checkIsSuperAdmin ? window.checkIsSuperAdmin() : false;
+                const canUseSharedBank = isSuper || (window.hasPermission && (
+                    window.hasPermission('bank.use_shared') || 
+                    window.hasPermission('bank.manage_system') || 
+                    window.hasPermission('questions.manage') || 
+                    window.hasPermission('bank.manage')
+                ));
+                const canManageOwnBank = window.hasPermission && window.hasPermission('bank.manage_own');
+
+                if (!canUseSharedBank && !canManageOwnBank) {
+                    if (window.showNotification) window.showNotification("⛔ Bạn chưa được cấp quyền sử dụng Ngân hàng câu hỏi. Vui lòng liên hệ Thầy Quản Trị!", "warning");
+                    window.switchView('home');
+                    return;
+                }
+
+                if (!canUseSharedBank) {
+                    if (typeof window.switchBankSubView === 'function') {
+                        window.switchBankSubView('my_vault');
+                    }
+                } else {
+                    if (typeof window.loadQuestionBank === 'function') {
+                        window.loadQuestionBank();
+                    }
                 }
             }
 
@@ -6597,8 +6618,20 @@
             const navExambank = document.getElementById('nav-exambank');
             if (navExambank) navExambank.style.display = canExams ? '' : 'none';
             const navQuestionbank = document.getElementById('nav-questionbank');
-            const canViewBank = isSuper || window.hasPermission('questions.manage') || window.hasPermission('bank.manage_system') || window.hasPermission('bank.manage') || window.hasPermission('bank.use_shared') || window.hasPermission('exams.view');
+            const canUseSharedBank = isSuper || window.hasPermission('questions.manage') || window.hasPermission('bank.manage_system') || window.hasPermission('bank.manage') || window.hasPermission('bank.use_shared');
+            const canManageOwnBank = window.hasPermission('bank.manage_own');
+            const canViewBank = canUseSharedBank || canManageOwnBank;
             if (navQuestionbank) navQuestionbank.style.display = canViewBank ? '' : 'none';
+
+            // Cập nhật nhãn lock cho nút Ngân hàng hệ thống nếu không có quyền
+            const btnSystemTab = document.getElementById('tabBankSystem');
+            if (btnSystemTab) {
+                if (!canUseSharedBank) {
+                    btnSystemTab.innerHTML = '<i class="fa-solid fa-lock text-amber-500 mr-1"></i> <span>Ngân hàng hệ thống</span> <span class="text-[9px] bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 px-1 py-0.5 rounded font-black ml-1">VIP</span>';
+                } else {
+                    btnSystemTab.innerHTML = '<i class="fa-solid fa-cloud"></i> <span>Ngân hàng hệ thống</span>';
+                }
+            }
 
             // Nút Soạn đề mới
             const btnCreateContent = document.getElementById('btnCreateContent');
@@ -6802,8 +6835,21 @@
                                     } catch(eUp) { console.warn("Lỗi đồng bộ auto-upgrade permissions:", eUp); }
                                 })();
                             } catch(eUpgrade) {}
-                        } else if (isFree && perms.length === 0) {
-                            perms = ['classes.view', 'classes.manage', 'students.manage', 'exams.create', 'exams.view', 'exams.manage_own', 'mixer.use', 'word_importer.use', 'exams.assign'];
+                        } else if (isFree) {
+                            if (perms.length === 0) {
+                                perms = ['classes.view', 'classes.manage', 'students.manage', 'exams.create', 'exams.view', 'exams.manage_own', 'mixer.use', 'word_importer.use', 'exams.assign'];
+                            }
+                            try {
+                                const pkgSnap = await getDoc(doc(db, "configurations", "teacher_package_config"));
+                                if (pkgSnap.exists()) {
+                                    const pData = pkgSnap.data();
+                                    const freePerms = Array.isArray(pData.freePermissions) ? pData.freePermissions : [];
+                                    if (!freePerms.includes('bank.use_shared')) {
+                                        perms = perms.filter(p => p !== 'bank.use_shared');
+                                        found.permissions = perms;
+                                    }
+                                }
+                            } catch(ePkg) {}
                         }
 
                         window.currentAdminProfile = {
@@ -6851,6 +6897,18 @@
                         perms = Array.from(new Set([...perms.filter(p => !p.includes('_dashboard')), ...(ADMIN_PRESETS.teacher_full || [])]));
                         data.permissions = perms;
                         if (!data.assignedCourseIds || data.assignedCourseIds.length === 0) data.assignedCourseIds = ['*'];
+                    } else if (isFree) {
+                        try {
+                            const pkgSnap = await getDoc(doc(db, "configurations", "teacher_package_config"));
+                            if (pkgSnap.exists()) {
+                                const pData = pkgSnap.data();
+                                const freePerms = Array.isArray(pData.freePermissions) ? pData.freePermissions : [];
+                                if (!freePerms.includes('bank.use_shared')) {
+                                    perms = perms.filter(p => p !== 'bank.use_shared');
+                                    data.permissions = perms;
+                                }
+                            }
+                        } catch(ePkg) {}
                     }
 
                     window.currentAdminProfile = {
@@ -7437,6 +7495,32 @@
                 };
                 await setDoc(doc(db, "configurations", "teacher_package_config"), payload, { merge: true });
                 window.cachedTeacherPkgConfig = payload;
+
+                // Tự động đồng bộ quyền Giáo viên Free trong admin_roles nếu Super Admin không cấp bank.use_shared
+                try {
+                    const rolesRef = doc(db, "configurations", "admin_roles");
+                    const rolesSnap = await getDoc(rolesRef);
+                    if (rolesSnap.exists()) {
+                        let rAccounts = rolesSnap.data().accounts || [];
+                        let changed = false;
+                        rAccounts.forEach(acc => {
+                            const isAccFree = acc.teacherTier === 'free' || acc.role === 'teacher_free';
+                            if (isAccFree && Array.isArray(acc.permissions)) {
+                                if (!freePermsToSave.includes('bank.use_shared') && acc.permissions.includes('bank.use_shared')) {
+                                    acc.permissions = acc.permissions.filter(p => p !== 'bank.use_shared');
+                                    changed = true;
+                                }
+                            }
+                        });
+                        if (changed) {
+                            await setDoc(rolesRef, { accounts: rAccounts, updatedAt: new Date().toISOString() }, { merge: true });
+                            console.log("Đã tự động loại bỏ bank.use_shared khỏi tài khoản Giáo viên Free trong admin_roles!");
+                        }
+                    }
+                } catch(eSyncFree) {
+                    console.warn("Lỗi đồng bộ gỡ quyền bank.use_shared khỏi GV Free:", eSyncFree);
+                }
+
                 window.showNotification("🎉 Đã lưu cấu hình Gói VIP, Gói Free & Biểu phí QPoint thành công!", "success");
             } catch (err) {
                 console.error("Lỗi lưu cấu hình gói giáo viên:", err);
@@ -13047,6 +13131,10 @@ async function loadFileManager(forceRefresh = false) {
             folderData = JSON.parse(cachedF) || [];
             examData = JSON.parse(cachedE) || [];
             tagData = cachedT ? (JSON.parse(cachedT) || []) : [];
+            if (!canUseShared) {
+                folderData = folderData.filter(f => !f.isSystem && (!f.teacherId || f.teacherId === effectiveUid));
+                examData = examData.filter(e => !e.isSystem && (!e.teacherId || e.teacherId === effectiveUid));
+            }
             const statEx = document.getElementById('homeStatExams');
             if (statEx && examData) statEx.textContent = examData.length;
             hasValidCache = true;
@@ -16236,6 +16324,9 @@ function renderTagFilterUI() {
                     ...e,
                     folderId: (!e.folderId && !e.folder_id || e.folderId === 'root' || e.folderId === 'null' || e.folderId === 'undefined') ? null : (e.folderId || e.folder_id)
                 }));
+                if (!canUseShared) {
+                    window.assignableExams = window.assignableExams.filter(e => !e.isSystem && (!e.teacherId || e.teacherId === effectiveUid));
+                }
 
                 // Tải thêm đề hệ thống dùng chung nếu có quyền bank.use_shared
                 if (canUseShared) {
@@ -16867,6 +16958,23 @@ function renderTagFilterUI() {
 
     // 2. Tải dữ liệu Ngân hàng & Cây MapID
     window.loadQuestionBank = async () => {
+        const isSuper = window.checkIsSuperAdmin ? window.checkIsSuperAdmin() : false;
+        const canUseSharedBank = isSuper || (window.hasPermission && (
+            window.hasPermission('bank.use_shared') || 
+            window.hasPermission('bank.manage_system') || 
+            window.hasPermission('questions.manage') || 
+            window.hasPermission('bank.manage')
+        ));
+
+        if (!canUseSharedBank) {
+            window.globalBankQuestions = [];
+            try { localStorage.removeItem('lms_cached_bank'); } catch(e) {}
+            if (typeof window.switchBankSubView === 'function') {
+                window.switchBankSubView('my_vault');
+            }
+            return;
+        }
+
         if (window.globalBankQuestions && window.globalBankQuestions.length > 0) {
             window.enrichBankQuestions(window.globalBankQuestions);
             window.applyBankFilters();
@@ -17114,6 +17222,18 @@ function renderTagFilterUI() {
 
     // Tra cứu câu hỏi trực tiếp theo ID / CCCD (dành cho Giáo viên)
     window.directLookupTeacherBank = async () => {
+        const isSuper = window.checkIsSuperAdmin ? window.checkIsSuperAdmin() : false;
+        const canUseSharedBank = isSuper || (window.hasPermission && (
+            window.hasPermission('bank.use_shared') || 
+            window.hasPermission('bank.manage_system') || 
+            window.hasPermission('questions.manage') || 
+            window.hasPermission('bank.manage')
+        ));
+        if (!canUseSharedBank) {
+            if (window.showNotification) window.showNotification("⛔ Bạn chưa được cấp quyền tra cứu Ngân hàng câu hỏi hệ thống!", "warning");
+            return;
+        }
+
         const input = document.getElementById('searchBank');
         if (!input) return;
         const query = input.value.trim();
@@ -17933,6 +18053,18 @@ function renderTagFilterUI() {
 
     // 7. Fetch Chi tiết & Hiện Modal
     window.fetchAndPreview = async (id) => {
+        const isSuper = window.checkIsSuperAdmin ? window.checkIsSuperAdmin() : false;
+        const canUseSharedBank = isSuper || (window.hasPermission && (
+            window.hasPermission('bank.use_shared') || 
+            window.hasPermission('bank.manage_system') || 
+            window.hasPermission('questions.manage') || 
+            window.hasPermission('bank.manage')
+        ));
+        if (!canUseSharedBank) {
+            if (window.showNotification) window.showNotification("⛔ Bạn không có quyền xem chi tiết câu hỏi từ Ngân hàng hệ thống!", "warning");
+            return;
+        }
+
         const modal = document.getElementById('questionPreviewModal');
         const content = document.getElementById('questionPreviewContent');
         const subtitle = document.getElementById('previewModalSubtitle');
@@ -18712,6 +18844,23 @@ function renderTagFilterUI() {
         const btnMyVault = document.getElementById('tabBankTeacherMyVault');
         const btnReview = document.getElementById('tabBankSuperAdminReview');
 
+        const isSuper = window.checkIsSuperAdmin ? window.checkIsSuperAdmin() : false;
+        const canUseSharedBank = isSuper || (window.hasPermission && (
+            window.hasPermission('bank.use_shared') || 
+            window.hasPermission('bank.manage_system') || 
+            window.hasPermission('questions.manage') || 
+            window.hasPermission('bank.manage')
+        ));
+
+        // Cập nhật nhãn lock cho nút Ngân hàng hệ thống nếu không có quyền
+        if (btnSystem) {
+            if (!canUseSharedBank) {
+                btnSystem.innerHTML = '<i class="fa-solid fa-lock text-amber-500 mr-1"></i> <span>Ngân hàng hệ thống</span> <span class="text-[9px] bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 px-1 py-0.5 rounded font-black ml-1">VIP</span>';
+            } else {
+                btnSystem.innerHTML = '<i class="fa-solid fa-cloud"></i> <span>Ngân hàng hệ thống</span>';
+            }
+        }
+
         const inactiveClasses = ['text-gray-600', 'dark:text-gray-300', 'hover:bg-gray-100', 'dark:hover:bg-gray-800'];
         const activeClasses = ['bg-primary-600', 'text-white', 'shadow-2xs'];
 
@@ -18753,11 +18902,48 @@ function renderTagFilterUI() {
             if (cMyVault) cMyVault.classList.add('hidden');
             if (cReview) cReview.classList.add('hidden');
             if (cSystem) cSystem.classList.remove('hidden');
-            if (fBar) fBar.classList.remove('hidden');
 
             setBtnActive(btnSystem, true);
             setBtnActive(btnMyVault, false);
             setBtnActive(btnReview, false);
+
+            if (!canUseSharedBank) {
+                if (fBar) fBar.classList.add('hidden');
+                const countEl = document.getElementById('bankCount');
+                if (countEl) countEl.innerText = 'Đã khóa';
+                const bulkContainer = document.getElementById('bankBulkActionContainer');
+                if (bulkContainer) bulkContainer.style.display = 'none';
+
+                const grid = document.getElementById('bankListGrid');
+                const empty = document.getElementById('bankListEmpty');
+                const loading = document.getElementById('bankListLoading');
+                if (empty) empty.classList.add('hidden');
+                if (loading) loading.classList.add('hidden');
+                if (grid) {
+                    grid.className = "w-full";
+                    grid.classList.remove('hidden');
+                    grid.innerHTML = `
+                        <div class="flex flex-col items-center justify-center p-8 md:p-12 text-center bg-white dark:bg-gray-800 rounded-3xl border border-amber-200 dark:border-amber-900/50 shadow-sm max-w-xl mx-auto my-8">
+                            <div class="w-16 h-16 rounded-2xl bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 flex items-center justify-center text-3xl mb-4 border border-amber-200 dark:border-amber-800 shadow-inner">
+                                <i class="fa-solid fa-lock"></i>
+                            </div>
+                            <h3 class="text-lg md:text-xl font-black text-gray-900 dark:text-gray-100 mb-2">Ngân Hàng Câu Hỏi Hệ Thống Đang Bị Khóa</h3>
+                            <p class="text-xs md:text-sm text-gray-600 dark:text-gray-400 mb-6 leading-relaxed">
+                                Tài khoản Thầy/Cô chưa được cấp quyền sử dụng Ngân hàng câu hỏi hệ thống (<strong>Dùng ngân hàng chia sẻ</strong>).<br>
+                                Vui lòng liên hệ Thầy Quản Trị hoặc nâng cấp Gói VIP để mở khóa toàn bộ 2.400+ câu hỏi và lời giải chi tiết.
+                            </p>
+                            <button type="button" onclick="window.switchBankSubView('my_vault')" class="btn-season-primary px-5 py-2.5 rounded-xl text-white font-bold text-xs md:text-sm flex items-center gap-2 shadow-md cursor-pointer">
+                                <i class="fa-solid fa-folder-closed"></i> Mở Kho R2 của tôi
+                            </button>
+                        </div>
+                    `;
+                }
+                return;
+            }
+
+            if (fBar) fBar.classList.remove('hidden');
+            const bulkContainer = document.getElementById('bankBulkActionContainer');
+            if (bulkContainer) bulkContainer.style.display = (window.canManageQuestionBank && window.canManageQuestionBank()) ? '' : 'none';
 
             if (typeof window.applyBankFilters === 'function') window.applyBankFilters();
         }
@@ -18768,6 +18954,23 @@ function renderTagFilterUI() {
         try {
             if (!window.BankService) return;
             const isSuper = window.checkIsSuperAdmin ? window.checkIsSuperAdmin() : false;
+            const canUseSharedBank = isSuper || (window.hasPermission && (
+                window.hasPermission('bank.use_shared') || 
+                window.hasPermission('bank.manage_system') || 
+                window.hasPermission('questions.manage') || 
+                window.hasPermission('bank.manage')
+            ));
+
+            // Cập nhật nhãn lock cho tabBankSystem nếu không có quyền
+            const btnSystem = document.getElementById('tabBankSystem');
+            if (btnSystem) {
+                if (!canUseSharedBank) {
+                    btnSystem.innerHTML = '<i class="fa-solid fa-lock text-amber-500 mr-1"></i> <span>Ngân hàng hệ thống</span> <span class="text-[9px] bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 px-1 py-0.5 rounded font-black ml-1">VIP</span>';
+                } else {
+                    btnSystem.innerHTML = '<i class="fa-solid fa-cloud"></i> <span>Ngân hàng hệ thống</span>';
+                }
+            }
+
             const teacherUid = window.currentUser?.uid || window.currentAdminProfile?.uid || (window.auth && window.auth.currentUser ? window.auth.currentUser.uid : null);
 
             // 1. Badge Kho R2 của tôi
@@ -20755,6 +20958,18 @@ function renderTagFilterUI() {
     };
 
     window.exportSingleQuestionTexById = async (id) => {
+        const isSuper = window.checkIsSuperAdmin ? window.checkIsSuperAdmin() : false;
+        const canUseSharedBank = isSuper || (window.hasPermission && (
+            window.hasPermission('bank.use_shared') || 
+            window.hasPermission('bank.manage_system') || 
+            window.hasPermission('questions.manage') || 
+            window.hasPermission('bank.manage')
+        ));
+        if (!canUseSharedBank) {
+            if (window.showNotification) window.showNotification("⛔ Bạn không có quyền xuất dữ liệu từ Ngân hàng hệ thống!", "warning");
+            return;
+        }
+
         let q = (window.globalBankQuestions || []).find(item => item.id === id || item.cccd === id);
         if (!q) {
             if (window.BankService) {
@@ -20978,6 +21193,18 @@ function renderTagFilterUI() {
     };
 
     window.checkQuestionUsageById = async (id) => {
+        const isSuper = window.checkIsSuperAdmin ? window.checkIsSuperAdmin() : false;
+        const canUseSharedBank = isSuper || (window.hasPermission && (
+            window.hasPermission('bank.use_shared') || 
+            window.hasPermission('bank.manage_system') || 
+            window.hasPermission('questions.manage') || 
+            window.hasPermission('bank.manage')
+        ));
+        if (!canUseSharedBank) {
+            if (window.showNotification) window.showNotification("⛔ Bạn không có quyền tra cứu từ Ngân hàng hệ thống!", "warning");
+            return;
+        }
+
         let q = (window.globalBankQuestions || []).find(item => item.id === id || item.cccd === id);
         if (!q || !q.content) {
             if (window.BankService) {

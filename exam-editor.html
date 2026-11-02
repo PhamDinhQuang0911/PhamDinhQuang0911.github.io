@@ -10408,6 +10408,27 @@ YÊU CẦU NỘI DUNG LỜI PHÊ:
                 return;
             }
 
+            const userEmail = (((window.auth && window.auth.currentUser ? window.auth.currentUser.email : '') || (typeof currentUser !== 'undefined' && currentUser?.email ? currentUser.email : ''))).toLowerCase().trim();
+            const ROOT_SUPER_ADMINS_LIST = ['phamngockhanh.942001@gmail.com', 'phamdinhquang0911@gmail.com'];
+            let isSuperSingle = ROOT_SUPER_ADMINS_LIST.includes(userEmail);
+            let canManageOwnBankSingle = isSuperSingle;
+            if (!isSuperSingle) {
+                try {
+                    const cfgSnap = await getDoc(doc(db, "configurations", "admin_roles"));
+                    if (cfgSnap.exists()) {
+                        const accs = cfgSnap.data().accounts || [];
+                        const me = accs.find(a => (a.email || '').toLowerCase().trim() === userEmail);
+                        if (me && Array.isArray(me.permissions)) {
+                            canManageOwnBankSingle = me.permissions.includes('bank.manage_own') || me.permissions.includes('bank.use_shared');
+                        }
+                    }
+                } catch(e) {}
+            }
+            if (!isSuperSingle && !canManageOwnBankSingle) {
+                window.customAlert("⛔ Thầy/Cô chưa được Super Admin cấp quyền tạo & quản lý Ngân hàng câu hỏi riêng!", "error");
+                return;
+            }
+
             // 2. Đảm bảo câu hỏi có mã CCCD số duy nhất
             let cccd = q.cccd || q.bankId;
             if (!window.BankService?.isNumericCccd(cccd)) {
