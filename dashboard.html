@@ -10327,7 +10327,28 @@
             document.head.appendChild(st);
         })();
 
-        window.openTeacherVideoPlayer = async function(lessonId) {
+        
+    window.retryLoadTeacherVideo = async function() {
+        try {
+            window._tgStreamUrlCache = {};
+            const keys = Object.keys(sessionStorage);
+            keys.forEach(k => { if (k.startsWith('tg_stream_')) sessionStorage.removeItem(k); });
+        } catch (_) {}
+        const modal = document.getElementById('teacherVideoPlayerModal');
+        if (modal) modal.remove();
+        if (window._currentTeacherLessonId) {
+            window.openTeacherVideoPlayer(window._currentTeacherLessonId);
+        }
+    };
+    window.clearVideoCacheAndReload = function() {
+        try {
+            sessionStorage.clear();
+            window._tgStreamUrlCache = {};
+        } catch (_) {}
+        location.reload();
+    };
+    window.openTeacherVideoPlayer = async function(lessonId) {
+            window._currentTeacherLessonId = lessonId;
             try {
                 history.pushState({ modal: 'teacher_video_player' }, '');
             } catch (_) {}
@@ -10407,8 +10428,8 @@
                             '<h4 class="font-extrabold text-sm md:text-base text-slate-100 mb-1">Video Bài Giảng Dung Lượng Lớn</h4>' +
                             '<p id="teacherFallbackNotice" class="text-xs text-slate-400 mb-4 leading-relaxed">Video này cần mở qua Web Telegram hoặc tải về máy để xem trực tiếp với chất lượng gốc.</p>' +
                             '<div class="flex flex-col sm:flex-row items-center gap-2.5 w-full justify-center">' +
-                                '<a id="teacherFallbackWebBtn" href="#" target="_blank" class="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-extrabold text-xs flex items-center justify-center gap-2 transition shadow-lg shadow-purple-600/30"><i class="fa-solid fa-globe"></i> Xem trên Web Telegram</a>' +
-                                '<a id="teacherFallbackTmeBtn" href="#" target="_blank" class="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs flex items-center justify-center gap-2 transition border border-slate-700"><i class="fa-solid fa-arrow-down"></i> Tải về máy xem ngay</a>' +
+                                '<button type="button" onclick="window.retryLoadTeacherVideo()" class="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-extrabold text-xs flex items-center justify-center gap-2 transition shadow-lg shadow-purple-600/30 cursor-pointer"><i class="fa-solid fa-rotate-right"></i> Thử kết nối lại ngay</button>' +
+                                '<button type="button" onclick="window.clearVideoCacheAndReload()" class="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs flex items-center justify-center gap-2 transition border border-slate-700 cursor-pointer"><i class="fa-solid fa-broom"></i> Xóa đệm & Tải lại</button>' +
                             '</div>' +
                         '</div>' +
                     '</div>' +
@@ -10548,32 +10569,50 @@
 
             titleEl.textContent = title;
 
-            async function resolveStreamUrl(chunkOrFileId) {
+            async function resolveStreamUrl(chunkOrFileId, forceFresh = false) {
                 if (!chunkOrFileId) return null;
                 const fId = typeof chunkOrFileId === 'string' ? chunkOrFileId : (chunkOrFileId.fileId || chunkOrFileId.file_id);
                 if (!fId) return chunkOrFileId.url || chunkOrFileId.streamUrl || null;
-                if (window._tgStreamUrlCache[fId]) {
+                if (!forceFresh && window._tgStreamUrlCache[fId]) {
                     return window._tgStreamUrlCache[fId];
                 }
-                try {
-                    const saved = sessionStorage.getItem('tg_stream_' + fId);
-                    if (saved) {
-                        window._tgStreamUrlCache[fId] = saved;
-                        return saved;
-                    }
-                } catch (_) {}
+                if (!forceFresh) {
+                    try {
+                        const savedRaw = sessionStorage.getItem('tg_stream_' + fId);
+                        if (savedRaw) {
+                            let savedUrl = savedRaw;
+                            let savedTime = 0;
+                            try {
+                                const parsed = JSON.parse(savedRaw);
+                                if (parsed && parsed.url) {
+                                    savedUrl = parsed.url;
+                                    savedTime = parsed.t || 0;
+                                }
+                            } catch (_) {}
+                            if (savedTime && (Date.now() - savedTime < 45 * 60 * 1000)) {
+                                window._tgStreamUrlCache[fId] = savedUrl;
+                                return savedUrl;
+                            } else if (!savedTime) {
+                                sessionStorage.removeItem('tg_stream_' + fId);
+                            }
+                        }
+                    } catch (_) {}
+                }
                 if (window._tgStreamUrlPromises[fId]) {
                     return await window._tgStreamUrlPromises[fId];
                 }
                 const fetchPromise = (async () => {
                     try {
                         const res = await fetch('https://api.telegram.org/bot' + BOT_TOKEN + '/getFile?file_id=' + encodeURIComponent(fId));
+                        if (!res.ok) console.warn('Telegram API HTTP status:', res.status);
                         const data = await res.json();
                         if (data.ok && data.result && data.result.file_path) {
                             const direct = 'https://api.telegram.org/file/bot' + BOT_TOKEN + '/' + data.result.file_path;
                             window._tgStreamUrlCache[fId] = direct;
-                            try { sessionStorage.setItem('tg_stream_' + fId, direct); } catch (_) {}
+                            try { sessionStorage.setItem('tg_stream_' + fId, JSON.stringify({ url: direct, t: Date.now() })); } catch (_) {}
                             return direct;
+                        } else {
+                            console.warn('Telegram getFile fail:', data);
                         }
                     } catch (e) {
                         console.warn('Lỗi phân giải file Telegram:', fId, e);
@@ -10892,11 +10931,7 @@
                     activeVid.play().catch(() => {});
                     playPauseBtn.innerHTML = '<i class="fa-solid fa-pause"></i>';
                     preloadNextChunk(1);
-                    (async () => {
-                        for (let i = 2; i < chunks.length; i++) {
-                            await resolveStreamUrl(chunks[i]);
-                        }
-                    })();
+                    // Lazy preload: nạp tuần tự theo tiến trình xem để tránh Telegram Rate Limit (429)
                 } else {
                     loaderEl.classList.add('hidden');
                     fallbackEl.classList.remove('hidden');
