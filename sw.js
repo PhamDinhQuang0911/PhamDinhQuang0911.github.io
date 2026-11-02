@@ -14,7 +14,7 @@
  * (network-first) nhưng nên tăng khi đổi styles.css/utils.js để chắc chắn.
  */
 
-const VERSION = 'qmath-v78-seamless-continuous-video-dual-engine';
+const VERSION = 'qmath-v79-fullscreen-radiant-timeline-seamless-video';
 const STATIC_CACHE = `${VERSION}-static`;
 const PAGE_CACHE = `${VERSION}-pages`;
 const CDN_CACHE = `${VERSION}-cdn`;
