@@ -10724,16 +10724,38 @@
                     }
                 }
 
-                async function preloadNextChunk(nextIdx) {
-                    if (nextIdx < chunks.length) {
-                        const nextUrl = await resolveStreamUrl(chunks[nextIdx]);
-                        if (nextUrl && standbyVid.src !== nextUrl) {
-                            standbyVid.src = nextUrl;
-                            standbyVid.currentTime = 0;
-                            standbyVid.playbackRate = currentPlaybackRate;
-                            standbyVid.preload = 'auto';
-                            standbyVid.load();
+                // CƠ CHẾ ĐỆM TRƯỢT 3 PHÂN ĐOẠN (SLIDING LOOKAHEAD BUFFER - 3 CHUNKS AHEAD)
+                let isResolvingLookahead = false;
+                async function ensureLookaheadWindow(currentIdx) {
+                    if (isResolvingLookahead || !chunks) return;
+                    isResolvingLookahead = true;
+                    try {
+                        // Tải trước 3 phân đoạn tiếp theo: currentIdx + 1, currentIdx + 2, currentIdx + 3
+                        const maxAhead = Math.min(chunks.length, currentIdx + 4);
+                        for (let i = currentIdx + 1; i < maxAhead; i++) {
+                            const fId = typeof chunks[i] === 'string' ? chunks[i] : (chunks[i]?.fileId || chunks[i]?.file_id);
+                            if (fId && !window._tgStreamUrlCache[fId]) {
+                                await resolveStreamUrl(chunks[i]);
+                                // Khoảng nghỉ 120ms để không dính Rate Limit 429 Telegram
+                                await new Promise(r => setTimeout(r, 120));
+                            }
                         }
+                    } catch (_) {}
+                    finally {
+                        isResolvingLookahead = false;
+                    }
+                }
+
+                async function preloadNextChunk(nextIdx) {
+                    if (nextIdx >= chunks.length) return;
+                    const nextUrl = await resolveStreamUrl(chunks[nextIdx]);
+                    if (nextUrl && standbyVid.src !== nextUrl) {
+                        standbyVid.src = nextUrl;
+                        standbyVid.currentTime = 0;
+                        standbyVid.playbackRate = currentPlaybackRate;
+                        standbyVid.preload = 'auto';
+                        standbyVid.muted = true; // Muted để trình duyệt cho phép đệm trước mượt mà
+                        standbyVid.load();
                     }
                 }
 
@@ -10745,13 +10767,22 @@
                         const globalTime = cumulativeTimes[activeIdx] + curT;
                         updateTimelineUI(globalTime);
 
-                        // Auto-hide loader as soon as playback time advances
+                        // Tự động ẩn loader khi frame video chạy
                         if (curT > 0.05 && !loaderEl.classList.contains("hidden")) {
                             if (stallTimer) clearTimeout(stallTimer);
                             loaderEl.classList.add("hidden");
                         }
 
-                        if (curT >= chunkDur - 0.25 && activeIdx + 1 < chunks.length) {
+                        // KHI XEM ĐƯỢC 1 NỬA PHÂN ĐOẠN HIỆN TẠI (50%):
+                        // Kích hoạt ngay việc nạp trước 3 phân đoạn tiếp theo & nạp sẵn dữ liệu standby
+                        if (curT >= (chunkDur * 0.45) && !videoEl._halfwayTriggered) {
+                            videoEl._halfwayTriggered = true;
+                            ensureLookaheadWindow(activeIdx);
+                            preloadNextChunk(activeIdx + 1);
+                        }
+
+                        // Chuyển giao mượt mà trước khi hết phân đoạn 0.4s để 0ms độ trễ
+                        if (curT >= Math.max(0.5, chunkDur - 0.4) && activeIdx + 1 < chunks.length) {
                             doHandover();
                         }
                     };
@@ -10765,7 +10796,7 @@
                         }
                     };
 
-                    // Debounce stalling to prevent aggressive spinner flashing (800ms)
+                    // Chống nhấp nháy spinner (trễ 800ms mới hiện nếu thật sự nghẽn)
                     videoEl.onwaiting = () => {
                         if (videoEl !== activeVid) return;
                         if (stallTimer) clearTimeout(stallTimer);
@@ -10784,6 +10815,7 @@
                             playPauseBtn.innerHTML = '<i class="fa-solid fa-pause"></i>';
                         }
                     };
+
                     videoEl.oncanplay = () => {
                         if (videoEl === activeVid && videoEl.currentTime > 0.05) {
                             if (stallTimer) clearTimeout(stallTimer);
@@ -10809,6 +10841,8 @@
                                 newVid.load();
                             }
                         }
+
+                        newVid.muted = false; // Bật lại âm thanh khi chuyển làm active
                         newVid.playbackRate = currentPlaybackRate;
                         newVid.style.opacity = '1';
                         newVid.style.zIndex = '2';
@@ -10819,19 +10853,26 @@
                             try { await playPromise; } catch (_) {}
                         }
 
+                        // Làm mờ và tạm dừng video cũ sau 100ms
                         oldVid.style.opacity = '0';
                         oldVid.style.zIndex = '1';
                         oldVid.style.pointerEvents = 'none';
-                        oldVid.pause();
+                        setTimeout(() => {
+                            try { oldVid.pause(); } catch (_) {}
+                        }, 100);
 
                         activeVid = newVid;
                         standbyVid = oldVid;
                         activeIdx = nextIdx;
+                        activeVid._halfwayTriggered = false;
 
                         if (stallTimer) clearTimeout(stallTimer);
                         loaderEl.classList.add('hidden');
 
+                        // Gối đầu ngay phân đoạn tiếp theo vào standbyVid
                         preloadNextChunk(activeIdx + 1);
+                        // Và duy trì cửa sổ trượt 3 phân đoạn
+                        ensureLookaheadWindow(activeIdx);
                     } finally {
                         isHandingOver = false;
                     }
@@ -10931,7 +10972,7 @@
                     activeVid.play().catch(() => {});
                     playPauseBtn.innerHTML = '<i class="fa-solid fa-pause"></i>';
                     preloadNextChunk(1);
-                    // Lazy preload: nạp tuần tự theo tiến trình xem để tránh Telegram Rate Limit (429)
+                    ensureLookaheadWindow(0); // Nạp trước 3 phân đoạn (Chunk 1, 2, 3) ngay khi bắt đầu
                 } else {
                     loaderEl.classList.add('hidden');
                     fallbackEl.classList.remove('hidden');
