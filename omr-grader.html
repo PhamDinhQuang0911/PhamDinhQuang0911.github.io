@@ -11,7 +11,7 @@
         }
     } catch(e){}
 </script>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>StarMind OMR - Chấm thi Trắc nghiệm Bằng Camera | QMath LMS</title>
     <link rel="icon" href="./omr/assets/starmind-exam.png">
     
@@ -314,41 +314,66 @@
 
             <!-- LIVE CAMERA AREA (Hidden by default) -->
             <div id="scanCameraArea" class="hidden space-y-4">
-                <div class="relative bg-black rounded-3xl overflow-hidden aspect-[3/4] sm:aspect-video max-h-[70vh] mx-auto shadow-2xl flex items-center justify-center border-2 border-slate-700">
-                    <video id="cameraVideo" autoplay playsinline muted class="w-full h-full object-cover"></video>
+                <div class="relative bg-slate-950 rounded-3xl overflow-hidden h-[66vh] sm:h-[72vh] w-full max-w-4xl mx-auto shadow-2xl flex items-center justify-center border-2 border-slate-700">
+                    <!-- Video tag with object-contain to preserve FULL native FOV without artificial zoom -->
+                    <video id="cameraVideo" autoplay playsinline muted class="w-full h-full object-contain pointer-events-none select-none"></video>
                     <canvas id="cameraCanvas" class="hidden"></canvas>
                     
                     <!-- Camera HUD Overlay -->
-                    <div class="absolute inset-0 pointer-events-none p-6 flex flex-col justify-between">
-                        <div class="flex items-center justify-between text-white/80 text-xs">
-                            <span class="px-2.5 py-1 bg-black/60 rounded-full backdrop-blur-md"><i class="fa-solid fa-circle-dot text-rose-500 mr-1 animate-pulse"></i> Khung ngắm OMR</span>
-                            <span id="cameraFps" class="font-mono px-2 py-0.5 bg-black/50 rounded">Live</span>
+                    <div class="absolute inset-0 pointer-events-none flex flex-col justify-between p-3 sm:p-5 select-none z-10">
+                        <!-- Top HUD Bar -->
+                        <div class="flex items-center justify-between text-white text-xs z-20">
+                            <div class="flex items-center gap-2">
+                                <span class="px-3 py-1 bg-black/70 rounded-full backdrop-blur-md flex items-center gap-1.5 font-bold shadow-md">
+                                    <i class="fa-solid fa-circle-dot text-rose-500 animate-pulse text-[10px]"></i>
+                                    <span>Khung chuẩn A4</span>
+                                </span>
+                                <span id="cameraZoomBadge" class="hidden font-mono px-2 py-0.5 bg-black/60 rounded-full text-[11px] font-bold text-emerald-400">1.0x</span>
+                            </div>
+                            <div class="flex items-center gap-1.5 pointer-events-auto">
+                                <!-- Torch Toggle -->
+                                <button type="button" id="btnCameraTorch" onclick="window.toggleCameraTorch()" class="hidden w-8 h-8 rounded-full bg-black/60 hover:bg-black/80 text-white flex items-center justify-center text-xs backdrop-blur-md shadow-md transition-all active:scale-95 cursor-pointer" title="Bật/Tắt đèn pin trợ sáng">
+                                    <i id="torchIcon" class="fa-solid fa-bolt"></i>
+                                </button>
+                                <span id="cameraFps" class="font-mono px-2.5 py-1 bg-black/60 rounded-full backdrop-blur-md font-bold text-slate-300">Live</span>
+                            </div>
                         </div>
                         
-                        <!-- 4 Corner Guides -->
-                        <div class="relative flex-1 m-4 border-2 border-emerald-400/50 rounded-2xl overflow-hidden">
-                            <div class="hud-scan-line"></div>
-                            <!-- Corner markers -->
-                            <div class="absolute top-2 left-2 w-8 h-8 border-t-4 border-l-4 border-emerald-400"></div>
-                            <div class="absolute top-2 right-2 w-8 h-8 border-t-4 border-r-4 border-emerald-400"></div>
-                            <div class="absolute bottom-2 left-2 w-8 h-8 border-b-4 border-l-4 border-emerald-400"></div>
-                            <div class="absolute bottom-2 right-2 w-8 h-8 border-b-4 border-r-4 border-emerald-400"></div>
+                        <!-- 4 Corner Guides: PROPORTIONAL A4 ASPECT RATIO (210/297) with generous distance -->
+                        <div class="relative flex-1 flex items-center justify-center my-1 pointer-events-none">
+                            <div id="cameraA4Guide" class="relative w-full h-full max-h-[82vh] aspect-[210/297] border-2 border-emerald-400/80 rounded-xl shadow-[0_0_0_9999px_rgba(0,0,0,0.42)] overflow-hidden transition-all duration-200">
+                                <div class="hud-scan-line"></div>
+                                <!-- 4 Precise L-Corner Markers matching OMR Black Fiducials -->
+                                <div class="absolute top-[2.2%] left-[3.2%] w-7 h-7 border-t-[3.5px] border-l-[3.5px] border-emerald-400"></div>
+                                <div class="absolute top-[2.2%] right-[3.2%] w-7 h-7 border-t-[3.5px] border-r-[3.5px] border-emerald-400"></div>
+                                <div class="absolute bottom-[2.2%] left-[3.2%] w-7 h-7 border-b-[3.5px] border-l-[3.5px] border-emerald-400"></div>
+                                <div class="absolute bottom-[2.2%] right-[3.2%] w-7 h-7 border-b-[3.5px] border-r-[3.5px] border-emerald-400"></div>
+                            </div>
                         </div>
 
-                        <div class="text-center text-white/90 text-xs font-semibold bg-black/50 py-1.5 px-3 rounded-full backdrop-blur-md mx-auto">
-                            Đặt 4 mốc đen góc phiếu nằm trọn trong khung ngắm
+                        <!-- Guide Tip -->
+                        <div class="text-center text-white/95 text-[11px] sm:text-xs font-bold bg-black/65 py-1 px-4 rounded-full backdrop-blur-md mx-auto shadow-md pointer-events-none">
+                            Giữ điện thoại cách mặt bàn 30-40cm để 4 góc đen nằm lọt trong khung
                         </div>
                     </div>
 
+                    <!-- Zoom Quick Buttons (for mobile devices supporting optical/digital zoom) -->
+                    <div id="cameraZoomControls" class="hidden absolute right-3 top-1/2 -translate-y-1/2 z-20 flex-col gap-2 pointer-events-auto">
+                        <button type="button" onclick="window.setCameraZoom(0.5)" class="zoom-btn w-9 h-9 rounded-full bg-black/70 hover:bg-black/90 text-white text-xs font-black backdrop-blur-md border border-white/20 transition-all active:scale-90" title="Góc siêu rộng (0.5x)">0.5x</button>
+                        <button type="button" onclick="window.setCameraZoom(1.0)" class="zoom-btn w-9 h-9 rounded-full bg-emerald-600 text-white text-xs font-black backdrop-blur-md border border-emerald-400 transition-all active:scale-90" title="Góc tiêu chuẩn (1x)">1x</button>
+                        <button type="button" onclick="window.setCameraZoom(2.0)" class="zoom-btn w-9 h-9 rounded-full bg-black/70 hover:bg-black/90 text-white text-xs font-black backdrop-blur-md border border-white/20 transition-all active:scale-90" title="Thu phóng (2x)">2x</button>
+                    </div>
+
                     <!-- Camera Control Bar -->
-                    <div class="absolute bottom-4 z-10 flex items-center gap-3">
-                        <button type="button" onclick="window.switchCameraLens()" class="w-11 h-11 rounded-full bg-white/20 hover:bg-white/30 text-white backdrop-blur-md flex items-center justify-center text-base transition-all active:scale-95" title="Đổi camera trước/sau">
+                    <div class="absolute bottom-3 sm:bottom-4 z-20 flex items-center gap-3 select-none">
+                        <button type="button" onclick="window.switchCameraLens()" class="w-11 h-11 rounded-full bg-black/60 hover:bg-black/80 text-white backdrop-blur-md flex items-center justify-center text-base transition-all active:scale-95 shadow-lg border border-white/10 cursor-pointer" title="Đổi camera trước/sau">
                             <i class="fa-solid fa-camera-rotate"></i>
                         </button>
-                        <button type="button" onclick="window.captureCameraFrame()" class="px-6 py-3 rounded-full bg-emerald-500 hover:bg-emerald-600 text-white font-extrabold text-sm shadow-lg flex items-center gap-2 transition-all active:scale-95 cursor-pointer">
-                            <i class="fa-solid fa-camera"></i> Chụp & Chấm ngay
+                        <button type="button" onclick="window.captureCameraFrame()" class="px-6 sm:px-8 py-3 rounded-full bg-emerald-500 hover:bg-emerald-600 text-white font-extrabold text-sm sm:text-base shadow-xl shadow-emerald-950/40 flex items-center gap-2.5 transition-all active:scale-95 cursor-pointer border border-emerald-300/30">
+                            <i class="fa-solid fa-camera text-base"></i>
+                            <span>Chụp & Chấm ngay</span>
                         </button>
-                        <button type="button" onclick="window.stopCameraStream()" class="w-11 h-11 rounded-full bg-white/20 hover:bg-white/30 text-white backdrop-blur-md flex items-center justify-center text-base transition-all active:scale-95" title="Dừng camera">
+                        <button type="button" onclick="window.stopCameraStream()" class="w-11 h-11 rounded-full bg-black/60 hover:bg-black/80 text-white backdrop-blur-md flex items-center justify-center text-base transition-all active:scale-95 shadow-lg border border-white/10 cursor-pointer" title="Dừng camera">
                             <i class="fa-solid fa-stop"></i>
                         </button>
                     </div>
@@ -421,7 +446,7 @@
                         <div class="p-4 bg-slate-50 dark:bg-slate-900/50 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-2">
                             <span class="text-xs font-bold text-slate-500 uppercase tracking-wider">Chữ viết tay họ tên học sinh (Cắt tự động):</span>
                             <div class="h-16 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center justify-center overflow-hidden p-1 shadow-2xs">
-                                <img id="resHandwrittenImg" src="" alt="Chữ viết tay học sinh" class="max-h-full object-contain">
+                                <img id="resHandwrittenImg" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1' height='1'%3E%3C/svg%3E" alt="Chữ viết tay học sinh" class="max-h-full object-contain">
                                 <span id="resNoHandwritingText" class="text-xs text-slate-400 italic hidden">Không trích xuất được chữ viết tay</span>
                             </div>
                         </div>
@@ -457,7 +482,7 @@
                         </div>
                         <div class="relative bg-slate-900 rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-700 shadow-md max-h-[500px] overflow-y-auto custom-scrollbar flex justify-center">
                             <div class="sheet-container" id="visualSheetContainer">
-                                <img id="resRectifiedImg" src="" alt="Phiếu đã nắn phẳng" class="max-w-full h-auto block">
+                                <img id="resRectifiedImg" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1' height='1'%3E%3C/svg%3E" alt="Phiếu đã nắn phẳng" class="max-w-full h-auto block">
                                 <svg id="resSvgOverlay" class="sheet-svg-overlay"></svg>
                             </div>
                         </div>
