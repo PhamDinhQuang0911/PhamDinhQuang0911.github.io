@@ -146,56 +146,145 @@ window.switchTab = (tabName) => {
 };
 
 // ========================================================
-// 3. EXAMS & DATA MANAGEMENT (Firestore + LocalStorage)
+// 3. EXAMS & DATA MANAGEMENT (Firestore + LocalStorage + LMS Integration)
 // ========================================================
+state.lmsExams = [];
+
+function normalizeLmsExam(raw) {
+    const qList = Array.isArray(raw.questions) ? raw.questions : [];
+    const mcCount = qList.filter(q => q.type === 'mc').length;
+    const tfCount = qList.filter(q => q.type === 'tf').length;
+    const shortCount = qList.filter(q => q.type === 'short').length;
+
+    return {
+        id: raw.id,
+        teacherId: raw.teacherId || state.teacherUid,
+        name: raw.title || raw.name || 'Đề thi LMS',
+        subject: raw.subject || 'Toán học',
+        sheet_template: raw.sheet_template || 'qmcv1239',
+        question_count: mcCount > 0 ? mcCount : (raw.question_count || 12),
+        part2_count: tfCount > 0 ? tfCount : (raw.part2_count || 4),
+        part3_count: shortCount > 0 ? shortCount : (raw.part3_count || 6),
+        part1_point: raw.part1_point || 0.25,
+        part2_points: raw.part2_points || [0.1, 0.25, 0.5, 1.0],
+        part3_point: raw.part3_point || 0.5,
+        codes: raw.codes && raw.codes.length > 0 ? raw.codes : (raw.mixedExams ? Object.keys(raw.mixedExams) : ['101', '102']),
+        questions: qList,
+        isLmsExam: true,
+        createdAt: raw.createdAt || new Date().toISOString()
+    };
+}
+
+function autoFillKeysFromLmsQuestions(ex) {
+    if (!ex.questions || ex.questions.length === 0) return;
+    const primaryCode = (ex.codes && ex.codes[0]) ? ex.codes[0] : '101';
+    
+    // Extract Part 1
+    const mcQuestions = ex.questions.filter(q => q.type === 'mc');
+    const p1Ans = mcQuestions.map(q => {
+        if (q.ans && typeof q.ans === 'string') return q.ans.trim().toUpperCase()[0] || 'A';
+        if (q.correct && typeof q.correct === 'string') return q.correct.trim().toUpperCase()[0] || 'A';
+        if (Array.isArray(q.options)) {
+            const corrIdx = q.options.findIndex(o => o.isCorrect || o.correct);
+            if (corrIdx !== -1) return ['A','B','C','D'][corrIdx] || 'A';
+        }
+        return 'A';
+    }).join('');
+
+    // Extract Part 2
+    const tfQuestions = ex.questions.filter(q => q.type === 'tf');
+    const p2Ans = tfQuestions.map(q => {
+        if (Array.isArray(q.answers)) return q.answers.map(a => a === 'D' || a === true ? 'Đ' : 'S').join('');
+        if (Array.isArray(q.options)) return q.options.map(opt => opt.isCorrect ? 'Đ' : 'S').join('');
+        return 'ĐSĐS';
+    });
+
+    // Extract Part 3
+    const shortQuestions = ex.questions.filter(q => q.type === 'short');
+    const p3Ans = shortQuestions.map(q => String(q.ans || q.correct || '0').trim());
+
+    if (!state.keys[primaryCode]) {
+        state.keys[primaryCode] = {
+            id: `key_${ex.id}_${primaryCode}`,
+            examId: ex.id,
+            teacherId: state.teacherUid,
+            code: primaryCode,
+            answers: p1Ans,
+            part2: p2Ans,
+            part3: p3Ans,
+            updatedAt: new Date().toISOString()
+        };
+        localStorage.setItem(`omr_keys_${ex.id}`, JSON.stringify(Object.values(state.keys)));
+    }
+}
+
 async function loadTeacherExams() {
     try {
-        let loaded = [];
-        // Try Firestore
+        let omrLoaded = [];
+        let lmsLoaded = [];
+
+        // 1. Try loading omr_exams from Firestore
         if (state.teacherUid) {
             try {
-                const qExams = query(collection(db, "omr_exams"), where("teacherId", "==", state.teacherUid));
-                const snap = await getDocs(qExams);
-                loaded = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-            } catch(err) {
-                console.warn("Firestore omr_exams query failed, using localStorage fallback:", err);
+                const qOmr = query(collection(db, "omr_exams"), where("teacherId", "==", state.teacherUid));
+                const snapOmr = await getDocs(qOmr);
+                omrLoaded = snapOmr.docs.map(d => ({ id: d.id, ...d.data() }));
+            } catch(e) {
+                console.warn("Firestore omr_exams failed:", e);
+            }
+
+            // 2. Try loading LMS exams collection
+            try {
+                const qLms = query(collection(db, "exams"), limit(120));
+                const snapLms = await getDocs(qLms);
+                lmsLoaded = snapLms.docs
+                    .map(d => ({ id: d.id, ...d.data() }))
+                    .filter(e => !e.isDeleted && (e.title || e.name));
+            } catch(e) {
+                console.warn("Firestore exams query failed:", e);
             }
         }
 
-        // Fallback or merge with localStorage
-        const localKey = 'omr_exams_' + (state.teacherUid || 'guest');
-        const localData = JSON.parse(localStorage.getItem(localKey) || '[]');
-        if (loaded.length === 0 && localData.length > 0) {
-            loaded = localData;
+        // 3. Check localStorage cache for LMS exams (from dashboard.html)
+        const uid = state.teacherUid || localStorage.getItem('last_active_uid') || '';
+        const cachedBankExams = localStorage.getItem(`bank_exams_${uid}_own`) || localStorage.getItem(`bank_exams_${uid}_shared`);
+        if (cachedBankExams) {
+            try {
+                const parsedCached = JSON.parse(cachedBankExams) || [];
+                parsedCached.forEach(ce => {
+                    if (ce && !ce.isDeleted && ce.title && !lmsLoaded.some(l => l.id === ce.id)) {
+                        lmsLoaded.push(ce);
+                    }
+                });
+            } catch(e) {}
         }
+
+        // 4. Fallback or merge with localStorage omr_exams
+        const localKey = 'omr_exams_' + (state.teacherUid || 'guest');
+        const localOmr = JSON.parse(localStorage.getItem(localKey) || '[]');
+        if (omrLoaded.length === 0 && localOmr.length > 0) {
+            omrLoaded = localOmr;
+        }
+
+        // Normalize LMS exams
+        state.lmsExams = lmsLoaded.map(e => normalizeLmsExam(e));
+
+        // Combined list: OMR exams + LMS exams
+        let combined = [...omrLoaded, ...state.lmsExams];
 
         // Seed Sample Exam if none exists
-        if (loaded.length === 0) {
+        if (combined.length === 0) {
             const sampleExam = createSampleExamObj();
-            loaded = [sampleExam];
-            saveLocalExams(loaded);
-            if (state.teacherUid) {
-                try {
-                    await setDoc(doc(db, "omr_exams", sampleExam.id), sampleExam);
-                    // Also seed keys and sample students
-                    const sampleKeys = createSampleKeys(sampleExam.id);
-                    for (const k of sampleKeys) {
-                        await setDoc(doc(db, "omr_keys", k.id), k);
-                    }
-                    const sampleStudents = createSampleStudents(sampleExam.id);
-                    for (const s of sampleStudents) {
-                        await setDoc(doc(db, "omr_students", s.id), s);
-                    }
-                } catch(e) {}
-            }
+            combined = [sampleExam];
+            saveLocalExams([sampleExam]);
         }
 
-        state.exams = loaded;
+        state.exams = combined;
         const lastSelectedId = localStorage.getItem('omr_last_exam_id_' + state.teacherUid);
         const targetExam = state.exams.find(e => e.id === lastSelectedId) || state.exams[0];
         await selectExam(targetExam.id);
     } catch(err) {
-        console.error("Lỗi tải bài thi OMR:", err);
+        console.error("Lỗi tải bài thi OMR/LMS:", err);
     }
 }
 
@@ -266,14 +355,20 @@ async function selectExam(examId) {
     // Update banner
     const titleEl = document.getElementById('activeExamName');
     const badgeEl = document.getElementById('activeExamTemplateBadge');
-    if (titleEl) titleEl.textContent = exam.name;
+    if (titleEl) titleEl.textContent = exam.name + (exam.isLmsExam ? ' (LMS)' : '');
     if (badgeEl) {
         const tplName = (window.MAU && window.MAU[exam.sheet_template]) ? window.MAU[exam.sheet_template].ten : exam.sheet_template;
-        badgeEl.textContent = tplName || 'CV 1239';
+        badgeEl.textContent = (exam.isLmsExam ? 'LMS · ' : '') + (tplName || 'CV 1239');
     }
 
     // Load Exam Keys
     await loadExamKeys(exam.id);
+
+    // If LMS exam with questions, auto-fill answer keys
+    if (exam.isLmsExam && exam.questions && exam.questions.length > 0) {
+        autoFillKeysFromLmsQuestions(exam);
+    }
+
     // Load Exam Students
     await loadExamStudents(exam.id);
     // Load Exam Submissions
@@ -853,13 +948,126 @@ function playBeepSound() {
 }
 
 // ========================================================
-// 5. LIVE FULLSCREEN CAMERA STREAM CONTROLLER & SCANNER
+// 5. LIVE FULLSCREEN CAMERA STREAM CONTROLLER & CONTINUOUS AUTO-SCANNER
 // ========================================================
 state.cameraZoom = 1.0;
 state.isTorchOn = false;
 state.backCameras = [];
 state.activeCameraIndex = 0;
 state.currentCameraDeviceId = null;
+state.autoScanEnabled = true;
+state.isAutoScanning = false;
+let autoScanInterval = null;
+let lastAutoScanTime = 0;
+
+window.toggleAutoScan = () => {
+    state.autoScanEnabled = !state.autoScanEnabled;
+    const btn = document.getElementById('btnToggleAutoScan');
+    const label = document.getElementById('autoScanLabel');
+    if (label) {
+        label.textContent = state.autoScanEnabled ? 'Tự quét: BẬT' : 'Tự quét: TẮT';
+    }
+    if (btn) {
+        btn.className = state.autoScanEnabled 
+            ? 'px-2.5 py-1 rounded-xl bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 text-xs font-bold flex items-center gap-1.5 active:scale-95 transition-all shadow-sm cursor-pointer'
+            : 'px-2.5 py-1 rounded-xl bg-slate-800 text-slate-400 border border-slate-700 text-xs font-bold flex items-center gap-1.5 active:scale-95 transition-all cursor-pointer';
+    }
+    if (state.autoScanEnabled) {
+        startAutoScanLoop();
+    } else {
+        stopAutoScanLoop();
+    }
+};
+
+function startAutoScanLoop() {
+    stopAutoScanLoop();
+    if (!state.autoScanEnabled) return;
+
+    autoScanInterval = setInterval(async () => {
+        const video = document.getElementById('cameraVideo');
+        const guide = document.getElementById('cameraA4Guide');
+        const sheetArea = document.getElementById('scanCameraArea');
+        const resSheet = document.getElementById('cameraResultSheet');
+
+        // Only scan if camera is open and video is actively streaming
+        if (!video || !state.currentCameraStream || sheetArea?.classList.contains('hidden')) return;
+        if (state.isAutoScanning || video.readyState < 2) return;
+
+        // Pause auto-scan for 3.2s when a result is newly displayed
+        if (resSheet && !resSheet.classList.contains('hidden') && Date.now() - lastAutoScanTime < 3200) {
+            return;
+        }
+
+        try {
+            state.isAutoScanning = true;
+            const vr = video.getBoundingClientRect();
+            const gr = guide ? guide.getBoundingClientRect() : null;
+            if (!gr || vr.width <= 0 || vr.height <= 0 || video.videoWidth <= 0 || video.videoHeight <= 0) {
+                state.isAutoScanning = false;
+                return;
+            }
+
+            const scale = Math.min(vr.width / video.videoWidth, vr.height / video.videoHeight);
+            const drawW = video.videoWidth * scale;
+            const drawH = video.videoHeight * scale;
+            const offsetX = (vr.width - drawW) / 2;
+            const offsetY = (vr.height - drawH) / 2;
+
+            let computedSx = (gr.left - vr.left - offsetX) / scale;
+            let computedSy = (gr.top - vr.top - offsetY) / scale;
+            let computedSw = gr.width / scale;
+            let computedSh = gr.height / scale;
+
+            const padX = computedSw * 0.05;
+            const padY = computedSh * 0.05;
+            computedSx = Math.max(0, computedSx - padX);
+            computedSy = Math.max(0, computedSy - padY);
+            computedSw = Math.min(video.videoWidth - computedSx, computedSw + padX * 2);
+            computedSh = Math.min(video.videoHeight - computedSy, computedSh + padY * 2);
+
+            if (computedSw < 200 || computedSh < 200) {
+                state.isAutoScanning = false;
+                return;
+            }
+
+            // Fast lightweight test canvas
+            const testCanvas = document.createElement('canvas');
+            const targetW = 600;
+            const targetH = Math.round(targetW * (computedSh / computedSw));
+            testCanvas.width = targetW;
+            testCanvas.height = targetH;
+            const tCtx = testCanvas.getContext('2d', { willReadFrequently: true });
+            tCtx.drawImage(video, computedSx, computedSy, computedSw, computedSh, 0, 0, targetW, targetH);
+
+            const gray = window.OMR.xam(tCtx.getImageData(0, 0, targetW, targetH));
+            const small = window.OMR.thuNho(gray, 500);
+            const blocks = window.OMR.timKhoi(small.g).filter(b => b.c > small.g.w * 0.012 && b.c < small.g.w * 0.05);
+
+            if (blocks.length >= 4) {
+                const corners = [[0, 0], [small.g.w, 0], [small.g.w, small.g.h], [0, small.g.h]].map(([x, y]) => 
+                    blocks.reduce((best, b) => !best || Math.hypot(b.x - x, b.y - y) < Math.hypot(best.x - x, best.y - y) ? b : best, null)
+                );
+                const uniqueCorners = new Set(corners);
+                if (uniqueCorners.size === 4) {
+                    lastAutoScanTime = Date.now();
+                    await window.captureCameraFrame();
+                }
+            }
+        } catch(e) {
+            // Ignore frame detection error in periodic loop
+        } finally {
+            state.isAutoScanning = false;
+        }
+    }, 750);
+}
+
+function stopAutoScanLoop() {
+    if (autoScanInterval) {
+        clearInterval(autoScanInterval);
+        autoScanInterval = null;
+    }
+    state.isAutoScanning = false;
+}
 
 async function getAvailableCameras() {
     try {
@@ -890,9 +1098,9 @@ function updateZoomUI(zoomVal, caps) {
     document.querySelectorAll('.zoom-btn').forEach(btn => {
         const bVal = parseFloat(btn.textContent);
         if (Math.abs(bVal - zoomVal) < 0.25) {
-            btn.className = 'zoom-btn w-10 h-10 rounded-full bg-emerald-600 text-white text-xs font-black backdrop-blur-md border border-emerald-400 transition-all active:scale-90 shadow-lg';
+            btn.className = 'zoom-btn px-2.5 py-1 rounded-lg bg-emerald-600 text-white text-xs font-bold border border-emerald-400 transition-all active:scale-90 shadow-md';
         } else {
-            btn.className = 'zoom-btn w-10 h-10 rounded-full bg-black/70 hover:bg-black/90 text-white text-xs font-black backdrop-blur-md border border-white/20 transition-all active:scale-90 shadow-md';
+            btn.className = 'zoom-btn px-2.5 py-1 rounded-lg bg-black/70 hover:bg-black/90 text-white text-xs font-bold border border-white/20 transition-all active:scale-90 shadow-sm';
         }
     });
 }
@@ -906,15 +1114,13 @@ window.startCameraStream = async () => {
     try {
         // High resolution constraints WITHOUT forced aspect ratio crop (preserves full native camera sensor view)
         const videoConstraints = {
-            width: { ideal: 1920, max: 2560 },
-            height: { ideal: 1440, max: 1920 }
+            facingMode: state.currentCameraDeviceId ? undefined : { ideal: 'environment' },
+            deviceId: state.currentCameraDeviceId ? { exact: state.currentCameraDeviceId } : undefined,
+            width: { ideal: 1920 },
+            height: { ideal: 1440 },
+            aspectRatio: { ideal: 4/3 },
+            resizeMode: { ideal: 'none' }
         };
-
-        if (state.currentCameraDeviceId) {
-            videoConstraints.deviceId = { exact: state.currentCameraDeviceId };
-        } else {
-            videoConstraints.facingMode = { ideal: state.currentFacingMode || 'environment' };
-        }
 
         const stream = await navigator.mediaDevices.getUserMedia({
             video: videoConstraints,
@@ -953,7 +1159,7 @@ window.startCameraStream = async () => {
                 updateZoomUI(minZoom, caps);
                 if (zoomControls) zoomControls.classList.remove('hidden');
             } else {
-                if (zoomControls) zoomControls.classList.remove('hidden'); // allow lens switching / fallback
+                if (zoomControls) zoomControls.classList.remove('hidden');
                 updateZoomUI(1.0, {});
             }
 
@@ -963,6 +1169,11 @@ window.startCameraStream = async () => {
                 torchBtn.classList.toggle('hidden', !caps.torch);
             }
         }
+
+        // Start Continuous Auto-Scan loop
+        if (state.autoScanEnabled) {
+            startAutoScanLoop();
+        }
     } catch(err) {
         console.error("Không mở được camera:", err);
         Swal.fire('Lỗi Camera', 'Không thể truy cập camera. Vui lòng cấp quyền camera trong cài đặt trình duyệt hoặc chuyển sang chế độ tải ảnh phiếu!', 'error');
@@ -971,6 +1182,7 @@ window.startCameraStream = async () => {
 };
 
 window.stopCameraStream = () => {
+    stopAutoScanLoop();
     if (state.currentCameraStream) {
         state.currentCameraStream.getTracks().forEach(t => t.stop());
         state.currentCameraStream = null;
@@ -1067,8 +1279,8 @@ window.toggleCameraTorch = async () => {
         }
         if (btn) {
             btn.className = state.isTorchOn 
-                ? 'w-10 h-10 rounded-full bg-amber-500 text-black flex items-center justify-center text-sm backdrop-blur-md shadow-lg transition-all active:scale-95 cursor-pointer border border-amber-300'
-                : 'w-10 h-10 rounded-full bg-black/60 hover:bg-black/80 text-white flex items-center justify-center text-sm backdrop-blur-md shadow-lg transition-all active:scale-95 cursor-pointer border border-white/20';
+                ? 'w-9 h-9 rounded-full bg-amber-500 text-black flex items-center justify-center text-xs backdrop-blur-md shadow-lg transition-all active:scale-95 cursor-pointer border border-amber-300'
+                : 'w-9 h-9 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center text-xs backdrop-blur-md shadow-lg transition-all active:scale-95 cursor-pointer border border-white/20';
         }
     } catch(e) {
         console.warn("Lỗi bật đèn pin:", e);
@@ -1091,6 +1303,19 @@ function showCameraResultSheet(sub) {
     if (scoreEl) scoreEl.textContent = (typeof sub.score === 'number' ? sub.score.toFixed(2) : sub.score);
     if (breakdownEl) {
         breakdownEl.textContent = `P.I: ${sub.part1_score ?? 0}đ | P.II: ${sub.part2_score ?? 0}đ | P.III: ${sub.part3_score ?? 0}đ`;
+    }
+
+    // Candidate Handwritten Name Crop Preview
+    const nameCropBox = document.getElementById('camResNameCropBox');
+    const nameCropImg = document.getElementById('camResNameCropImg');
+    const iconBox = document.getElementById('camResIconBox');
+    if (sub.name_image && nameCropImg && nameCropBox) {
+        nameCropImg.src = sub.name_image;
+        nameCropBox.classList.remove('hidden');
+        if (iconBox) iconBox.classList.add('hidden');
+    } else {
+        if (nameCropBox) nameCropBox.classList.add('hidden');
+        if (iconBox) iconBox.classList.remove('hidden');
     }
 
     sheet.classList.remove('hidden');
@@ -1159,9 +1384,9 @@ window.captureCameraFrame = async () => {
         let computedSw = gr.width / scale;
         let computedSh = gr.height / scale;
 
-        // 5% safety margin padding so outer corner markers are not clipped
-        const padX = computedSw * 0.05;
-        const padY = computedSh * 0.05;
+        // 4% padding margin so outer corner markers are not clipped
+        const padX = computedSw * 0.04;
+        const padY = computedSh * 0.04;
         computedSx = Math.max(0, computedSx - padX);
         computedSy = Math.max(0, computedSy - padY);
         computedSw = Math.min(video.videoWidth - computedSx, computedSw + padX * 2);
@@ -1181,9 +1406,13 @@ window.captureCameraFrame = async () => {
     ctx.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
 
     const statusBadge = document.getElementById('cameraScanStatus');
+    const statusText = document.getElementById('cameraStatusText');
     if (statusBadge) {
         statusBadge.innerHTML = '<i class="fa-solid fa-spinner fa-spin text-emerald-400"></i> Đang nhận diện...';
         statusBadge.classList.remove('hidden');
+    }
+    if (statusText) {
+        statusText.innerHTML = '<span class="text-emerald-300 font-bold"><i class="fa-solid fa-spinner fa-spin"></i> Đang phân tích phiếu thi...</span>';
     }
 
     canvas.toBlob(async (blob) => {
@@ -1194,6 +1423,12 @@ window.captureCameraFrame = async () => {
                 statusBadge.innerHTML = '<i class="fa-solid fa-check text-emerald-400"></i> Đã nhận diện!';
                 setTimeout(() => statusBadge.classList.add('hidden'), 2000);
             }
+            if (statusText) {
+                statusText.innerHTML = `<span class="text-emerald-300 font-bold">✓ Đã chấm xong: ${(typeof sub.score === 'number' ? sub.score.toFixed(2) : sub.score)} điểm · ${sub.student_name || ('SBD ' + sub.student_no)}</span>`;
+                setTimeout(() => {
+                    if (statusText) statusText.textContent = 'Canh bốn ô đen vào bốn khung nhỏ. Khi chụp, hệ thống chỉ lấy vùng A4 bên trong khung xanh.';
+                }, 3200);
+            }
             showCameraResultSheet(sub);
         } catch(err) {
             console.warn("Scan frame error:", err);
@@ -1201,6 +1436,12 @@ window.captureCameraFrame = async () => {
                 statusBadge.innerHTML = '<i class="fa-solid fa-triangle-exclamation text-amber-400"></i> Căn 4 góc đen chưa rõ, thử lại';
                 statusBadge.classList.remove('hidden');
                 setTimeout(() => statusBadge.classList.add('hidden'), 3500);
+            }
+            if (statusText) {
+                statusText.innerHTML = '<span class="text-amber-300 font-bold">⚠️ Chưa nhận diện đủ 4 mốc đen. Hãy đưa phiếu vào trọn 4 ô vuông!</span>';
+                setTimeout(() => {
+                    if (statusText) statusText.textContent = 'Canh bốn ô đen vào bốn khung nhỏ. Khi chụp, hệ thống chỉ lấy vùng A4 bên trong khung xanh.';
+                }, 3200);
             }
         }
     }, 'image/jpeg', 0.95);
@@ -1775,26 +2016,30 @@ window.renderExamsListTab = () => {
         <div class="bg-white dark:bg-slate-800 p-5 rounded-2xl border ${state.exam?.id === e.id ? 'border-emerald-500 ring-2 ring-emerald-500/20' : 'border-slate-200 dark:border-slate-700'} shadow-2xs flex flex-col justify-between space-y-4">
             <div class="space-y-2">
                 <div class="flex items-center justify-between">
-                    <span class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${state.exam?.id === e.id ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'}">
-                        ${state.exam?.id === e.id ? 'Đang chọn' : 'Bài thi'}
-                    </span>
-                    <span class="text-[10px] text-slate-400 font-mono">${new Date(e.createdAt).toLocaleDateString('vi-VN')}</span>
+                    <div class="flex items-center gap-1.5">
+                        <span class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${state.exam?.id === e.id ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300' : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300'}">
+                            ${state.exam?.id === e.id ? 'Đang chọn' : (e.isLmsExam ? 'LMS' : 'Bài thi')}
+                        </span>
+                        ${e.isLmsExam ? '<span class="text-[9px] font-bold px-1.5 py-0.5 rounded bg-teal-50 text-teal-700 border border-teal-200">Kho đề</span>' : ''}
+                    </div>
+                    <span class="text-[10px] text-slate-400 font-mono">${new Date(e.createdAt || Date.now()).toLocaleDateString('vi-VN')}</span>
                 </div>
                 <h4 class="font-extrabold text-base text-slate-800 dark:text-white leading-tight">${e.name}</h4>
-                <div class="text-xs text-slate-500 space-y-0.5">
-                    <div>Mẫu phiếu: <b>${e.sheet_template}</b></div>
-                    <div>Mã đề: <b>${(e.codes || []).join(', ')}</b></div>
-                    <div>Cấu trúc: <b>${e.question_count} TN · ${e.part2_count} Đ/S · ${e.part3_count} TLN</b></div>
+                <div class="text-xs text-slate-500 dark:text-slate-400 space-y-0.5">
+                    <div>Mẫu phiếu: <b class="text-slate-700 dark:text-slate-300">${(window.MAU && window.MAU[e.sheet_template]) ? window.MAU[e.sheet_template].ten : e.sheet_template}</b></div>
+                    <div>Mã đề: <b class="font-mono text-slate-700 dark:text-slate-300">${(e.codes || []).join(', ')}</b></div>
+                    <div>Cấu trúc: <b class="text-slate-700 dark:text-slate-300">${e.question_count || 12} TN · ${e.part2_count || 4} Đ/S · ${e.part3_count || 6} TLN</b></div>
                 </div>
             </div>
 
             <div class="flex items-center gap-2 pt-2 border-t border-slate-100 dark:border-slate-700">
-                <button type="button" onclick="window.selectExamAndSwitch('${e.id}')" class="flex-1 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs">
-                    Chọn bài này
+                <button type="button" onclick="window.selectExamAndSwitch('${e.id}')" class="flex-1 py-2 ${state.exam?.id === e.id ? 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300' : 'bg-emerald-600 hover:bg-emerald-700 text-white'} rounded-xl text-xs font-bold transition-all shadow-xs">
+                    ${state.exam?.id === e.id ? 'Đang chấm bài này' : 'Chọn bài này'}
                 </button>
+                ${!e.isLmsExam ? `
                 <button type="button" onclick="window.deleteExam('${e.id}')" class="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl text-xs font-bold transition-colors" title="Xóa bài thi này">
                     <i class="fa-solid fa-trash"></i>
-                </button>
+                </button>` : ''}
             </div>
         </div>
     `).join('');
@@ -1886,3 +2131,89 @@ setTimeout(() => {
         autoSaveCam.addEventListener('change', () => { autoSaveMain.checked = autoSaveCam.checked; });
     }
 }, 500);
+
+// ========================================================
+// 11. LMS EXAM PICKER MODAL (KHO ĐỀ THI LMS QMATH)
+// ========================================================
+window.openLmsExamPickerModal = () => {
+    const modal = document.getElementById('lmsExamPickerModal');
+    if (!modal) return;
+    modal.classList.remove('hidden');
+    const searchInput = document.getElementById('lmsExamSearchInput');
+    if (searchInput) {
+        searchInput.value = '';
+        setTimeout(() => searchInput.focus(), 100);
+    }
+    window.renderLmsExamPickerList();
+};
+
+window.closeLmsExamPickerModal = () => {
+    const modal = document.getElementById('lmsExamPickerModal');
+    if (modal) modal.classList.add('hidden');
+};
+
+window.renderLmsExamPickerList = () => {
+    const listEl = document.getElementById('lmsExamPickerList');
+    if (!listEl) return;
+    const filter = (document.getElementById('lmsExamSearchInput')?.value || '').toLowerCase().trim();
+
+    // Get LMS exams from state.exams or state.lmsExams
+    const lmsItems = (state.exams || []).filter(e => e.isLmsExam);
+
+    const filtered = lmsItems.filter(e => {
+        return !filter || (e.name && e.name.toLowerCase().includes(filter));
+    });
+
+    if (filtered.length === 0) {
+        listEl.innerHTML = `
+            <div class="p-8 text-center text-slate-400">
+                <i class="fa-solid fa-file-circle-question text-3xl mb-2 opacity-50"></i>
+                <p class="text-xs font-semibold">Không tìm thấy đề thi LMS nào ${filter ? 'khớp từ khóa "' + filter + '"' : 'trong tài khoản của bạn'}.</p>
+                <p class="text-[11px] text-slate-500 mt-1">Đề thi bạn tạo ở mục "Kho đề thi" hoặc "Soạn đề" trên LMS sẽ tự động xuất hiện tại đây.</p>
+            </div>
+        `;
+        return;
+    }
+
+    listEl.innerHTML = filtered.map(item => {
+        const isCurrent = state.exam?.id === item.id;
+        const totalQ = (item.question_count || 0) + (item.part2_count || 0) + (item.part3_count || 0);
+        return `
+            <div class="pt-2.5 first:pt-0 flex items-center justify-between gap-3 group">
+                <div class="min-w-0 flex-1">
+                    <div class="flex items-center gap-1.5 mb-1">
+                        <span class="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300">
+                            Kho đề LMS
+                        </span>
+                        ${isCurrent ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-teal-500 text-white">Đang chọn</span>' : ''}
+                        <span class="text-[11px] text-slate-400 font-mono">${item.createdAt ? new Date(item.createdAt).toLocaleDateString('vi-VN') : ''}</span>
+                    </div>
+                    <h5 class="text-xs sm:text-sm font-bold text-slate-800 dark:text-slate-100 truncate group-hover:text-emerald-600 transition-colors">
+                        ${item.name}
+                    </h5>
+                    <div class="flex items-center gap-3 text-[11px] text-slate-500 mt-0.5">
+                        <span>Cấu trúc: <b>${item.question_count || 12} TN · ${item.part2_count || 4} Đ/S · ${item.part3_count || 6} TLN</b></span>
+                        <span>Mã đề: <b>${(item.codes || ['101']).join(', ')}</b></span>
+                    </div>
+                </div>
+                <button type="button" onclick="window.selectLmsExamForGrading('${item.id}')" class="px-3.5 py-1.5 rounded-xl ${isCurrent ? 'bg-slate-100 dark:bg-slate-700 text-slate-500 cursor-default' : 'bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white shadow-xs cursor-pointer'} text-xs font-bold transition-all shrink-0">
+                    ${isCurrent ? 'Đang dùng' : 'Chọn chấm'}
+                </button>
+            </div>
+        `;
+    }).join('');
+};
+
+window.selectLmsExamForGrading = async (examId) => {
+    window.closeLmsExamPickerModal();
+    await selectExam(examId);
+    window.switchTab('scan');
+    Swal.fire({
+        toast: true,
+        position: 'top-end',
+        icon: 'success',
+        title: `Đã chọn đề LMS: ${state.exam?.name}`,
+        showConfirmButton: false,
+        timer: 2500
+    });
+};
