@@ -1422,7 +1422,11 @@ const VIRTUAL_CONFIG_PREFIX = {
     parent_watch_tokens: 'pwt_',
     lesson_views: 'lview_',
     exam_live_events: 'evlive_',
-    teacher_vault_questions: 'tvq_'
+    teacher_vault_questions: 'tvq_',
+    omr_exams: 'omrex_',
+    omr_keys: 'omrkey_',
+    omr_students: 'omrstu_',
+    omr_submissions: 'omrsub_'
 };
 
 export async function getDoc(docRef) {
