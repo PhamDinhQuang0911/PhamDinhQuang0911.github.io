@@ -2816,13 +2816,52 @@ async function generateStampedGradedSheet(sub, rawResult) {
             const isP3Bonus = key.bonus_p3 && (key.bonus_p3[q] === true || key.bonus_p3[String(q)] === true);
             const isMatch = isP3Bonus || isP3Match(sAns, kAns);
 
-            // Khoanh tròn các ô số học sinh đã tô ở 4 cột
-            if (rawResult.p3m && rawResult.p3m[q]) {
+            // Khoanh tròn các ô số học sinh đã tô ở 4 cột (Xanh lá nếu đúng, Đỏ nếu sai, Vàng nét đứt nếu là vị trí đáp án đúng)
+            let p3mStudent = (rawResult.p3m && rawResult.p3m[q]) || sub.p3m?.[q] || null;
+            if (!p3mStudent && sAns && tpl.p3hang) {
+                p3mStudent = [];
                 for (let col = 0; col < 4; col++) {
-                    const v = rawResult.p3m[q][col];
-                    if (v >= 0 && tpl.p3[q][col] && tpl.p3[q][col][v]) {
+                    const ch = sAns[col] || '';
+                    const rIdx = ch ? tpl.p3hang.indexOf(ch) : -1;
+                    p3mStudent.push(rIdx);
+                }
+            }
+
+            let p3mKey = null;
+            if (kAns && tpl.p3hang) {
+                p3mKey = [];
+                for (let col = 0; col < 4; col++) {
+                    const ch = kAns[col] || '';
+                    const rIdx = ch ? tpl.p3hang.indexOf(ch) : -1;
+                    p3mKey.push(rIdx);
+                }
+            }
+
+            // 1. Khoanh tròn các ô số học sinh đã tô
+            if (p3mStudent) {
+                for (let col = 0; col < 4; col++) {
+                    const v = p3mStudent[col];
+                    if (v >= 0 && tpl.p3[q]?.[col]?.[v]) {
                         const pt = tpl.p3[q][col][v];
-                        drawRingOnCanvas(pt, isP3Override ? '#9333ea' : (isMatch ? '#10b981' : '#ef4444'), 4.5, 14.5);
+                        if (isP3Override) {
+                            drawRingOnCanvas(pt, '#9333ea', 6, 16);
+                            drawRingOnCanvas(pt, '#d8b4fe', 3, 11);
+                        } else if (isP3Bonus || isMatch) {
+                            drawRingOnCanvas(pt, '#10b981', 5, 15.5); // Xanh lá: Đúng
+                        } else {
+                            drawRingOnCanvas(pt, '#ef4444', 5, 15.5); // Đỏ: Tô sai
+                        }
+                    }
+                }
+            }
+
+            // 2. Nếu học sinh làm sai, khoanh tròn VÀNG NÉT ĐỨT vị trí đáp án đúng
+            if (!isMatch && !isP3Bonus && p3mKey) {
+                for (let col = 0; col < 4; col++) {
+                    const vk = p3mKey[col];
+                    if (vk >= 0 && tpl.p3[q]?.[col]?.[vk]) {
+                        const ptKey = tpl.p3[q][col][vk];
+                        drawRingOnCanvas(ptKey, '#f59e0b', 4, 15, true); // Vàng nét đứt: Vị trí đáp án đúng
                     }
                 }
             }
@@ -4407,7 +4446,7 @@ window.loadCodeKeyInputs = (code) => {
                         return `
                             <div class="flex items-center justify-between text-xs">
                                 <span class="font-bold text-slate-500">Ý ${opt})</span>
-                                <div class="inline-flex gap-1">
+                                <div class="inline-flex gap-1" data-p2-opt-row="${r}">
                                     <button type="button" onclick="window.selectP2Btn(this, ${q}, ${r}, 'Đ')" class="p2-btn px-2.5 py-0.5 rounded text-xs font-bold border transition-all ${val==='Đ'?'bg-emerald-600 text-white border-emerald-600':'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-600'}">Đ</button>
                                     <button type="button" onclick="window.selectP2Btn(this, ${q}, ${r}, 'S')" class="p2-btn px-2.5 py-0.5 rounded text-xs font-bold border transition-all ${val==='S'?'bg-rose-600 text-white border-rose-600':'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-600'}">S</button>
                                 </div>
@@ -4493,7 +4532,7 @@ window.saveAllKeys = async () => {
         if (cb.checked) bonus_p1[idx] = true;
     });
 
-    // Read P2
+    // Read P2 (Chính xác từng ý a, b, c, d, không bị lệch do bắt nhầm label bonus)
     const p2Cards = document.getElementById('part2KeyGrid')?.children || [];
     let p2Chunks = [];
     const bonus_p2 = {};
@@ -4501,10 +4540,15 @@ window.saveAllKeys = async () => {
         const card = p2Cards[q];
         let chunk = '';
         if (card) {
-            card.querySelectorAll('.inline-flex').forEach(flex => {
-                const active = flex.querySelector('.bg-emerald-600, .bg-rose-600');
-                chunk += active ? active.textContent.trim() : '-';
-            });
+            for (let r = 0; r < 4; r++) {
+                const row = card.querySelector(`[data-p2-opt-row="${r}"]`);
+                if (row) {
+                    const active = row.querySelector('.bg-emerald-600, .bg-rose-600');
+                    chunk += active ? active.textContent.trim() : '-';
+                } else {
+                    chunk += '-';
+                }
+            }
             const cb = card.querySelector('[data-bonus-p2]');
             if (cb && cb.checked) bonus_p2[q] = true;
         }
@@ -6750,7 +6794,7 @@ window.renderEditExamModalKeys = (code) => {
                             return `
                                 <div class="flex items-center justify-between text-xs bg-white dark:bg-slate-800 p-1.5 rounded-lg border border-slate-200 dark:border-slate-700">
                                     <span class="font-bold text-slate-500">${opt})</span>
-                                    <div class="inline-flex gap-1">
+                                    <div class="inline-flex gap-1" data-modal-p2-opt-row="${r}">
                                         <button type="button" onclick="window.selectModalP2Btn(this, ${q}, ${r}, 'Đ')" class="p2-modal-btn px-2 py-0.5 rounded text-xs font-bold border transition-all ${val==='Đ'?'bg-emerald-600 text-white border-emerald-600':'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-600'}">Đ</button>
                                         <button type="button" onclick="window.selectModalP2Btn(this, ${q}, ${r}, 'S')" class="p2-modal-btn px-2 py-0.5 rounded text-xs font-bold border transition-all ${val==='S'?'bg-rose-600 text-white border-rose-600':'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-600'}">S</button>
                                     </div>
@@ -6841,10 +6885,15 @@ window.saveCurrentEditModalKey = (code) => {
         const card = p2Cards[q];
         let chunk = '';
         if (card) {
-            card.querySelectorAll('.inline-flex').forEach(flex => {
-                const active = flex.querySelector('.bg-emerald-600, .bg-rose-600');
-                chunk += active ? active.textContent.trim() : '-';
-            });
+            for (let r = 0; r < 4; r++) {
+                const row = card.querySelector(`[data-modal-p2-opt-row="${r}"]`);
+                if (row) {
+                    const active = row.querySelector('.bg-emerald-600, .bg-rose-600');
+                    chunk += active ? active.textContent.trim() : '-';
+                } else {
+                    chunk += '-';
+                }
+            }
             const cb = card.querySelector('[data-modal-bonus-p2]');
             if (cb && cb.checked) bonus_p2[q] = true;
         }
