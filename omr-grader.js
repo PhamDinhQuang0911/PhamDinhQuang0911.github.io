@@ -2047,10 +2047,18 @@ window.handleFilesSelected = async (files) => {
         } catch(err) {
             console.error("Lỗi chấm bài:", file.name, err);
             failCount++;
+            let previewUrl = '';
+            try {
+                if (file instanceof Blob || file instanceof File) {
+                    previewUrl = URL.createObjectURL(file);
+                }
+            } catch (_) {}
             state.failedBatchFiles.push({
                 file,
                 name: file.name || `Ảnh #${i + 1}`,
-                error: err.message || 'Không nhận diện được 4 góc đen định vị'
+                error: err.message || 'Không nhận diện được 4 góc đen định vị',
+                previewUrl,
+                timestamp: Date.now()
             });
         }
     }
@@ -2147,13 +2155,102 @@ function renderBatchFailedQueue() {
     }
     if (listEl) {
         listEl.innerHTML = failed.map((item, idx) => `
-            <div class="flex items-center justify-between gap-2 py-1 px-2.5 rounded-lg bg-white/80 dark:bg-slate-900/60 border border-rose-200 dark:border-rose-900/50">
-                <span class="truncate font-semibold text-slate-800 dark:text-slate-200">#${idx + 1}. ${item.name}</span>
-                <span class="text-rose-600 dark:text-rose-400 font-mono text-[10px] shrink-0">${item.error}</span>
+            <div class="flex items-center justify-between gap-3 p-2 rounded-xl bg-white/90 dark:bg-slate-900/80 border border-rose-200 dark:border-rose-900/50 shadow-2xs">
+                <div class="flex items-center gap-2.5 min-w-0">
+                    ${item.previewUrl ? `
+                        <img src="${item.previewUrl}" onclick="window.previewFailedBatchImage(${idx})" class="w-12 h-16 object-cover rounded-lg border border-rose-300 dark:border-rose-700 shadow-2xs cursor-pointer hover:scale-105 transition-transform shrink-0" title="Bấm xem ảnh phóng to">
+                    ` : `
+                        <div class="w-12 h-16 rounded-lg bg-rose-100 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-800 flex items-center justify-center text-rose-500 shrink-0">
+                            <i class="fa-solid fa-image text-lg"></i>
+                        </div>
+                    `}
+                    <div class="min-w-0">
+                        <div class="font-bold text-slate-800 dark:text-slate-200 text-xs truncate max-w-[180px] sm:max-w-[260px]" title="${item.name}">
+                            #${idx + 1}. ${item.name}
+                        </div>
+                        <div class="text-rose-600 dark:text-rose-400 font-mono text-[11px] truncate mt-0.5" title="${item.error}">
+                            <i class="fa-solid fa-triangle-exclamation mr-1"></i>${item.error}
+                        </div>
+                    </div>
+                </div>
+                <div class="flex items-center gap-1.5 shrink-0">
+                    <button type="button" onclick="window.previewFailedBatchImage(${idx})" class="px-2.5 py-1 text-xs font-semibold rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 transition-colors cursor-pointer" title="Xem ảnh">
+                        <i class="fa-solid fa-eye mr-1"></i>Xem
+                    </button>
+                    <button type="button" onclick="window.openManualGradingForFailed(${idx})" class="px-3 py-1.5 text-xs font-bold rounded-lg bg-amber-500 hover:bg-amber-600 text-white shadow-2xs transition-all active:scale-95 flex items-center gap-1 cursor-pointer" title="Nhập SBD, mã đề và câu trả lời thủ công">
+                        <i class="fa-solid fa-pen-to-square"></i> Chấm thủ công
+                    </button>
+                    <button type="button" onclick="window.removeFailedBatchItem(${idx})" class="w-6 h-6 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 flex items-center justify-center transition-colors cursor-pointer" title="Bỏ qua ảnh này">
+                        <i class="fa-solid fa-xmark text-xs"></i>
+                    </button>
+                </div>
             </div>
         `).join('');
     }
 }
+
+window.previewFailedBatchImage = (idx) => {
+    const item = state.failedBatchFiles?.[idx];
+    if (!item) return;
+    Swal.fire({
+        title: `<span class="text-xs font-bold text-slate-700 dark:text-slate-200">${item.name}</span>`,
+        html: `
+            <div class="space-y-2 text-center">
+                <div class="text-[11px] text-rose-600 font-bold bg-rose-50 dark:bg-rose-950/40 p-2 rounded-xl border border-rose-200">
+                    <i class="fa-solid fa-triangle-exclamation mr-1"></i> ${item.error}
+                </div>
+                <div class="max-h-[65vh] overflow-auto rounded-xl border border-slate-200 dark:border-slate-700 p-1 bg-black/5 flex items-center justify-center">
+                    <img src="${item.previewUrl}" class="max-w-full max-h-[60vh] object-contain rounded shadow-sm" alt="Ảnh bài thi chưa nhận diện được">
+                </div>
+            </div>
+        `,
+        showCancelButton: true,
+        confirmButtonText: '<i class="fa-solid fa-pen-to-square mr-1"></i> Chấm thủ công phiếu này',
+        cancelButtonText: 'Đóng',
+        confirmButtonColor: '#f59e0b',
+        width: '640px'
+    }).then(res => {
+        if (res.isConfirmed) {
+            window.openManualGradingForFailed(idx);
+        }
+    });
+};
+
+window.removeFailedBatchItem = (idx) => {
+    if (state.failedBatchFiles?.[idx]) {
+        state.failedBatchFiles.splice(idx, 1);
+        renderBatchFailedQueue();
+    }
+};
+
+window.openManualGradingForFailed = (idx) => {
+    const item = state.failedBatchFiles?.[idx];
+    if (!item) return;
+
+    const draftSub = {
+        id: 'manual_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6),
+        exam_id: state.exam?.id,
+        student_no: '',
+        code: (state.exam?.codes && state.exam.codes[0]) || '101',
+        student_name: '',
+        answers: '-'.repeat(state.exam?.question_count || 12),
+        part2: Array(state.exam?.part2_count || 4).fill('----'),
+        part3: Array(state.exam?.part3_count || 6).fill(''),
+        score: 0,
+        part1_score: 0,
+        part2_score: 0,
+        part3_score: 0,
+        image_data: item.previewUrl || '',
+        clean_image: item.previewUrl || '',
+        createdAt: new Date().toISOString(),
+        is_manual_entry: true,
+        _failedItemIdx: idx,
+        class_name: state.exam?.className || ''
+    };
+
+    state.lastSubmission = draftSub;
+    window.openEditSubmissionAnswersModal();
+};
 
 window.retryFailedBatch = async () => {
     const failed = Array.isArray(state.failedBatchFiles) ? state.failedBatchFiles : [];
@@ -2208,10 +2305,11 @@ window.copyClassSummaryToZalo = async () => {
         detailLines += `${stt}. ${s.student_name || 'Học sinh'} | ${sbd} | ${code} 👉 ${sc}đ\n`;
     });
 
+    const teacherTitle = (state.user?.displayName || state.user?.name) ? (state.user.displayName || state.user.name) : 'Giáo viên';
     const zaloMessage = 
 `📊 BẢNG TỔNG KẾT ĐIỂM KIỂM TRA
 📝 Đề thi: ${examName}
-👨‍🏫 Giáo viên: Thầy Choang - Hệ thống Toán học QMath LMS
+👨‍🏫 Giáo viên: ${teacherTitle} - Hệ thống Toán học QMath LMS
 📅 Thời gian tổng kết: ${nowStr}
 ─────────────────────────────
 👥 Tổng số bài đã chấm: ${sorted.length} học sinh
@@ -3100,13 +3198,19 @@ async function generateStampedGradedSheet(sub, rawResult) {
     }
     ctx.restore();
 
-    // Tên thương hiệu Toán Thầy Choang cỡ lớn căn giữa dưới Logo
+    // Xác định tên giáo viên đăng ký tài khoản
+    let teacherRaw = (state.user?.displayName || state.user?.name || '').trim();
+    if (!teacherRaw && state.user?.email) teacherRaw = state.user.email.split('@')[0];
+    if (!teacherRaw) teacherRaw = 'Phạm Đình Quang';
+    const teacherDisplay = teacherRaw.toLowerCase().startsWith('gv') ? teacherRaw : `GV ${teacherRaw}`;
+
+    // Tên thương hiệu Giáo viên căn giữa dưới Logo
     const brandCenterX = brandCardX + brandCardW / 2;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'alphabetic';
     ctx.fillStyle = '#0f172a';
-    ctx.font = '900 30px "Segoe UI", Arial, sans-serif';
-    ctx.fillText('TOÁN THẦY CHOANG', brandCenterX, brandCardY + 212);
+    ctx.font = '900 24px "Segoe UI", Arial, sans-serif';
+    ctx.fillText(teacherDisplay.toUpperCase(), brandCenterX, brandCardY + 212);
 
     ctx.fillStyle = '#059669';
     ctx.font = 'bold 21px "Segoe UI", Arial, sans-serif';
@@ -3121,6 +3225,24 @@ async function generateStampedGradedSheet(sub, rawResult) {
     ctx.fillText('Chuẩn BGD 2025 (CV 1239)', brandCenterX, brandCardY + 310);
     ctx.textAlign = 'left';
 
+    // Đối chiếu tên thí sinh từ danh sách lớp (theo số báo danh) nếu có danh sách
+    let resolvedStudentName = (sub.student_name || '').trim();
+    const hasExistingRealName = resolvedStudentName && !resolvedStudentName.startsWith('Học sinh #') && !resolvedStudentName.startsWith('Phiếu ');
+    if (!hasExistingRealName && Array.isArray(state.students) && state.students.length > 0 && sub.student_no) {
+        const cleanSbd = String(sub.student_no).replace(/\D/g, '');
+        const numSbd = cleanSbd ? String(Number(cleanSbd)) : '';
+        const matched = state.students.find(st => {
+            const stSbd = String(st.student_no || st.sbd || '').replace(/\D/g, '');
+            const stNum = stSbd ? String(Number(stSbd)) : '';
+            return (cleanSbd && stSbd && cleanSbd === stSbd) || (numSbd && stNum && numSbd === stNum);
+        });
+        if (matched && (matched.name || matched.student_name || matched.studentName)) {
+            resolvedStudentName = matched.name || matched.student_name || matched.studentName;
+            sub.student_name = resolvedStudentName;
+        }
+    }
+    if (!resolvedStudentName) resolvedStudentName = sub.student_no ? `Học sinh #${sub.student_no}` : 'Theo SBD trên phiếu';
+
     // 3. KHUNG THÔNG TIN THÍ SINH & ĐỀ THI CỠ LỚN (GIỮA: X: 438 -> 948)
     const cardX = 438, cardY = 24, cardW = 510, cardH = 334;
     ctx.fillStyle = '#ffffff';
@@ -3132,59 +3254,67 @@ async function generateStampedGradedSheet(sub, rawResult) {
     ctx.fill();
     ctx.stroke();
 
-    // Tên kỳ thi / bài kiểm tra (chữ cực đậm 28px)
+    // Tên kỳ thi / bài kiểm tra (chữ cực đậm 27px)
     ctx.fillStyle = '#0f172a';
-    ctx.font = '900 28px "Segoe UI", Arial, sans-serif';
+    ctx.font = '900 27px "Segoe UI", Arial, sans-serif';
     const rawExamName = (state.exam?.name || 'BÀI KIỂM TRA ĐỊNH KỲ').toUpperCase();
     const examName = rawExamName.length > 28 ? rawExamName.slice(0, 27) + '…' : rawExamName;
-    ctx.fillText(examName, cardX + 22, cardY + 48);
+    ctx.fillText(examName, cardX + 22, cardY + 46);
 
     ctx.strokeStyle = '#cbd5e1';
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(cardX + 22, cardY + 66);
-    ctx.lineTo(cardX + cardW - 22, cardY + 66);
+    ctx.moveTo(cardX + 22, cardY + 64);
+    ctx.lineTo(cardX + cardW - 22, cardY + 64);
     ctx.stroke();
 
-    // Chi tiết học sinh (Chữ to gấp đôi để đọc rõ trên điện thoại)
-    ctx.fillStyle = '#475569';
-    ctx.font = 'bold 21px "Segoe UI", Arial, sans-serif';
-    ctx.fillText('Thí sinh:', cardX + 22, cardY + 110);
-    ctx.fillStyle = '#0f172a';
-    ctx.font = '900 27px "Segoe UI", Arial, sans-serif';
-    const stuLabel = sub.student_name || 'Theo SBD trên phiếu';
-    ctx.fillText(stuLabel.length > 22 ? stuLabel.slice(0, 21) + '…' : stuLabel, cardX + 125, cardY + 110);
-
-    // SBD & Mã đề nổi bật cỡ cực lớn (38px)
-    ctx.fillStyle = '#475569';
-    ctx.font = 'bold 22px "Segoe UI", Arial, sans-serif';
-    ctx.fillText('SBD:', cardX + 22, cardY + 172);
-    ctx.fillStyle = '#059669';
-    ctx.font = '900 38px "Courier New", monospace';
-    ctx.fillText(sub.student_no || '---', cardX + 90, cardY + 174);
-
-    ctx.fillStyle = '#475569';
-    ctx.font = 'bold 22px "Segoe UI", Arial, sans-serif';
-    ctx.fillText('Mã đề:', cardX + 280, cardY + 172);
-    ctx.fillStyle = '#dc2626';
-    ctx.font = '900 38px "Courier New", monospace';
-    ctx.fillText(sub.code || '---', cardX + 365, cardY + 174);
-
-    // Lớp & Giờ chấm
-    ctx.fillStyle = '#475569';
-    ctx.font = 'bold 21px "Segoe UI", Arial, sans-serif';
-    ctx.fillText('Lớp:', cardX + 22, cardY + 232);
-    ctx.fillStyle = '#0f172a';
-    ctx.font = 'bold 24px "Segoe UI", Arial, sans-serif';
-    ctx.fillText(sub.class_name || state.exam?.className || (state.exam?.classes?.[0] || '---'), cardX + 90, cardY + 232);
-
+    // Dòng 1: Thí sinh
     ctx.fillStyle = '#475569';
     ctx.font = 'bold 20px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('Thí sinh:', cardX + 22, cardY + 104);
+    ctx.fillStyle = '#0f172a';
+    ctx.font = '900 26px "Segoe UI", Arial, sans-serif';
+    ctx.fillText(resolvedStudentName.length > 22 ? resolvedStudentName.slice(0, 21) + '…' : resolvedStudentName, cardX + 120, cardY + 104);
+
+    // Dòng 2: Người chấm (Tên giáo viên đăng ký tài khoản)
+    ctx.fillStyle = '#475569';
+    ctx.font = 'bold 20px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('Người chấm:', cardX + 22, cardY + 146);
+    ctx.fillStyle = '#059669';
+    ctx.font = 'bold 23px "Segoe UI", Arial, sans-serif';
+    ctx.fillText(teacherDisplay.length > 22 ? teacherDisplay.slice(0, 21) + '…' : teacherDisplay, cardX + 155, cardY + 146);
+
+    // Dòng 3: SBD & Mã đề nổi bật
+    ctx.fillStyle = '#475569';
+    ctx.font = 'bold 21px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('SBD:', cardX + 22, cardY + 196);
+    ctx.fillStyle = '#059669';
+    ctx.font = '900 36px "Courier New", monospace';
+    ctx.fillText(sub.student_no || '---', cardX + 85, cardY + 198);
+
+    ctx.fillStyle = '#475569';
+    ctx.font = 'bold 21px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('Mã đề:', cardX + 270, cardY + 196);
+    ctx.fillStyle = '#dc2626';
+    ctx.font = '900 36px "Courier New", monospace';
+    ctx.fillText(sub.code || '---', cardX + 355, cardY + 198);
+
+    // Dòng 4: Lớp
+    ctx.fillStyle = '#475569';
+    ctx.font = 'bold 20px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('Lớp:', cardX + 22, cardY + 244);
+    ctx.fillStyle = '#0f172a';
+    ctx.font = 'bold 22px "Segoe UI", Arial, sans-serif';
+    ctx.fillText(sub.class_name || state.exam?.className || (state.exam?.classes?.[0] || '---'), cardX + 85, cardY + 244);
+
+    // Dòng 5: Giờ chấm & Ghi chú đính chính
+    ctx.fillStyle = '#475569';
+    ctx.font = 'bold 18px "Segoe UI", Arial, sans-serif';
     ctx.fillText('Chấm lúc: ' + new Date(sub.createdAt).toLocaleString('vi-VN'), cardX + 22, cardY + 286);
     if (sub.has_manual_override) {
         ctx.fillStyle = '#7e22ce';
-        ctx.font = 'bold 18px "Segoe UI", Arial, sans-serif';
-        ctx.fillText('★ Có câu được Giáo viên đính chính thủ công', cardX + 22, cardY + 316);
+        ctx.font = 'bold 16px "Segoe UI", Arial, sans-serif';
+        ctx.fillText('★ Có câu được Giáo viên đính chính thủ công', cardX + 22, cardY + 314);
     }
 
     // 4. KHUNG ĐIỂM SỐ TỪNG PHẦN CỠ LỚN (BÊN PHẢI: X: 962 -> 1272)
@@ -3280,8 +3410,17 @@ async function generateStampedGradedSheet(sub, rawResult) {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
-    ctx.font = '900 18px "Segoe UI", Arial, sans-serif';
-    ctx.fillText('TOÁN THẦY CHOANG', 0, -96);
+    ctx.font = '900 17px "Segoe UI", Arial, sans-serif';
+    ctx.fillText(teacherDisplay.toUpperCase(), 0, -96);
+
+    ctx.font = '900 66px "Segoe UI", Arial, sans-serif';
+    ctx.fillText((sub.score ?? 0).toFixed(2), 0, -4);
+
+    ctx.font = '900 19px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('ĐIỂM CHÍNH THỨC', 0, 42);
+
+    ctx.font = 'bold 16px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('★ QMATH.IO.VN ★', 0, 96);
 
     ctx.font = '900 66px "Segoe UI", Arial, sans-serif';
     ctx.fillText((sub.score ?? 0).toFixed(2), 0, -4);
@@ -5107,31 +5246,169 @@ window.clearAllSubmissionsForCurrentExam = async () => {
 };
 
 window.exportResultsToExcel = () => {
-    if (state.submissions.length === 0) {
+    if (!Array.isArray(state.submissions) || state.submissions.length === 0) {
         Swal.fire('Thông báo', 'Chưa có kết quả nào để xuất file!', 'info');
         return;
     }
 
-    const headers = ['STT', 'SBD', 'Họ và tên', 'Lớp', 'Mã đề', 'Điểm Phần I', 'Điểm Phần II', 'Điểm Phần III', 'Tổng điểm', 'Thời gian chấm'];
-    const rows = state.submissions.map((s, idx) => [
-        idx + 1,
-        `"${s.student_no || ''}"`,
-        `"${(s.student_name || '').replace(/"/g, '""')}"`,
-        `"${(s.class_name || '').replace(/"/g, '""')}"`,
-        `"${s.code || ''}"`,
-        (s.part1_score ?? 0).toFixed(2),
-        (s.part2_score ?? 0).toFixed(2),
-        (s.part3_score ?? 0).toFixed(2),
-        (s.score ?? 0).toFixed(2),
-        `"${new Date(s.createdAt).toLocaleString('vi-VN')}"`
-    ]);
+    const examName = state.exam?.name || 'Bài thi trắc nghiệm';
+    const teacherName = state.user?.displayName || state.user?.name || 'Giáo viên';
+    const examClass = state.exam?.className || 'Lớp OMR';
 
-    const csvContent = '\uFEFF' + [headers.join(','), ...rows.map(r => r.join(','))].join('\r\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    // 1. Sắp xếp theo điểm giảm dần (nếu bằng điểm nhau thì xếp theo SBD)
+    const sorted = [...state.submissions].sort((a, b) => {
+        const scoreDiff = (Number(b.score) || 0) - (Number(a.score) || 0);
+        if (scoreDiff !== 0) return scoreDiff;
+        return String(a.student_no || '').localeCompare(String(b.student_no || ''), undefined, { numeric: true });
+    });
+
+    // 2. Tính thứ hạng thi cử chuẩn (Standard competition ranking: 1, 1, 3...)
+    let currentRank = 1;
+    const ranks = [];
+    for (let i = 0; i < sorted.length; i++) {
+        if (i > 0 && (Number(sorted[i].score) || 0) < (Number(sorted[i - 1].score) || 0)) {
+            currentRank = i + 1;
+        }
+        ranks.push(currentRank);
+    }
+
+    // 3. Thống kê điểm số
+    const total = sorted.length;
+    const avg = (sorted.reduce((acc, s) => acc + (Number(s.score) || 0), 0) / (total || 1)).toFixed(2);
+    const max = total > 0 ? Math.max(...sorted.map(s => Number(s.score) || 0)).toFixed(2) : '0.00';
+    const min = total > 0 ? Math.min(...sorted.map(s => Number(s.score) || 0)).toFixed(2) : '0.00';
+
+    let dupSbdCount = 0;
+    let dupSbdCodeCount = 0;
+    sorted.forEach(s => {
+        const d = getSubmissionDuplicateStatus(s, sorted);
+        if (d.isSameSbdCode) dupSbdCodeCount++;
+        else if (d.isSameSbd) dupSbdCount++;
+    });
+
+    // 4. Xây dựng nội dung file Excel (HTML Spreadsheet với đầy đủ styles, borders, màu nền và định dạng text)
+    const rowsHtml = sorted.map((s, idx) => {
+        const dupe = getSubmissionDuplicateStatus(s, sorted);
+        let rowBg = '#FFFFFF';
+        let textColor = '#0F172A';
+        let note = '';
+
+        if (dupe.isSameSbdCode) {
+            rowBg = '#FFE4E6'; // Màu đỏ hồng nhạt cho trường hợp trùng cả SBD và Mã đề
+            textColor = '#9F1239';
+            note = 'Trùng cả SBD & Mã đề';
+        } else if (dupe.isSameSbd) {
+            rowBg = '#FEF3C7'; // Màu vàng cam nhạt cho trường hợp trùng SBD
+            textColor = '#92400E';
+            note = 'Trùng SBD';
+        }
+
+        const studentName = s.student_name || (s.student_no ? `Học sinh #${s.student_no}` : `Phiếu #${idx + 1}`);
+        const className = s.class_name || examClass || '---';
+        const scoreVal = (Number(s.score) || 0).toFixed(2);
+        const rankVal = ranks[idx];
+
+        return `
+            <tr style="background-color: ${rowBg}; color: ${textColor}; height: 28px;">
+                <td style="border: 1px solid #CBD5E1; text-align: center; font-weight: normal; vertical-align: middle;">${idx + 1}</td>
+                <td style="border: 1px solid #CBD5E1; text-align: center; font-weight: bold; mso-number-format: '\\@'; vertical-align: middle;">${s.student_no || '---'}</td>
+                <td style="border: 1px solid #CBD5E1; text-align: left; padding-left: 8px; font-weight: 500; vertical-align: middle;">${studentName}</td>
+                <td style="border: 1px solid #CBD5E1; text-align: center; vertical-align: middle;">${className}</td>
+                <td style="border: 1px solid #CBD5E1; text-align: center; font-weight: bold; vertical-align: middle;">${scoreVal}</td>
+                <td style="border: 1px solid #CBD5E1; text-align: center; font-weight: bold; vertical-align: middle;">${rankVal}</td>
+            </tr>
+        `;
+    }).join('');
+
+    const excelHtml = `
+        <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+        <head>
+            <meta charset="utf-8">
+            <!--[if gte mso 9]>
+            <xml>
+                <x:ExcelWorkbook>
+                    <x:ExcelWorksheets>
+                        <x:ExcelWorksheet>
+                            <x:Name>Bảng Điểm</x:Name>
+                            <x:WorksheetOptions>
+                                <x:DisplayGridlines/>
+                            </x:WorksheetOptions>
+                        </x:ExcelWorksheet>
+                    </x:ExcelWorksheets>
+                </x:ExcelWorkbook>
+            </xml>
+            <![endif]-->
+            <style>
+                body { font-family: 'Segoe UI', Arial, sans-serif; color: #0F172A; }
+                table { border-collapse: collapse; width: 100%; }
+                th, td { mso-style-parent: style0; }
+            </style>
+        </head>
+        <body>
+            <table>
+                <!-- DÒNG TIÊU ĐỀ BÀI THI -->
+                <tr>
+                    <td colspan="6" style="text-align: center; font-size: 16pt; font-weight: bold; color: #0F172A; height: 40px; vertical-align: middle;">
+                        BẢNG KẾT QUẢ CHẤM THI: ${(examName || 'OMR').toUpperCase()}
+                    </td>
+                </tr>
+                <tr>
+                    <td colspan="6" style="text-align: center; font-size: 10pt; color: #64748B; height: 24px; vertical-align: middle;">
+                        Giáo viên: <b>${teacherName}</b> &nbsp;|&nbsp; Ngày xuất: <b>${new Date().toLocaleString('vi-VN')}</b>
+                    </td>
+                </tr>
+                <tr><td colspan="6" style="height: 12px;"></td></tr>
+
+                <!-- BẢNG THỐNG KÊ ĐIỂM -->
+                <tr style="background-color: #F8FAFC; font-weight: bold; text-align: center;">
+                    <th colspan="6" style="border: 1px solid #CBD5E1; background-color: #F1F5F9; font-size: 11pt; padding: 6px; text-align: left;">
+                        📊 BẢNG THỐNG KÊ ĐIỂM SỐ
+                    </th>
+                </tr>
+                <tr style="background-color: #F8FAFC; text-align: center; font-size: 10pt; height: 26px;">
+                    <td style="border: 1px solid #CBD5E1; font-weight: bold; width: 60px;">Tổng số bài</td>
+                    <td style="border: 1px solid #CBD5E1; font-weight: bold; width: 100px;">Điểm trung bình</td>
+                    <td style="border: 1px solid #CBD5E1; font-weight: bold; width: 220px;">Điểm cao nhất</td>
+                    <td style="border: 1px solid #CBD5E1; font-weight: bold; width: 120px;">Điểm thấp nhất</td>
+                    <td style="border: 1px solid #CBD5E1; font-weight: bold; width: 100px; background-color: #FEF3C7; color: #92400E;">Trùng SBD</td>
+                    <td style="border: 1px solid #CBD5E1; font-weight: bold; width: 100px; background-color: #FFE4E6; color: #9F1239;">Trùng cả SBD &amp; Mã</td>
+                </tr>
+                <tr style="text-align: center; font-size: 11pt; height: 30px;">
+                    <td style="border: 1px solid #CBD5E1; font-weight: bold;">${total}</td>
+                    <td style="border: 1px solid #CBD5E1; font-weight: bold; color: #0284C7;">${avg}</td>
+                    <td style="border: 1px solid #CBD5E1; font-weight: bold; color: #16A34A;">${max}</td>
+                    <td style="border: 1px solid #CBD5E1; font-weight: bold; color: #DC2626;">${min}</td>
+                    <td style="border: 1px solid #CBD5E1; font-weight: bold; background-color: ${dupSbdCount > 0 ? '#FEF3C7' : '#FFFFFF'}; color: ${dupSbdCount > 0 ? '#B45309' : '#64748B'};">${dupSbdCount}</td>
+                    <td style="border: 1px solid #CBD5E1; font-weight: bold; background-color: ${dupSbdCodeCount > 0 ? '#FFE4E6' : '#FFFFFF'}; color: ${dupSbdCodeCount > 0 ? '#BE123C' : '#64748B'};">${dupSbdCodeCount}</td>
+                </tr>
+                <tr><td colspan="6" style="height: 16px;"></td></tr>
+
+                <!-- DÒNG TIÊU ĐỀ CỦA BẢNG ĐIỂM (IN ĐẬM, ĐỔ NỀN XÁM NHẠT #E2E8F0, CÓ BO VIỀN) -->
+                <tr style="background-color: #E2E8F0; font-weight: bold; text-align: center; height: 34px;">
+                    <th style="border: 1px solid #94A3B8; padding: 8px 12px; width: 60px; vertical-align: middle;">STT</th>
+                    <th style="border: 1px solid #94A3B8; padding: 8px 12px; width: 100px; vertical-align: middle;">SBD</th>
+                    <th style="border: 1px solid #94A3B8; padding: 8px 12px; width: 220px; text-align: left; vertical-align: middle;">Họ và tên</th>
+                    <th style="border: 1px solid #94A3B8; padding: 8px 12px; width: 120px; vertical-align: middle;">Lớp</th>
+                    <th style="border: 1px solid #94A3B8; padding: 8px 12px; width: 100px; vertical-align: middle;">Điểm</th>
+                    <th style="border: 1px solid #94A3B8; padding: 8px 12px; width: 100px; vertical-align: middle;">Thứ hạng</th>
+                </tr>
+
+                <!-- CÁC DÒNG DỮ LIỆU ĐÃ BO VIỀN VÀ BÔI MÀU CẢNH BÁO TRÙNG -->
+                ${rowsHtml}
+            </table>
+        </body>
+        </html>
+    `;
+
+    const blob = new Blob(['\uFEFF' + excelHtml], { type: 'application/vnd.ms-excel;charset=utf-8;' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `Ket_qua_cham_OMR_${(state.exam?.name || 'Bai_thi').replace(/\s+/g, '_')}_${Date.now()}.csv`;
+    const cleanFileName = `Bang_diem_${(examName || 'Bai_thi').replace(/[\s/\\:*?"<>|]+/g, '_')}_${Date.now()}.xls`;
+    link.download = cleanFileName;
+    document.body.appendChild(link);
     link.click();
+    document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(link.href), 10000);
 };
 
 // ========================================================
@@ -5501,11 +5778,26 @@ window.renderOmrClassesList = () => {
         </button>
     `;
 
-    // Populate #newExamOmrClassId in #createExamModal
+    // Populate #newExamOmrClassId in #createExamModal (Bao gồm cả Lớp OMR và Lớp LMS)
     if (examClassSelect) {
         const prevVal = examClassSelect.value;
-        examClassSelect.innerHTML = `<option value="">-- Không chọn (Bài thi tự do) --</option>` +
-            classes.map(c => `<option value="${c.id}">${c.name} (${(c.students || []).length} học sinh)</option>`).join('');
+        let optHtml = `<option value="">-- Không chọn (Bài thi tự do) --</option>`;
+        if (classes.length > 0) {
+            optHtml += `<optgroup label="Lớp OMR độc lập">` +
+                classes.map(c => `<option value="${c.id}">${c.name} (${(c.students || []).length} học sinh)</option>`).join('') +
+                `</optgroup>`;
+        }
+        const lmsList = Array.isArray(state.lmsClasses) ? state.lmsClasses : [];
+        if (lmsList.length > 0) {
+            optHtml += `<optgroup label="Lớp học LMS">` +
+                lmsList.map(c => {
+                    const cnt = c.studentCount || (Array.isArray(c.students) ? c.students.length : 0);
+                    const yStr = c.academicYear ? ` [${c.academicYear}]` : '';
+                    return `<option value="lms_${c.id}">🏫 ${c.name || 'Lớp LMS'} (${cnt} HS)${yStr}</option>`;
+                }).join('') +
+                `</optgroup>`;
+        }
+        examClassSelect.innerHTML = optHtml;
         if (prevVal) examClassSelect.value = prevVal;
     }
 };
@@ -6898,43 +7190,70 @@ window.confirmApplyQrKey = async () => {
 // ========================================================
 // 8.3 TIỆN ÍCH ĐỒNG BỘ TỪ LỚP HỌC LMS (NẾU CÓ DÙNG LMS)
 // ========================================================
-async function fetchTeacherLmsClasses() {
-    if (Array.isArray(state.lmsClasses) && state.lmsClasses.length > 0) return state.lmsClasses;
+async function fetchTeacherLmsClasses(forceRefresh = false) {
+    if (!forceRefresh && Array.isArray(state.lmsClasses) && state.lmsClasses.length > 0) return state.lmsClasses;
     let classes = [];
+
+    // 1. Kiểm tra cache từ dashboard để lấy ngay tức thì (0ms)
     try {
-        if (state.teacherUid) {
-            const qClasses = query(collection(db, "classes"), where("teacherId", "==", state.teacherUid));
-            const snap = await getDocs(qClasses);
-            classes = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(c => !c.isDeleted);
+        const cacheKeys = ['cached_classes_me', `cached_classes_${state.teacherUid}`, 'cached_classes_all', 'allClassesData'];
+        for (const k of cacheKeys) {
+            const raw = localStorage.getItem(k);
+            if (raw) {
+                const parsed = JSON.parse(raw);
+                if (Array.isArray(parsed) && parsed.length > 0) {
+                    classes = parsed;
+                    break;
+                }
+            }
         }
-        if (classes.length === 0) {
-            const snapAll = await getDocs(query(collection(db, "classes"), limit(50)));
-            classes = snapAll.docs.map(d => ({ id: d.id, ...d.data() })).filter(c => !c.isDeleted);
+    } catch (_) {}
+
+    // 2. Tải trực tiếp từ cơ sở dữ liệu Firebase / Supabase
+    if (classes.length === 0 || forceRefresh) {
+        try {
+            if (typeof db !== 'undefined') {
+                if (state.teacherUid) {
+                    const qClasses = query(collection(db, "classes"), where("teacherId", "==", state.teacherUid));
+                    const snap = await getDocs(qClasses);
+                    const fetched = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(c => !c.isDeleted);
+                    if (fetched.length > 0) classes = fetched;
+                }
+                if (classes.length === 0) {
+                    const snapAll = await getDocs(query(collection(db, "classes"), limit(100)));
+                    classes = snapAll.docs.map(d => ({ id: d.id, ...d.data() })).filter(c => !c.isDeleted);
+                }
+            }
+        } catch(e) {
+            console.warn("Lỗi tải danh sách lớp LMS từ DB:", e);
         }
-    } catch(e) {
-        console.warn("Lỗi tải danh sách lớp LMS:", e);
     }
+
     state.lmsClasses = classes;
     return classes;
 }
 
 async function syncStudentsFromClassIdToExam(classId, examObj, silent = false) {
     if (!classId || !examObj) return [];
-    const classDoc = await getDoc(doc(db, "classes", classId));
-    if (!classDoc.exists()) {
+    let classData = (state.lmsClasses || []).find(c => c.id === classId);
+    if (!classData && typeof db !== 'undefined') {
+        const classDoc = await getDoc(doc(db, "classes", classId));
+        if (classDoc.exists()) classData = classDoc.data();
+    }
+    if (!classData) {
         if (!silent) throw new Error("Lớp học không tồn tại!");
         return [];
     }
-    const classData = classDoc.data();
     const className = classData.name || 'Lớp LMS';
 
     examObj.classId = classId;
     examObj.className = className;
-    localStorage.setItem(`omr_exam_class_${examObj.id}`, JSON.stringify({ classId, className }));
+    examObj.isTempClass = false;
+    localStorage.setItem(`omr_exam_class_${examObj.id}`, JSON.stringify({ classId, className, isTemp: false }));
     updateActiveExamBanner();
 
     let rawStudents = Array.isArray(classData.students) ? classData.students : [];
-    if (rawStudents.length === 0) {
+    if (rawStudents.length === 0 && typeof db !== 'undefined') {
         try {
             const qSt = await getDocs(collection(db, `classes/${classId}/students`));
             rawStudents = qSt.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -6942,7 +7261,7 @@ async function syncStudentsFromClassIdToExam(classId, examObj, silent = false) {
     }
 
     if (rawStudents.length === 0) {
-        if (!silent) Swal.fire('Thông báo', `Đã gán lớp ${className} (hiện chưa có học sinh trong danh sách lớp).`, 'info');
+        if (!silent) Swal.fire('Thông báo', `Đã gán lớp "${className}" (lớp hiện chưa có học sinh trong danh sách).`, 'info');
         return [];
     }
 
@@ -6965,7 +7284,7 @@ async function syncStudentsFromClassIdToExam(classId, examObj, silent = false) {
     });
 
     state.students = newStudents;
-    if (state.teacherUid) {
+    if (state.teacherUid && typeof db !== 'undefined') {
         for (const s of newStudents) {
             try { await setDoc(doc(db, "omr_students", s.id), s); } catch(e) {}
         }
@@ -6978,42 +7297,173 @@ async function syncStudentsFromClassIdToExam(classId, examObj, silent = false) {
 
 window.openSyncLmsClassModal = async () => {
     const modal = document.getElementById('syncLmsClassModal');
-    const select = document.getElementById('lmsClassSelector');
-    if (!modal || !select) return;
+    if (!modal) return;
 
     modal.classList.remove('hidden');
-    select.innerHTML = `<option value="">Đang tải danh sách lớp học của bạn...</option>`;
+    window.switchSyncClassTab('lms');
+
+    const select = document.getElementById('lmsClassSelector');
+    if (select) select.innerHTML = `<option value="">Đang tải danh sách lớp học của bạn...</option>`;
 
     try {
         const classes = await fetchTeacherLmsClasses();
-        if (classes.length === 0) {
-            select.innerHTML = `<option value="">Bạn chưa tạo lớp học nào trong QMath LMS</option>`;
+        const yearFilter = document.getElementById('lmsAcademicYearFilter');
+        if (yearFilter) {
+            const yearsSet = new Set(['2025-2026', '2024-2025', '2023-2024']);
+            classes.forEach(c => {
+                if (c.academicYear) yearsSet.add(c.academicYear);
+            });
+            const sortedYears = Array.from(yearsSet).sort().reverse();
+            const curVal = yearFilter.value || '2025-2026';
+            yearFilter.innerHTML = sortedYears.map(y => `
+                <option value="${y}" ${curVal === y ? 'selected' : ''}>Năm học ${y}</option>
+            `).join('') + `<option value="all" ${curVal === 'all' ? 'selected' : ''}>🌟 Xem tất cả các năm học</option>`;
+        }
+        window.filterLmsClassesByYear();
+    } catch(err) {
+        console.error("Lỗi tải lớp LMS:", err);
+        if (select) select.innerHTML = `<option value="">Lỗi tải dữ liệu lớp học</option>`;
+    }
+};
+
+window.switchSyncClassTab = (tab) => {
+    const isLms = tab === 'lms';
+    const btnLms = document.getElementById('tabBtnSyncClassLms');
+    const btnTemp = document.getElementById('tabBtnSyncClassTemp');
+    const panelLms = document.getElementById('panelSyncClassLms');
+    const panelTemp = document.getElementById('panelSyncClassTemp');
+    const btnActionText = document.getElementById('syncClassActionBtnText');
+
+    if (btnLms) {
+        btnLms.className = isLms
+            ? 'px-3.5 py-2 font-bold text-xs border-b-2 border-emerald-600 text-emerald-600 dark:text-emerald-400 cursor-pointer flex items-center gap-1.5'
+            : 'px-3.5 py-2 font-bold text-xs border-b-2 border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 cursor-pointer flex items-center gap-1.5';
+    }
+    if (btnTemp) {
+        btnTemp.className = !isLms
+            ? 'px-3.5 py-2 font-bold text-xs border-b-2 border-emerald-600 text-emerald-600 dark:text-emerald-400 cursor-pointer flex items-center gap-1.5'
+            : 'px-3.5 py-2 font-bold text-xs border-b-2 border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 cursor-pointer flex items-center gap-1.5';
+    }
+    if (panelLms) panelLms.classList.toggle('hidden', !isLms);
+    if (panelTemp) panelTemp.classList.toggle('hidden', isLms);
+    if (btnActionText) {
+        btnActionText.textContent = isLms ? 'Nạp học sinh từ LMS' : 'Tạo & Áp dụng Lớp tạm';
+    }
+};
+
+window.filterLmsClassesByYear = () => {
+    const year = document.getElementById('lmsAcademicYearFilter')?.value || '2025-2026';
+    const select = document.getElementById('lmsClassSelector');
+    const countBadge = document.getElementById('lmsClassesFilteredCount');
+    if (!select) return;
+
+    const all = Array.isArray(state.lmsClasses) ? state.lmsClasses : [];
+    const filtered = year === 'all'
+        ? all
+        : all.filter(c => (c.academicYear || '2025-2026') === year);
+
+    if (countBadge) countBadge.textContent = `${filtered.length} lớp`;
+
+    if (filtered.length === 0) {
+        select.innerHTML = `<option value="">Không có lớp nào trong năm học ${year}</option>`;
+        const badge = document.getElementById('lmsClassStuCountBadge');
+        if (badge) badge.textContent = '0 HS';
+        return;
+    }
+
+    select.innerHTML = filtered.map(c => {
+        const count = c.studentCount || (Array.isArray(c.students) ? c.students.length : 0);
+        const yStr = c.academicYear ? ` [${c.academicYear}]` : '';
+        const isSelected = state.exam?.classId === c.id;
+        return `<option value="${c.id}" ${isSelected ? 'selected' : ''}>${c.name || 'Lớp học'} (${count} HS)${yStr}</option>`;
+    }).join('');
+
+    window.updateLmsClassPreview();
+};
+
+window.updateLmsClassPreview = () => {
+    const classId = document.getElementById('lmsClassSelector')?.value;
+    const badge = document.getElementById('lmsClassStuCountBadge');
+    if (!badge) return;
+
+    const cls = (state.lmsClasses || []).find(c => c.id === classId);
+    if (cls) {
+        const count = cls.studentCount || (Array.isArray(cls.students) ? cls.students.length : 0);
+        badge.textContent = `${count} học sinh`;
+    } else {
+        badge.textContent = '---';
+    }
+};
+
+window.confirmSyncClassAction = async () => {
+    const isTempTab = document.getElementById('panelSyncClassTemp') && !document.getElementById('panelSyncClassTemp').classList.contains('hidden');
+
+    if (isTempTab) {
+        const tempName = document.getElementById('tempClassNameInput')?.value.trim();
+        if (!tempName) {
+            Swal.fire('Thiếu thông tin', 'Vui lòng nhập tên cho lớp tạm!', 'warning');
+            return;
+        }
+        if (!state.exam) {
+            Swal.fire('Lỗi', 'Vui lòng mở một đề thi trước khi gán lớp!', 'warning');
             return;
         }
 
-        select.innerHTML = classes.map(c => `
-            <option value="${c.id}" ${state.exam?.classId === c.id ? 'selected' : ''}>${c.name || 'Lớp học'} (${c.studentCount || (c.students?.length) || 0} học sinh)</option>
-        `).join('');
-    } catch(err) {
-        console.error("Lỗi tải lớp LMS:", err);
-        select.innerHTML = `<option value="">Lỗi tải dữ liệu lớp học</option>`;
+        const tempClassId = 'temp_' + Date.now();
+        state.exam.classId = tempClassId;
+        state.exam.className = tempName;
+        state.exam.isTempClass = true;
+
+        localStorage.setItem(`omr_exam_class_${state.exam.id}`, JSON.stringify({
+            classId: tempClassId,
+            className: tempName,
+            isTemp: true
+        }));
+
+        updateActiveExamBanner();
+        document.getElementById('syncLmsClassModal').classList.add('hidden');
+
+        // Cập nhật text trong editExamSettingsModal nếu đang mở
+        const classTextEl = document.getElementById('editExamCurrentClassText');
+        if (classTextEl) {
+            classTextEl.textContent = `${tempName} (Lớp tạm) · ${(state.students || []).length} học sinh`;
+        }
+
+        Swal.fire({
+            icon: 'success',
+            title: 'Đã tạo lớp tạm!',
+            text: `Bài thi đã được gán lớp tạm: "${tempName}". Bạn có thể nạp danh sách học sinh vào đề trong tab Lớp & SBD.`,
+            timer: 2500
+        });
+    } else {
+        const classId = document.getElementById('lmsClassSelector')?.value;
+        if (!classId || !state.exam) {
+            Swal.fire('Lưu ý', 'Vui lòng chọn một lớp học từ danh sách!', 'warning');
+            return;
+        }
+        try {
+            Swal.showLoading();
+            const newStudents = await syncStudentsFromClassIdToExam(classId, state.exam, false);
+            document.getElementById('syncLmsClassModal').classList.add('hidden');
+
+            const classTextEl = document.getElementById('editExamCurrentClassText');
+            if (classTextEl) {
+                classTextEl.textContent = `${state.exam.className} · ${newStudents.length} học sinh`;
+            }
+
+            if (newStudents.length > 0) {
+                Swal.fire('Thành công', `Đã gán lớp "${state.exam.className}" và đồng bộ ${newStudents.length} học sinh kèm SBD!`, 'success');
+            } else {
+                Swal.fire('Đã gán lớp', `Đã gán lớp "${state.exam.className}". Lớp này hiện chưa có danh sách học sinh nào trong LMS.`, 'info');
+            }
+        } catch(err) {
+            Swal.fire('Lỗi đồng bộ', err.message, 'error');
+        }
     }
 };
 
 window.confirmSyncFromLmsClass = async () => {
-    const classId = document.getElementById('lmsClassSelector')?.value;
-    if (!classId || !state.exam) return;
-
-    try {
-        Swal.showLoading();
-        const newStudents = await syncStudentsFromClassIdToExam(classId, state.exam, false);
-        document.getElementById('syncLmsClassModal').classList.add('hidden');
-        if (newStudents.length > 0) {
-            Swal.fire('Thành công', `Đã gán lớp ${state.exam.className} và đồng bộ ${newStudents.length} học sinh kèm SBD!`, 'success');
-        }
-    } catch(err) {
-        Swal.fire('Lỗi đồng bộ', err.message, 'error');
-    }
+    return window.confirmSyncClassAction();
 };
 
 window.openImportStudentsCsvModal = () => {
@@ -7274,8 +7724,26 @@ window.confirmCreateExam = async () => {
     }
 
     let attachedClass = null;
-    if (omrClassId && Array.isArray(state.omrClasses)) {
-        attachedClass = state.omrClasses.find(c => c.id === omrClassId);
+    if (omrClassId) {
+        if (omrClassId.startsWith('lms_')) {
+            const rawId = omrClassId.replace('lms_', '');
+            const lmsCls = (state.lmsClasses || []).find(c => c.id === rawId);
+            if (lmsCls) {
+                attachedClass = {
+                    id: lmsCls.id,
+                    name: lmsCls.name || 'Lớp LMS',
+                    students: (lmsCls.students || []).map((st, i) => ({
+                        student_no: st.sbd || st.student_no || String(i + 1).padStart(3, '0'),
+                        name: st.name || st.studentName || st.displayName || `Học sinh ${i + 1}`,
+                        phone: st.phoneParent || st.phone || '',
+                        note: ''
+                    })),
+                    isLms: true
+                };
+            }
+        } else if (Array.isArray(state.omrClasses)) {
+            attachedClass = state.omrClasses.find(c => c.id === omrClassId);
+        }
     }
 
     const newExam = {
@@ -7502,6 +7970,17 @@ window.openEditExamSettingsModal = () => {
     if (codeSelect) {
         codeSelect.innerHTML = codes.map(c => `<option value="${c}">${c}</option>`).join('');
         codeSelect.value = editExamCurrentCode;
+    }
+
+    // Hiển thị lớp hiện tại đang gán cho bài thi
+    const classTextEl = document.getElementById('editExamCurrentClassText');
+    if (classTextEl) {
+        if (state.exam.className) {
+            const tempTag = state.exam.isTempClass ? ' (Lớp tạm)' : '';
+            classTextEl.textContent = `${state.exam.className}${tempTag} · ${(state.students || []).length} học sinh`;
+        } else {
+            classTextEl.textContent = 'Chưa gán lớp (Bài thi tự do)';
+        }
     }
 
     window.switchExamSettingsTab('info');
@@ -7882,7 +8361,20 @@ window.openEditSubmissionAnswersModal = () => {
     if (sbdInp) sbdInp.value = sub.student_no || '';
     if (codeInp) codeInp.value = sub.code || '';
     if (nameInp) nameInp.value = sub.student_name || '';
-    if (reasonInp) reasonInp.value = '';
+    if (reasonInp) reasonInp.value = sub.is_manual_entry ? 'Chấm thủ công ảnh lỗi' : '';
+
+    // Hiển thị ảnh bài thi (nếu có) để đối chiếu
+    const imgEl = document.getElementById('editSubModalImage');
+    const imgCont = document.getElementById('editSubModalImageContainer');
+    const imgLink = document.getElementById('editSubModalImageLink');
+    const imgSrc = sub.clean_image || sub.image_data || sub.stamped_image;
+    if (imgEl && imgCont && imgSrc) {
+        imgEl.src = imgSrc;
+        if (imgLink) imgLink.href = imgSrc;
+        imgCont.classList.remove('hidden');
+    } else if (imgCont) {
+        imgCont.classList.add('hidden');
+    }
 
     window.switchEditSubTab('p1');
     window.renderEditSubP1();
@@ -8088,6 +8580,20 @@ window.confirmSaveSubmissionEdit = async () => {
     sub.part1_score = scoreData.part1Score;
     sub.part2_score = scoreData.part2Score;
     sub.part3_score = scoreData.part3Score;
+
+    // Nếu là bài chấm thủ công từ hàng đợi ảnh lỗi, đưa vào state.submissions và loại bỏ khỏi hàng đợi lỗi
+    if (sub.is_manual_entry) {
+        if (typeof sub._failedItemIdx === 'number' && state.failedBatchFiles?.[sub._failedItemIdx]) {
+            state.failedBatchFiles.splice(sub._failedItemIdx, 1);
+            renderBatchFailedQueue();
+        }
+        const existingIdx = state.submissions.findIndex(s => s.id === sub.id);
+        if (existingIdx !== -1) {
+            state.submissions[existingIdx] = sub;
+        } else {
+            state.submissions.unshift(sub);
+        }
+    }
 
     // Đóng dấu lại ảnh với vòng màu tím cho các câu sửa
     await reStampSubmission(sub);
