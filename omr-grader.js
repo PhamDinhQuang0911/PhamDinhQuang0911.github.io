@@ -189,11 +189,13 @@ window.toggleOmrSidebar = () => {
     const sb = document.getElementById('mainSidebar');
     const ov = document.getElementById('omrSidebarOverlay');
     if (!sb) return;
-    const isClosed = sb.classList.contains('-translate-x-full');
-    if (isClosed) {
+    const isOpen = sb.classList.contains('omr-sidebar-open');
+    if (!isOpen) {
+        sb.classList.add('omr-sidebar-open');
         sb.classList.remove('-translate-x-full');
         if (ov) ov.classList.remove('hidden');
     } else {
+        sb.classList.remove('omr-sidebar-open');
         sb.classList.add('-translate-x-full');
         if (ov) ov.classList.add('hidden');
     }
@@ -202,7 +204,10 @@ window.toggleOmrSidebar = () => {
 window.closeOmrSidebar = () => {
     const sb = document.getElementById('mainSidebar');
     const ov = document.getElementById('omrSidebarOverlay');
-    if (sb) sb.classList.add('-translate-x-full');
+    if (sb) {
+        sb.classList.remove('omr-sidebar-open');
+        sb.classList.add('-translate-x-full');
+    }
     if (ov) ov.classList.add('hidden');
 };
 
@@ -700,6 +705,9 @@ function updateOverviewStats() {
     const badge = document.getElementById('resultsCountBadge');
     if (badge) badge.textContent = totalSub;
 
+    const mobBadge = document.getElementById('mobileResultsCountBadge');
+    if (mobBadge) mobBadge.textContent = totalSub;
+
     const stuBadge = document.getElementById('studentsCountBadge');
     if (stuBadge) stuBadge.textContent = state.students.length;
 
@@ -711,15 +719,68 @@ function updateOverviewStats() {
     if (elSub) elSub.textContent = totalSub;
     if (elStu) elStu.textContent = state.students.length;
 
+    let avg = '0.00';
+    let max = '0.00';
     if (totalSub > 0) {
         const scores = state.submissions.map(s => Number(s.score) || 0);
-        const avg = (scores.reduce((a, b) => a + b, 0) / totalSub).toFixed(2);
-        const max = Math.max(...scores).toFixed(2);
+        avg = (scores.reduce((a, b) => a + b, 0) / totalSub).toFixed(2);
+        max = Math.max(...scores).toFixed(2);
         if (elAvg) elAvg.textContent = avg;
         if (elMax) elMax.textContent = max;
     } else {
         if (elAvg) elAvg.textContent = '0.0';
         if (elMax) elMax.textContent = '0.0';
+    }
+
+    // Cập nhật danh sách tất cả bài đã chấm trực tiếp ngay tại màn hình Chấm bài (#view-scan)
+    const inlineCountEl = document.getElementById('scanInlineCount');
+    const inlineStatsEl = document.getElementById('scanInlineStatsText');
+    const inlineListEl = document.getElementById('scanInlineSubmissionsList');
+    if (inlineCountEl) inlineCountEl.textContent = totalSub;
+    if (inlineStatsEl) {
+        inlineStatsEl.textContent = `Điểm TB: ${avg}đ · Cao nhất: ${max}đ`;
+    }
+    if (inlineListEl) {
+        if (totalSub === 0) {
+            inlineListEl.innerHTML = `<div class="py-8 text-center text-xs text-slate-400">Chưa có bài chấm nào trong đề kiểm tra này.</div>`;
+        } else {
+            const ordered = [...state.submissions].reverse();
+            inlineListEl.innerHTML = ordered.map((s, idx) => {
+                const stt = totalSub - idx;
+                const sName = s.student_name || (s.student_no ? `Thí sinh SBD ${s.student_no}` : `Phiếu #${stt}`);
+                const scoreStr = (typeof s.score === 'number' ? s.score.toFixed(2) : (s.score ?? 0)) + 'đ';
+                const timeStr = s.createdAt ? new Date(s.createdAt).toLocaleTimeString('vi-VN', {hour:'2-digit', minute:'2-digit'}) : '';
+                return `
+                    <div class="p-2.5 sm:px-3.5 rounded-2xl bg-gray-50/90 dark:bg-[#1E1B29] border border-gray-200/80 dark:border-[#38344D] flex items-center justify-between gap-2 hover:border-emerald-400 transition-all">
+                        <div onclick="window.viewSubmissionDetail('${s.id}')" class="flex items-center gap-2.5 min-w-0 flex-1 cursor-pointer">
+                            <span class="w-7 h-7 rounded-xl badge-season font-mono font-black text-xs flex items-center justify-center shrink-0">#${stt}</span>
+                            <div class="min-w-0 flex-1">
+                                <div class="flex items-center gap-1.5 flex-wrap">
+                                    <span class="font-extrabold text-xs sm:text-sm text-slate-900 dark:text-white truncate">${sName}</span>
+                                    <span class="px-1.5 py-0.5 rounded bg-slate-200/70 dark:bg-slate-800 text-[10px] font-mono font-bold text-slate-700 dark:text-slate-300">SBD: ${s.student_no || '---'}</span>
+                                    <span class="px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-950/60 text-[10px] font-mono font-bold text-amber-800 dark:text-amber-300">Mã: ${s.code || '---'}</span>
+                                </div>
+                                <div class="text-[11px] text-slate-500 dark:text-slate-400 font-semibold mt-0.5">
+                                    P.I: <b>${(s.part1_score ?? 0).toFixed(2)}đ</b> · P.II: <b>${(s.part2_score ?? 0).toFixed(2)}đ</b> · P.III: <b>${(s.part3_score ?? 0).toFixed(2)}đ</b>${timeStr ? ` · ${timeStr}` : ''}
+                                </div>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-1 sm:gap-1.5 shrink-0">
+                            <span class="px-2.5 py-1 rounded-xl bg-emerald-600 text-white font-mono font-black text-xs sm:text-sm tabular-nums">${scoreStr}</span>
+                            <button type="button" onclick="window.viewSubmissionDetail('${s.id}')" class="w-8 h-8 rounded-xl bg-white dark:bg-[#262335] border border-gray-200 dark:border-[#38344D] text-slate-700 dark:text-slate-200 hover:text-emerald-600 flex items-center justify-center text-xs cursor-pointer" title="Xem chi tiết phiếu chấm này">
+                                <i class="fa-solid fa-eye"></i>
+                            </button>
+                            <button type="button" onclick="window.downloadSubmissionById('${s.id}')" class="w-8 h-8 rounded-xl bg-white dark:bg-[#262335] border border-gray-200 dark:border-[#38344D] text-emerald-600 hover:bg-emerald-50 flex items-center justify-center text-xs cursor-pointer" title="Tải ảnh phiếu đóng dấu">
+                                <i class="fa-solid fa-download"></i>
+                            </button>
+                            <button type="button" onclick="window.openParentNotifyModal('${s.id}')" class="w-8 h-8 rounded-xl bg-white dark:bg-[#262335] border border-gray-200 dark:border-[#38344D] text-indigo-600 hover:bg-indigo-50 flex items-center justify-center text-xs cursor-pointer" title="Gửi kết quả cho Phụ huynh">
+                                <i class="fa-solid fa-paper-plane"></i>
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
     }
 
     // Recent list preview in overview
@@ -749,6 +810,24 @@ function updateOverviewStats() {
         }
     }
 }
+
+window.downloadSubmissionById = async (subId) => {
+    const sub = state.submissions.find(s => s.id === subId);
+    if (!sub || !sub.image_data) {
+        Swal.fire('Thông báo', 'Chưa có ảnh bài thi để tải về.', 'info');
+        return;
+    }
+    const imgUrl = await ensureSubmissionStampedHeaderUpgraded(sub);
+    const a = document.createElement('a');
+    a.href = imgUrl;
+    const sbd = sub.student_no || 'khong_sbd';
+    const name = (sub.student_name || 'thi_sinh').replace(/\s+/g, '_');
+    const score = (typeof sub.score === 'number' ? sub.score.toFixed(2) : sub.score);
+    a.download = `PhieuCham_${sbd}_${name}_${score}d.jpg`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+};
 
 // ========================================================
 // 4. OMR SCANNING & RECOGNITION CORE ENGINE (CAMERA + MULTI-IMAGE + ZIP)
@@ -1474,7 +1553,7 @@ async function generateStampedGradedSheet(sub, rawResult) {
     const rawH = rectImg.height || rectImg.naturalHeight || 2200;
     const sheetW = 1552;
     const sheetH = Math.round(sheetW * rawH / rawW);
-    const headerH = 260; // Khung thông tin & con dấu trang nhã phía trên
+    const headerH = 380; // Khung thông tin & con dấu CỠ LỚN (siêu rõ nét khi xem trên điện thoại)
 
     const canvas = document.createElement('canvas');
     canvas.width = sheetW;
@@ -1485,25 +1564,39 @@ async function generateStampedGradedSheet(sub, rawResult) {
     ctx.fillStyle = '#f8fafc';
     ctx.fillRect(0, 0, sheetW, headerH);
 
-    // Viền màu xanh ngọc thương hiệu QMath LMS ở đỉnh
+    // Viền màu xanh ngọc thương hiệu QMath LMS ở đỉnh (dày 10px)
     const topBar = ctx.createLinearGradient(0, 0, sheetW, 0);
     topBar.addColorStop(0, '#059669');
     topBar.addColorStop(0.5, '#0d9488');
     topBar.addColorStop(1, '#059669');
     ctx.fillStyle = topBar;
-    ctx.fillRect(0, 0, sheetW, 6);
+    ctx.fillRect(0, 0, sheetW, 10);
 
     // Đường phân cách sắc nét phía dưới Header
-    ctx.strokeStyle = '#cbd5e1';
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = '#94a3b8';
+    ctx.lineWidth = 3;
     ctx.beginPath();
     ctx.moveTo(0, headerH);
     ctx.lineTo(sheetW, headerH);
     ctx.stroke();
 
-    // 2. KHỐI LOGO THẦY CHOANG & THƯƠNG HIỆU WEB (GÓC TRÁI: X: 28 -> 418)
+    // 2. KHỐI LOGO THẦY CHOANG & THƯƠNG HIỆU WEB CỠ LỚN (GÓC TRÁI: X: 22 -> 425)
     const logoImg = await ensureBrandLogoReady();
-    const logoX = 28, logoY = 26, logoS = 84, rad = 18;
+    const brandCardX = 22, brandCardY = 24, brandCardW = 402, brandCardH = 334;
+    ctx.fillStyle = '#ffffff';
+    ctx.strokeStyle = '#cbd5e1';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(brandCardX, brandCardY, brandCardW, brandCardH, 18);
+    else ctx.rect(brandCardX, brandCardY, brandCardW, brandCardH);
+    ctx.fill();
+    ctx.stroke();
+
+    // Vẽ Logo Thầy Choang cỡ lớn (156x156px) ở chính giữa phía trên khối thương hiệu
+    const logoS = 156;
+    const logoX = brandCardX + Math.round((brandCardW - logoS) / 2);
+    const logoY = brandCardY + 16;
+    const rad = 24;
     ctx.save();
     ctx.beginPath();
     ctx.moveTo(logoX + rad, logoY);
@@ -1516,8 +1609,8 @@ async function generateStampedGradedSheet(sub, rawResult) {
     if (logoImg && logoImg.complete && logoImg.naturalWidth > 0) {
         ctx.fillStyle = '#ffffff';
         ctx.fill();
-        ctx.strokeStyle = '#cbd5e1';
-        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = '#e2e8f0';
+        ctx.lineWidth = 2;
         ctx.stroke();
         ctx.clip();
         ctx.drawImage(logoImg, logoX + 2, logoY + 2, logoS - 4, logoS - 4);
@@ -1528,202 +1621,222 @@ async function generateStampedGradedSheet(sub, rawResult) {
         ctx.fillStyle = logoGrad;
         ctx.fill();
         ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 30px "Segoe UI", Arial, sans-serif';
+        ctx.font = 'bold 54px "Segoe UI", Arial, sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText('TC', logoX + logoS / 2, logoY + logoS / 2 + 1);
+        ctx.fillText('TC', logoX + logoS / 2, logoY + logoS / 2 + 2);
     }
     ctx.restore();
 
-    // Tên thương hiệu Toán Thầy Choang
-    ctx.textAlign = 'left';
+    // Tên thương hiệu Toán Thầy Choang cỡ lớn căn giữa dưới Logo
+    const brandCenterX = brandCardX + brandCardW / 2;
+    ctx.textAlign = 'center';
     ctx.textBaseline = 'alphabetic';
     ctx.fillStyle = '#0f172a';
-    ctx.font = 'bold 21px "Segoe UI", Arial, sans-serif';
-    ctx.fillText('TOÁN THẦY CHOANG', logoX + logoS + 14, logoY + 32);
+    ctx.font = '900 30px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('TOÁN THẦY CHOANG', brandCenterX, brandCardY + 212);
 
     ctx.fillStyle = '#059669';
-    ctx.font = 'bold 12px "Segoe UI", Arial, sans-serif';
-    ctx.fillText('HỆ THỐNG CHẤM THI OMR · QMATH LMS', logoX + logoS + 14, logoY + 53);
+    ctx.font = 'bold 21px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('HỆ THỐNG CHẤM THI OMR', brandCenterX, brandCardY + 246);
+
+    ctx.fillStyle = '#334155';
+    ctx.font = 'bold 20px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('Web: qmath.io.vn', brandCenterX, brandCardY + 278);
 
     ctx.fillStyle = '#64748b';
-    ctx.font = '11px "Segoe UI", Arial, sans-serif';
-    ctx.fillText('Luyện thi Toán tư duy & Khảo thí (qmath.io.vn)', logoX + logoS + 14, logoY + 72);
+    ctx.font = 'bold 17px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('Chuẩn BGD 2025 (CV 1239)', brandCenterX, brandCardY + 310);
+    ctx.textAlign = 'left';
 
-    // 3. KHUNG THÔNG TIN THÍ SINH & ĐỀ THI (GIỮA: X: 430 -> 1060)
-    const cardX = 430, cardY = 22, cardW = 620, cardH = 216;
+    // 3. KHUNG THÔNG TIN THÍ SINH & ĐỀ THI CỠ LỚN (GIỮA: X: 438 -> 948)
+    const cardX = 438, cardY = 24, cardW = 510, cardH = 334;
     ctx.fillStyle = '#ffffff';
-    ctx.strokeStyle = '#e2e8f0';
-    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = '#cbd5e1';
+    ctx.lineWidth = 2;
     ctx.beginPath();
-    if (ctx.roundRect) ctx.roundRect(cardX, cardY, cardW, cardH, 14);
+    if (ctx.roundRect) ctx.roundRect(cardX, cardY, cardW, cardH, 18);
     else ctx.rect(cardX, cardY, cardW, cardH);
     ctx.fill();
     ctx.stroke();
 
-    // Tên kỳ thi / bài kiểm tra
+    // Tên kỳ thi / bài kiểm tra (chữ cực đậm 28px)
     ctx.fillStyle = '#0f172a';
-    ctx.font = 'bold 17px "Segoe UI", Arial, sans-serif';
-    const examName = (state.exam?.name || 'BÀI KIỂM TRA ĐỊNH KỲ').toUpperCase();
-    ctx.fillText(examName, cardX + 20, cardY + 34);
+    ctx.font = '900 28px "Segoe UI", Arial, sans-serif';
+    const rawExamName = (state.exam?.name || 'BÀI KIỂM TRA ĐỊNH KỲ').toUpperCase();
+    const examName = rawExamName.length > 28 ? rawExamName.slice(0, 27) + '…' : rawExamName;
+    ctx.fillText(examName, cardX + 22, cardY + 48);
 
-    ctx.strokeStyle = '#f1f5f9';
-    ctx.lineWidth = 1;
+    ctx.strokeStyle = '#cbd5e1';
+    ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(cardX + 20, cardY + 48);
-    ctx.lineTo(cardX + cardW - 20, cardY + 48);
+    ctx.moveTo(cardX + 22, cardY + 66);
+    ctx.lineTo(cardX + cardW - 22, cardY + 66);
     ctx.stroke();
 
-    // Chi tiết học sinh
+    // Chi tiết học sinh (Chữ to gấp đôi để đọc rõ trên điện thoại)
     ctx.fillStyle = '#475569';
-    ctx.font = '13px "Segoe UI", Arial, sans-serif';
-    ctx.fillText('Họ và tên thí sinh:', cardX + 20, cardY + 78);
+    ctx.font = 'bold 21px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('Thí sinh:', cardX + 22, cardY + 110);
     ctx.fillStyle = '#0f172a';
-    ctx.font = 'bold 17px "Segoe UI", Arial, sans-serif';
-    ctx.fillText(sub.student_name || 'Chưa cập nhật tên (Theo SBD)', cardX + 155, cardY + 78);
+    ctx.font = '900 27px "Segoe UI", Arial, sans-serif';
+    const stuLabel = sub.student_name || 'Theo SBD trên phiếu';
+    ctx.fillText(stuLabel.length > 22 ? stuLabel.slice(0, 21) + '…' : stuLabel, cardX + 125, cardY + 110);
 
+    // SBD & Mã đề nổi bật cỡ cực lớn (38px)
     ctx.fillStyle = '#475569';
-    ctx.font = '13px "Segoe UI", Arial, sans-serif';
-    ctx.fillText('Số báo danh (SBD):', cardX + 20, cardY + 110);
+    ctx.font = 'bold 22px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('SBD:', cardX + 22, cardY + 172);
     ctx.fillStyle = '#059669';
-    ctx.font = 'bold 16px "Courier New", monospace';
-    ctx.fillText(sub.student_no || '---', cardX + 155, cardY + 110);
+    ctx.font = '900 38px "Courier New", monospace';
+    ctx.fillText(sub.student_no || '---', cardX + 90, cardY + 174);
 
     ctx.fillStyle = '#475569';
-    ctx.font = '13px "Segoe UI", Arial, sans-serif';
-    ctx.fillText('Mã đề thi:', cardX + 340, cardY + 110);
+    ctx.font = 'bold 22px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('Mã đề:', cardX + 280, cardY + 172);
+    ctx.fillStyle = '#dc2626';
+    ctx.font = '900 38px "Courier New", monospace';
+    ctx.fillText(sub.code || '---', cardX + 365, cardY + 174);
+
+    // Lớp & Giờ chấm
+    ctx.fillStyle = '#475569';
+    ctx.font = 'bold 21px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('Lớp:', cardX + 22, cardY + 232);
     ctx.fillStyle = '#0f172a';
-    ctx.font = 'bold 16px "Courier New", monospace';
-    ctx.fillText(sub.code || '---', cardX + 415, cardY + 110);
+    ctx.font = 'bold 24px "Segoe UI", Arial, sans-serif';
+    ctx.fillText(sub.class_name || state.exam?.className || (state.exam?.classes?.[0] || '---'), cardX + 90, cardY + 232);
 
     ctx.fillStyle = '#475569';
-    ctx.font = '13px "Segoe UI", Arial, sans-serif';
-    ctx.fillText('Lớp:', cardX + 20, cardY + 142);
-    ctx.fillStyle = '#0f172a';
-    ctx.font = 'bold 14px "Segoe UI", Arial, sans-serif';
-    ctx.fillText(sub.class_name || (state.exam?.classes?.[0] || '---'), cardX + 155, cardY + 142);
+    ctx.font = 'bold 20px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('Chấm lúc: ' + new Date(sub.createdAt).toLocaleString('vi-VN'), cardX + 22, cardY + 286);
 
-    ctx.fillStyle = '#475569';
-    ctx.font = '13px "Segoe UI", Arial, sans-serif';
-    ctx.fillText('Chấm lúc:', cardX + 340, cardY + 142);
-    ctx.fillStyle = '#64748b';
-    ctx.font = '13px "Segoe UI", Arial, sans-serif';
-    ctx.fillText(new Date(sub.createdAt).toLocaleString('vi-VN'), cardX + 415, cardY + 142);
-
-    // Mẫu phiếu chuẩn
-    ctx.fillStyle = '#64748b';
-    ctx.font = '12px "Segoe UI", Arial, sans-serif';
-    ctx.fillText('Chuẩn hóa thị giác máy tính OMR · Mẫu BGD 2025 (CV 1239)', cardX + 20, cardY + 185);
-
-    // 4. KHUNG ĐIỂM SỐ TỪNG PHẦN (BÊN PHẢI: X: 1070 -> 1285)
-    const sbX = 1070, sbY = 22, sbW = 215, sbH = 216;
+    // 4. KHUNG ĐIỂM SỐ TỪNG PHẦN CỠ LỚN (BÊN PHẢI: X: 962 -> 1272)
+    const sbX = 962, sbY = 24, sbW = 310, sbH = 334;
     ctx.fillStyle = '#ffffff';
-    ctx.strokeStyle = '#e2e8f0';
-    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = '#cbd5e1';
+    ctx.lineWidth = 2;
     ctx.beginPath();
-    if (ctx.roundRect) ctx.roundRect(sbX, sbY, sbW, sbH, 14);
+    if (ctx.roundRect) ctx.roundRect(sbX, sbY, sbW, sbH, 18);
     else ctx.rect(sbX, sbY, sbW, sbH);
     ctx.fill();
     ctx.stroke();
 
-    ctx.fillStyle = '#64748b';
-    ctx.font = 'bold 11px "Segoe UI", Arial, sans-serif';
-    ctx.fillText('ĐIỂM TỪNG PHẦN', sbX + 16, sbY + 30);
+    ctx.fillStyle = '#0f172a';
+    ctx.font = '900 22px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('BẢNG ĐIỂM CHI TIẾT', sbX + 20, sbY + 46);
+
+    ctx.strokeStyle = '#cbd5e1';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(sbX + 20, sbY + 64);
+    ctx.lineTo(sbX + sbW - 20, sbY + 64);
+    ctx.stroke();
 
     const drawScoreLine = (label, scoreVal, yPos) => {
         ctx.fillStyle = '#334155';
-        ctx.font = '12px "Segoe UI", Arial, sans-serif';
-        ctx.fillText(label, sbX + 16, yPos);
+        ctx.font = 'bold 22px "Segoe UI", Arial, sans-serif';
+        ctx.fillText(label, sbX + 20, yPos);
         ctx.fillStyle = '#0f172a';
-        ctx.font = 'bold 15px "Courier New", monospace';
+        ctx.font = '900 30px "Courier New", monospace';
         ctx.textAlign = 'right';
-        ctx.fillText((scoreVal ?? 0).toFixed(2) + ' đ', sbX + sbW - 16, yPos);
+        ctx.fillText((scoreVal ?? 0).toFixed(2) + 'đ', sbX + sbW - 20, yPos);
         ctx.textAlign = 'left';
     };
 
-    drawScoreLine('Phần I (TN 4 lựa chọn):', sub.part1_score, sbY + 66);
-    drawScoreLine('Phần II (Đúng / Sai):', sub.part2_score, sbY + 108);
-    drawScoreLine('Phần III (Trả lời ngắn):', sub.part3_score, sbY + 150);
+    drawScoreLine('Phần I (TN):', sub.part1_score, sbY + 114);
+    drawScoreLine('Phần II (Đ/S):', sub.part2_score, sbY + 170);
+    drawScoreLine('Phần III (TLN):', sub.part3_score, sbY + 226);
 
-    ctx.strokeStyle = '#e2e8f0';
+    ctx.strokeStyle = '#cbd5e1';
+    ctx.lineWidth = 2.5;
     ctx.beginPath();
-    ctx.moveTo(sbX + 14, sbY + 172);
-    ctx.lineTo(sbX + sbW - 14, sbY + 172);
+    ctx.moveTo(sbX + 20, sbY + 252);
+    ctx.lineTo(sbX + sbW - 20, sbY + 252);
     ctx.stroke();
 
-    ctx.fillStyle = '#059669';
-    ctx.font = 'bold 12px "Segoe UI", Arial, sans-serif';
-    ctx.fillText('Tổng điểm:', sbX + 16, sbY + 196);
-    ctx.fillStyle = '#059669';
-    ctx.font = 'bold 18px "Courier New", monospace';
+    ctx.fillStyle = '#dc2626';
+    ctx.font = '900 25px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('TỔNG:', sbX + 20, sbY + 306);
+    ctx.fillStyle = '#dc2626';
+    ctx.font = '900 42px "Courier New", monospace';
     ctx.textAlign = 'right';
-    ctx.fillText((sub.score ?? 0).toFixed(2) + ' đ', sbX + sbW - 16, sbY + 196);
+    ctx.fillText((sub.score ?? 0).toFixed(2) + 'đ', sbX + sbW - 18, sbY + 308);
     ctx.textAlign = 'left';
 
-    // 5. CON DẤU XÁC NHẬN CHÍNH THỨC (SEAL: X: 1305 -> 1525, TÂM: 1415, Y: 130)
+    // 5. CON DẤU ĐỎ CHẤM BÀI CHÍNH THỨC CỠ LỚN (SEAL: TÂM X: 1412, Y: 190, R: 126)
     ctx.save();
-    const sealX = 1415, sealY = 130;
+    const sealX = 1412, sealY = 190;
     ctx.translate(sealX, sealY);
-    ctx.rotate(-0.08); // Nghiêng nhẹ -4.6 độ cho cảm giác mộc dấu thật
+    ctx.rotate(-0.07); // Nghiêng nhẹ cho cảm giác đóng mộc dấu thật
 
-    // Vòng tròn ngoài
-    ctx.strokeStyle = '#059669';
-    ctx.lineWidth = 3.5;
+    // Nền tròn trắng kem nhạt giúp con dấu nổi bật
+    ctx.fillStyle = '#fff1f2';
     ctx.beginPath();
-    ctx.arc(0, 0, 75, 0, Math.PI * 2);
+    ctx.arc(0, 0, 126, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Vòng tròn ngoài đậm
+    ctx.strokeStyle = '#dc2626';
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.arc(0, 0, 126, 0, Math.PI * 2);
     ctx.stroke();
 
     // Vòng tròn nét đứt thứ 2
-    ctx.strokeStyle = '#059669';
-    ctx.lineWidth = 1.5;
-    ctx.setLineDash([4, 3]);
+    ctx.strokeStyle = '#dc2626';
+    ctx.lineWidth = 2.5;
+    ctx.setLineDash([7, 5]);
     ctx.beginPath();
-    ctx.arc(0, 0, 68, 0, Math.PI * 2);
+    ctx.arc(0, 0, 114, 0, Math.PI * 2);
     ctx.stroke();
     ctx.setLineDash([]);
 
     // Vòng tròn trong
-    ctx.strokeStyle = '#059669';
-    ctx.lineWidth = 1.2;
+    ctx.strokeStyle = '#dc2626';
+    ctx.lineWidth = 2.5;
     ctx.beginPath();
-    ctx.arc(0, 0, 48, 0, Math.PI * 2);
+    ctx.arc(0, 0, 82, 0, Math.PI * 2);
     ctx.stroke();
 
-    // Chữ trong mộc dấu
-    ctx.fillStyle = '#059669';
+    // Chữ trong mộc dấu cỡ cực lớn
+    ctx.fillStyle = '#dc2626';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
-    ctx.font = 'bold 10px "Segoe UI", Arial, sans-serif';
-    ctx.fillText('THẦY CHOANG · QMATH', 0, -56);
+    ctx.font = '900 18px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('TOÁN THẦY CHOANG', 0, -96);
 
-    ctx.font = 'bold 36px "Segoe UI", Arial, sans-serif';
-    ctx.fillText((sub.score ?? 0).toFixed(2), 0, 0);
+    ctx.font = '900 66px "Segoe UI", Arial, sans-serif';
+    ctx.fillText((sub.score ?? 0).toFixed(2), 0, -4);
 
-    ctx.font = 'bold 10px "Segoe UI", Arial, sans-serif';
-    ctx.fillText('ĐIỂM CHÍNH THỨC', 0, 24);
+    ctx.font = '900 19px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('ĐIỂM CHÍNH THỨC', 0, 42);
 
-    ctx.font = '9px "Segoe UI", Arial, sans-serif';
-    ctx.fillText('★ ĐÃ CHẤM TỰ ĐỘNG ★', 0, 56);
+    ctx.font = 'bold 16px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('★ QMATH.IO.VN ★', 0, 96);
     ctx.restore();
 
     // 6. VẼ PHIẾU NẮN PHẲNG BÊN DƯỚI HEADER (Y: headerH)
     ctx.drawImage(rectImg, 0, headerH, sheetW, sheetH);
 
-    // 7. VẼ ĐÁNH DẤU CHI TIẾT TRỰC TIẾP CẢ 3 PHẦN LÊN ẢNH
+    if (rawResult.onlyHeaderUpgrade) {
+        return canvas.toDataURL('image/jpeg', 0.92);
+    }
+
+    // 7. VẼ ĐÁNH DẤU CHI TIẾT TRỰC TIẾP CẢ 3 PHẦN LÊN ẢNH (Vòng tròn đậm rõ hơn)
     const key = resolveKeyForCode(sub.code);
     const kFrame = tpl.khung || [0, 0, 16.53, 23.39];
     const scaleX = sheetW / kFrame[2];
     const scaleY = sheetH / kFrame[3];
 
-    const drawRingOnCanvas = (pt, color, lineW = 3.5, r = 14, dashed = false) => {
+    const drawRingOnCanvas = (pt, color, lineW = 4.5, r = 15, dashed = false) => {
         if (!pt) return;
         const cx = pt[0] * scaleX;
         const cy = pt[1] * scaleY + headerH;
         ctx.save();
         ctx.strokeStyle = color;
         ctx.lineWidth = lineW;
-        if (dashed) ctx.setLineDash([4, 3]);
+        if (dashed) ctx.setLineDash([5, 4]);
         ctx.beginPath();
         ctx.arc(cx, cy, r, 0, Math.PI * 2);
         ctx.stroke();
@@ -1743,11 +1856,11 @@ async function generateStampedGradedSheet(sub, rawResult) {
                 const isKeyMark = keyAns === char;
 
                 if (isStudentMark && isKeyMark) {
-                    drawRingOnCanvas(pt, '#10b981', 3.5, 14); // Xanh lá: Đúng
+                    drawRingOnCanvas(pt, '#10b981', 4.5, 15.5); // Xanh lá: Đúng
                 } else if (isStudentMark && !isKeyMark) {
-                    drawRingOnCanvas(pt, '#ef4444', 3.5, 14); // Đỏ: Tô sai
+                    drawRingOnCanvas(pt, '#ef4444', 4.5, 15.5); // Đỏ: Tô sai
                 } else if (!isStudentMark && isKeyMark && studentAns && studentAns !== '-') {
-                    drawRingOnCanvas(pt, '#f59e0b', 2.5, 13, true); // Vàng nét đứt: Vị trí đáp án đúng
+                    drawRingOnCanvas(pt, '#f59e0b', 3.5, 14.5, true); // Vàng nét đứt: Vị trí đáp án đúng
                 }
             });
         }
@@ -1771,21 +1884,21 @@ async function generateStampedGradedSheet(sub, rawResult) {
 
                 if (sChar === 'Đ') {
                     if (kChar === 'Đ') {
-                        drawRingOnCanvas(ptD, '#10b981', 3.5, 14);
+                        drawRingOnCanvas(ptD, '#10b981', 4.5, 15.5);
                     } else {
-                        drawRingOnCanvas(ptD, '#ef4444', 3.5, 14);
-                        if (kChar === 'S') drawRingOnCanvas(ptS, '#f59e0b', 2.5, 13, true);
+                        drawRingOnCanvas(ptD, '#ef4444', 4.5, 15.5);
+                        if (kChar === 'S') drawRingOnCanvas(ptS, '#f59e0b', 3.5, 14.5, true);
                     }
                 } else if (sChar === 'S') {
                     if (kChar === 'S') {
-                        drawRingOnCanvas(ptS, '#10b981', 3.5, 14);
+                        drawRingOnCanvas(ptS, '#10b981', 4.5, 15.5);
                     } else {
-                        drawRingOnCanvas(ptS, '#ef4444', 3.5, 14);
-                        if (kChar === 'Đ') drawRingOnCanvas(ptD, '#f59e0b', 2.5, 13, true);
+                        drawRingOnCanvas(ptS, '#ef4444', 4.5, 15.5);
+                        if (kChar === 'Đ') drawRingOnCanvas(ptD, '#f59e0b', 3.5, 14.5, true);
                     }
                 } else {
-                    if (kChar === 'Đ') drawRingOnCanvas(ptD, '#f59e0b', 2.5, 13, true);
-                    else if (kChar === 'S') drawRingOnCanvas(ptS, '#f59e0b', 2.5, 13, true);
+                    if (kChar === 'Đ') drawRingOnCanvas(ptD, '#f59e0b', 3.5, 14.5, true);
+                    else if (kChar === 'S') drawRingOnCanvas(ptS, '#f59e0b', 3.5, 14.5, true);
                 }
             }
         }
@@ -1811,30 +1924,30 @@ async function generateStampedGradedSheet(sub, rawResult) {
                     const v = rawResult.p3m[q][col];
                     if (v >= 0 && tpl.p3[q][col] && tpl.p3[q][col][v]) {
                         const pt = tpl.p3[q][col][v];
-                        drawRingOnCanvas(pt, isMatch ? '#10b981' : '#ef4444', 3.5, 13);
+                        drawRingOnCanvas(pt, isMatch ? '#10b981' : '#ef4444', 4.5, 14.5);
                     }
                 }
             }
 
-            // Vẽ bảng điểm / nhãn kết quả câu trả lời ngắn ngay trên đầu mỗi câu
+            // Vẽ bảng điểm / nhãn kết quả câu trả lời ngắn CỠ LỚN ngay trên đầu mỗi câu
             if (tpl.p3[q][0] && tpl.p3[q][0][0]) {
                 const pt0 = tpl.p3[q][0][0];
-                const bx = pt0[0] * scaleX - 10;
-                const by = pt0[1] * scaleY + headerH - 44;
-                const bw = 150, bh = 34;
+                const bw = 216, bh = 50;
+                const bx = Math.max(12, pt0[0] * scaleX - 24);
+                const by = pt0[1] * scaleY + headerH - 56;
 
                 ctx.save();
                 ctx.fillStyle = isMatch ? '#ecfdf5' : '#fef2f2';
-                ctx.strokeStyle = isMatch ? '#10b981' : '#ef4444';
-                ctx.lineWidth = 1.5;
+                ctx.strokeStyle = isMatch ? '#059669' : '#dc2626';
+                ctx.lineWidth = 3;
                 ctx.beginPath();
-                if (ctx.roundRect) ctx.roundRect(bx, by, bw, bh, 8);
+                if (ctx.roundRect) ctx.roundRect(bx, by, bw, bh, 10);
                 else ctx.rect(bx, by, bw, bh);
                 ctx.fill();
                 ctx.stroke();
 
                 ctx.fillStyle = isMatch ? '#065f46' : '#991b1b';
-                ctx.font = 'bold 12px "Segoe UI", Arial, sans-serif';
+                ctx.font = '900 20px "Segoe UI", Arial, sans-serif';
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
                 if (isMatch) {
@@ -1976,13 +2089,51 @@ function renderSvgOverlay(rawResult, code) {
     svg.innerHTML = marks;
 }
 
-window.downloadGradedSheet = () => {
+async function ensureSubmissionStampedHeaderUpgraded(sub) {
+    if (!sub || !sub.image_data || sub._headerV25Upgraded) return sub?.image_data;
+    try {
+        const img = await new Promise((resolve, reject) => {
+            const i = new Image();
+            i.onload = () => resolve(i);
+            i.onerror = () => reject(new Error('Image load error'));
+            i.src = sub.image_data;
+        });
+        // Nếu là ảnh phiếu cũ có header 260px (chiều cao ~ 2450px) hoặc chưa đóng dấu header 380px
+        if (img.naturalWidth === 1552 && img.naturalHeight > 2250 && img.naturalHeight < 2520) {
+            const oldHeaderH = 260;
+            const bodyH = img.naturalHeight - oldHeaderH;
+            const bodyCanvas = document.createElement('canvas');
+            bodyCanvas.width = img.naturalWidth;
+            bodyCanvas.height = bodyH;
+            bodyCanvas.getContext('2d').drawImage(img, 0, oldHeaderH, img.naturalWidth, bodyH, 0, 0, img.naturalWidth, bodyH);
+            const upgraded = await generateStampedGradedSheet(sub, {
+                rectifiedCanvas: bodyCanvas,
+                onlyHeaderUpgrade: true
+            });
+            if (upgraded) {
+                sub.image_data = upgraded;
+                sub.stamped_image = upgraded;
+                sub._headerV25Upgraded = true;
+                const imgEl = document.getElementById('resRectifiedImg');
+                if (imgEl && state.lastSubmission?.id === sub.id) {
+                    imgEl.src = upgraded;
+                }
+            }
+        } else {
+            sub._headerV25Upgraded = true;
+        }
+    } catch (_) {}
+    return sub.image_data;
+}
+
+window.downloadGradedSheet = async () => {
     if (!state.lastSubmission?.image_data) {
         Swal.fire('Thông báo', 'Chưa có ảnh bài thi để tải về.', 'info');
         return;
     }
+    const imgUrl = await ensureSubmissionStampedHeaderUpgraded(state.lastSubmission);
     const a = document.createElement('a');
-    a.href = state.lastSubmission.image_data;
+    a.href = imgUrl;
     const sbd = state.lastSubmission.student_no || 'khong_sbd';
     const name = (state.lastSubmission.student_name || 'thi_sinh').replace(/\s+/g, '_');
     const score = (typeof state.lastSubmission.score === 'number' ? state.lastSubmission.score.toFixed(2) : state.lastSubmission.score);
@@ -3101,10 +3252,11 @@ window.renderResultsTable = () => {
     `).join('');
 };
 
-window.viewSubmissionDetail = (subId) => {
+window.viewSubmissionDetail = async (subId) => {
     const sub = state.submissions.find(s => s.id === subId);
     if (!sub) return;
     state.lastSubmission = sub;
+    await ensureSubmissionStampedHeaderUpgraded(sub);
     window.switchTab('scan');
     // Display in inspector
     displayLastResultInspector(sub, {

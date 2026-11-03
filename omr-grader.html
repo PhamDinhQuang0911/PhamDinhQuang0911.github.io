@@ -296,12 +296,54 @@
             border-color: #10b981 !important;
             box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.25) !important;
         }
+        /* Mobile Slide-Over Sidebar Drawer (Bulletproof CSS independent of Tailwind CDN delay) */
+        @media (max-width: 1023px) {
+            #mainSidebar {
+                position: fixed !important;
+                top: 0 !important;
+                bottom: 0 !important;
+                left: 0 !important;
+                z-index: 9999 !important;
+                transform: translateX(-105%) !important;
+                transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1) !important;
+            }
+            #mainSidebar.omr-sidebar-open {
+                transform: translateX(0%) !important;
+            }
+        }
     </style>
+    <script>
+        /* Inline Menu Controller so Hamburger Menu ☰ works at 0ms even before ES module loads */
+        window.toggleOmrSidebar = function() {
+            var sb = document.getElementById('mainSidebar');
+            var ov = document.getElementById('omrSidebarOverlay');
+            if (!sb) return;
+            var isOpen = sb.classList.contains('omr-sidebar-open');
+            if (!isOpen) {
+                sb.classList.add('omr-sidebar-open');
+                sb.classList.remove('-translate-x-full');
+                if (ov) ov.classList.remove('hidden');
+            } else {
+                sb.classList.remove('omr-sidebar-open');
+                sb.classList.add('-translate-x-full');
+                if (ov) ov.classList.add('hidden');
+            }
+        };
+        window.closeOmrSidebar = function() {
+            var sb = document.getElementById('mainSidebar');
+            var ov = document.getElementById('omrSidebarOverlay');
+            if (sb) {
+                sb.classList.remove('omr-sidebar-open');
+                sb.classList.add('-translate-x-full');
+            }
+            if (ov) ov.classList.add('hidden');
+        };
+    </script>
 </head>
 <body class="bg-[#F8FAFC] dark:bg-[#1E1B29] text-slate-800 dark:text-slate-100 h-screen flex flex-col overflow-hidden transition-colors">
 
     <!-- MOBILE SIDEBAR BACKDROP OVERLAY -->
-    <div id="omrSidebarOverlay" onclick="window.closeOmrSidebar()" class="fixed inset-0 bg-gray-900/60 backdrop-blur-2xs z-[90] hidden transition-opacity lg:hidden"></div>
+    <div id="omrSidebarOverlay" onclick="window.closeOmrSidebar()" class="fixed inset-0 bg-gray-900/60 backdrop-blur-2xs z-[9990] hidden transition-opacity lg:hidden"></div>
 
     <!-- TOP HEADER BAR (Đồng bộ phong cách QMath LMS) -->
     <header class="h-14 shrink-0 bg-white dark:bg-[#1E1B29] border-b border-gray-200 dark:border-[#2D2A3D] px-3 sm:px-5 flex items-center justify-between gap-2 z-30 shadow-2xs">
@@ -486,13 +528,17 @@
         <div class="flex-1 flex flex-col min-w-0 overflow-hidden">
 
             <!-- MOBILE COMPACT ACTIVE EXAM BAR (Gọn sạch, dành tối đa diện tích cho Tên Đề Thi) -->
-            <div class="lg:hidden bg-white dark:bg-[#262335] border-b border-gray-200 dark:border-[#38344D] px-3 py-2 flex items-center justify-between gap-2 shrink-0">
+            <div class="lg:hidden bg-white dark:bg-[#262335] border-b border-gray-200 dark:border-[#38344D] px-3 py-2 flex items-center justify-between gap-1.5 shrink-0">
                 <div onclick="window.openLmsExamPickerModal()" class="flex items-center gap-2 min-w-0 flex-1 cursor-pointer">
                     <span class="w-2 h-2 rounded-full bg-emerald-500 shrink-0"></span>
                     <div class="min-w-0 flex-1">
                         <div id="mobileActiveExamName" class="text-xs font-extrabold text-slate-800 dark:text-white line-clamp-1 leading-snug">Chưa chọn đề thi</div>
                     </div>
                 </div>
+                <button type="button" onclick="window.switchTab('results')" class="px-2.5 py-1 rounded-lg badge-season text-[11px] font-extrabold shrink-0 cursor-pointer flex items-center gap-1" title="Xem tất cả điểm đã chấm của đề này">
+                    <i class="fa-solid fa-table-list text-[10px]"></i>
+                    <span>Bảng điểm (<span id="mobileResultsCountBadge">0</span>)</span>
+                </button>
                 <button type="button" onclick="window.openLmsExamPickerModal()" class="px-2.5 py-1 rounded-lg bg-gray-100 dark:bg-[#1E1B29] border border-gray-200 dark:border-[#38344D] text-[11px] font-bold text-slate-700 dark:text-slate-200 shrink-0 cursor-pointer flex items-center gap-1">
                     <i class="fa-solid fa-repeat text-[10px]"></i> Đổi đề
                 </button>
@@ -687,6 +733,37 @@
                                         </div>
                                     </div>
                                 </div>
+                            </div>
+                        </div>
+
+                        <!-- DANH SÁCH TẤT CẢ ĐIỂM ĐÃ CHẤM TRONG BÀI KIỂM TRA NÀY (Hiển thị trực tiếp ngay dưới phần Chấm bài) -->
+                        <div id="scanInlineSubmissionsCard" class="bg-white dark:bg-[#262335] rounded-3xl border border-gray-200 dark:border-[#38344D] p-4 sm:p-5 shadow-xs space-y-3.5">
+                            <div class="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-gray-100 dark:border-[#38344D]">
+                                <div class="flex items-center gap-2">
+                                    <span class="w-8 h-8 rounded-xl badge-season flex items-center justify-center text-sm">
+                                        <i class="fa-solid fa-list-check"></i>
+                                    </span>
+                                    <div>
+                                        <h3 class="text-sm sm:text-base font-extrabold text-slate-900 dark:text-white leading-tight">
+                                            Tất cả bài đã chấm trong đề này (<span id="scanInlineCount">0</span> bài)
+                                        </h3>
+                                        <p id="scanInlineStatsText" class="text-[11px] text-slate-500 dark:text-slate-400 font-semibold">
+                                            Điểm TB: 0.00đ · Cao nhất: 0.00đ
+                                        </p>
+                                    </div>
+                                </div>
+                                <div class="flex items-center gap-1.5 flex-wrap">
+                                    <button type="button" onclick="window.exportResultsToExcel()" class="px-2.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold flex items-center gap-1.5 cursor-pointer shadow-2xs">
+                                        <i class="fa-solid fa-file-excel"></i> <span>Xuất Excel</span>
+                                    </button>
+                                    <button type="button" onclick="window.switchTab('results')" class="px-2.5 py-1.5 rounded-xl btn-season-secondary text-xs font-extrabold flex items-center gap-1.5 cursor-pointer">
+                                        <i class="fa-solid fa-up-right-from-square"></i> <span>Mở Bảng điểm lớn</span>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div id="scanInlineSubmissionsList" class="space-y-2 max-h-[420px] overflow-y-auto custom-scrollbar pr-0.5">
+                                <div class="py-8 text-center text-xs text-slate-400">Chưa có bài chấm nào trong đề kiểm tra này.</div>
                             </div>
                         </div>
                     </section>
@@ -1400,6 +1477,6 @@
     <script src="./omr/answer-import.js"></script>
 
     <!-- QMath LMS Unified Database & Auth Compatibility Module -->
-    <script type="module" src="./omr-grader.js?v=20"></script>
+    <script type="module" src="./omr-grader.js?v=25"></script>
 </body>
 </html>
