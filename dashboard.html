@@ -15221,11 +15221,6 @@ function renderTagFilterUI() {
                                 deletedExamIdsInFolder.push(e.id);
                                 deleteDoc(doc(db, "exams", e.id)).catch(()=>{});
                                 deleteDoc(doc(db, "omr_exams", e.id)).catch(()=>{});
-                                setDoc(doc(db, "omr_deleted_exams", e.id), {
-                                    id: e.id,
-                                    teacherId: currentUserUid,
-                                    deletedAt: new Date().toISOString()
-                                }).catch(()=>{});
                             }
                         });
                         if (deletedExamIdsInFolder.length > 0) {
@@ -15233,6 +15228,13 @@ function renderTagFilterUI() {
                                 const delIds = JSON.parse(localStorage.getItem('omr_deleted_exam_ids') || '[]');
                                 deletedExamIdsInFolder.forEach(id => { if (!delIds.includes(id)) delIds.push(id); });
                                 localStorage.setItem('omr_deleted_exam_ids', JSON.stringify(delIds.slice(-500)));
+                                if (currentUserUid) {
+                                    getDoc(doc(db, "configurations", "omr_deleted_exams_" + currentUserUid)).then(snap => {
+                                        const ids = (snap && snap.exists() && Array.isArray(snap.data()?.ids)) ? snap.data().ids : [];
+                                        deletedExamIdsInFolder.forEach(id => { if (!ids.includes(id)) ids.push(id); });
+                                        setDoc(doc(db, "configurations", "omr_deleted_exams_" + currentUserUid), { ids: ids.slice(-200), updatedAt: new Date().toISOString() });
+                                    }).catch(()=>{});
+                                }
                             } catch (_) {}
                         }
                         folderData = folderData.filter(f => !idsToDelete.has(f.id));
@@ -15241,17 +15243,19 @@ function renderTagFilterUI() {
                         localStorage.setItem('bank_exams', JSON.stringify(examData));
                         saveBankCache();
                     } else {
-                        // Đề thi đơn lẻ: Đồng bộ xóa sang cả omr_exams & lưu tombstone cho mọi thiết bị
+                        // Đề thi đơn lẻ: Đồng bộ xóa sang cả omr_exams & lưu tombstone configurations an toàn
                         deleteDoc(doc(db, "omr_exams", currentActionItem.id)).catch(()=>{});
-                        setDoc(doc(db, "omr_deleted_exams", currentActionItem.id), {
-                            id: currentActionItem.id,
-                            teacherId: currentUserUid,
-                            deletedAt: new Date().toISOString()
-                        }).catch(()=>{});
                         try {
                             const delIds = JSON.parse(localStorage.getItem('omr_deleted_exam_ids') || '[]');
                             if (!delIds.includes(currentActionItem.id)) delIds.push(currentActionItem.id);
                             localStorage.setItem('omr_deleted_exam_ids', JSON.stringify(delIds.slice(-500)));
+                            if (currentUserUid) {
+                                getDoc(doc(db, "configurations", "omr_deleted_exams_" + currentUserUid)).then(snap => {
+                                    const ids = (snap && snap.exists() && Array.isArray(snap.data()?.ids)) ? snap.data().ids : [];
+                                    if (!ids.includes(currentActionItem.id)) ids.push(currentActionItem.id);
+                                    setDoc(doc(db, "configurations", "omr_deleted_exams_" + currentUserUid), { ids: ids.slice(-200), updatedAt: new Date().toISOString() });
+                                }).catch(()=>{});
+                            }
                         } catch (_) {}
 
                         examData = examData.filter(e => e.id !== currentActionItem.id);

@@ -518,17 +518,15 @@ async function loadTeacherExams() {
 
         // 1. Try loading omr_exams from Firestore / Supabase virtual config
         if (state.teacherUid) {
-            // Đồng bộ danh sách đề đã bị xóa từ Cloud (khi người dùng xóa trên điện thoại hoặc máy khác)
+            // Đồng bộ danh sách đề đã bị xóa từ Cloud (doc configurations an toàn, không sinh lỗi 404)
             try {
-                const qDel = query(collection(db, "omr_deleted_exams"), where("teacherId", "==", state.teacherUid), limit(150));
-                const snapDel = await getDocs(qDel);
-                snapDel.docs.forEach(d => {
-                    localDeletedIds.add(d.id);
-                    if (d.data()?.id) localDeletedIds.add(String(d.data().id));
-                });
-                try {
-                    localStorage.setItem('omr_deleted_exam_ids', JSON.stringify([...localDeletedIds].slice(-500)));
-                } catch (_) {}
+                const delDocSnap = await getDoc(doc(db, "configurations", "omr_deleted_exams_" + state.teacherUid));
+                if (delDocSnap && delDocSnap.exists() && Array.isArray(delDocSnap.data()?.ids)) {
+                    delDocSnap.data().ids.forEach(id => localDeletedIds.add(String(id)));
+                    try {
+                        localStorage.setItem('omr_deleted_exam_ids', JSON.stringify([...localDeletedIds].slice(-500)));
+                    } catch (_) {}
+                }
             } catch (_) {}
 
             // Đồng bộ cấu hình Kênh Telegram từ Cloud nếu có
@@ -1207,7 +1205,15 @@ async function uploadGradedSheetToTelegram(sub, imgDataUrl) {
         });
         const resData = await resp.json();
         if (!resData.ok) {
-            console.warn("Telegram sendPhoto error:", resData.description);
+            const desc = resData.description || '';
+            if (desc.toLowerCase().includes('not a member') || desc.toLowerCase().includes('forbidden')) {
+                if (!state._tgChannelWarningLogged) {
+                    state._tgChannelWarningLogged = true;
+                    console.warn("⚠️ Telegram Bot chưa được thêm vào Kênh làm Administrator (hoặc chưa bật quyền Post Messages):", desc);
+                }
+            } else {
+                console.warn("Telegram sendPhoto error:", desc);
+            }
             return null;
         }
 
@@ -1409,19 +1415,7 @@ async function loadExamSubmissions(examId) {
 async function fetchSubmissionsFromCloud(examId, list) {
     if (!state.teacherUid || typeof db === 'undefined') return;
 
-    // 1. Đồng bộ thêm từ Firestore omr_submissions nếu trên máy bị thiếu bài
-    try {
-        const qSnap = await getDocs(query(collection(db, "omr_submissions"), where("examId", "==", examId)));
-        qSnap.docs.forEach(d => {
-            const cloudSub = { id: d.id, ...d.data() };
-            const existing = list.find(x => x.id === cloudSub.id);
-            if (!existing) {
-                list.push(cloudSub);
-            }
-        });
-    } catch(e) {}
-
-    // 2. Khôi phục thêm từ bảng results trên Supabase (Bảo toàn cả các bài trùng SBD, không lọc bỏ)
+    // Đồng bộ và khôi phục bài chấm từ bảng results trên Supabase (Bảo toàn 100% tất cả các bài, kể cả trùng SBD)
     try {
         const resSnap = await getDocs(query(collection(db, "results"), where("examId", "==", examId)));
         resSnap.docs.forEach(docSnap => {
@@ -1456,6 +1450,7 @@ async function fetchSubmissionsFromCloud(examId, list) {
                     part3: Array.isArray(r.omrPart3) ? r.omrPart3 : [],
                     image_data: r.stampedImage || '',
                     stamped_image: r.stampedImage || '',
+                    name_image: r.nameImage || '',
                     telegram_photo_url: r.telegramPhotoUrl || '',
                     createdAt: r.submittedAt || r.gradedAt || r.updatedAt || new Date().toISOString()
                 });
@@ -1464,6 +1459,9 @@ async function fetchSubmissionsFromCloud(examId, list) {
                 if (!existing.image_data && r.stampedImage) {
                     existing.image_data = r.stampedImage;
                     existing.stamped_image = r.stampedImage;
+                }
+                if (!existing.name_image && r.nameImage) {
+                    existing.name_image = r.nameImage;
                 }
                 if (!existing.telegram_photo_url && r.telegramPhotoUrl) {
                     existing.telegram_photo_url = r.telegramPhotoUrl;
@@ -1705,59 +1703,90 @@ function renderInlineSubmissionsList() {
     }
 
     inlineListEl.innerHTML = filtered.map((s, idx) => {
-        const hasName = !!(s.student_name && String(s.student_name).trim() && !String(s.student_name).startsWith('Học sinh #'));
-        const displayName = hasName
-            ? s.student_name
-            : (s.student_no ? `Học sinh #${s.student_no}` : `Phiếu chưa tô SBD (#${idx + 1})`);
+        const hasName = !!(s.student_name && String(s.student_name).trim() && !String(s.student_name).startsWith('Học sinh #') && !String(s.student_name).startsWith('Phiếu '));
         const scoreNum = Number(s.score ?? 0);
         const dupeStatus = getSubmissionDuplicateStatus(s, state.submissions);
-        const rowClass = dupeStatus ? dupeStatus.rowBg : 'hover:bg-gray-50 dark:hover:bg-[#262335]/60';
+        const rowClass = dupeStatus ? dupeStatus.rowBg : 'hover:bg-slate-50/90 dark:hover:bg-[#262335]/70';
         const dupeBadge = dupeStatus
             ? `<span class="px-1.5 py-0.5 rounded text-[10px] font-bold border ${dupeStatus.badgeBg}" title="Phát hiện ${dupeStatus.dupeCount} bài có cùng SBD ${s.student_no}">${dupeStatus.label}</span>`
             : '';
 
+        // Tự động cắt chữ viết tay trong nền nếu chưa có name_image nhưng có ảnh bài chấm
+        if (!hasName && !s.name_image && (s.stamped_image || s.image_data)) {
+            const rawSrc = s.image_data || s.stamped_image;
+            const isStamped = !s.image_data && !!s.stamped_image;
+            cropCandidateHandwrittenName(rawSrc, s.template_key, isStamped).then(cropUrl => {
+                if (cropUrl) {
+                    s.name_image = cropUrl;
+                    const imgEl = document.getElementById(`subNameImg_${s.id}`);
+                    if (imgEl) {
+                        imgEl.src = cropUrl;
+                        imgEl.classList.remove('hidden');
+                        const placeholder = document.getElementById(`subNamePlaceholder_${s.id}`);
+                        if (placeholder) placeholder.classList.add('hidden');
+                    }
+                }
+            }).catch(()=>{});
+        }
+
+        const scoreColorClass = scoreNum >= 8 
+            ? 'bg-emerald-600 dark:bg-emerald-500' 
+            : (scoreNum >= 5 ? 'bg-sky-600 dark:bg-sky-500' : 'bg-rose-600 dark:bg-rose-500');
+
         return `
-            <div class="px-3 py-2.5 ${rowClass} transition-colors border-b border-gray-100 dark:border-[#38344D]/50 last:border-b-0">
-                <div class="flex items-center justify-between gap-2 min-w-0">
-                    <!-- Left: STT + Họ tên học sinh + SBD & Mã đề (Clean, tuyệt đối không hiển thị điểm các phần bên ngoài) -->
-                    <div onclick="window.viewSubmissionDetail('${s.id}')" class="flex items-center gap-2.5 min-w-0 flex-1 cursor-pointer">
-                        <span class="w-6 h-6 rounded-lg bg-gray-100 dark:bg-[#1E1B29] text-slate-600 dark:text-slate-300 font-mono font-bold text-[11px] flex items-center justify-center shrink-0 border border-gray-200/60 dark:border-[#38344D]">${idx + 1}</span>
-                        <div class="min-w-0 flex-1">
-                            <div class="flex items-center gap-1.5 min-w-0 flex-wrap">
-                                <span class="font-bold text-xs sm:text-sm ${hasName ? 'text-slate-900 dark:text-white' : 'text-slate-500 dark:text-slate-400 italic'} truncate">${displayName}</span>
-                                ${s.class_name ? `<span class="px-1.5 py-0.2 rounded bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold shrink-0 border border-emerald-200 dark:border-emerald-800">${s.class_name}</span>` : ''}
-                                ${!hasName && s.name_image ? `<img src="${s.name_image}" class="h-4 max-w-[80px] object-contain rounded border border-gray-200 dark:border-gray-700 bg-white shrink-0" alt="Tên viết tay">` : ''}
+            <div onclick="window.viewSubmissionDetail('${s.id}')" class="px-3 py-2.5 ${rowClass} transition-colors border-b border-gray-100 dark:border-[#38344D]/50 last:border-b-0 cursor-pointer active:bg-gray-100 dark:active:bg-[#2e2a40] select-none">
+                <div class="flex items-center justify-between gap-2.5 min-w-0">
+                    <!-- Left: STT tròn gọn gàng -->
+                    <span class="w-6 h-6 sm:w-7 sm:h-7 rounded-lg bg-gray-100 dark:bg-[#1E1B29] text-slate-600 dark:text-slate-300 font-mono font-bold text-[11px] sm:text-xs flex items-center justify-center shrink-0 border border-gray-200/60 dark:border-[#38344D]">${idx + 1}</span>
+
+                    <!-- Center: Dành trọn vẹn khoảng trống cho Tên học sinh hoặc Ảnh cắt chữ viết tay -->
+                    <div class="flex-1 min-w-0 pr-1">
+                        ${hasName ? `
+                        <!-- Trường hợp 1: Có tên trong danh sách lớp -> Hiển thị tên to, đậm, rõ nét -->
+                        <div class="flex items-center gap-1.5 min-w-0">
+                            <span class="font-extrabold text-xs sm:text-sm text-slate-900 dark:text-white truncate">${s.student_name}</span>
+                            ${s.class_name ? `<span class="px-1.5 py-0.2 rounded bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold border border-emerald-200/70 dark:border-emerald-800/60 shrink-0">${s.class_name}</span>` : ''}
+                        </div>
+                        <div class="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400 font-mono mt-0.5 flex-wrap">
+                            <span>SBD: <b class="text-slate-800 dark:text-slate-200 font-bold">${s.student_no || '--'}</b></span>
+                            <span>·</span>
+                            <span>Mã: <b class="text-slate-800 dark:text-slate-200 font-bold">${s.code || '--'}</b></span>
+                            ${dupeBadge}
+                        </div>
+                        ` : `
+                        <!-- Trường hợp 2: Chưa ghép tên học sinh -> Hiển thị ảnh cắt phần tên viết tay trên phiếu -->
+                        <div class="flex items-center gap-2 sm:gap-3 min-w-0">
+                            <div class="h-10 sm:h-12 w-28 sm:w-40 shrink-0 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 bg-white flex items-center justify-center shadow-2xs">
+                                <img src="${s.name_image || ''}" id="subNameImg_${s.id}" class="w-full h-full object-contain p-0.5 ${s.name_image ? '' : 'hidden'}" alt="Tên viết tay" loading="lazy">
+                                <div id="subNamePlaceholder_${s.id}" class="text-[10px] text-slate-400 font-bold italic text-center px-1 ${s.name_image ? 'hidden' : ''}">
+                                    <i class="fa-solid fa-signature mr-1"></i>Chữ viết tay
+                                </div>
                             </div>
-                            <div class="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400 font-mono mt-0.5 flex-wrap">
-                                <span>SBD: <b class="text-slate-800 dark:text-slate-200">${s.student_no || '--'}</b></span>
-                                <span>·</span>
-                                <span>Mã: <b class="text-slate-800 dark:text-slate-200">${s.code || '--'}</b></span>
-                                ${dupeBadge}
+                            <div class="min-w-0 flex-1">
+                                <div class="text-[11px] font-bold text-amber-600 dark:text-amber-400 flex items-center gap-1 truncate">
+                                    <i class="fa-solid fa-triangle-exclamation text-[10px] shrink-0"></i>
+                                    <span class="truncate">Chưa gán tên</span>
+                                </div>
+                                <div class="flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400 font-mono mt-0.5 flex-wrap">
+                                    <span>SBD: <b class="text-slate-800 dark:text-slate-200 font-bold">${s.student_no || '--'}</b></span>
+                                    <span>·</span>
+                                    <span>Mã: <b class="text-slate-800 dark:text-slate-200 font-bold">${s.code || '--'}</b></span>
+                                    ${dupeBadge}
+                                </div>
                             </div>
                         </div>
+                        `}
                     </div>
 
-                    <!-- Right: Tổng điểm nổi bật + Cụm 3 nút đồng bộ 1 màu hệ thống -->
+                    <!-- Right: Điểm số nổi bật & Nút Xóa siêu gọn gàng (Không còn nút mắt, bút, tele gây chật chội) -->
                     <div class="flex items-center gap-2 shrink-0">
-                        <span onclick="window.viewSubmissionDetail('${s.id}')" class="px-2.5 py-1 rounded-xl bg-emerald-600 text-white font-mono font-extrabold text-xs sm:text-sm tabular-nums cursor-pointer hover:scale-105 transition-transform shadow-2xs" title="Bấm xem chi tiết bài chấm">
+                        <span class="px-2.5 py-1.5 rounded-xl ${scoreColorClass} text-white font-mono font-extrabold text-xs sm:text-sm tabular-nums shadow-2xs leading-none">
                             ${scoreNum.toFixed(2)}đ
                         </span>
 
-                        <div class="flex items-center gap-1">
-                            ${s.telegram_photo_url ? `
-                            <a href="${s.telegram_photo_url}" target="_blank" rel="noopener noreferrer" class="w-7 h-7 rounded-lg bg-sky-50 hover:bg-sky-100 dark:bg-sky-950/50 text-sky-600 dark:text-sky-300 flex items-center justify-center text-xs active:scale-95 transition-all cursor-pointer border border-sky-200 dark:border-sky-800" title="Xem ảnh gốc lưu trên Telegram">
-                                <i class="fa-brands fa-telegram"></i>
-                            </a>` : ''}
-                            <button type="button" onclick="window.quickAssignStudentToSubmission('${s.id}')" class="w-7 h-7 rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-[#1E1B29] dark:hover:bg-[#2D2A3D] text-slate-600 dark:text-slate-300 flex items-center justify-center text-xs active:scale-95 transition-all cursor-pointer border border-gray-200 dark:border-[#38344D]" title="Sửa tên / SBD">
-                                <i class="fa-solid fa-pen"></i>
-                            </button>
-                            <button type="button" onclick="window.viewSubmissionDetail('${s.id}')" class="w-7 h-7 rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-[#1E1B29] dark:hover:bg-[#2D2A3D] text-slate-600 dark:text-slate-300 flex items-center justify-center text-xs active:scale-95 transition-all cursor-pointer border border-gray-200 dark:border-[#38344D]" title="Xem phiếu chấm chi tiết">
-                                <i class="fa-solid fa-eye text-emerald-600 dark:text-emerald-400"></i>
-                            </button>
-                            <button type="button" onclick="window.deleteSubmission('${s.id}')" class="w-7 h-7 rounded-lg bg-gray-100 hover:bg-rose-50 dark:bg-[#1E1B29] dark:hover:bg-rose-950/50 text-slate-400 hover:text-rose-600 flex items-center justify-center text-xs active:scale-95 transition-all cursor-pointer border border-gray-200 dark:border-[#38344D]" title="Xóa bài chấm này">
-                                <i class="fa-solid fa-trash-can"></i>
-                            </button>
-                        </div>
+                        <button type="button" onclick="event.stopPropagation(); window.deleteSubmission('${s.id}')" class="w-7 h-7 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/50 flex items-center justify-center text-xs active:scale-95 transition-colors cursor-pointer border border-transparent hover:border-rose-200 dark:hover:border-rose-900/50" title="Xóa bài chấm này">
+                            <i class="fa-solid fa-trash-can"></i>
+                        </button>
                     </div>
                 </div>
             </div>
@@ -2816,24 +2845,29 @@ function getSheetTransform(tplKey, tpl, outH, outW = 1552) {
     return window.OMR.phepChieu([[pad, pad], [outW - pad, pad], [outW - pad, outH - pad], [pad, outH - pad]], tpl.moc.slice(0, 4).map(m => [m.x, m.y]));
 }
 
-function cropCandidateHandwrittenName(rectifiedSource, tplKey = null) {
+function cropCandidateHandwrittenName(rectifiedSource, tplKey = null, isStamped = false) {
+    if (!rectifiedSource) return Promise.resolve(null);
     const activeKey = tplKey || state.exam?.sheet_template || 'qmcv1239';
-    let rect = [670/1653, 480/2339, 385/1653, 54/2339]; // default qmcv1239
-    if (activeKey === 'bgd2025original' || activeKey === 'bgd2') rect = [708/1638, 419/2339, 363/1638, 82/2339];
-    else if (activeKey === 'phutho') rect = [676/1654, 391/2339, 420/1654, 65/2339];
-    else if (activeKey === 'tnmaker40') rect = [1028/2479, 446/1746, 561/2479, 126/1746];
-    else if (activeKey === 'qm40') rect = [1132/1735, 82/919, 357/1735, 101/919];
+    // Mở rộng và tối ưu tọa độ vùng họ tên viết tay để bao trọn chữ viết tay của học sinh
+    let rect = [645/1653, 455/2339, 430/1653, 85/2339]; // default qmcv1239
+    if (activeKey === 'bgd2025original' || activeKey === 'bgd2') rect = [700/1638, 410/2339, 390/1638, 95/2339];
+    else if (activeKey === 'phutho') rect = [665/1654, 380/2339, 440/1654, 85/2339];
+    else if (activeKey === 'tnmaker40') rect = [1020/2479, 440/1746, 580/2479, 140/1746];
+    else if (activeKey === 'qm40') rect = [1120/1735, 75/919, 380/1735, 120/919];
+
+    const headerH = isStamped ? 380 : 0;
 
     if (rectifiedSource instanceof HTMLCanvasElement) {
         const canvas = document.createElement('canvas');
+        const sheetH = Math.max(1, rectifiedSource.height - headerH);
         const sx = rectifiedSource.width * rect[0];
-        const sy = rectifiedSource.height * rect[1];
+        const sy = headerH + sheetH * rect[1];
         const sw = rectifiedSource.width * rect[2];
-        const sh = rectifiedSource.height * rect[3];
+        const sh = sheetH * rect[3];
         canvas.width = Math.max(1, Math.round(sw));
         canvas.height = Math.max(1, Math.round(sh));
         canvas.getContext('2d').drawImage(rectifiedSource, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
-        const data = canvas.toDataURL('image/jpeg', 0.85);
+        const data = canvas.toDataURL('image/jpeg', 0.88);
         canvas.width = 1;
         canvas.height = 1;
         return Promise.resolve(data);
@@ -2843,14 +2877,15 @@ function cropCandidateHandwrittenName(rectifiedSource, tplKey = null) {
         const img = new Image();
         img.onload = () => {
             const canvas = document.createElement('canvas');
-            const sx = img.naturalWidth * rect[0];
-            const sy = img.naturalHeight * rect[1];
-            const sw = img.naturalWidth * rect[2];
-            const sh = img.naturalHeight * rect[3];
+            const sheetH = Math.max(1, (img.naturalHeight || img.height) - headerH);
+            const sx = (img.naturalWidth || img.width) * rect[0];
+            const sy = headerH + sheetH * rect[1];
+            const sw = (img.naturalWidth || img.width) * rect[2];
+            const sh = sheetH * rect[3];
             canvas.width = Math.max(1, Math.round(sw));
             canvas.height = Math.max(1, Math.round(sh));
             canvas.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
-            const data = canvas.toDataURL('image/jpeg', 0.85);
+            const data = canvas.toDataURL('image/jpeg', 0.88);
             canvas.width = 1;
             canvas.height = 1;
             try { img.src = ''; } catch(_) {}
@@ -4155,6 +4190,7 @@ async function syncSubmissionToLmsResultsCollection(sub) {
         omrPart2: sub.part2 || [],
         omrPart3: sub.part3 || [],
         stampedImage: compressedStamped || '',
+        nameImage: sub.name_image || '',
         telegramPhotoUrl: sub.telegram_photo_url || '',
         gradingSource: 'omr',
         submissionMode: 'offline_omr',
@@ -7749,15 +7785,17 @@ window.deleteExam = async (examId) => {
         }
     } catch (_) {}
 
-    // Đồng bộ xóa vĩnh viễn lên Cloud Database & lưu tombstone cho mọi thiết bị
+    // Đồng bộ xóa vĩnh viễn lên Cloud Database & lưu tombstone cho mọi thiết bị (dùng configurations an toàn)
     if (state.teacherUid) {
         try { await deleteDoc(doc(db, "omr_exams", examId)); } catch(e) {}
         try { await deleteDoc(doc(db, "exams", examId)); } catch(e) {}
         try {
-            await setDoc(doc(db, "omr_deleted_exams", examId), {
-                id: examId,
-                teacherId: state.teacherUid,
-                deletedAt: new Date().toISOString()
+            const delSnap = await getDoc(doc(db, "configurations", "omr_deleted_exams_" + state.teacherUid));
+            const existingIds = (delSnap && delSnap.exists() && Array.isArray(delSnap.data()?.ids)) ? delSnap.data().ids : [];
+            if (!existingIds.includes(examId)) existingIds.push(examId);
+            await setDoc(doc(db, "configurations", "omr_deleted_exams_" + state.teacherUid), {
+                ids: existingIds.slice(-200),
+                updatedAt: new Date().toISOString()
             });
         } catch(e) {}
     }
