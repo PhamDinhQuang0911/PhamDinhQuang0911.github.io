@@ -1698,10 +1698,9 @@ function startAutoScanLoop() {
                     if (isValidQuad) {
                         state.consecutiveCornerDetections = (state.consecutiveCornerDetections || 0) + 1;
                         
-                        // Làm sáng góc khung căn màu xanh ngọc
+                        // Làm sáng góc khung căn màu xanh ngọc – dùng CSS class để không bị purge
                         document.querySelectorAll('.camera-corner-bracket').forEach(b => {
-                            b.classList.add('border-emerald-300', 'shadow-[0_0_15px_rgba(16,185,129,0.85)]');
-                            b.classList.remove('border-white/60');
+                            b.classList.add('detected');
                         });
 
                         const reqFrames = state.autoScanSpeed === 'fast' ? 1 : 2;
@@ -1713,8 +1712,7 @@ function startAutoScanLoop() {
                     } else {
                         state.consecutiveCornerDetections = 0;
                         document.querySelectorAll('.camera-corner-bracket').forEach(b => {
-                            b.classList.remove('border-emerald-300', 'shadow-[0_0_15px_rgba(16,185,129,0.85)]');
-                            b.classList.add('border-white/60');
+                            b.classList.remove('detected');
                         });
                     }
                 } else {
