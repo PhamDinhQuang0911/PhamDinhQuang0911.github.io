@@ -6953,6 +6953,16 @@ window.confirmSaveExamSettings = async () => {
     }
 };
 
+
+function renderSubmissionsUI() {
+    if (typeof window.renderResultsTable === 'function') {
+        window.renderResultsTable();
+    }
+    if (typeof updateOverviewStats === 'function') {
+        updateOverviewStats();
+    }
+}
+window.renderSubmissionsUI = renderSubmissionsUI;
 window.recalculateAllSubmissionsScore = async () => {
     if (!state.exam || !state.submissions || state.submissions.length === 0) return;
     Swal.fire({
@@ -6962,36 +6972,59 @@ window.recalculateAllSubmissionsScore = async () => {
         didOpen: () => Swal.showLoading()
     });
 
-    for (const sub of state.submissions) {
-        const scoreData = calculateExamScore(sub.code, sub.answers, sub.part2, sub.part3);
-        sub.score = scoreData.totalScore;
-        sub.part1_score = scoreData.part1Score;
-        sub.part2_score = scoreData.part2Score;
-        sub.part3_score = scoreData.part3Score;
+    try {
+        for (const sub of state.submissions) {
+            const scoreData = calculateExamScore(sub.code, sub.answers, sub.part2, sub.part3);
+            sub.score = scoreData.totalScore;
+            sub.part1_score = scoreData.part1Score;
+            sub.part2_score = scoreData.part2Score;
+            sub.part3_score = scoreData.part3Score;
 
-        try {
-            await reStampSubmission(sub);
-        } catch (_) {}
-    }
+            try {
+                await reStampSubmission(sub);
+            } catch (_) {}
 
-    if (typeof storage !== 'undefined' && storage.saveSubmissions) {
-        await storage.saveSubmissions(state.exam.id, state.submissions);
-    } else {
-        saveSubmissionsToLocalSafe(state.exam.id, state.submissions);
-    }
-
-    if (state.lastSubmission) {
-        const updatedLast = state.submissions.find(s => s.id === state.lastSubmission.id);
-        if (updatedLast) {
-            state.lastSubmission = updatedLast;
-            await displayLastResultInspector(updatedLast, null);
+            // Đồng bộ lại điểm mới sang Supabase results nếu có
+            if (typeof syncSubmissionToLmsResultsCollection === 'function') {
+                try {
+                    await syncSubmissionToLmsResultsCollection(sub);
+                } catch (_) {}
+            }
         }
-    }
 
-    renderSubmissionsUI();
-    window.renderResultsTable();
-    updateOverviewStats();
-    Swal.fire('Đã hoàn tất', `Đã tính lại điểm và đóng dấu lại cho toàn bộ ${state.submissions.length} bài chấm!`, 'success');
+        if (typeof storage !== 'undefined' && storage.saveSubmissions) {
+            await storage.saveSubmissions(state.exam.id, state.submissions);
+        } else {
+            saveSubmissionsToLocalSafe(state.exam.id, state.submissions);
+        }
+
+        if (state.lastSubmission) {
+            const updatedLast = state.submissions.find(s => s.id === state.lastSubmission.id);
+            if (updatedLast) {
+                state.lastSubmission = updatedLast;
+                if (typeof displayLastResultInspector === 'function') {
+                    try { await displayLastResultInspector(updatedLast, null); } catch (_) {}
+                }
+            }
+        }
+
+        if (typeof window.renderResultsTable === 'function') {
+            window.renderResultsTable();
+        }
+        if (typeof updateOverviewStats === 'function') {
+            updateOverviewStats();
+        }
+
+        Swal.fire({
+            icon: 'success',
+            title: 'Đã hoàn tất!',
+            text: `Đã tính lại điểm và đóng dấu lại cho toàn bộ ${state.submissions.length} bài chấm!`,
+            timer: 2500
+        });
+    } catch (err) {
+        console.error('[recalculateAllSubmissionsScore Error]:', err);
+        Swal.fire('Lỗi', 'Đã xảy ra lỗi khi tính lại điểm: ' + (err.message || err.toString()), 'error');
+    }
 };
 
 // ========================================================
