@@ -777,11 +777,18 @@ function updateActiveExamBanner() {
     const omr4Code = exam.omrCode || computeOmrExam4DigitCode(exam.id);
     const structSummary = `Mã OMR: ${omr4Code} · ${exam.question_count || 12} TN · ${exam.part2_count || 4} Đ/S · ${exam.part3_count || 6} TLN`;
 
+    let classLabel = exam.className ? String(exam.className).trim() : '';
+    if (classLabel) {
+        if (!classLabel.toLowerCase().startsWith('lớp')) {
+            classLabel = 'Lớp ' + classLabel;
+        }
+    }
+
     if (titleEl) titleEl.textContent = displayTitle;
     if (sidebarTitleEl) sidebarTitleEl.textContent = displayTitle;
-    if (mobileTitleEl) mobileTitleEl.textContent = displayTitle + (exam.className ? ` · Lớp ${exam.className}` : '');
+    if (mobileTitleEl) mobileTitleEl.textContent = displayTitle + (classLabel ? ` · ${classLabel}` : '');
     if (sidebarMetaEl) {
-        sidebarMetaEl.textContent = `${structSummary}${exam.className ? ` · Lớp ${exam.className}` : ''}`;
+        sidebarMetaEl.textContent = `${structSummary}${classLabel ? ` · ${classLabel}` : ''}`;
     }
 
     if (badgeEl) {
@@ -1072,47 +1079,48 @@ function renderInlineSubmissionsList() {
             : (s.student_no ? `Thí sinh SBD ${s.student_no}` : `Phiếu chưa tô SBD (#${idx + 1})`);
         const scoreNum = Number(s.score ?? 0);
         const scoreBadgeClass = scoreNum >= 8
-            ? 'bg-emerald-600 text-white'
-            : (scoreNum >= 5 ? 'bg-blue-600 text-white' : 'bg-amber-600 text-white');
+            ? 'bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300'
+            : (scoreNum >= 5
+                ? 'bg-sky-50 dark:bg-sky-950/60 border border-sky-200 dark:border-sky-800 text-sky-700 dark:text-sky-300'
+                : 'bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300');
 
         return `
-            <div class="px-3.5 py-2.5 hover:bg-gray-50 dark:hover:bg-[#262335]/80 transition-colors">
-                <!-- Dòng 1: STT + Họ và tên học sinh (rộng thoáng 100%) + Điểm tổng bên phải -->
-                <div class="flex items-center justify-between gap-2">
-                    <div onclick="window.viewSubmissionDetail('${s.id}')" class="flex items-center gap-2 min-w-0 flex-1 cursor-pointer">
-                        <span class="w-6 h-6 rounded-lg bg-slate-100 dark:bg-[#262335] text-slate-600 dark:text-slate-300 font-mono font-extrabold text-[11px] flex items-center justify-center shrink-0">${idx + 1}</span>
-                        <span class="font-extrabold text-xs sm:text-sm ${hasName ? 'text-slate-900 dark:text-white' : 'text-slate-500 dark:text-slate-400 italic'} truncate">${displayName}</span>
-                        ${s.class_name ? `<span class="px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-300 text-[10px] font-bold shrink-0">${s.class_name}</span>` : ''}
-                        ${!hasName && s.name_image ? `<img src="${s.name_image}" class="h-5 max-w-[90px] object-contain rounded border border-gray-200 bg-white shrink-0" alt="Tên viết tay">` : ''}
+            <div class="px-3 py-2.5 hover:bg-gray-50 dark:hover:bg-[#262335]/60 transition-colors border-b border-gray-100 dark:border-[#38344D]/50 last:border-b-0">
+                <div class="flex items-center justify-between gap-2 min-w-0">
+                    <!-- Left: STT + Họ tên học sinh + SBD & Mã đề (Clean, không nhồi điểm các phần ra ngoài) -->
+                    <div onclick="window.viewSubmissionDetail('${s.id}')" class="flex items-center gap-2.5 min-w-0 flex-1 cursor-pointer">
+                        <span class="w-6 h-6 rounded-lg bg-gray-100 dark:bg-[#1E1B29] text-slate-600 dark:text-slate-300 font-mono font-bold text-[11px] flex items-center justify-center shrink-0 border border-gray-200/60 dark:border-[#38344D]">${idx + 1}</span>
+                        <div class="min-w-0 flex-1">
+                            <div class="flex items-center gap-1.5 min-w-0">
+                                <span class="font-bold text-xs sm:text-sm ${hasName ? 'text-slate-900 dark:text-white' : 'text-slate-500 dark:text-slate-400 italic'} truncate">${displayName}</span>
+                                ${s.class_name ? `<span class="px-1.5 py-0.2 rounded bg-gray-100 dark:bg-[#1E1B29] text-slate-600 dark:text-slate-300 text-[10px] font-semibold shrink-0 border border-gray-200 dark:border-[#38344D]">${s.class_name}</span>` : ''}
+                                ${!hasName && s.name_image ? `<img src="${s.name_image}" class="h-4 max-w-[80px] object-contain rounded border border-gray-200 dark:border-gray-700 bg-white shrink-0" alt="Tên viết tay">` : ''}
+                            </div>
+                            <div class="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400 font-mono mt-0.5">
+                                <span>SBD: <b class="text-slate-700 dark:text-slate-200">${s.student_no || '--'}</b></span>
+                                <span>·</span>
+                                <span>Mã đề: <b class="text-slate-700 dark:text-slate-200">${s.code || '--'}</b></span>
+                            </div>
+                        </div>
                     </div>
-                    <span onclick="window.viewSubmissionDetail('${s.id}')" class="px-2.5 py-0.5 rounded-lg ${scoreBadgeClass} font-mono font-black text-xs sm:text-sm tabular-nums shrink-0 cursor-pointer shadow-2xs">
-                        ${scoreNum.toFixed(2)}đ
-                    </span>
-                </div>
 
-                <!-- Dòng 2: Thông tin SBD · Mã đề · Điểm thành phần trên 1 hàng ngang + Cụm nút gọn bên phải -->
-                <div class="flex items-center justify-between gap-2 mt-1.5 pl-8">
-                    <div onclick="window.viewSubmissionDetail('${s.id}')" class="flex items-center gap-x-2.5 gap-y-0.5 flex-wrap text-[11px] text-slate-500 dark:text-slate-400 font-semibold min-w-0 cursor-pointer">
-                        <span>SBD: <b class="font-mono text-slate-800 dark:text-slate-200">${s.student_no || '--'}</b></span>
-                        <span>Mã: <b class="font-mono text-amber-600 dark:text-amber-400">${s.code || '--'}</b></span>
-                        <span class="text-slate-400 dark:text-slate-500 font-mono text-[10px] sm:text-[11px]">I:${(s.part1_score ?? 0).toFixed(2)} · II:${(s.part2_score ?? 0).toFixed(2)} · III:${(s.part3_score ?? 0).toFixed(2)}</span>
-                    </div>
-                    <div class="flex items-center gap-1.5 shrink-0">
-                        <button type="button" onclick="window.quickAssignStudentToSubmission('${s.id}')" class="px-2.5 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 text-xs font-extrabold cursor-pointer flex items-center gap-1 active:scale-95 transition-all" title="Sửa tên học sinh / Chọn học sinh từ danh sách Lớp">
-                            <i class="fa-solid fa-user-pen text-xs"></i> <span class="hidden sm:inline">Gán tên</span>
-                        </button>
-                        <button type="button" onclick="window.viewSubmissionDetail('${s.id}')" class="w-8.5 h-8.5 sm:w-8 sm:h-8 rounded-xl bg-gray-100 hover:bg-gray-200 dark:bg-[#262335] text-slate-700 dark:text-slate-200 flex items-center justify-center text-xs active:scale-95 transition-all cursor-pointer" title="Xem phiếu đã chấm">
-                            <i class="fa-solid fa-eye"></i>
-                        </button>
-                        <button type="button" onclick="window.downloadSubmissionById('${s.id}')" class="w-8.5 h-8.5 sm:w-8 sm:h-8 rounded-xl bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-300 flex items-center justify-center text-xs active:scale-95 transition-all cursor-pointer" title="Tải ảnh phiếu đóng dấu">
-                            <i class="fa-solid fa-download"></i>
-                        </button>
-                        <button type="button" onclick="window.openSendParentModal('${s.id}')" class="w-8.5 h-8.5 sm:w-8 sm:h-8 rounded-xl bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-300 flex items-center justify-center text-xs active:scale-95 transition-all cursor-pointer" title="Gửi kết quả cho Phụ huynh">
-                            <i class="fa-solid fa-paper-plane"></i>
-                        </button>
-                        <button type="button" onclick="window.deleteSubmission('${s.id}')" class="w-8.5 h-8.5 sm:w-8 sm:h-8 rounded-xl bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 text-rose-500 flex items-center justify-center text-xs active:scale-95 transition-all cursor-pointer" title="Xóa bài chấm này">
-                            <i class="fa-solid fa-trash"></i>
-                        </button>
+                    <!-- Right: Tổng điểm nổi bật + Cụm nút đồng bộ 1 màu hệ thống -->
+                    <div class="flex items-center gap-2 shrink-0">
+                        <span onclick="window.viewSubmissionDetail('${s.id}')" class="px-2.5 py-1 rounded-xl ${scoreBadgeClass} font-mono font-bold text-xs sm:text-sm tabular-nums cursor-pointer hover:scale-105 transition-transform" title="Bấm xem chi tiết bài chấm">
+                            ${scoreNum.toFixed(2)}đ
+                        </span>
+
+                        <div class="flex items-center gap-1">
+                            <button type="button" onclick="window.quickAssignStudentToSubmission('${s.id}')" class="w-7 h-7 rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-[#1E1B29] dark:hover:bg-[#2D2A3D] text-slate-600 dark:text-slate-300 flex items-center justify-center text-xs active:scale-95 transition-all cursor-pointer border border-gray-200 dark:border-[#38344D]" title="Sửa tên / SBD">
+                                <i class="fa-solid fa-pen"></i>
+                            </button>
+                            <button type="button" onclick="window.viewSubmissionDetail('${s.id}')" class="w-7 h-7 rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-[#1E1B29] dark:hover:bg-[#2D2A3D] text-slate-600 dark:text-slate-300 flex items-center justify-center text-xs active:scale-95 transition-all cursor-pointer border border-gray-200 dark:border-[#38344D]" title="Xem phiếu chấm chi tiết">
+                                <i class="fa-solid fa-eye text-emerald-600 dark:text-emerald-400"></i>
+                            </button>
+                            <button type="button" onclick="window.deleteSubmission('${s.id}')" class="w-7 h-7 rounded-lg bg-gray-100 hover:bg-rose-50 dark:bg-[#1E1B29] dark:hover:bg-rose-950/50 text-slate-400 hover:text-rose-600 flex items-center justify-center text-xs active:scale-95 transition-all cursor-pointer border border-gray-200 dark:border-[#38344D]" title="Xóa bài chấm này">
+                                <i class="fa-solid fa-trash-can"></i>
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -3799,31 +3807,31 @@ window.renderResultsTable = () => {
             <td class="p-3">
                 <div class="font-bold text-slate-900 dark:text-white flex items-center gap-2 flex-wrap">
                     <span>${displayName}</span>
-                    ${s.class_name ? `<span class="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 text-[10px] font-bold border border-indigo-200/70 dark:border-indigo-800/60">${s.class_name}</span>` : ''}
+                    ${s.class_name ? `<span class="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 text-[10px] font-bold border border-emerald-200/70 dark:border-emerald-800/60">${s.class_name}</span>` : ''}
                     ${s.name_image ? `<img src="${s.name_image}" class="h-5 max-w-[90px] object-contain border border-slate-200 dark:border-slate-700 rounded bg-white" title="Chữ viết tay gốc">` : ''}
                 </div>
             </td>
             <td class="p-3 text-center font-mono font-bold text-slate-700 dark:text-slate-300">${s.code || '---'}</td>
-            <td class="p-3 text-center font-mono text-slate-600 dark:text-slate-400">${(s.part1_score ?? 0).toFixed(2)}</td>
-            <td class="p-3 text-center font-mono text-slate-600 dark:text-slate-400">${(s.part2_score ?? 0).toFixed(2)}</td>
-            <td class="p-3 text-center font-mono text-slate-600 dark:text-slate-400">${(s.part3_score ?? 0).toFixed(2)}</td>
+            <td class="p-3 text-center font-mono text-slate-600 dark:text-slate-400 hidden md:table-cell">${(s.part1_score ?? 0).toFixed(2)}</td>
+            <td class="p-3 text-center font-mono text-slate-600 dark:text-slate-400 hidden md:table-cell">${(s.part2_score ?? 0).toFixed(2)}</td>
+            <td class="p-3 text-center font-mono text-slate-600 dark:text-slate-400 hidden md:table-cell">${(s.part3_score ?? 0).toFixed(2)}</td>
             <td class="p-3 text-center font-mono font-black text-emerald-600 dark:text-emerald-400 text-sm">${(s.score ?? 0).toFixed(2)}</td>
             <td class="p-3 text-center text-slate-400 text-[11px]">${new Date(s.createdAt).toLocaleTimeString('vi-VN', {hour:'2-digit', minute:'2-digit', day:'2-digit', month:'2-digit'})}</td>
             <td class="p-3 text-center">
                 <div class="flex items-center justify-center gap-1.5">
-                    <button type="button" onclick="window.quickAssignStudentToSubmission('${s.id}')" class="w-8 h-8 rounded-xl bg-amber-50 text-amber-700 hover:bg-amber-100 dark:bg-amber-950/40 dark:text-amber-300 flex items-center justify-center transition-all active:scale-95 cursor-pointer" title="Gán tên / SBD học sinh cho phiếu này">
-                        <i class="fa-solid fa-user-pen text-xs"></i>
+                    <button type="button" onclick="window.quickAssignStudentToSubmission('${s.id}')" class="w-8 h-8 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 flex items-center justify-center transition-all active:scale-95 cursor-pointer" title="Gán tên / SBD học sinh cho phiếu này">
+                        <i class="fa-solid fa-user-pen text-xs text-emerald-600 dark:text-emerald-400"></i>
                     </button>
-                    <button type="button" onclick="window.viewSubmissionDetail('${s.id}')" class="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-300 flex items-center justify-center transition-all active:scale-95 cursor-pointer" title="Xem chi tiết phiếu chấm">
-                        <i class="fa-solid fa-eye text-xs"></i>
+                    <button type="button" onclick="window.viewSubmissionDetail('${s.id}')" class="w-8 h-8 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 flex items-center justify-center transition-all active:scale-95 cursor-pointer" title="Xem chi tiết phiếu chấm">
+                        <i class="fa-solid fa-eye text-xs text-emerald-600 dark:text-emerald-400"></i>
                     </button>
-                    <button type="button" onclick="window.downloadSubmissionById('${s.id}')" class="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 hover:bg-blue-100 dark:bg-blue-950/40 dark:text-blue-300 flex items-center justify-center transition-all active:scale-95 cursor-pointer" title="Tải ảnh phiếu đã chấm">
-                        <i class="fa-solid fa-download text-xs"></i>
+                    <button type="button" onclick="window.downloadSubmissionById('${s.id}')" class="w-8 h-8 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 flex items-center justify-center transition-all active:scale-95 cursor-pointer" title="Tải ảnh phiếu đã chấm">
+                        <i class="fa-solid fa-download text-xs text-emerald-600 dark:text-emerald-400"></i>
                     </button>
-                    <button type="button" onclick="window.openSendParentModal('${s.id}')" class="w-8 h-8 rounded-xl bg-indigo-50 text-indigo-600 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:text-indigo-300 flex items-center justify-center transition-all active:scale-95 cursor-pointer" title="Gửi kết quả & phiếu chấm cho Phụ huynh (PHHS)">
-                        <i class="fa-solid fa-paper-plane text-xs"></i>
+                    <button type="button" onclick="window.openSendParentModal('${s.id}')" class="w-8 h-8 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 flex items-center justify-center transition-all active:scale-95 cursor-pointer" title="Gửi kết quả & phiếu chấm cho Phụ huynh (PHHS)">
+                        <i class="fa-solid fa-paper-plane text-xs text-emerald-600 dark:text-emerald-400"></i>
                     </button>
-                    <button type="button" onclick="window.deleteSubmission('${s.id}')" class="w-8 h-8 rounded-xl bg-rose-50 text-rose-600 hover:bg-rose-100 dark:bg-rose-950/40 dark:text-rose-400 flex items-center justify-center transition-all active:scale-95 cursor-pointer" title="Xóa kết quả này">
+                    <button type="button" onclick="window.deleteSubmission('${s.id}')" class="w-8 h-8 rounded-xl bg-slate-100 hover:bg-rose-100 dark:bg-slate-800 dark:hover:bg-rose-950/40 text-rose-500 hover:text-rose-600 flex items-center justify-center transition-all active:scale-95 cursor-pointer" title="Xóa kết quả này">
                         <i class="fa-solid fa-trash text-xs"></i>
                     </button>
                 </div>
@@ -5798,10 +5806,10 @@ window.renderLmsExamPickerList = () => {
                 <!-- Dòng 2: Thông tin cấu trúc + Mã đề OMR + Nút chọn gọn gàng -->
                 <div class="flex items-center justify-between gap-2 pt-1 border-t border-gray-100 dark:border-[#38344D]/70 text-[11px] text-slate-500 dark:text-slate-400">
                     <div class="flex items-center flex-wrap gap-x-2 gap-y-1 min-w-0">
-                        <span class="px-1.5 py-0.5 rounded text-[10px] font-bold ${item.isLmsExam ? 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-300' : 'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300'}">${item.isLmsExam ? 'Kho đề LMS' : 'Đề tự tạo'}</span>
+                        <span class="px-1.5 py-0.5 rounded text-[10px] font-bold ${item.isLmsExam ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300' : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300'}">${item.isLmsExam ? 'Kho đề LMS' : 'Đề tự tạo'}</span>
                         <span><b>${item.question_count || 12}</b> TN · <b>${item.part2_count || 4}</b> Đ/S · <b>${item.part3_count || 6}</b> TLN</span>
                         <span class="px-1.5 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 font-mono font-bold text-[10px]">Mã: ${omrCode}</span>
-                        ${item.className ? `<span class="text-indigo-600 dark:text-indigo-300 font-bold truncate">• ${item.className}</span>` : ''}
+                        ${item.className ? `<span class="text-emerald-600 dark:text-emerald-400 font-bold truncate">• ${item.className}</span>` : ''}
                     </div>
                     <span class="px-2.5 py-1 rounded-lg ${isCurrent ? 'bg-gray-100 dark:bg-[#1E1B29] text-slate-700 dark:text-slate-300' : 'btn-season-primary'} text-[11px] font-bold shrink-0 flex items-center gap-1">
                         <span>${isCurrent ? 'Nạp lại' : 'Chọn chấm'}</span>
