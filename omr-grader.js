@@ -484,6 +484,7 @@ state.gradedCountsByExam = {};
 state.memoryImages = {};
 
 async function loadTeacherExams() {
+    await loadFolders();
     try {
         let omrLoaded = [];
         let lmsLoaded = [];
@@ -592,9 +593,10 @@ async function loadTeacherExams() {
                     question_count: 12,
                     part2_count: 4,
                     part3_count: 6,
-                    part1_point: 0.25,
-                    part2_points: [0.1, 0.25, 0.5, 1.0],
-                    part3_point: 0.5,
+                    part1_point: p1Point,
+        part2_points: [0.1, 0.25, 0.5, 1.0],
+        part3_point: p3Point,
+        folderId: folderId,
                     codes: [r.examCode || '0101', '101', '102'],
                     classId: r.classId || '',
                     className: r.className || '',
@@ -1869,26 +1871,81 @@ async function processSingleSheet(source, options = {}) {
     return submission;
 }
 
+
+// ========================================================
+// BỘ ĐỘNG CƠ NHẬN DIỆN ĐA MẪU PHIẾU TỰ ĐỘNG (MULTI-TEMPLATE AUTO DETECTION)
+// ========================================================
+const TEMPLATE_SPECS = {
+    qmcv1239: { maxP1: 40, maxP2: 8, maxP3: 6, name: 'QM 2025 - CV 1239' },
+    bgd2025original: { maxP1: 40, maxP2: 8, maxP3: 6, name: 'BGD 2025 Gốc' },
+    tnmaker40: { maxP1: 40, maxP2: 0, maxP3: 0, name: 'TNMaker 40 câu ngang' },
+    qm_sheet: { maxP1: 40, maxP2: 0, maxP3: 0, name: 'QM 40 câu dọc' },
+    phutho: { maxP1: 50, maxP2: 10, maxP3: 12, name: 'HSG Phú Thọ' }
+};
+
+function getCompatibleTemplatesForExam(exam) {
+    const p1Count = exam?.question_count || 12;
+    const p2Count = exam?.part2_count || 0;
+    const p3Count = exam?.part3_count || 0;
+    const active = exam?.sheet_template || 'qmcv1239';
+
+    const candidates = [active];
+    for (const [key, spec] of Object.entries(TEMPLATE_SPECS)) {
+        if (key === active) continue;
+        if (spec.maxP1 >= p1Count && spec.maxP2 >= p2Count && spec.maxP3 >= p3Count) {
+            candidates.push(key);
+        }
+    }
+    return candidates;
+}
+
 function recognizeSheetFromGray(gray, options = {}) {
-    const tplKey = state.exam?.sheet_template || 'qmcv1239';
-    const tpl = (window.MAU && window.MAU[tplKey]) ? window.MAU[tplKey] : window.MAU.qmcv1239;
+    const candidateKeys = getCompatibleTemplatesForExam(state.exam);
     const guideHints = options.guideHints || null;
 
-    let result = null;
-    if (options.preFound && options.preFound.refined) {
-        const { refined } = options.preFound;
-        result = window.OMR.docPhieu(gray, refined.H, tpl, refined.den);
-        result.H = refined.H;
-        result.soMoc = refined.soMoc;
-    } else if (['qm40', 'bgd2025original', 'phutho', 'tnmaker40', 'qmcv1239'].includes(tplKey) && window.readQMSheet) {
-        result = window.readQMSheet(gray, tpl, guideHints);
-    } else {
-        result = window.OMR.docAnh(gray, tpl, window.OMR.thuNho(gray, 900));
+    let bestResult = null;
+    let matchedTplKey = null;
+    let lastErr = null;
+
+    // Duyệt qua danh sách các mẫu phiếu tương thích với cấu hình đề thi
+    for (const tplKey of candidateKeys) {
+        const tpl = (window.MAU && window.MAU[tplKey]) ? window.MAU[tplKey] : window.MAU.qmcv1239;
+        if (!tpl) continue;
+
+        try {
+            let result = null;
+            if (options.preFound && options.preFound.refined) {
+                const { refined } = options.preFound;
+                result = window.OMR.docPhieu(gray, refined.H, tpl, refined.den);
+                result.H = refined.H;
+                result.soMoc = refined.soMoc;
+            } else if (['qm40', 'bgd2025original', 'phutho', 'tnmaker40', 'qmcv1239'].includes(tplKey) && window.readQMSheet) {
+                result = window.readQMSheet(gray, tpl, guideHints);
+            } else {
+                result = window.OMR.docAnh(gray, tpl, window.OMR.thuNho(gray, 900));
+            }
+
+            if (result && (result.soMoc >= 3 || (result.den && result.den.length >= 3) || result.H)) {
+                const hasAnswers = (result.p1 && result.p1.replace(/\*/g, '').length > 0) || (result.sbd && result.sbd.length > 0) || (result.made && result.made.length > 0);
+                if (hasAnswers || !bestResult) {
+                    bestResult = result;
+                    matchedTplKey = tplKey;
+                    if (hasAnswers) break; // Khớp thành công mẫu phiếu này
+                }
+            }
+        } catch(err) {
+            lastErr = err;
+        }
     }
 
-    if (!result) throw new Error("Không nhận diện được đủ 4 mốc đen góc phiếu!");
+    if (!bestResult) {
+        throw (lastErr || new Error("Không nhận diện được đủ 4 mốc đen góc phiếu trên các mẫu phiếu tương thích!"));
+    }
 
-    // Fast perspective rectification (960px base width -> 2.6x faster than 1552px, scaled cleanly in stamp header)
+    const tplKey = matchedTplKey || state.exam?.sheet_template || 'qmcv1239';
+    const tpl = (window.MAU && window.MAU[tplKey]) ? window.MAU[tplKey] : window.MAU.qmcv1239;
+
+    // Fast perspective rectification với mẫu phiếu đã khớp
     const rectW = options.fastRectify !== false ? 960 : 1552;
     const outH = getSheetHeight(tplKey, tpl, rectW);
     const target = getSheetTransform(tplKey, tpl, outH, rectW);
@@ -1904,7 +1961,7 @@ function recognizeSheetFromGray(gray, options = {}) {
         const rowOff = y * rectW * 4;
         for (let x = 0; x < rectW; x++) {
             const cm = window.OMR.ap(target, x, y);
-            const p = window.OMR.ap(result.H, cm[0], cm[1]);
+            const p = window.OMR.ap(bestResult.H, cm[0], cm[1]);
             const xx = (p[0] + 0.5) | 0;
             const yy = (p[1] + 0.5) | 0;
             const val = (xx >= 0 && yy >= 0 && xx < gw && yy < gh) ? gd[yy * gw + xx] : 255;
@@ -1919,29 +1976,31 @@ function recognizeSheetFromGray(gray, options = {}) {
 
     const p2Count = state.exam?.part2_count || 4;
     const formattedP2 = Array.from({ length: p2Count }, (_, i) => {
-        const chunk = (result.p2 || '').slice(i * 4, i * 4 + 4);
+        const chunk = (bestResult.p2 || '').slice(i * 4, i * 4 + 4);
         return chunk.replace(/D/g, 'Đ').replace(/\*/g, '?');
     });
 
     return {
-        student_no: (result.sbd || '').replace(/\D/g, ''),
-        code: (result.made || '').replace(/\D/g, ''),
-        part1: (result.p1 || '').replace(/\*/g, '?'),
+        student_no: (bestResult.sbd || '').replace(/\D/g, ''),
+        code: (bestResult.made || '').replace(/\D/g, ''),
+        part1: (bestResult.p1 || '').replace(/\*/g, '?'),
         part2: formattedP2,
         part3: [],
-        part3Text: result.p3 || [],
+        part3Text: bestResult.p3 || [],
         calibrated: true,
         rectifiedCanvas: outCanvas,
         rectifiedImage: outCanvas.toDataURL('image/jpeg', 0.88),
-        uncertain: result.nghi || [],
-        H: result.H,
+        uncertain: bestResult.nghi || [],
+        H: bestResult.H,
         template: tpl,
-        p1m: result.p1m,
-        p2m: result.p2m,
-        p3m: result.p3m,
-        raw: result
+        templateKey: tplKey,
+        p1m: bestResult.p1m,
+        p2m: bestResult.p2m,
+        p3m: bestResult.p3m,
+        raw: bestResult
     };
 }
+
 
 function recognizeSheetWithOMR(source, options = {}) {
     // Fast synchronous path if source is already a pre-computed gray image or HTMLCanvasElement
@@ -5890,6 +5949,12 @@ window.clearExamSubmissions = async (examId) => {
 
 window.openCreateExamModal = () => {
     document.getElementById('createExamModal').classList.remove('hidden');
+    const folderSelect = document.getElementById('newExamFolderSelect');
+    if (folderSelect) {
+        folderSelect.innerHTML = `<option value="">📁 [Thư mục gốc]</option>` +
+            (state.folders || []).map(f => `<option value="${f.id}" ${state.currentFolderId === f.id ? 'selected' : ''}>📁 ${f.name}</option>`).join('');
+    }
+    window.calcExamScorePreview('create');
 };
 
 window.closeCreateExamModal = () => {
@@ -5905,9 +5970,26 @@ window.confirmCreateExam = async () => {
     const tpl = document.getElementById('newExamTemplate')?.value || 'qmcv1239';
     const codes = (document.getElementById('newExamCodes')?.value || '101, 102').split(',').map(s => s.trim()).filter(Boolean);
     const p1Count = parseInt(document.getElementById('newExamCountP1')?.value) || 12;
+    const p1Point = parseFloat(document.getElementById('newExamPointP1')?.value) || 0.25;
     const p2Count = parseInt(document.getElementById('newExamCountP2')?.value) || 4;
     const p3Count = parseInt(document.getElementById('newExamCountP3')?.value) || 6;
+    const p3Point = parseFloat(document.getElementById('newExamPointP3')?.value) || 0.5;
     const omrClassId = document.getElementById('newExamOmrClassId')?.value || '';
+    const folderId = document.getElementById('newExamFolderSelect')?.value || state.currentFolderId || null;
+
+    const totalScore = (p1Count * p1Point) + (p2Count * 1.0) + (p3Count * p3Point);
+    if (totalScore > 10.001) {
+        const warnRes = await Swal.fire({
+            title: 'Tổng điểm vượt quá 10 điểm!',
+            text: `Tổng điểm dự kiến của bài thi là ${totalScore.toFixed(2)} đ (> 10.0 đ). Thầy/Cô có chắc chắn muốn tạo với mức điểm này không?`,
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: 'Vẫn tạo',
+            cancelButtonText: 'Sửa lại',
+            confirmButtonColor: '#ef4444'
+        });
+        if (!warnRes.isConfirmed) return;
+    }
 
     let attachedClass = null;
     if (omrClassId && Array.isArray(state.omrClasses)) {
@@ -5983,6 +6065,438 @@ setTimeout(() => {
 // ========================================================
 // 11. LMS EXAM PICKER MODAL & PHHS PARENT RESULT SHARING
 // ========================================================
+
+// ========================================================
+// TÍNH ĐIỂM TRỰC TIẾP, CẢNH BÁO > 10Đ & CÀI ĐẶT ĐỀ THI
+// ========================================================
+window.calcExamScorePreview = (mode = 'create') => {
+    const prefix = mode === 'create' ? 'newExam' : 'editExam';
+    const p1Count = parseInt(document.getElementById(`${prefix}CountP1`)?.value) || 0;
+    const p1Pt = parseFloat(document.getElementById(`${prefix}PointP1`)?.value) || 0;
+    const p2Count = parseInt(document.getElementById(`${prefix}CountP2`)?.value) || 0;
+    const p2MaxPt = 1.0; // Barem Bộ GD: tối đa 1.0đ cho mỗi câu 4 ý
+    const p3Count = parseInt(document.getElementById(`${prefix}CountP3`)?.value) || 0;
+    const p3Pt = parseFloat(document.getElementById(`${prefix}PointP3`)?.value) || 0;
+
+    const p1Total = p1Count * p1Pt;
+    const p2Total = p2Count * p2MaxPt;
+    const p3Total = p3Count * p3Pt;
+    const total = p1Total + p2Total + p3Total;
+
+    const badge = document.getElementById(`${prefix}ScoreBadge`);
+    const warnBox = document.getElementById(`${prefix}ScoreWarnBox`);
+
+    if (badge) {
+        badge.innerHTML = `Tổng điểm: <b class="font-mono text-sm">${total.toFixed(2)}</b> / 10.0 đ (P1: ${p1Total.toFixed(2)}đ · P2: ${p2Total.toFixed(2)}đ · P3: ${p3Total.toFixed(2)}đ)`;
+    }
+
+    if (warnBox) {
+        if (total > 10.001) {
+            warnBox.classList.remove('hidden');
+            warnBox.className = 'p-3 rounded-xl border border-rose-400 bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 text-xs font-bold flex items-center gap-2';
+            warnBox.innerHTML = `<i class="fa-solid fa-triangle-exclamation text-base"></i> CẢNH BÁO: Tổng điểm hiện tại là ${total.toFixed(2)}đ (VƯỢT QUÁ 10 ĐIỂM)! Vui lòng điều chỉnh lại số câu hoặc điểm/câu.`;
+        } else if (Math.abs(total - 10.0) > 0.001 && total > 0) {
+            warnBox.classList.remove('hidden');
+            warnBox.className = 'p-3 rounded-xl border border-amber-300 bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 text-xs font-semibold flex items-center gap-2';
+            warnBox.innerHTML = `<i class="fa-solid fa-circle-info text-base"></i> Lưu ý: Tổng điểm là ${total.toFixed(2)} đ (chưa đạt chuẩn 10.00 điểm).`;
+        } else {
+            warnBox.classList.add('hidden');
+        }
+    }
+
+    return total;
+};
+
+window.openEditExamSettingsModal = () => {
+    if (!state.exam) return;
+    const modal = document.getElementById('editExamSettingsModal');
+    if (!modal) return;
+    modal.classList.remove('hidden');
+
+    document.getElementById('editExamName').value = state.exam.name || '';
+    document.getElementById('editExamTemplate').value = state.exam.sheet_template || 'qmcv1239';
+    document.getElementById('editExamCodes').value = (state.exam.codes || ['101', '102']).join(', ');
+    document.getElementById('editExamCountP1').value = state.exam.question_count || 12;
+    document.getElementById('editExamPointP1').value = state.exam.part1_point ?? 0.25;
+    document.getElementById('editExamCountP2').value = state.exam.part2_count || 4;
+    document.getElementById('editExamCountP3').value = state.exam.part3_count || 6;
+    document.getElementById('editExamPointP3').value = state.exam.part3_point ?? 0.5;
+
+    const folderSelect = document.getElementById('editExamFolderSelect');
+    if (folderSelect) {
+        folderSelect.innerHTML = `<option value="">📁 [Thư mục gốc]</option>` +
+            (state.folders || []).map(f => `<option value="${f.id}" ${state.exam.folderId === f.id ? 'selected' : ''}>📁 ${f.name}</option>`).join('');
+    }
+
+    window.calcExamScorePreview('edit');
+};
+
+window.confirmSaveExamSettings = async () => {
+    if (!state.exam) return;
+    const name = document.getElementById('editExamName')?.value.trim();
+    if (!name) {
+        Swal.fire('Lưu ý', 'Tên bài thi không được để trống!', 'warning');
+        return;
+    }
+
+    const total = window.calcExamScorePreview('edit');
+    if (total > 10.001) {
+        const confirmOver = await Swal.fire({
+            title: 'Tổng điểm vượt quá 10 điểm!',
+            text: `Tổng điểm cấu hình hiện tại là ${total.toFixed(2)} đ (> 10.0 đ). Thầy/Cô có chắc chắn muốn lưu mức điểm này không?`,
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: 'Vẫn lưu',
+            cancelButtonText: 'Sửa lại',
+            confirmButtonColor: '#ef4444'
+        });
+        if (!confirmOver.isConfirmed) return;
+    }
+
+    state.exam.name = name;
+    state.exam.sheet_template = document.getElementById('editExamTemplate')?.value || state.exam.sheet_template;
+    state.exam.codes = (document.getElementById('editExamCodes')?.value || '101').split(',').map(s => s.trim()).filter(Boolean);
+    state.exam.question_count = parseInt(document.getElementById('editExamCountP1')?.value) || 12;
+    state.exam.part1_point = parseFloat(document.getElementById('editExamPointP1')?.value) || 0.25;
+    state.exam.part2_count = parseInt(document.getElementById('editExamCountP2')?.value) || 4;
+    state.exam.part3_count = parseInt(document.getElementById('editExamCountP3')?.value) || 6;
+    state.exam.part3_point = parseFloat(document.getElementById('editExamPointP3')?.value) || 0.5;
+    state.exam.folderId = document.getElementById('editExamFolderSelect')?.value || null;
+
+    saveLocalExams(state.exams);
+    if (typeof storage !== 'undefined' && storage.saveExams) {
+        await storage.saveExams(state.exams);
+    }
+    if (state.teacherUid && typeof db !== 'undefined') {
+        try { await setDoc(doc(db, "omr_exams", state.exam.id), state.exam, { merge: true }); } catch (_) {}
+    }
+
+    document.getElementById('editExamSettingsModal').classList.add('hidden');
+    updateActiveExamBanner();
+    window.renderExamsListTab();
+    window.renderExamPickerList();
+
+    if (state.submissions && state.submissions.length > 0) {
+        const reCalc = await Swal.fire({
+            title: 'Cập nhật lại điểm đã chấm?',
+            text: `Bài thi đã có ${state.submissions.length} bài chấm. Thầy/Cô có muốn tự động tính lại điểm (re-score) cho toàn bộ ${state.submissions.length} bài theo barem điểm mới này không?`,
+            icon: 'question',
+            showCancelButton: true,
+            confirmButtonText: 'Có, tính lại điểm ngay',
+            cancelButtonText: 'Không, giữ nguyên điểm cũ',
+            confirmButtonColor: '#059669'
+        });
+        if (reCalc.isConfirmed) {
+            await window.recalculateAllSubmissionsScore();
+        } else {
+            Swal.fire('Thành công', 'Đã lưu cấu hình bài thi!', 'success');
+        }
+    } else {
+        Swal.fire('Thành công', 'Đã lưu cấu hình bài thi!', 'success');
+    }
+};
+
+window.recalculateAllSubmissionsScore = async () => {
+    if (!state.exam || !state.submissions || state.submissions.length === 0) return;
+    Swal.showLoading();
+
+    for (const sub of state.submissions) {
+        const scoreData = calculateExamScore(sub.code, sub.answers, sub.part2, sub.part3);
+        sub.score = scoreData.totalScore;
+        sub.part1_score = scoreData.part1Score;
+        sub.part2_score = scoreData.part2Score;
+        sub.part3_score = scoreData.part3Score;
+
+        try {
+            sub._headerV25Upgraded = false;
+            await ensureSubmissionStampedHeaderUpgraded(sub);
+        } catch (_) {}
+    }
+
+    if (typeof storage !== 'undefined' && storage.saveSubmissions) {
+        await storage.saveSubmissions(state.exam.id, state.submissions);
+    } else {
+        saveSubmissionsToLocalSafe(state.exam.id, state.submissions);
+    }
+
+    renderSubmissionsUI();
+    updateOverviewStats();
+    Swal.fire('Đã hoàn tất', `Đã tính lại điểm cho toàn bộ ${state.submissions.length} bài chấm theo barem mới!`, 'success');
+};
+
+
+// ========================================================
+// QUẢN LÝ CÂY THƯ MỤC ĐỀ THI (TREE FOLDER EXPLORER)
+// ========================================================
+state.folders = [];
+state.currentFolderId = null; // null = root
+
+async function loadFolders() {
+    let fList = [];
+    if (typeof storage !== 'undefined' && storage.getFolders) {
+        fList = await storage.getFolders();
+    } else {
+        const raw = localStorage.getItem('bank_folders') || localStorage.getItem('omr_standalone_folders');
+        if (raw) {
+            try { fList = JSON.parse(raw); } catch(_) {}
+        }
+    }
+    if (!Array.isArray(fList) || fList.length === 0) {
+        fList = [
+            { id: 'f_k12', name: 'Khối 12 - Ôn Thi Tốt Nghiệp', parentId: null, createdAt: new Date().toISOString() },
+            { id: 'f_midterm', name: 'Khảo Sát & Giữa Kỳ', parentId: null, createdAt: new Date().toISOString() }
+        ];
+    }
+    state.folders = fList;
+    return fList;
+}
+
+window.navigateExamFolder = (folderId) => {
+    state.currentFolderId = folderId;
+    window.renderExamPickerList();
+};
+
+window.navigateUpExamFolder = () => {
+    if (!state.currentFolderId) return;
+    const cur = state.folders.find(f => f.id === state.currentFolderId);
+    state.currentFolderId = cur?.parentId || null;
+    window.renderExamPickerList();
+};
+
+window.createNewExamFolder = async () => {
+    const { value: folderName } = await Swal.fire({
+        title: 'Tạo thư mục mới',
+        input: 'text',
+        inputPlaceholder: 'Nhập tên thư mục (VD: Khối 11, Giữa Kỳ I...)',
+        showCancelButton: true,
+        confirmButtonText: 'Tạo thư mục',
+        cancelButtonText: 'Hủy',
+        confirmButtonColor: '#059669'
+    });
+    if (!folderName || !folderName.trim()) return;
+
+    const newFolder = {
+        id: 'f_' + Date.now(),
+        name: folderName.trim(),
+        parentId: state.currentFolderId || null,
+        createdAt: new Date().toISOString()
+    };
+    state.folders.push(newFolder);
+    if (typeof storage !== 'undefined' && storage.saveFolders) {
+        await storage.saveFolders(state.folders);
+    } else {
+        localStorage.setItem('bank_folders', JSON.stringify(state.folders));
+    }
+    window.renderExamPickerList();
+    Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: `Đã tạo thư mục "${newFolder.name}"`, showConfirmButton: false, timer: 2000 });
+};
+
+window.moveExamToFolder = async (examId) => {
+    const ex = state.exams.find(e => e.id === examId);
+    if (!ex) return;
+
+    const inputOptions = { 'root': '📁 [Thư mục gốc]' };
+    (state.folders || []).forEach(f => {
+        inputOptions[f.id] = `📁 ${f.name}`;
+    });
+
+    const { value: targetFolderId } = await Swal.fire({
+        title: `Chuyển đề "${ex.name}"`,
+        input: 'select',
+        inputOptions,
+        inputValue: ex.folderId || 'root',
+        showCancelButton: true,
+        confirmButtonText: 'Chuyển vào đây',
+        cancelButtonText: 'Hủy',
+        confirmButtonColor: '#059669'
+    });
+    if (typeof targetFolderId === 'undefined') return;
+
+    ex.folderId = targetFolderId === 'root' ? null : targetFolderId;
+    saveLocalExams(state.exams);
+    if (typeof storage !== 'undefined' && storage.saveExams) {
+        await storage.saveExams(state.exams);
+    }
+    window.renderExamPickerList();
+    Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Đã chuyển đề thi thành công!', showConfirmButton: false, timer: 1800 });
+};
+
+// ========================================================
+// HIỂN THỊ DANH SÁCH ĐỀ THI DẠNG EXPLORER CÂY THƯ MỤC
+// ========================================================
+window.renderExamPickerList = () => {
+    const listEl = document.getElementById('examPickerList') || document.getElementById('lmsExamPickerList');
+    if (!listEl) return;
+    const filter = (document.getElementById('examSearchInput')?.value || document.getElementById('lmsExamSearchInput')?.value || '').toLowerCase().trim();
+
+    // 1. Cập nhật Breadcrumb Navigation
+    const trailEl = document.getElementById('examBreadcrumbTrail');
+    const statsEl = document.getElementById('examFolderStatsText');
+
+    if (trailEl) {
+        if (!state.currentFolderId) {
+            trailEl.innerHTML = '';
+        } else {
+            // Build path
+            const path = [];
+            let curr = state.folders.find(f => f.id === state.currentFolderId);
+            while (curr) {
+                path.unshift(curr);
+                curr = curr.parentId ? state.folders.find(f => f.id === curr.parentId) : null;
+            }
+            trailEl.innerHTML = path.map((f, idx) => {
+                const isLast = idx === path.length - 1;
+                return `
+                    <span class="text-slate-300 dark:text-slate-600">/</span>
+                    <button type="button" onclick="window.navigateExamFolder('${f.id}')" class="${isLast ? 'text-emerald-700 dark:text-emerald-300 font-extrabold' : 'text-slate-600 dark:text-slate-300 hover:text-emerald-600'} transition-colors cursor-pointer truncate max-w-[150px]">
+                        ${f.name}
+                    </button>
+                `;
+            }).join('');
+        }
+    }
+
+    // 2. Lọc Thư mục con & Đề thi
+    let subFolders = [];
+    let currentExams = [];
+
+    if (filter) {
+        // Tìm kiếm toàn diện
+        currentExams = (state.exams || []).filter(e => {
+            const nameMatch = e.name && e.name.toLowerCase().includes(filter);
+            const codeMatch = (e.omrCode && e.omrCode.includes(filter)) || (Array.isArray(e.codes) && e.codes.some(c => c.includes(filter)));
+            return nameMatch || codeMatch;
+        });
+    } else {
+        // Lọc theo thư mục hiện tại
+        subFolders = (state.folders || []).filter(f => (f.parentId || null) === (state.currentFolderId || null));
+        currentExams = (state.exams || []).filter(e => (e.folderId || null) === (state.currentFolderId || null));
+    }
+
+    if (statsEl) {
+        statsEl.textContent = `${subFolders.length} thư mục · ${currentExams.length} đề thi`;
+    }
+
+    if (subFolders.length === 0 && currentExams.length === 0) {
+        listEl.innerHTML = `
+            <div class="p-12 text-center text-slate-400">
+                <i class="fa-solid fa-folder-open text-4xl mb-3 opacity-40"></i>
+                <p class="text-sm font-bold text-slate-700 dark:text-slate-300">Thư mục này hiện đang trống</p>
+                <p class="text-xs text-slate-500 mt-1">Chưa có đề thi hoặc thư mục con nào ${filter ? 'khớp từ khóa "' + filter + '"' : ''}.</p>
+                <div class="flex items-center justify-center gap-2 mt-4">
+                    <button type="button" onclick="window.createNewExamFolder()" class="px-3.5 py-2 rounded-xl btn-season-secondary text-xs font-bold cursor-pointer">
+                        <i class="fa-solid fa-folder-plus text-amber-500 mr-1"></i> Tạo thư mục
+                    </button>
+                    <button type="button" onclick="window.closeLmsExamPickerModal(); window.closeExamPickerModal(); window.openCreateExamModal();" class="px-4 py-2 rounded-xl btn-season-primary text-xs font-bold cursor-pointer">
+                        <i class="fa-solid fa-plus mr-1"></i> Tạo đề thi mới
+                    </button>
+                </div>
+            </div>
+        `;
+        return;
+    }
+
+    let html = '';
+
+    // A. Hiển thị danh sách Thư mục con (Folders Grid)
+    if (subFolders.length > 0 && !filter) {
+        html += `
+            <div class="space-y-2">
+                <div class="text-[11px] font-extrabold uppercase tracking-wider text-slate-400 dark:text-slate-500 flex items-center gap-1.5">
+                    <i class="fa-solid fa-folder text-amber-500"></i> Thư mục con (${subFolders.length}):
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
+                    ${subFolders.map(f => {
+                        const countInF = (state.exams || []).filter(e => e.folderId === f.id).length;
+                        return `
+                            <div onclick="window.navigateExamFolder('${f.id}')" class="p-3 rounded-2xl bg-white dark:bg-[#262335] border border-gray-200/80 dark:border-[#38344D] hover:border-amber-400 dark:hover:border-amber-500 shadow-2xs hover:shadow-xs cursor-pointer transition-all flex items-center justify-between gap-3 group">
+                                <div class="flex items-center gap-2.5 min-w-0">
+                                    <div class="w-9 h-9 rounded-xl bg-amber-50 dark:bg-amber-950/50 text-amber-600 dark:text-amber-400 flex items-center justify-center text-lg shrink-0 group-hover:scale-110 transition-transform">
+                                        <i class="fa-solid fa-folder"></i>
+                                    </div>
+                                    <div class="min-w-0">
+                                        <h5 class="text-xs sm:text-sm font-extrabold text-slate-900 dark:text-white truncate group-hover:text-amber-600 transition-colors" title="${f.name}">${f.name}</h5>
+                                        <p class="text-[11px] text-slate-500 dark:text-slate-400 font-mono">${countInF} đề thi</p>
+                                    </div>
+                                </div>
+                                <i class="fa-solid fa-chevron-right text-xs text-slate-300 group-hover:text-amber-500 group-hover:translate-x-0.5 transition-all shrink-0"></i>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+            </div>
+        `;
+    }
+
+    // B. Hiển thị danh sách Đề thi (Exams Grid / List)
+    if (currentExams.length > 0) {
+        html += `
+            <div class="space-y-2">
+                <div class="text-[11px] font-extrabold uppercase tracking-wider text-slate-400 dark:text-slate-500 flex items-center gap-1.5">
+                    <i class="fa-solid fa-file-lines text-emerald-500"></i> Bài thi (${currentExams.length}):
+                </div>
+                <div class="space-y-2">
+                    ${currentExams.map(item => {
+                        const isCurrent = state.exam?.id === item.id;
+                        const omrCode = item.omrCode || (item.codes && item.codes[0]) || '101';
+                        const gradedCount = (state.gradedCountsByExam && state.gradedCountsByExam[item.id]) || 0;
+                        const folderOfExam = item.folderId ? state.folders.find(f => f.id === item.folderId) : null;
+                        
+                        return `
+                            <div onclick="window.selectExamForGrading('${item.id}')" class="p-3.5 sm:p-4 rounded-2xl bg-white dark:bg-[#262335] border ${isCurrent ? 'border-emerald-500 ring-2 ring-emerald-500/20' : 'border-gray-200/90 dark:border-[#38344D] hover:border-emerald-400'} shadow-2xs cursor-pointer transition-all group space-y-2.5">
+                                <div class="flex items-start justify-between gap-2">
+                                    <div class="flex items-start gap-2.5 min-w-0 flex-1">
+                                        <div class="w-8 h-8 rounded-xl ${isCurrent ? 'bg-emerald-600 text-white' : 'bg-slate-100 dark:bg-[#1E1B29] text-emerald-600'} flex items-center justify-center text-sm font-bold shrink-0">
+                                            <i class="fa-solid fa-file-signature"></i>
+                                        </div>
+                                        <div class="min-w-0 flex-1">
+                                            <h5 class="text-xs sm:text-sm font-extrabold text-slate-900 dark:text-white leading-snug line-clamp-2 group-hover:text-emerald-600 transition-colors" title="${(item.name || '').replace(/"/g, '&quot;')}">
+                                                ${item.name}
+                                            </h5>
+                                            <div class="flex items-center flex-wrap gap-2 text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                                                <span><b>${item.question_count || 12}</b> TN (${item.part1_point ?? 0.25}đ) · <b>${item.part2_count || 4}</b> Đ/S · <b>${item.part3_count || 6}</b> TLN (${item.part3_point ?? 0.5}đ)</span>
+                                                <span>•</span>
+                                                <span class="font-mono text-emerald-700 dark:text-emerald-300 font-bold">Mã OMR: ${omrCode}</span>
+                                                ${item.className ? `<span>• Lớp: <b>${item.className}</b></span>` : ''}
+                                                ${folderOfExam ? `<span class="px-1.5 py-0.5 rounded bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 font-bold text-[10px]"><i class="fa-solid fa-folder text-[9px] mr-0.5"></i>${folderOfExam.name}</span>` : ''}
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="flex items-center gap-1.5 shrink-0">
+                                        ${gradedCount > 0 ? `<button type="button" onclick="event.stopPropagation(); window.clearExamSubmissions('${item.id}')" class="px-2 py-1 rounded-lg text-[10px] font-extrabold bg-emerald-50 hover:bg-rose-50 text-emerald-700 hover:text-rose-700 dark:bg-emerald-950/60 dark:hover:bg-rose-950/60 border border-emerald-300/50 dark:border-emerald-700 transition-colors cursor-pointer" title="Xóa sạch bài chấm để chấm lại">✓ Đã chấm ${gradedCount} bài <i class="fa-solid fa-rotate-left text-[9px] ml-0.5"></i></button>` : ''}
+                                        ${isCurrent ? '<span class="px-2.5 py-1 rounded-lg text-[11px] font-extrabold bg-emerald-600 text-white">Đang chọn</span>' : ''}
+                                    </div>
+                                </div>
+
+                                <div class="flex items-center justify-between gap-2 pt-2 border-t border-gray-100 dark:border-[#38344D]/70 text-[11px]">
+                                    <div class="flex items-center gap-2">
+                                        <button type="button" onclick="event.stopPropagation(); window.moveExamToFolder('${item.id}')" class="px-2 py-1 rounded-lg bg-gray-100 hover:bg-amber-50 dark:bg-[#1E1B29] dark:hover:bg-amber-950/50 text-slate-600 dark:text-slate-300 hover:text-amber-600 text-[11px] font-bold flex items-center gap-1 transition-colors cursor-pointer border border-gray-200 dark:border-[#38344D]" title="Chuyển sang thư mục khác">
+                                            <i class="fa-solid fa-folder-tree text-amber-500"></i>
+                                            <span>Chuyển thư mục</span>
+                                        </button>
+                                        <button type="button" onclick="event.stopPropagation(); window.deleteExam('${item.id}')" class="w-7 h-7 rounded-lg bg-gray-100 hover:bg-rose-50 dark:bg-[#1E1B29] dark:hover:bg-rose-950/50 text-slate-400 hover:text-rose-600 flex items-center justify-center text-xs active:scale-95 transition-all cursor-pointer border border-gray-200 dark:border-[#38344D]" title="Xóa đề thi này">
+                                            <i class="fa-solid fa-trash-can"></i>
+                                        </button>
+                                    </div>
+
+                                    <button type="button" onclick="window.selectExamForGrading('${item.id}')" class="px-3.5 py-1.5 rounded-xl ${isCurrent ? 'bg-gray-100 dark:bg-[#1E1B29] text-slate-700 dark:text-slate-300' : 'btn-season-primary'} text-xs font-bold flex items-center gap-1.5 cursor-pointer">
+                                        <span>${isCurrent ? 'Nạp lại' : 'Chọn chấm'}</span>
+                                        <i class="fa-solid fa-arrow-right text-[10px]"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+            </div>
+        `;
+    }
+
+    listEl.innerHTML = html;
+};
+window.renderLmsExamPickerList = window.renderExamPickerList;
+
 window.openLmsExamPickerModal = async () => {
     const modal = document.getElementById('lmsExamPickerModal');
     if (!modal) return;
