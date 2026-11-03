@@ -832,16 +832,26 @@ function updateActiveExamBanner() {
         }
     }
 
-    if (titleEl) titleEl.textContent = displayTitle;
-    if (sidebarTitleEl) sidebarTitleEl.textContent = displayTitle;
-    if (mobileTitleEl) mobileTitleEl.textContent = displayTitle + (classLabel ? ` · ${classLabel}` : '');
+    if (titleEl) {
+        titleEl.textContent = displayTitle;
+        titleEl.title = displayTitle;
+    }
+    if (sidebarTitleEl) {
+        sidebarTitleEl.textContent = displayTitle;
+        sidebarTitleEl.title = displayTitle;
+    }
+    if (mobileTitleEl) {
+        mobileTitleEl.textContent = displayTitle + (classLabel ? ` · ${classLabel}` : '');
+        mobileTitleEl.title = displayTitle;
+    }
     if (sidebarMetaEl) {
         sidebarMetaEl.textContent = `${structSummary}${classLabel ? ` · ${classLabel}` : ''}`;
     }
 
     if (badgeEl) {
         const tplName = (window.MAU && window.MAU[tplKey]) ? window.MAU[tplKey].ten : tplKey;
-        badgeEl.textContent = `${structSummary} · ${tplName || 'CV 1239'}`;
+        badgeEl.textContent = `${exam.question_count || 12} TN · ${exam.part2_count || 4} Đ/S · ${exam.part3_count || 6} TLN`;
+        badgeEl.title = `Mã OMR: ${omr4Code} · Mẫu: ${tplName || 'CV 1239'}`;
         badgeEl.classList.remove('hidden');
     }
     if (classBadgeEl) {
@@ -1834,7 +1844,11 @@ async function processSingleSheet(source, options = {}) {
         answers: rawResult.part1,
         part2: rawResult.part2,
         part3: rawResult.part3Text || rawResult.part3,
+        _original_answers: rawResult.part1,
+        _original_part2: rawResult.part2,
+        _original_part3: rawResult.part3Text || rawResult.part3,
         flags: rawResult.uncertain || [],
+        clean_image: rawResult.rectifiedImage || '',
         image_data: rawResult.rectifiedImage,
         name_image: nameImg,
         createdAt: new Date().toISOString()
@@ -2167,7 +2181,8 @@ function calculateExamScore(code, studentP1, studentP2, studentP3) {
     for (let i = 0; i < qCount1; i++) {
         const s = (studentP1 || '')[i];
         const k = keyP1[i];
-        if (s && k && s === k && s !== '-' && s !== '?') {
+        const isBonus = key.bonus_p1 && (key.bonus_p1[i] === true || key.bonus_p1[String(i)] === true);
+        if (isBonus || (s && k && s === k && s !== '-' && s !== '?')) {
             p1Correct++;
         }
     }
@@ -2177,6 +2192,11 @@ function calculateExamScore(code, studentP1, studentP2, studentP3) {
     let part2Score = 0;
     const qCount2 = state.exam?.part2_count || 4;
     for (let q = 0; q < qCount2; q++) {
+        const isQBonus = key.bonus_p2 && (key.bonus_p2[q] === true || key.bonus_p2[String(q)] === true);
+        if (isQBonus) {
+            part2Score += p2Pts[3] || 1.0; // Luôn cho điểm trọn vẹn câu này
+            continue;
+        }
         const sChunk = (studentP2 && studentP2[q]) ? studentP2[q] : '----';
         const kChunk = (key.part2 && key.part2[q]) ? key.part2[q] : '----';
         let matchCount = 0;
@@ -2197,6 +2217,11 @@ function calculateExamScore(code, studentP1, studentP2, studentP3) {
     let p3Correct = 0;
     const qCount3 = state.exam?.part3_count || 6;
     for (let q = 0; q < qCount3; q++) {
+        const isBonus = key.bonus_p3 && (key.bonus_p3[q] === true || key.bonus_p3[String(q)] === true);
+        if (isBonus) {
+            p3Correct++;
+            continue;
+        }
         let sAns = '';
         if (Array.isArray(studentP3)) {
             const item = studentP3[q];
@@ -2239,6 +2264,37 @@ async function displayLastResultInspector(sub, rawResult) {
     document.getElementById('resP2Score').textContent = (sub.part2_score ?? 0).toFixed(2);
     document.getElementById('resP3Score').textContent = (sub.part3_score ?? 0).toFixed(2);
     document.getElementById('resTotalScore').textContent = (sub.score ?? 0).toFixed(2);
+
+    // Hiển thị thông báo câu đính chính nếu có
+    const overrideBox = document.getElementById('resOverrideAlertBox');
+    const overrideText = document.getElementById('resOverrideAlertText');
+    if (overrideBox) {
+        if (sub.has_manual_override && sub.manual_overrides) {
+            const list = [];
+            if (sub.manual_overrides.p1) {
+                Object.entries(sub.manual_overrides.p1).forEach(([q, v]) => {
+                    list.push(`Câu ${parseInt(q) + 1} (${v.from || '-'} → ${v.to})`);
+                });
+            }
+            if (sub.manual_overrides.p2) {
+                Object.entries(sub.manual_overrides.p2).forEach(([k, v]) => {
+                    const [q, r] = k.split('_');
+                    list.push(`Câu ${parseInt(q) + 1}${['a','b','c','d'][r]} (${v.to})`);
+                });
+            }
+            if (sub.manual_overrides.p3) {
+                Object.entries(sub.manual_overrides.p3).forEach(([q, v]) => {
+                    list.push(`Câu ${parseInt(q) + 1} (${v.to})`);
+                });
+            }
+            if (overrideText) {
+                overrideText.textContent = list.length > 0 ? list.join(' · ') : 'Bài thi đã được giáo viên đính chính đáp án thủ công.';
+            }
+            overrideBox.classList.remove('hidden');
+        } else {
+            overrideBox.classList.add('hidden');
+        }
+    }
 
     // Edit fields
     document.getElementById('editSbdInput').value = sub.student_no || '';
@@ -2517,6 +2573,11 @@ async function generateStampedGradedSheet(sub, rawResult) {
     ctx.fillStyle = '#475569';
     ctx.font = 'bold 20px "Segoe UI", Arial, sans-serif';
     ctx.fillText('Chấm lúc: ' + new Date(sub.createdAt).toLocaleString('vi-VN'), cardX + 22, cardY + 286);
+    if (sub.has_manual_override) {
+        ctx.fillStyle = '#7e22ce';
+        ctx.font = 'bold 18px "Segoe UI", Arial, sans-serif';
+        ctx.fillText('★ Có câu được Giáo viên đính chính thủ công', cardX + 22, cardY + 316);
+    }
 
     // 4. KHUNG ĐIỂM SỐ TỪNG PHẦN CỠ LỚN (BÊN PHẢI: X: 962 -> 1272)
     const sbX = 962, sbY = 24, sbW = 310, sbH = 334;
@@ -2657,13 +2718,26 @@ async function generateStampedGradedSheet(sub, rawResult) {
         for (let q = 0; q < qCount1; q++) {
             const studentAns = (sub.answers || '')[q];
             const keyAns = (key.answers || '')[q];
+            const isOverride = sub.manual_overrides?.p1?.[q] || sub.manual_overrides?.p1?.[String(q)];
+            const isBonus = key.bonus_p1 && (key.bonus_p1[q] === true || key.bonus_p1[String(q)] === true);
+
             ['A', 'B', 'C', 'D'].forEach((char, optIdx) => {
                 const pt = tpl.p1[q][optIdx];
                 if (!pt) return;
                 const isStudentMark = studentAns === char;
                 const isKeyMark = keyAns === char;
 
-                if (isStudentMark && isKeyMark) {
+                if (isOverride && isStudentMark) {
+                    // GIÁO VIÊN ĐÃ ĐÍNH CHÍNH CÂU NÀY: VÒNG TÍM NỔI BẬT
+                    drawRingOnCanvas(pt, '#9333ea', 6, 17);
+                    drawRingOnCanvas(pt, '#d8b4fe', 3, 11);
+                } else if (isBonus) {
+                    if (isStudentMark) {
+                        drawRingOnCanvas(pt, '#10b981', 5, 16); // Xanh lá: Được tính điểm
+                    } else if (isKeyMark) {
+                        drawRingOnCanvas(pt, '#f59e0b', 3.5, 14.5, true);
+                    }
+                } else if (isStudentMark && isKeyMark) {
                     drawRingOnCanvas(pt, '#10b981', 4.5, 15.5); // Xanh lá: Đúng
                 } else if (isStudentMark && !isKeyMark) {
                     drawRingOnCanvas(pt, '#ef4444', 4.5, 15.5); // Đỏ: Tô sai
@@ -2680,6 +2754,8 @@ async function generateStampedGradedSheet(sub, rawResult) {
         for (let q = 0; q < qCount2; q++) {
             const sChunk = (sub.part2 && sub.part2[q]) ? sub.part2[q] : '----';
             const kChunk = (key.part2 && key.part2[q]) ? key.part2[q] : '----';
+            const isQBonus = key.bonus_p2 && (key.bonus_p2[q] === true || key.bonus_p2[String(q)] === true);
+
             for (let r = 0; r < 4; r++) {
                 const idx = q * 4 + r;
                 if (idx >= tpl.p2.length) continue;
@@ -2689,8 +2765,18 @@ async function generateStampedGradedSheet(sub, rawResult) {
 
                 const sChar = (sChunk[r] || '-').toUpperCase().replace('D', 'Đ');
                 const kChar = (kChunk[r] || '-').toUpperCase().replace('D', 'Đ');
+                const isItemOverride = sub.manual_overrides?.p2?.[`${q}_${r}`];
 
-                if (sChar === 'Đ') {
+                if (isItemOverride) {
+                    const targetPt = sChar === 'Đ' ? ptD : (sChar === 'S' ? ptS : null);
+                    if (targetPt) {
+                        drawRingOnCanvas(targetPt, '#9333ea', 6, 17);
+                        drawRingOnCanvas(targetPt, '#d8b4fe', 3, 11);
+                    }
+                } else if (isQBonus) {
+                    if (sChar === 'Đ') drawRingOnCanvas(ptD, '#10b981', 4.5, 15.5);
+                    else if (sChar === 'S') drawRingOnCanvas(ptS, '#10b981', 4.5, 15.5);
+                } else if (sChar === 'Đ') {
                     if (kChar === 'Đ') {
                         drawRingOnCanvas(ptD, '#10b981', 4.5, 15.5);
                     } else {
@@ -2724,7 +2810,9 @@ async function generateStampedGradedSheet(sub, rawResult) {
                 sAns = String(rawResult.part3Text[q] || '').trim();
             }
             const kAns = String((key.part3 && key.part3[q]) || '').trim();
-            const isMatch = isP3Match(sAns, kAns);
+            const isP3Override = sub.manual_overrides?.p3?.[q] || sub.manual_overrides?.p3?.[String(q)];
+            const isP3Bonus = key.bonus_p3 && (key.bonus_p3[q] === true || key.bonus_p3[String(q)] === true);
+            const isMatch = isP3Bonus || isP3Match(sAns, kAns);
 
             // Khoanh tròn các ô số học sinh đã tô ở 4 cột
             if (rawResult.p3m && rawResult.p3m[q]) {
@@ -2732,7 +2820,7 @@ async function generateStampedGradedSheet(sub, rawResult) {
                     const v = rawResult.p3m[q][col];
                     if (v >= 0 && tpl.p3[q][col] && tpl.p3[q][col][v]) {
                         const pt = tpl.p3[q][col][v];
-                        drawRingOnCanvas(pt, isMatch ? '#10b981' : '#ef4444', 4.5, 14.5);
+                        drawRingOnCanvas(pt, isP3Override ? '#9333ea' : (isMatch ? '#10b981' : '#ef4444'), 4.5, 14.5);
                     }
                 }
             }
@@ -2745,8 +2833,8 @@ async function generateStampedGradedSheet(sub, rawResult) {
                 const by = pt0[1] * scaleY + headerH - 56;
 
                 ctx.save();
-                ctx.fillStyle = isMatch ? '#ecfdf5' : '#fef2f2';
-                ctx.strokeStyle = isMatch ? '#059669' : '#dc2626';
+                ctx.fillStyle = isP3Override ? '#faf5ff' : (isMatch ? '#ecfdf5' : '#fef2f2');
+                ctx.strokeStyle = isP3Override ? '#9333ea' : (isMatch ? '#059669' : '#dc2626');
                 ctx.lineWidth = 3;
                 ctx.beginPath();
                 if (ctx.roundRect) ctx.roundRect(bx, by, bw, bh, 10);
@@ -2754,11 +2842,15 @@ async function generateStampedGradedSheet(sub, rawResult) {
                 ctx.fill();
                 ctx.stroke();
 
-                ctx.fillStyle = isMatch ? '#065f46' : '#991b1b';
+                ctx.fillStyle = isP3Override ? '#6b21a8' : (isMatch ? '#065f46' : '#991b1b');
                 ctx.font = '900 20px "Segoe UI", Arial, sans-serif';
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
-                if (isMatch) {
+                if (isP3Override) {
+                    ctx.fillText(`★ Đã sửa: ${sAns || '---'} (+${isMatch ? (state.exam?.part3_point ?? 0.5) : 0}đ)`, bx + bw / 2, by + bh / 2);
+                } else if (isP3Bonus) {
+                    ctx.fillText(`★ Cho điểm: ${sAns || '---'} (+${state.exam?.part3_point ?? 0.5}đ)`, bx + bw / 2, by + bh / 2);
+                } else if (isMatch) {
                     ctx.fillText(`✓ ${sAns || '---'} (+${state.exam?.part3_point ?? 0.5}đ)`, bx + bw / 2, by + bh / 2);
                 } else {
                     ctx.fillText(`✗ ${sAns || 'Trống'} (Đ/A: ${kAns || '---'})`, bx + bw / 2, by + bh / 2);
@@ -4243,6 +4335,9 @@ window.handleKeyExamCodeChange = (code) => {
 
 window.loadCodeKeyInputs = (code) => {
     const key = state.keys[code] || { answers: '', part2: [], part3: [] };
+    const bonusP1 = key.bonus_p1 || {};
+    const bonusP2 = key.bonus_p2 || {};
+    const bonusP3 = key.bonus_p3 || {};
     
     // Part 1 Grid
     const p1Cont = document.getElementById('part1KeyGrid');
@@ -4250,16 +4345,23 @@ window.loadCodeKeyInputs = (code) => {
     if (p1Cont) {
         p1Cont.innerHTML = Array.from({ length: qCount1 }, (_, i) => {
             const currentAns = (key.answers || '')[i] || '-';
+            const isBonus = !!(bonusP1[i] || bonusP1[String(i)]);
             return `
-                <div class="p-2.5 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center justify-between">
-                    <span class="font-bold text-slate-500">Câu ${i + 1}:</span>
-                    <select data-p1="${i}" class="px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 font-bold text-emerald-600 outline-none">
-                        <option value="-" ${currentAns==='-'?'selected':''}>-</option>
-                        <option value="A" ${currentAns==='A'?'selected':''}>A</option>
-                        <option value="B" ${currentAns==='B'?'selected':''}>B</option>
-                        <option value="C" ${currentAns==='C'?'selected':''}>C</option>
-                        <option value="D" ${currentAns==='D'?'selected':''}>D</option>
-                    </select>
+                <div class="p-2.5 bg-slate-50 dark:bg-slate-900 rounded-xl border ${isBonus ? 'border-amber-400 bg-amber-50/40 dark:bg-amber-950/20' : 'border-slate-200 dark:border-slate-700'} flex items-center justify-between gap-1">
+                    <span class="font-bold text-slate-500 text-xs shrink-0">Câu ${i + 1}:</span>
+                    <div class="flex items-center gap-1.5">
+                        <select data-p1="${i}" class="px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 font-bold text-emerald-600 outline-none text-xs">
+                            <option value="-" ${currentAns==='-'?'selected':''}>-</option>
+                            <option value="A" ${currentAns==='A'?'selected':''}>A</option>
+                            <option value="B" ${currentAns==='B'?'selected':''}>B</option>
+                            <option value="C" ${currentAns==='C'?'selected':''}>C</option>
+                            <option value="D" ${currentAns==='D'?'selected':''}>D</option>
+                        </select>
+                        <label class="inline-flex items-center gap-1 cursor-pointer select-none text-[11px] font-bold ${isBonus ? 'text-amber-600 dark:text-amber-400' : 'text-slate-400 hover:text-amber-600'}" title="Tất cả học sinh đều được tính trọn điểm câu này (phòng khi đề sai)">
+                            <input type="checkbox" data-bonus-p1="${i}" ${isBonus ? 'checked' : ''} onchange="this.closest('.p-2.5').classList.toggle('border-amber-400', this.checked); this.closest('.p-2.5').classList.toggle('bg-amber-50/40', this.checked)" class="rounded text-amber-500 w-3.5 h-3.5 border-slate-300 focus:ring-0">
+                            <span class="text-[10px] hidden sm:inline">Cho điểm</span>
+                        </label>
+                    </div>
                 </div>
             `;
         }).join('');
@@ -4271,9 +4373,16 @@ window.loadCodeKeyInputs = (code) => {
     if (p2Cont) {
         p2Cont.innerHTML = Array.from({ length: qCount2 }, (_, q) => {
             const currentChunk = (key.part2 && key.part2[q]) ? key.part2[q] : '----';
+            const isQBonus = !!(bonusP2[q] || bonusP2[String(q)]);
             return `
-                <div class="p-3 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 space-y-2">
-                    <b class="text-xs text-slate-700 dark:text-slate-200">Câu ${q + 1} (Đúng/Sai)</b>
+                <div class="p-3 bg-slate-50 dark:bg-slate-900 rounded-xl border ${isQBonus ? 'border-amber-400 bg-amber-50/40 dark:bg-amber-950/20' : 'border-slate-200 dark:border-slate-700'} space-y-2">
+                    <div class="flex items-center justify-between">
+                        <b class="text-xs text-slate-700 dark:text-slate-200">Câu ${q + 1} (Đúng/Sai)</b>
+                        <label class="inline-flex items-center gap-1 cursor-pointer select-none text-[11px] font-bold ${isQBonus ? 'text-amber-600 dark:text-amber-400' : 'text-slate-400 hover:text-amber-600'}" title="Tất cả học sinh đều được tính trọn điểm câu này">
+                            <input type="checkbox" data-bonus-p2="${q}" ${isQBonus ? 'checked' : ''} onchange="this.closest('.p-3').classList.toggle('border-amber-400', this.checked)" class="rounded text-amber-500 w-3.5 h-3.5 border-slate-300 focus:ring-0">
+                            <span>Cho điểm cả câu</span>
+                        </label>
+                    </div>
                     ${['a', 'b', 'c', 'd'].map((opt, r) => {
                         const val = currentChunk[r] || '-';
                         return `
@@ -4297,45 +4406,20 @@ window.loadCodeKeyInputs = (code) => {
     if (p3Cont) {
         p3Cont.innerHTML = Array.from({ length: qCount3 }, (_, i) => {
             const val = (key.part3 && key.part3[i]) || '';
+            const isBonus = !!(bonusP3[i] || bonusP3[String(i)]);
             return `
-                <div class="p-2.5 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 space-y-1">
-                    <label class="block font-bold text-slate-500">Câu ${i + 1}:</label>
-                    <input type="text" data-p3="${i}" value="${val}" placeholder="VD: -4,5" class="w-full px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 font-mono font-bold text-center outline-none">
+                <div class="p-2.5 bg-slate-50 dark:bg-slate-900 rounded-xl border ${isBonus ? 'border-amber-400 bg-amber-50/40 dark:bg-amber-950/20' : 'border-slate-200 dark:border-slate-700'} space-y-1">
+                    <div class="flex items-center justify-between">
+                        <label class="block font-bold text-slate-500 text-xs">Câu ${i + 1}:</label>
+                        <label class="inline-flex items-center gap-1 cursor-pointer select-none text-[10px] font-bold ${isBonus ? 'text-amber-600 dark:text-amber-400' : 'text-slate-400 hover:text-amber-600'}" title="Tất cả học sinh đều được tính trọn điểm câu này">
+                            <input type="checkbox" data-bonus-p3="${i}" ${isBonus ? 'checked' : ''} onchange="this.closest('.p-2.5').classList.toggle('border-amber-400', this.checked)" class="rounded text-amber-500 w-3 h-3 border-slate-300 focus:ring-0">
+                            <span>Cho điểm</span>
+                        </label>
+                    </div>
+                    <input type="text" data-p3="${i}" value="${val}" placeholder="VD: -4,5" class="w-full px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 font-mono font-bold text-center outline-none text-xs">
                 </div>
             `;
         }).join('');
-    }
-};
-
-window.selectP2Btn = (btn, q, r, val) => {
-    const parent = btn.parentElement;
-    parent.querySelectorAll('button').forEach(b => {
-        b.className = "p2-btn px-2.5 py-0.5 rounded text-xs font-bold border transition-all bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-600";
-    });
-    btn.className = val === 'Đ' 
-        ? "p2-btn px-2.5 py-0.5 rounded text-xs font-bold border transition-all bg-emerald-600 text-white border-emerald-600"
-        : "p2-btn px-2.5 py-0.5 rounded text-xs font-bold border transition-all bg-rose-600 text-white border-rose-600";
-    btn.dataset.val = val;
-};
-
-window.applyBulkKey = () => {
-    const text = document.getElementById('bulkKeyInput')?.value || '';
-    if (!text) return;
-    try {
-        const qCount = state.exam?.question_count || 12;
-        const res = window.parseQuickAnswers ? window.parseQuickAnswers(text, qCount) : { answers: text.toUpperCase().replace(/[^ABCD]/g, '') };
-        const ansStr = res.answers || '';
-        document.querySelectorAll('[data-p1]').forEach((sel, i) => {
-            if (ansStr[i]) sel.value = ansStr[i];
-        });
-        Swal.fire({
-            icon: 'success',
-            title: 'Đã áp dụng chuỗi đáp án!',
-            text: `Đã điền đáp án cho ${Math.min(ansStr.length, qCount)} câu Phần I.`,
-            timer: 1800
-        });
-    } catch(err) {
-        Swal.fire('Lỗi định dạng', err.message, 'warning');
     }
 };
 
@@ -4347,13 +4431,19 @@ window.saveAllKeys = async () => {
 
     // Read P1
     let p1Answers = '';
+    const bonus_p1 = {};
     document.querySelectorAll('[data-p1]').forEach(sel => {
         p1Answers += sel.value || '-';
+    });
+    document.querySelectorAll('[data-bonus-p1]').forEach(cb => {
+        const idx = parseInt(cb.dataset.bonusP1);
+        if (cb.checked) bonus_p1[idx] = true;
     });
 
     // Read P2
     const p2Cards = document.getElementById('part2KeyGrid')?.children || [];
     let p2Chunks = [];
+    const bonus_p2 = {};
     for (let q = 0; q < qCount2; q++) {
         const card = p2Cards[q];
         let chunk = '';
@@ -4362,14 +4452,21 @@ window.saveAllKeys = async () => {
                 const active = flex.querySelector('.bg-emerald-600, .bg-rose-600');
                 chunk += active ? active.textContent.trim() : '-';
             });
+            const cb = card.querySelector('[data-bonus-p2]');
+            if (cb && cb.checked) bonus_p2[q] = true;
         }
         p2Chunks.push(chunk || '----');
     }
 
     // Read P3
     let p3Answers = [];
+    const bonus_p3 = {};
     document.querySelectorAll('[data-p3]').forEach(inp => {
         p3Answers.push(inp.value.trim());
+    });
+    document.querySelectorAll('[data-bonus-p3]').forEach(cb => {
+        const idx = parseInt(cb.dataset.bonusP3);
+        if (cb.checked) bonus_p3[idx] = true;
     });
 
     const keyObj = {
@@ -4380,6 +4477,9 @@ window.saveAllKeys = async () => {
         answers: p1Answers,
         part2: p2Chunks,
         part3: p3Answers,
+        bonus_p1,
+        bonus_p2,
+        bonus_p3,
         updatedAt: new Date().toISOString()
     };
 
@@ -4393,6 +4493,22 @@ window.saveAllKeys = async () => {
     }
     // Save to localStorage
     localStorage.setItem(`omr_keys_${state.exam.id}`, JSON.stringify(Object.values(state.keys)));
+
+    if (state.submissions && state.submissions.length > 0) {
+        const reCalc = await Swal.fire({
+            title: `Đã lưu đáp án mã đề ${code}!`,
+            text: `Bài thi đang có ${state.submissions.length} bài chấm. Bạn có muốn tự động tính lại điểm và đóng dấu lại ảnh cho tất cả bài thi không?`,
+            icon: 'question',
+            showCancelButton: true,
+            confirmButtonText: 'Có, tính & đóng dấu lại',
+            cancelButtonText: 'Không',
+            confirmButtonColor: '#059669'
+        });
+        if (reCalc.isConfirmed) {
+            await window.recalculateAllSubmissionsScore();
+            return;
+        }
+    }
 
     Swal.fire('Thành công', `Đã lưu đáp án cho mã đề ${code}!`, 'success');
 };
@@ -6107,6 +6223,83 @@ window.calcExamScorePreview = (mode = 'create') => {
     return total;
 };
 
+// ========================================================
+// TỰ ĐỘNG ĐÓNG DẤU LẠI PHIẾU CHẤM (RESTAMP SUBMISSION)
+// ========================================================
+async function reStampSubmission(sub) {
+    if (!sub) return null;
+    let baseImgSrc = sub.clean_image || sub.stamped_image || sub.image_data;
+    if (!baseImgSrc && sub.id) {
+        baseImgSrc = await getOmrImageFromDb(sub.id);
+    }
+    if (!baseImgSrc) return null;
+
+    try {
+        const img = await new Promise((resolve, reject) => {
+            const i = new Image();
+            i.onload = () => resolve(i);
+            i.onerror = () => reject(new Error('Load image failed'));
+            i.src = baseImgSrc;
+        });
+
+        let bodyCanvas;
+        if (sub.clean_image && baseImgSrc === sub.clean_image) {
+            bodyCanvas = img;
+        } else {
+            const headerH = img.naturalHeight > 2520 ? 380 : (img.naturalHeight > 2300 ? 260 : 0);
+            const bodyH = img.naturalHeight - headerH;
+            bodyCanvas = document.createElement('canvas');
+            bodyCanvas.width = img.naturalWidth;
+            bodyCanvas.height = bodyH;
+            const bCtx = bodyCanvas.getContext('2d');
+            bCtx.drawImage(img, 0, headerH, img.naturalWidth, bodyH, 0, 0, img.naturalWidth, bodyH);
+        }
+
+        const tplKey = state.exam?.sheet_template || 'qmcv1239';
+        const tpl = (window.MAU && window.MAU[tplKey]) || window.MAU.qmcv1239;
+        const newStamped = await generateStampedGradedSheet(sub, {
+            rectifiedCanvas: bodyCanvas,
+            template: tpl
+        });
+
+        if (newStamped) {
+            sub.image_data = newStamped;
+            sub.stamped_image = newStamped;
+            saveOmrImageToDb(sub.id, newStamped);
+            if (state.memoryImages) state.memoryImages[sub.id] = newStamped;
+        }
+        return newStamped;
+    } catch(err) {
+        console.warn("reStampSubmission error:", err);
+        return null;
+    }
+}
+
+// ========================================================
+// CÀI ĐẶT ĐỀ THI & SỬA ĐÁP ÁN (EDIT EXAM SETTINGS & KEYS)
+// ========================================================
+let editExamCurrentCode = '101';
+
+window.switchExamSettingsTab = (tab) => {
+    const btnInfo = document.getElementById('tabBtnExamSettingsInfo');
+    const btnKeys = document.getElementById('tabBtnExamSettingsKeys');
+    const panelInfo = document.getElementById('panelExamSettingsInfo');
+    const panelKeys = document.getElementById('panelExamSettingsKeys');
+
+    if (tab === 'info') {
+        if (btnInfo) btnInfo.className = 'px-4 py-2.5 font-bold text-xs border-b-2 border-emerald-600 text-emerald-600 dark:text-emerald-400 cursor-pointer flex items-center gap-1.5 transition-all';
+        if (btnKeys) btnKeys.className = 'px-4 py-2.5 font-bold text-xs border-b-2 border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 cursor-pointer flex items-center gap-1.5 transition-all';
+        if (panelInfo) panelInfo.classList.remove('hidden');
+        if (panelKeys) panelKeys.classList.add('hidden');
+    } else {
+        if (btnInfo) btnInfo.className = 'px-4 py-2.5 font-bold text-xs border-b-2 border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 cursor-pointer flex items-center gap-1.5 transition-all';
+        if (btnKeys) btnKeys.className = 'px-4 py-2.5 font-bold text-xs border-b-2 border-amber-600 text-amber-600 dark:text-amber-400 cursor-pointer flex items-center gap-1.5 transition-all';
+        if (panelInfo) panelInfo.classList.add('hidden');
+        if (panelKeys) panelKeys.classList.remove('hidden');
+        window.renderEditExamModalKeys(editExamCurrentCode);
+    }
+};
+
 window.openEditExamSettingsModal = () => {
     if (!state.exam) return;
     const modal = document.getElementById('editExamSettingsModal');
@@ -6128,7 +6321,213 @@ window.openEditExamSettingsModal = () => {
             (state.folders || []).map(f => `<option value="${f.id}" ${state.exam.folderId === f.id ? 'selected' : ''}>📁 ${f.name}</option>`).join('');
     }
 
+    // Populate mã đề selector trong tab đáp án của modal
+    const codeSelect = document.getElementById('editExamModalCodeSelect');
+    const codes = state.exam.codes && state.exam.codes.length > 0 ? state.exam.codes : ['101', '102'];
+    editExamCurrentCode = codes[0] || '101';
+    if (codeSelect) {
+        codeSelect.innerHTML = codes.map(c => `<option value="${c}">${c}</option>`).join('');
+        codeSelect.value = editExamCurrentCode;
+    }
+
+    window.switchExamSettingsTab('info');
     window.calcExamScorePreview('edit');
+    window.renderEditExamModalKeys(editExamCurrentCode);
+};
+
+window.handleEditExamModalCodeChange = (code) => {
+    // Lưu mã cũ trước khi đổi
+    window.saveCurrentEditModalKey(editExamCurrentCode);
+    editExamCurrentCode = code;
+    window.renderEditExamModalKeys(code);
+};
+
+window.renderEditExamModalKeys = (code) => {
+    const key = state.keys[code] || { answers: '', part2: [], part3: [] };
+    const bonusP1 = key.bonus_p1 || {};
+    const bonusP2 = key.bonus_p2 || {};
+    const bonusP3 = key.bonus_p3 || {};
+
+    // P1 Grid
+    const p1Cont = document.getElementById('editExamModalP1Grid');
+    const qCount1 = parseInt(document.getElementById('editExamCountP1')?.value) || state.exam?.question_count || 12;
+    if (p1Cont) {
+        p1Cont.innerHTML = Array.from({ length: qCount1 }, (_, i) => {
+            const currentAns = (key.answers || '')[i] || '-';
+            const isBonus = !!(bonusP1[i] || bonusP1[String(i)]);
+            return `
+                <div class="p-2 bg-slate-50 dark:bg-slate-900 rounded-xl border ${isBonus ? 'border-amber-400 bg-amber-50/40 dark:bg-amber-950/20' : 'border-slate-200 dark:border-slate-700'} flex items-center justify-between gap-1">
+                    <span class="font-bold text-slate-600 dark:text-slate-300 text-xs shrink-0">Câu ${i + 1}:</span>
+                    <div class="flex items-center gap-1.5">
+                        <select data-modal-p1="${i}" class="px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 font-bold text-emerald-600 outline-none text-xs">
+                            <option value="-" ${currentAns==='-'?'selected':''}>-</option>
+                            <option value="A" ${currentAns==='A'?'selected':''}>A</option>
+                            <option value="B" ${currentAns==='B'?'selected':''}>B</option>
+                            <option value="C" ${currentAns==='C'?'selected':''}>C</option>
+                            <option value="D" ${currentAns==='D'?'selected':''}>D</option>
+                        </select>
+                        <label class="inline-flex items-center gap-1 cursor-pointer select-none text-[11px] font-bold ${isBonus ? 'text-amber-600 dark:text-amber-400' : 'text-slate-400 hover:text-amber-600'}" title="Tất cả học sinh đều được điểm câu này">
+                            <input type="checkbox" data-modal-bonus-p1="${i}" ${isBonus ? 'checked' : ''} onchange="this.closest('.p-2').classList.toggle('border-amber-400', this.checked); this.closest('.p-2').classList.toggle('bg-amber-50/40', this.checked)" class="rounded text-amber-500 w-3.5 h-3.5 border-slate-300 focus:ring-0">
+                            <span class="text-[10px]">Cho điểm</span>
+                        </label>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    // P2 Grid
+    const p2Cont = document.getElementById('editExamModalP2Grid');
+    const qCount2 = parseInt(document.getElementById('editExamCountP2')?.value) || state.exam?.part2_count || 4;
+    if (p2Cont) {
+        p2Cont.innerHTML = Array.from({ length: qCount2 }, (_, q) => {
+            const currentChunk = (key.part2 && key.part2[q]) ? key.part2[q] : '----';
+            const isQBonus = !!(bonusP2[q] || bonusP2[String(q)]);
+            return `
+                <div class="p-3 bg-slate-50 dark:bg-slate-900 rounded-xl border ${isQBonus ? 'border-amber-400 bg-amber-50/40 dark:bg-amber-950/20' : 'border-slate-200 dark:border-slate-700'} space-y-2">
+                    <div class="flex items-center justify-between">
+                        <b class="text-xs text-slate-700 dark:text-slate-200">Câu ${q + 1} (Đúng / Sai)</b>
+                        <label class="inline-flex items-center gap-1 cursor-pointer select-none text-[11px] font-bold ${isQBonus ? 'text-amber-600 dark:text-amber-400' : 'text-slate-400 hover:text-amber-600'}" title="Tất cả học sinh đều được điểm câu này">
+                            <input type="checkbox" data-modal-bonus-p2="${q}" ${isQBonus ? 'checked' : ''} onchange="this.closest('.p-3').classList.toggle('border-amber-400', this.checked)" class="rounded text-amber-500 w-3.5 h-3.5 border-slate-300 focus:ring-0">
+                            <span>Cho điểm cả câu</span>
+                        </label>
+                    </div>
+                    <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        ${['a', 'b', 'c', 'd'].map((opt, r) => {
+                            const val = currentChunk[r] || '-';
+                            return `
+                                <div class="flex items-center justify-between text-xs bg-white dark:bg-slate-800 p-1.5 rounded-lg border border-slate-200 dark:border-slate-700">
+                                    <span class="font-bold text-slate-500">${opt})</span>
+                                    <div class="inline-flex gap-1">
+                                        <button type="button" onclick="window.selectModalP2Btn(this, ${q}, ${r}, 'Đ')" class="p2-modal-btn px-2 py-0.5 rounded text-xs font-bold border transition-all ${val==='Đ'?'bg-emerald-600 text-white border-emerald-600':'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-600'}">Đ</button>
+                                        <button type="button" onclick="window.selectModalP2Btn(this, ${q}, ${r}, 'S')" class="p2-modal-btn px-2 py-0.5 rounded text-xs font-bold border transition-all ${val==='S'?'bg-rose-600 text-white border-rose-600':'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-600'}">S</button>
+                                    </div>
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    // P3 Grid
+    const p3Cont = document.getElementById('editExamModalP3Grid');
+    const qCount3 = parseInt(document.getElementById('editExamCountP3')?.value) || state.exam?.part3_count || 6;
+    if (p3Cont) {
+        p3Cont.innerHTML = Array.from({ length: qCount3 }, (_, i) => {
+            const val = (key.part3 && key.part3[i]) || '';
+            const isBonus = !!(bonusP3[i] || bonusP3[String(i)]);
+            return `
+                <div class="p-2.5 bg-slate-50 dark:bg-slate-900 rounded-xl border ${isBonus ? 'border-amber-400 bg-amber-50/40 dark:bg-amber-950/20' : 'border-slate-200 dark:border-slate-700'} space-y-1">
+                    <div class="flex items-center justify-between">
+                        <label class="block font-bold text-slate-500 text-xs">Câu ${i + 1}:</label>
+                        <label class="inline-flex items-center gap-1 cursor-pointer select-none text-[10px] font-bold ${isBonus ? 'text-amber-600 dark:text-amber-400' : 'text-slate-400 hover:text-amber-600'}" title="Tất cả học sinh đều được điểm câu này">
+                            <input type="checkbox" data-modal-bonus-p3="${i}" ${isBonus ? 'checked' : ''} onchange="this.closest('.p-2.5').classList.toggle('border-amber-400', this.checked)" class="rounded text-amber-500 w-3 h-3 border-slate-300 focus:ring-0">
+                            <span>Cho điểm</span>
+                        </label>
+                    </div>
+                    <input type="text" data-modal-p3="${i}" value="${val}" placeholder="VD: -4,5" class="w-full px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 font-mono font-bold text-center outline-none text-xs">
+                </div>
+            `;
+        }).join('');
+    }
+};
+
+window.selectModalP2Btn = (btn, q, r, val) => {
+    const parent = btn.parentElement;
+    parent.querySelectorAll('button').forEach(b => {
+        b.className = "p2-modal-btn px-2 py-0.5 rounded text-xs font-bold border transition-all bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-600";
+    });
+    btn.className = val === 'Đ' 
+        ? "p2-modal-btn px-2 py-0.5 rounded text-xs font-bold border transition-all bg-emerald-600 text-white border-emerald-600"
+        : "p2-modal-btn px-2 py-0.5 rounded text-xs font-bold border transition-all bg-rose-600 text-white border-rose-600";
+    btn.dataset.val = val;
+};
+
+window.applyModalBulkKey = () => {
+    const text = document.getElementById('editExamModalBulkInput')?.value || '';
+    if (!text) return;
+    try {
+        const qCount = parseInt(document.getElementById('editExamCountP1')?.value) || 12;
+        const res = window.parseQuickAnswers ? window.parseQuickAnswers(text, qCount) : { answers: text.toUpperCase().replace(/[^ABCD]/g, '') };
+        const ansStr = res.answers || '';
+        document.querySelectorAll('[data-modal-p1]').forEach((sel, i) => {
+            if (ansStr[i]) sel.value = ansStr[i];
+        });
+        Swal.fire({
+            icon: 'success',
+            title: 'Đã áp dụng chuỗi đáp án!',
+            text: `Đã điền đáp án cho ${Math.min(ansStr.length, qCount)} câu Phần I.`,
+            timer: 1800
+        });
+    } catch(err) {
+        Swal.fire('Lỗi định dạng', err.message, 'warning');
+    }
+};
+
+window.saveCurrentEditModalKey = (code) => {
+    if (!code || !state.exam) return;
+    const qCount1 = parseInt(document.getElementById('editExamCountP1')?.value) || 12;
+    const qCount2 = parseInt(document.getElementById('editExamCountP2')?.value) || 4;
+    const qCount3 = parseInt(document.getElementById('editExamCountP3')?.value) || 6;
+
+    let p1Answers = '';
+    const bonus_p1 = {};
+    document.querySelectorAll('[data-modal-p1]').forEach(sel => {
+        p1Answers += sel.value || '-';
+    });
+    document.querySelectorAll('[data-modal-bonus-p1]').forEach(cb => {
+        const idx = parseInt(cb.dataset.modalBonusP1);
+        if (cb.checked) bonus_p1[idx] = true;
+    });
+
+    const p2Cards = document.getElementById('editExamModalP2Grid')?.children || [];
+    let p2Chunks = [];
+    const bonus_p2 = {};
+    for (let q = 0; q < qCount2; q++) {
+        const card = p2Cards[q];
+        let chunk = '';
+        if (card) {
+            card.querySelectorAll('.inline-flex').forEach(flex => {
+                const active = flex.querySelector('.bg-emerald-600, .bg-rose-600');
+                chunk += active ? active.textContent.trim() : '-';
+            });
+            const cb = card.querySelector('[data-modal-bonus-p2]');
+            if (cb && cb.checked) bonus_p2[q] = true;
+        }
+        p2Chunks.push(chunk || '----');
+    }
+
+    let p3Answers = [];
+    const bonus_p3 = {};
+    document.querySelectorAll('[data-modal-p3]').forEach(inp => {
+        p3Answers.push(inp.value.trim());
+    });
+    document.querySelectorAll('[data-modal-bonus-p3]').forEach(cb => {
+        const idx = parseInt(cb.dataset.modalBonusP3);
+        if (cb.checked) bonus_p3[idx] = true;
+    });
+
+    const keyObj = {
+        id: `key_${state.exam.id}_${code}`,
+        examId: state.exam.id,
+        teacherId: state.teacherUid,
+        code,
+        answers: p1Answers,
+        part2: p2Chunks,
+        part3: p3Answers,
+        bonus_p1,
+        bonus_p2,
+        bonus_p3,
+        updatedAt: new Date().toISOString()
+    };
+    state.keys[code] = keyObj;
+
+    if (state.teacherUid) {
+        try { setDoc(doc(db, "omr_keys", keyObj.id), keyObj); } catch(_) {}
+    }
+    localStorage.setItem(`omr_keys_${state.exam.id}`, JSON.stringify(Object.values(state.keys)));
 };
 
 window.confirmSaveExamSettings = async () => {
@@ -6151,6 +6550,12 @@ window.confirmSaveExamSettings = async () => {
             confirmButtonColor: '#ef4444'
         });
         if (!confirmOver.isConfirmed) return;
+    }
+
+    // Lưu mã đề đang chọn trong tab keys
+    const codeSelect = document.getElementById('editExamModalCodeSelect');
+    if (codeSelect && codeSelect.value) {
+        window.saveCurrentEditModalKey(codeSelect.value);
     }
 
     state.exam.name = name;
@@ -6178,27 +6583,32 @@ window.confirmSaveExamSettings = async () => {
 
     if (state.submissions && state.submissions.length > 0) {
         const reCalc = await Swal.fire({
-            title: 'Cập nhật lại điểm đã chấm?',
-            text: `Bài thi đã có ${state.submissions.length} bài chấm. Thầy/Cô có muốn tự động tính lại điểm (re-score) cho toàn bộ ${state.submissions.length} bài theo barem điểm mới này không?`,
+            title: 'Cập nhật lại điểm đã chấm & đóng dấu lại?',
+            text: `Bài thi đã có ${state.submissions.length} bài chấm. Hệ thống sẽ tự động tính lại điểm (re-score) và đóng dấu lại toàn bộ ảnh cho ${state.submissions.length} bài.`,
             icon: 'question',
             showCancelButton: true,
-            confirmButtonText: 'Có, tính lại điểm ngay',
-            cancelButtonText: 'Không, giữ nguyên điểm cũ',
+            confirmButtonText: 'Có, cập nhật ngay',
+            cancelButtonText: 'Không, giữ nguyên',
             confirmButtonColor: '#059669'
         });
         if (reCalc.isConfirmed) {
             await window.recalculateAllSubmissionsScore();
         } else {
-            Swal.fire('Thành công', 'Đã lưu cấu hình bài thi!', 'success');
+            Swal.fire('Thành công', 'Đã lưu cấu hình bài thi và đáp án!', 'success');
         }
     } else {
-        Swal.fire('Thành công', 'Đã lưu cấu hình bài thi!', 'success');
+        Swal.fire('Thành công', 'Đã lưu cấu hình bài thi và đáp án!', 'success');
     }
 };
 
 window.recalculateAllSubmissionsScore = async () => {
     if (!state.exam || !state.submissions || state.submissions.length === 0) return;
-    Swal.showLoading();
+    Swal.fire({
+        title: 'Đang cập nhật lại điểm...',
+        text: `Đang tính lại điểm và đóng dấu lại ảnh cho ${state.submissions.length} bài thi...`,
+        allowOutsideClick: false,
+        didOpen: () => Swal.showLoading()
+    });
 
     for (const sub of state.submissions) {
         const scoreData = calculateExamScore(sub.code, sub.answers, sub.part2, sub.part3);
@@ -6208,8 +6618,7 @@ window.recalculateAllSubmissionsScore = async () => {
         sub.part3_score = scoreData.part3Score;
 
         try {
-            sub._headerV25Upgraded = false;
-            await ensureSubmissionStampedHeaderUpgraded(sub);
+            await reStampSubmission(sub);
         } catch (_) {}
     }
 
@@ -6219,9 +6628,279 @@ window.recalculateAllSubmissionsScore = async () => {
         saveSubmissionsToLocalSafe(state.exam.id, state.submissions);
     }
 
+    if (state.lastSubmission) {
+        const updatedLast = state.submissions.find(s => s.id === state.lastSubmission.id);
+        if (updatedLast) {
+            state.lastSubmission = updatedLast;
+            await displayLastResultInspector(updatedLast, null);
+        }
+    }
+
     renderSubmissionsUI();
+    window.renderResultsTable();
     updateOverviewStats();
-    Swal.fire('Đã hoàn tất', `Đã tính lại điểm cho toàn bộ ${state.submissions.length} bài chấm theo barem mới!`, 'success');
+    Swal.fire('Đã hoàn tất', `Đã tính lại điểm và đóng dấu lại cho toàn bộ ${state.submissions.length} bài chấm!`, 'success');
+};
+
+// ========================================================
+// SỬA BÀI THI & ĐÍNH CHÍNH TÔ TRẮC NGHIỆM (HS TẨY CHƯA SẠCH / TÔ NHẦM)
+// ========================================================
+let editSubState = {
+    sub: null,
+    answersP1: '',
+    answersP2: [],
+    answersP3: [],
+    activeTab: 'p1'
+};
+
+window.openEditSubmissionAnswersModal = () => {
+    const sub = state.lastSubmission;
+    if (!sub) return;
+    editSubState.sub = sub;
+    editSubState.answersP1 = sub.answers || '';
+    editSubState.answersP2 = sub.part2 ? JSON.parse(JSON.stringify(sub.part2)) : [];
+    editSubState.answersP3 = sub.part3 ? JSON.parse(JSON.stringify(sub.part3)) : [];
+    editSubState.activeTab = 'p1';
+
+    const sbdInp = document.getElementById('editSubModalSbd');
+    const codeInp = document.getElementById('editSubModalCode');
+    const nameInp = document.getElementById('editSubModalName');
+    const reasonInp = document.getElementById('editSubModalReason');
+
+    if (sbdInp) sbdInp.value = sub.student_no || '';
+    if (codeInp) codeInp.value = sub.code || '';
+    if (nameInp) nameInp.value = sub.student_name || '';
+    if (reasonInp) reasonInp.value = '';
+
+    window.switchEditSubTab('p1');
+    window.renderEditSubP1();
+    window.renderEditSubP2();
+    window.renderEditSubP3();
+
+    document.getElementById('editSubmissionAnswersModal')?.classList.remove('hidden');
+};
+
+window.closeEditSubmissionAnswersModal = () => {
+    document.getElementById('editSubmissionAnswersModal')?.classList.add('hidden');
+};
+
+window.switchEditSubTab = (tab) => {
+    editSubState.activeTab = tab;
+    ['p1', 'p2', 'p3'].forEach(t => {
+        const btn = document.getElementById(`tabBtnEditSub${t.toUpperCase()}`);
+        const panel = document.getElementById(`editSubPanel${t.toUpperCase()}`);
+        if (btn) {
+            btn.className = t === tab
+                ? 'px-4 py-2 font-bold border-b-2 border-amber-600 text-amber-600 dark:text-amber-400 cursor-pointer'
+                : 'px-4 py-2 font-bold border-b-2 border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 cursor-pointer';
+        }
+        if (panel) {
+            panel.classList.toggle('hidden', t !== tab);
+        }
+    });
+};
+
+window.renderEditSubP1 = () => {
+    const cont = document.getElementById('editSubP1Container');
+    if (!cont) return;
+    const qCount = state.exam?.question_count || 12;
+    const sub = editSubState.sub;
+    const key = resolveKeyForCode(sub?.code);
+    const keyAns = key.answers || '';
+    const origAns = sub?._original_answers || sub?.answers || '';
+
+    cont.innerHTML = Array.from({ length: qCount }, (_, i) => {
+        const currentChoice = (editSubState.answersP1 || '')[i] || '-';
+        const kChar = keyAns[i] || '-';
+        const oChar = origAns[i] || '-';
+        const isModified = sub?.manual_overrides?.p1?.[i] || (currentChoice !== oChar && currentChoice !== '-');
+
+        return `
+            <div class="p-2.5 rounded-xl border ${isModified ? 'border-purple-300 dark:border-purple-700 bg-purple-50/50 dark:bg-purple-950/20' : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900'} flex items-center justify-between gap-2">
+                <div class="flex items-center gap-1.5 min-w-0">
+                    <span class="font-bold text-slate-700 dark:text-slate-200 text-xs shrink-0">Câu ${i + 1}:</span>
+                    <span class="px-1.5 py-0.5 rounded text-[10px] font-mono bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 font-bold" title="Đáp án chuẩn của đề">Đ/A: ${kChar}</span>
+                    ${isModified ? '<span class="text-[10px] text-purple-600 font-bold">● Sửa</span>' : ''}
+                </div>
+                <div class="inline-flex gap-1 shrink-0">
+                    ${['A', 'B', 'C', 'D'].map(c => `
+                        <button type="button" onclick="window.chooseEditSubP1(${i}, '${c}')" class="w-7 h-7 rounded-lg text-xs font-bold border transition-all cursor-pointer ${currentChoice === c ? 'bg-amber-600 text-white border-amber-600 shadow-2xs scale-105' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-600 hover:bg-slate-100'}">${c}</button>
+                    `).join('')}
+                    <button type="button" onclick="window.chooseEditSubP1(${i}, '-')" class="w-7 h-7 rounded-lg text-xs font-bold border text-slate-400 border-slate-300 dark:border-slate-600 hover:bg-rose-50 hover:text-rose-600 cursor-pointer" title="Bỏ trống / Tô hỏng">✕</button>
+                </div>
+            </div>
+        `;
+    }).join('');
+};
+
+window.chooseEditSubP1 = (q, val) => {
+    let arr = editSubState.answersP1.split('');
+    while (arr.length <= q) arr.push('-');
+    arr[q] = val;
+    editSubState.answersP1 = arr.join('');
+    window.renderEditSubP1();
+};
+
+window.renderEditSubP2 = () => {
+    const cont = document.getElementById('editSubP2Container');
+    if (!cont) return;
+    const qCount = state.exam?.part2_count || 4;
+    const sub = editSubState.sub;
+    const key = resolveKeyForCode(sub?.code);
+
+    cont.innerHTML = Array.from({ length: qCount }, (_, q) => {
+        const sChunk = (editSubState.answersP2 && editSubState.answersP2[q]) ? editSubState.answersP2[q] : '----';
+        const kChunk = (key.part2 && key.part2[q]) ? key.part2[q] : '----';
+        return `
+            <div class="p-3 bg-slate-50 dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-2">
+                <div class="font-bold text-xs text-slate-800 dark:text-slate-200">Câu ${q + 1} (Đúng / Sai):</div>
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    ${['a', 'b', 'c', 'd'].map((opt, r) => {
+                        const val = (sChunk[r] || '-').toUpperCase().replace('D', 'Đ');
+                        const kVal = (kChunk[r] || '-').toUpperCase().replace('D', 'Đ');
+                        const isMod = sub?.manual_overrides?.p2?.[`${q}_${r}`];
+                        return `
+                            <div class="p-2 rounded-xl border ${isMod ? 'border-purple-300 bg-purple-50/50' : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800'} flex items-center justify-between">
+                                <span class="font-bold text-slate-600 dark:text-slate-300 text-xs">${opt}) <small class="text-emerald-600 font-bold font-mono">${kVal}</small></span>
+                                <div class="inline-flex gap-1">
+                                    <button type="button" onclick="window.chooseEditSubP2(${q}, ${r}, 'Đ')" class="px-2 py-0.5 rounded text-xs font-bold border ${val === 'Đ' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-slate-100 text-slate-600 border-slate-300'}">Đ</button>
+                                    <button type="button" onclick="window.chooseEditSubP2(${q}, ${r}, 'S')" class="px-2 py-0.5 rounded text-xs font-bold border ${val === 'S' ? 'bg-rose-600 text-white border-rose-600' : 'bg-slate-100 text-slate-600 border-slate-300'}">S</button>
+                                </div>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+            </div>
+        `;
+    }).join('');
+};
+
+window.chooseEditSubP2 = (q, r, val) => {
+    while (editSubState.answersP2.length <= q) editSubState.answersP2.push('----');
+    let chunk = (editSubState.answersP2[q] || '----').split('');
+    while (chunk.length < 4) chunk.push('-');
+    chunk[r] = val;
+    editSubState.answersP2[q] = chunk.join('');
+    window.renderEditSubP2();
+};
+
+window.renderEditSubP3 = () => {
+    const cont = document.getElementById('editSubP3Container');
+    if (!cont) return;
+    const qCount = state.exam?.part3_count || 6;
+    const sub = editSubState.sub;
+    const key = resolveKeyForCode(sub?.code);
+
+    cont.innerHTML = Array.from({ length: qCount }, (_, i) => {
+        let val = '';
+        if (Array.isArray(editSubState.answersP3)) val = editSubState.answersP3[i] || '';
+        else if (Array.isArray(sub?.part3)) val = sub?.part3[i] || '';
+        const kVal = (key.part3 && key.part3[i]) || '';
+        const isMod = sub?.manual_overrides?.p3?.[i];
+
+        return `
+            <div class="p-2.5 rounded-xl border ${isMod ? 'border-purple-300 bg-purple-50/50' : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900'} space-y-1">
+                <div class="flex items-center justify-between text-xs font-bold text-slate-600 dark:text-slate-300">
+                    <span>Câu ${i + 1}:</span>
+                    <span class="text-emerald-600 font-mono text-[11px]">Đ/A: ${kVal}</span>
+                </div>
+                <input type="text" oninput="window.changeEditSubP3(${i}, this.value)" value="${val}" placeholder="VD: -4,5" class="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 font-mono font-bold text-center text-xs">
+            </div>
+        `;
+    }).join('');
+};
+
+window.changeEditSubP3 = (q, val) => {
+    while (editSubState.answersP3.length <= q) editSubState.answersP3.push('');
+    editSubState.answersP3[q] = val.trim();
+};
+
+window.confirmSaveSubmissionEdit = async () => {
+    const sub = editSubState.sub;
+    if (!sub) return;
+    Swal.showLoading();
+
+    const newSbd = document.getElementById('editSubModalSbd')?.value.trim() || sub.student_no;
+    const newCode = document.getElementById('editSubModalCode')?.value.trim() || sub.code;
+    const newName = document.getElementById('editSubModalName')?.value.trim() || sub.student_name;
+    const reason = document.getElementById('editSubModalReason')?.value.trim() || 'Giáo viên đính chính';
+
+    if (!sub._original_answers) sub._original_answers = sub.answers || '';
+    if (!sub.manual_overrides) sub.manual_overrides = { p1: {}, p2: {}, p3: {} };
+
+    // So sánh P1
+    const qCount1 = state.exam?.question_count || 12;
+    for (let i = 0; i < qCount1; i++) {
+        const cur = (editSubState.answersP1 || '')[i] || '-';
+        const orig = (sub._original_answers || '')[i] || '-';
+        if (cur !== orig && cur !== '-') {
+            sub.manual_overrides.p1[i] = { from: orig, to: cur, reason, at: new Date().toISOString() };
+            sub.has_manual_override = true;
+        }
+    }
+
+    // So sánh P2
+    const qCount2 = state.exam?.part2_count || 4;
+    for (let q = 0; q < qCount2; q++) {
+        const curChunk = editSubState.answersP2[q] || '----';
+        const origChunk = (sub.part2 && sub.part2[q]) ? sub.part2[q] : '----';
+        for (let r = 0; r < 4; r++) {
+            if (curChunk[r] && origChunk[r] && curChunk[r] !== origChunk[r]) {
+                sub.manual_overrides.p2[`${q}_${r}`] = { from: origChunk[r], to: curChunk[r], reason, at: new Date().toISOString() };
+                sub.has_manual_override = true;
+            }
+        }
+    }
+
+    // So sánh P3
+    const qCount3 = state.exam?.part3_count || 6;
+    for (let q = 0; q < qCount3; q++) {
+        const curVal = editSubState.answersP3[q] || '';
+        const origVal = (sub.part3 && sub.part3[q]) ? String(sub.part3[q]) : '';
+        if (curVal !== origVal && curVal !== '') {
+            sub.manual_overrides.p3[q] = { from: origVal, to: curVal, reason, at: new Date().toISOString() };
+            sub.has_manual_override = true;
+        }
+    }
+
+    sub.student_no = newSbd;
+    sub.code = newCode;
+    sub.student_name = newName;
+    sub.answers = editSubState.answersP1;
+    sub.part2 = editSubState.answersP2;
+    sub.part3 = editSubState.answersP3;
+
+    // Tính lại điểm
+    const scoreData = calculateExamScore(sub.code, sub.answers, sub.part2, sub.part3);
+    sub.score = scoreData.totalScore;
+    sub.part1_score = scoreData.part1Score;
+    sub.part2_score = scoreData.part2Score;
+    sub.part3_score = scoreData.part3Score;
+
+    // Đóng dấu lại ảnh với vòng màu tím cho các câu sửa
+    await reStampSubmission(sub);
+
+    // Lưu vào storage & database
+    if (typeof storage !== 'undefined' && storage.saveSubmissions) {
+        await storage.saveSubmissions(state.exam.id, state.submissions);
+    } else {
+        saveSubmissionsToLocalSafe(state.exam.id, state.submissions);
+    }
+    if (state.teacherUid && typeof db !== 'undefined') {
+        try { await setDoc(doc(db, "omr_submissions", sub.id), sub, { merge: true }); } catch (_) {}
+    }
+
+    window.closeEditSubmissionAnswersModal();
+    await displayLastResultInspector(sub, null);
+    window.renderResultsTable();
+    updateOverviewStats();
+
+    Swal.fire({
+        icon: 'success',
+        title: 'Đã đính chính bài làm!',
+        text: `Đã tính lại điểm (${sub.score.toFixed(2)}đ) và đóng dấu lại ảnh với vòng màu tím cho các câu sửa.`,
+        timer: 2500
+    });
 };
 
 
