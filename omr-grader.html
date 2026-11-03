@@ -299,6 +299,20 @@
             position: relative;
             display: inline-block;
             max-width: 100%;
+            transition: all 0.2s ease-in-out;
+        }
+        .sheet-container.fit-screen img {
+            max-height: calc(100vh - 210px) !important;
+            width: auto !important;
+            max-width: 100% !important;
+            object-fit: contain;
+            border-radius: 8px;
+        }
+        .sheet-container.fit-width img {
+            width: 100% !important;
+            max-height: none !important;
+            height: auto !important;
+            border-radius: 8px;
         }
         .sheet-svg-overlay {
             position: absolute;
@@ -627,10 +641,17 @@
                                         </select>
                                     </div>
 
-                                    <label class="inline-flex items-center gap-1.5 text-xs font-bold text-slate-700 dark:text-slate-200 bg-gray-50 dark:bg-[#1E1B29] px-2.5 py-1.5 rounded-xl border border-gray-200 dark:border-[#38344D] cursor-pointer shrink-0">
-                                        <input type="checkbox" id="autoSaveToggle" checked class="w-3.5 h-3.5 rounded accent-emerald-600 cursor-pointer">
-                                        <span class="text-[11px] sm:text-xs">Tự lưu</span>
-                                    </label>
+                                    <div class="flex items-center gap-1.5 shrink-0">
+                                        <button type="button" onclick="window.openTelegramConfigModal()" class="inline-flex items-center gap-1.5 text-xs font-bold text-sky-700 dark:text-sky-300 bg-sky-50 dark:bg-sky-950/40 hover:bg-sky-100 dark:hover:bg-sky-900/40 px-2.5 py-1.5 rounded-xl border border-sky-200 dark:border-sky-800 cursor-pointer transition-all active:scale-95" title="Cấu hình lưu ảnh phiếu bài chấm lên Kênh Telegram (8 Bot xoay vòng)">
+                                            <i class="fa-brands fa-telegram text-sky-500 text-sm"></i>
+                                            <span class="hidden sm:inline">Lưu Telegram</span>
+                                            <span id="tgActiveIndicator" class="w-2 h-2 rounded-full bg-slate-300 dark:bg-slate-600"></span>
+                                        </button>
+                                        <label class="inline-flex items-center gap-1.5 text-xs font-bold text-slate-700 dark:text-slate-200 bg-gray-50 dark:bg-[#1E1B29] px-2.5 py-1.5 rounded-xl border border-gray-200 dark:border-[#38344D] cursor-pointer">
+                                            <input type="checkbox" id="autoSaveToggle" checked class="w-3.5 h-3.5 rounded accent-emerald-600 cursor-pointer">
+                                            <span class="text-[11px] sm:text-xs">Tự lưu</span>
+                                        </label>
+                                    </div>
                                     <!-- Hidden legacy mode buttons kept for JS compatibility -->
                                     <div class="hidden">
                                         <button type="button" id="btnModeUpload" onclick="window.setScanMode('upload')"></button>
@@ -737,6 +758,9 @@
                                         <button type="button" onclick="window.downloadGradedSheet()" id="btnDownloadStamped" class="px-3 py-2 btn-season-secondary text-xs font-bold rounded-xl shadow-2xs transition-all active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer" title="Tải ảnh phiếu đã đóng dấu">
                                             <i class="fa-solid fa-download text-emerald-600 dark:text-emerald-400"></i> <span>Tải phiếu</span>
                                         </button>
+                                        <a id="btnViewTelegram" href="#" target="_blank" rel="noopener noreferrer" class="hidden px-3 py-2 bg-sky-50 hover:bg-sky-100 dark:bg-sky-950/40 text-sky-600 dark:text-sky-300 border border-sky-200 dark:border-sky-800 text-xs font-bold rounded-xl shadow-2xs transition-all active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer" title="Mở ảnh gốc đã lưu trên Kênh Telegram">
+                                            <i class="fa-brands fa-telegram text-sky-500"></i> <span>Xem Telegram</span>
+                                        </a>
                                         <button type="button" onclick="window.closeSubmissionDetail()" class="px-3 py-2 btn-season-secondary text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5">
                                             <i class="fa-solid fa-arrow-left text-emerald-600 dark:text-emerald-400"></i> <span>Quay lại</span>
                                         </button>
@@ -783,6 +807,9 @@
                                         <button type="button" onclick="window.openEditSubmissionAnswersModal()" class="px-2.5 py-1 rounded-lg bg-purple-600 hover:bg-purple-700 text-white font-bold text-[11px] cursor-pointer">Sửa tiếp</button>
                                     </div>
 
+                                    <!-- Cảnh báo khi bài trùng SBD hoặc trùng cả SBD & Mã đề -->
+                                    <div id="resDuplicateNoticeBox" class="hidden p-3 rounded-2xl text-xs font-bold border transition-all"></div>
+
                                     <!-- Chữ viết tay họ tên trên phiếu -->
                                     <div class="space-y-1.5">
                                         <span class="text-xs font-bold text-slate-600 dark:text-slate-300">Chữ viết tay họ tên trên phiếu:</span>
@@ -821,9 +848,16 @@
                                 <!-- CỘT 2 (lg:col-span-7): Toàn bộ không gian cho Ảnh phiếu bài làm đã đóng dấu & chấm chi tiết -->
                                 <div class="lg:col-span-7 xl:col-span-7 space-y-2">
                                     <div class="flex items-center justify-between text-xs flex-wrap gap-2 pb-1 border-b border-slate-100 dark:border-slate-800">
-                                        <span class="font-bold text-slate-700 dark:text-slate-200 text-xs sm:text-sm flex items-center gap-2">
-                                            <i class="fa-regular fa-image text-emerald-600"></i> Phiếu bài làm đã đóng dấu &amp; chấm chi tiết:
-                                        </span>
+                                        <div class="flex items-center gap-2">
+                                            <span class="font-bold text-slate-700 dark:text-slate-200 text-xs sm:text-sm flex items-center gap-1.5">
+                                                <i class="fa-regular fa-image text-emerald-600"></i> Phiếu bài làm đã đóng dấu:
+                                            </span>
+                                            <!-- Chế độ xem: Thu vừa 100% toàn bộ phiếu vs Phóng to ngang -->
+                                            <div class="inline-flex items-center p-0.5 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[11px] font-bold">
+                                                <button type="button" id="btnSheetFitScreen" onclick="window.setSheetViewMode('fit')" class="px-2 py-0.5 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-white shadow-2xs transition-all cursor-pointer flex items-center gap-1" title="Thu nhỏ vừa khung nhìn để thấy trọn vẹn 100% phiếu mà không cần cuộn"><i class="fa-solid fa-compress text-[10px] text-emerald-500"></i> 100% Phiếu</button>
+                                                <button type="button" id="btnSheetFitWidth" onclick="window.setSheetViewMode('width')" class="px-2 py-0.5 rounded-lg text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white transition-all cursor-pointer flex items-center gap-1" title="Phóng to chiều ngang để soi chi tiết"><i class="fa-solid fa-expand text-[10px]"></i> Phóng to</button>
+                                            </div>
+                                        </div>
                                         <span class="text-slate-500 text-[11px] sm:text-xs flex items-center gap-2 flex-wrap">
                                             <span class="inline-flex items-center gap-1"><i class="fa-solid fa-circle text-emerald-500 text-[10px]"></i>Đúng</span>
                                             <span class="inline-flex items-center gap-1"><i class="fa-solid fa-circle text-rose-500 text-[10px]"></i>Sai</span>
@@ -831,9 +865,9 @@
                                             <span class="inline-flex items-center gap-1"><i class="fa-solid fa-circle text-purple-600 text-[10px]"></i>Đã sửa</span>
                                         </span>
                                     </div>
-                                    <div class="relative bg-slate-950 rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800 shadow-md max-h-[90vh] overflow-y-auto custom-scrollbar flex justify-center p-2 sm:p-3">
-                                        <div class="sheet-container" id="visualSheetContainer">
-                                            <img id="resRectifiedImg" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1' height='1'%3E%3C/svg%3E" alt="Phiếu đã nắn phẳng" class="max-w-full h-auto block">
+                                    <div id="sheetImgWrapper" class="relative bg-slate-950 rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800 shadow-md max-h-[86vh] overflow-y-auto custom-scrollbar flex justify-center items-start p-2 sm:p-3">
+                                        <div class="sheet-container fit-screen" id="visualSheetContainer">
+                                            <img id="resRectifiedImg" onclick="window.toggleSheetViewMode()" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1' height='1'%3E%3C/svg%3E" alt="Phiếu đã nắn phẳng" class="max-w-full block cursor-zoom-in" title="Bấm vào ảnh để chuyển đổi Thu nhỏ 100% / Phóng to">
                                             <svg id="resSvgOverlay" class="sheet-svg-overlay"></svg>
                                         </div>
                                     </div>
@@ -1329,7 +1363,62 @@
         </div>
     </div>
 
-    <!-- MODAL: ĐỒNG BỘ TỪ LỚP HỌC LMS -->
+    <!-- MODAL: CẤU HÌNH LƯU TRỮ ẢNH TELEGRAM (8 BOT ROUND-ROBIN) -->
+    <div id="telegramConfigModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+        <div class="bg-white dark:bg-slate-900 rounded-3xl max-w-lg w-full shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden flex flex-col max-h-[92vh]">
+            <div class="px-6 py-4 bg-sky-600 text-white flex items-center justify-between">
+                <h3 class="font-bold text-base flex items-center gap-2">
+                    <i class="fa-brands fa-telegram text-xl"></i> Cấu hình Lưu trữ Kênh Telegram
+                </h3>
+                <button onclick="window.closeTelegramConfigModal()" class="w-7 h-7 rounded-lg bg-white/20 hover:bg-white/30 text-white flex items-center justify-center transition-colors cursor-pointer"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="p-6 overflow-y-auto custom-scrollbar space-y-4 text-xs">
+                <div class="p-3.5 rounded-2xl bg-sky-50 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-800 text-sky-900 dark:text-sky-200 space-y-1.5">
+                    <div class="font-bold flex items-center gap-1.5 text-xs">
+                        <i class="fa-solid fa-cloud-arrow-up text-sky-600 dark:text-sky-400"></i> Lưu ảnh bài chấm miễn phí không giới hạn dung lượng
+                    </div>
+                    <p class="text-[11px] leading-relaxed opacity-90">
+                        Ảnh bài chấm đã đóng dấu sẽ được tự động tải lên Kênh Telegram của bạn. Cơ chế xoay vòng đa Bot (lên tới 8 Bot Round-Robin) giúp tăng tốc độ tải lên gấp nhiều lần và chống chạm giới hạn Telegram API!
+                    </p>
+                </div>
+
+                <label class="flex items-center gap-3 p-3 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 cursor-pointer">
+                    <input type="checkbox" id="tgConfigEnabled" class="w-4 h-4 rounded accent-sky-600 cursor-pointer">
+                    <span class="font-bold text-slate-800 dark:text-slate-100 text-xs">Bật tự động lưu ảnh bài chấm lên Kênh Telegram</span>
+                </label>
+
+                <div>
+                    <label class="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                        ID Kênh / Chat ID Telegram (*):
+                    </label>
+                    <input type="text" id="tgConfigChatId" placeholder="VD: -1001234567890 hoặc @kenh_omr_qmath" class="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 outline-none font-mono font-semibold text-slate-800 dark:text-slate-100">
+                    <span class="text-[10px] text-slate-400 mt-1 block">Lưu ý: Bạn phải thêm tất cả các Bot làm <b>Quản trị viên (Admin)</b> của Kênh Telegram để Bot có quyền đăng ảnh!</span>
+                </div>
+
+                <div>
+                    <div class="flex items-center justify-between mb-1">
+                        <label class="font-bold text-slate-700 dark:text-slate-300">
+                            Danh sách Bot Tokens (1 hoặc nhiều bot, mỗi bot 1 dòng):
+                        </label>
+                        <span id="tgBotCountBadge" class="text-[10px] font-mono text-sky-600 dark:text-sky-400 font-bold">0 bot</span>
+                    </div>
+                    <textarea id="tgConfigTokens" rows="5" placeholder="Dán các mã Bot Token vào đây, mỗi bot 1 dòng. Ví dụ:&#10;123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ&#10;987654321:XYZabcDeFGHiJklMNopQRStuvw" class="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 outline-none font-mono text-[11px] text-slate-800 dark:text-slate-100" oninput="window.updateTgBotCountBadge()"></textarea>
+                    <span class="text-[10px] text-slate-400 mt-1 block">Hỗ trợ tới 8 bot (hoặc hơn). Hệ thống tự động chia đều lượt tải ảnh cho các bot theo vòng tròn.</span>
+                </div>
+
+                <div class="pt-2">
+                    <button type="button" onclick="window.testTelegramConnection()" class="w-full py-2.5 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold text-xs flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-98 border border-slate-200 dark:border-slate-700">
+                        <i class="fa-solid fa-paper-plane text-sky-500"></i>
+                        <span>Gửi ảnh test thử nghiệm lên Kênh Telegram</span>
+                    </button>
+                </div>
+            </div>
+            <div class="px-6 py-3 bg-slate-100 dark:bg-slate-800/90 border-t border-slate-200 dark:border-slate-700 flex justify-end gap-2">
+                <button type="button" onclick="window.closeTelegramConfigModal()" class="px-4 py-2 text-slate-600 dark:text-slate-400 font-bold text-xs rounded-xl cursor-pointer">Đóng</button>
+                <button type="button" onclick="window.saveTelegramConfig()" class="px-5 py-2 bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs rounded-xl shadow-xs cursor-pointer">Lưu cấu hình</button>
+            </div>
+        </div>
+    </div>
     <div id="syncLmsClassModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
         <div class="bg-white dark:bg-slate-900 rounded-3xl max-w-md w-full shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden flex flex-col">
             <div class="px-6 py-4 bg-emerald-600 text-white flex items-center justify-between">
@@ -2330,6 +2419,6 @@
     <script src="./omr/answer-import.js"></script>
 
     <!-- QMath LMS Unified Database & Auth Compatibility Module -->
-    <script type="module" src="./omr-grader.js?v=20261103_v97"></script>
+    <script type="module" src="./omr-grader.js?v=20261104_v99"></script>
 </body>
 </html>

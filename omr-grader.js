@@ -138,6 +138,10 @@ function initTeacherUI() {
         avatarEl.textContent = initial;
     }
 
+    // Cập nhật trạng thái lưu trữ Telegram và chế độ xem phiếu bài chấm
+    if (typeof updateTelegramStatusIndicator === 'function') updateTelegramStatusIndicator();
+    if (typeof window.setSheetViewMode === 'function') window.setSheetViewMode(currentSheetViewMode);
+
     // Đồng bộ Logo Thầy Choang từ cài đặt giao diện qmath.io.vn (site_settings/homepage_hero)
     getDoc(doc(db, "site_settings", "homepage_hero")).then(snap => {
         if (snap && snap.exists()) {
@@ -482,6 +486,19 @@ function autoFillKeysFromLmsQuestions(ex, forceOverwrite = false) {
 
 state.gradedCountsByExam = {};
 state.memoryImages = {};
+
+// Cấu hình Lưu trữ Kênh Telegram (8 Bot Round-Robin)
+state.telegramConfig = {
+    enabled: false,
+    chatId: '',
+    botTokens: []
+};
+try {
+    const rawTg = localStorage.getItem('omr_telegram_storage_config');
+    if (rawTg) {
+        state.telegramConfig = { ...state.telegramConfig, ...JSON.parse(rawTg) };
+    }
+} catch (_) {}
 
 async function loadTeacherExams() {
     await loadFolders();
@@ -967,78 +984,376 @@ async function deleteOmrImageFromDb(key) {
     } catch (_) {}
 }
 
+// ========================================================
+// HỆ THỐNG LƯU TRỮ KÊNH TELEGRAM (8 BOT ROUND-ROBIN CLOUD BACKUP)
+// ========================================================
+let tgBotRoundRobinIndex = 0;
+
+function getNextTelegramBotToken() {
+    const tokens = (state.telegramConfig?.botTokens || []).map(t => String(t || '').trim()).filter(Boolean);
+    if (tokens.length === 0) return null;
+    const token = tokens[tgBotRoundRobinIndex % tokens.length];
+    tgBotRoundRobinIndex = (tgBotRoundRobinIndex + 1) % tokens.length;
+    return token;
+}
+
+function updateTelegramStatusIndicator() {
+    const el = document.getElementById('tgActiveIndicator');
+    if (!el) return;
+    const isEnabled = Boolean(state.telegramConfig?.enabled && (state.telegramConfig?.botTokens || []).length > 0 && state.telegramConfig?.chatId);
+    if (isEnabled) {
+        const botCount = (state.telegramConfig.botTokens || []).length;
+        el.className = 'w-2 h-2 rounded-full bg-emerald-500 animate-pulse';
+        el.title = `Đang bật lưu Telegram (${botCount} bot)`;
+    } else {
+        el.className = 'w-2 h-2 rounded-full bg-slate-300 dark:bg-slate-600';
+        el.title = 'Chưa bật lưu Telegram';
+    }
+}
+window.updateTelegramStatusIndicator = updateTelegramStatusIndicator;
+
+window.openTelegramConfigModal = function() {
+    const modal = document.getElementById('telegramConfigModal');
+    if (!modal) return;
+    const chk = document.getElementById('tgConfigEnabled');
+    const txtChat = document.getElementById('tgConfigChatId');
+    const txtTokens = document.getElementById('tgConfigTokens');
+
+    if (chk) chk.checked = Boolean(state.telegramConfig?.enabled);
+    if (txtChat) txtChat.value = state.telegramConfig?.chatId || '';
+    if (txtTokens) txtTokens.value = (state.telegramConfig?.botTokens || []).join('\n');
+
+    window.updateTgBotCountBadge();
+    modal.classList.remove('hidden');
+};
+
+window.closeTelegramConfigModal = function() {
+    document.getElementById('telegramConfigModal')?.classList.add('hidden');
+};
+
+window.updateTgBotCountBadge = function() {
+    const txt = document.getElementById('tgConfigTokens')?.value || '';
+    const tokens = txt.split('\n').map(t => t.trim()).filter(Boolean);
+    const badge = document.getElementById('tgBotCountBadge');
+    if (badge) {
+        badge.textContent = `${tokens.length} bot`;
+        badge.className = tokens.length > 0
+            ? 'text-[10px] font-mono text-emerald-600 dark:text-emerald-400 font-bold'
+            : 'text-[10px] font-mono text-slate-400 font-bold';
+    }
+};
+
+window.saveTelegramConfig = function() {
+    const chk = document.getElementById('tgConfigEnabled');
+    const txtChat = document.getElementById('tgConfigChatId');
+    const txtTokens = document.getElementById('tgConfigTokens');
+
+    const enabled = Boolean(chk?.checked);
+    const chatId = (txtChat?.value || '').trim();
+    const rawTokens = (txtTokens?.value || '').split('\n').map(t => t.trim()).filter(Boolean);
+
+    if (enabled && (!chatId || rawTokens.length === 0)) {
+        Swal.fire('Thiếu thông tin', 'Vui lòng nhập Chat/Channel ID và ít nhất 1 mã Bot Token trước khi bật tính năng!', 'warning');
+        return;
+    }
+
+    state.telegramConfig = {
+        enabled,
+        chatId,
+        botTokens: rawTokens
+    };
+
+    try {
+        localStorage.setItem('omr_telegram_storage_config', JSON.stringify(state.telegramConfig));
+    } catch (e) {
+        console.warn("Không thể lưu cấu hình Telegram vào localStorage:", e);
+    }
+
+    updateTelegramStatusIndicator();
+    window.closeTelegramConfigModal();
+
+    Swal.fire({
+        icon: 'success',
+        title: 'Đã lưu cấu hình Telegram!',
+        text: enabled
+            ? `Hệ thống đã sẵn sàng với ${rawTokens.length} bot xoay vòng lưu ảnh bài chấm!`
+            : 'Đã tắt tính năng tự động lưu ảnh lên Telegram.',
+        timer: 2000,
+        showConfirmButton: false
+    });
+};
+
+function dataUrlToBlob(dataUrl) {
+    const parts = dataUrl.split(',');
+    const mimeMatch = parts[0].match(/:(.*?);/);
+    const mime = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+    const binary = atob(parts[1]);
+    const len = binary.length;
+    const buffer = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+        buffer[i] = binary.charCodeAt(i);
+    }
+    return new Blob([buffer], { type: mime });
+}
+
+async function uploadGradedSheetToTelegram(sub, imgDataUrl) {
+    if (!state.telegramConfig?.enabled) return null;
+    const token = getNextTelegramBotToken();
+    if (!token) return null;
+    const chatId = state.telegramConfig?.chatId;
+    if (!chatId) return null;
+    if (!imgDataUrl || !imgDataUrl.startsWith('data:image')) return null;
+
+    try {
+        const photoBlob = dataUrlToBlob(imgDataUrl);
+        const formData = new FormData();
+        formData.append('chat_id', chatId);
+        const sbdText = sub.student_no ? `SBD: ${sub.student_no}` : 'Chưa có SBD';
+        const nameText = sub.student_name ? ` - ${sub.student_name}` : '';
+        const codeText = sub.code ? ` | Mã đề: ${sub.code}` : '';
+        const scoreText = (sub.score !== undefined) ? ` | Điểm: ${sub.score}đ` : '';
+        const examName = state.exam?.name || 'Bài kiểm tra OMR';
+        formData.append('caption', `📝 [${examName}]\n👤 ${sbdText}${nameText}${codeText}${scoreText}\n⏰ ${new Date().toLocaleString('vi-VN')}`);
+        formData.append('photo', photoBlob, `omr_${sub.id || Date.now()}.jpg`);
+
+        const resp = await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, {
+            method: 'POST',
+            body: formData
+        });
+        const resData = await resp.json();
+        if (!resData.ok) {
+            console.warn("Telegram sendPhoto error:", resData.description);
+            return null;
+        }
+
+        const photos = resData.result?.photo;
+        const messageId = resData.result?.message_id;
+        if (photos && photos.length > 0) {
+            const largestPhoto = photos[photos.length - 1];
+            const fileResp = await fetch(`https://api.telegram.org/bot${token}/getFile?file_id=${largestPhoto.file_id}`);
+            const fileData = await fileResp.json();
+            if (fileData.ok && fileData.result?.file_path) {
+                const directUrl = `https://api.telegram.org/file/bot${token}/${fileData.result.file_path}`;
+                sub.telegram_photo_url = directUrl;
+                sub.telegram_msg_id = messageId;
+
+                const idx = state.submissions.findIndex(s => s.id === sub.id);
+                if (idx !== -1) {
+                    state.submissions[idx].telegram_photo_url = directUrl;
+                    state.submissions[idx].telegram_msg_id = messageId;
+                }
+                saveSubmissionsToLocalSafe(sub.examId, state.submissions);
+
+                if (state.teacherUid && typeof db !== 'undefined') {
+                    const subIdSafe = (sub.id || '').replace(/[^a-zA-Z0-9_-]/g, '');
+                    updateDoc(doc(db, "results", `omr_${sub.examId}_${subIdSafe}`), {
+                        telegramPhotoUrl: directUrl
+                    }).catch(() => {});
+                }
+
+                return directUrl;
+            }
+        }
+    } catch (e) {
+        console.warn("Telegram upload exception:", e);
+    }
+    return null;
+}
+
+window.testTelegramConnection = async function() {
+    const txtChat = document.getElementById('tgConfigChatId');
+    const txtTokens = document.getElementById('tgConfigTokens');
+
+    const chatId = (txtChat?.value || '').trim();
+    const rawTokens = (txtTokens?.value || '').split('\n').map(t => t.trim()).filter(Boolean);
+
+    if (!chatId || rawTokens.length === 0) {
+        Swal.fire('Thiếu thông tin', 'Vui lòng nhập ID Kênh và ít nhất 1 mã Bot Token để kiểm tra kết nối!', 'warning');
+        return;
+    }
+
+    Swal.fire({
+        title: 'Đang kiểm tra kết nối Telegram...',
+        html: `Đang gửi ảnh kiểm tra qua <b>${rawTokens.length} bot</b>... Vui lòng chờ vài giây!`,
+        allowOutsideClick: false,
+        didOpen: () => {
+            Swal.showLoading();
+        }
+    });
+
+    try {
+        const cvs = document.createElement('canvas');
+        cvs.width = 600;
+        cvs.height = 300;
+        const ctx = cvs.getContext('2d');
+        ctx.fillStyle = '#0ea5e9';
+        ctx.fillRect(0, 0, 600, 300);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 26px sans-serif';
+        ctx.fillText('🚀 QMATH LMS - OMR TEST PHOTO', 50, 100);
+        ctx.font = '18px sans-serif';
+        ctx.fillText(`Kiểm tra kết nối thành công: ${new Date().toLocaleString('vi-VN')}`, 50, 150);
+        ctx.fillText(`Tổng số bot cấu hình: ${rawTokens.length} bot`, 50, 190);
+        const testDataUrl = cvs.toDataURL('image/jpeg', 0.9);
+
+        const token = rawTokens[0];
+        const blob = dataUrlToBlob(testDataUrl);
+        const fd = new FormData();
+        fd.append('chat_id', chatId);
+        fd.append('caption', `✅ Kết nối Kênh Telegram thành công từ QMath OMR Scanner!\n🤖 Sử dụng Bot: ${token.split(':')[0]}...\n👥 Tổng số Bot: ${rawTokens.length} bot\n⏰ Thời gian: ${new Date().toLocaleString('vi-VN')}`);
+        fd.append('photo', blob, 'test.jpg');
+
+        const resp = await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, {
+            method: 'POST',
+            body: fd
+        });
+        const resJson = await resp.json();
+
+        if (resJson.ok) {
+            Swal.fire({
+                icon: 'success',
+                title: '🎉 Kết nối thành công!',
+                html: `Bot đã gửi ảnh test lên Kênh Telegram <b>${chatId}</b> thành công mỹ mãn! Hãy kiểm tra Kênh Telegram của bạn.`,
+                confirmButtonText: 'Tuyệt vời',
+                confirmButtonColor: '#0ea5e9'
+            });
+        } else {
+            Swal.fire({
+                icon: 'error',
+                title: 'Lỗi gửi tin nhắn Telegram',
+                html: `Telegram báo lỗi: <br><code class="text-rose-500 font-bold">${resJson.description || 'Không rõ lỗi'}</code><br><br><span class="text-xs text-slate-500">Gợi ý: Hãy đảm bảo bạn đã thêm Bot vào Kênh và cấp quyền <b>Admin (Đăng bài)</b> cho Bot!</span>`
+            });
+        }
+    } catch (err) {
+        Swal.fire({
+            icon: 'error',
+            title: 'Lỗi mạng hoặc CORS',
+            html: `Không thể kết nối đến Telegram API: <br><code>${err.message || err}</code>`
+        });
+    }
+};
+
+// ========================================================
+// CHẾ ĐỘ XEM ẢNH PHIẾU SOI (FIT 100% SCREEN VIEW VS ZOOM FIT WIDTH)
+// ========================================================
+let currentSheetViewMode = localStorage.getItem('omr_sheet_view_mode') || 'fit';
+
+window.setSheetViewMode = function(mode) {
+    currentSheetViewMode = mode;
+    try {
+        localStorage.setItem('omr_sheet_view_mode', mode);
+    } catch (_) {}
+
+    const container = document.getElementById('visualSheetContainer');
+    const btnFit = document.getElementById('btnSheetFitScreen');
+    const btnWidth = document.getElementById('btnSheetFitWidth');
+    const img = document.getElementById('resRectifiedImg');
+
+    if (container) {
+        if (mode === 'fit') {
+            container.classList.remove('fit-width');
+            container.classList.add('fit-screen');
+        } else {
+            container.classList.remove('fit-screen');
+            container.classList.add('fit-width');
+        }
+    }
+
+    if (btnFit && btnWidth) {
+        if (mode === 'fit') {
+            btnFit.className = 'px-2 py-0.5 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-white shadow-2xs transition-all cursor-pointer flex items-center gap-1 font-bold';
+            btnWidth.className = 'px-2 py-0.5 rounded-lg text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white transition-all cursor-pointer flex items-center gap-1';
+        } else {
+            btnWidth.className = 'px-2 py-0.5 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-white shadow-2xs transition-all cursor-pointer flex items-center gap-1 font-bold';
+            btnFit.className = 'px-2 py-0.5 rounded-lg text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white transition-all cursor-pointer flex items-center gap-1';
+        }
+    }
+
+    if (img) {
+        img.className = (mode === 'fit') ? 'max-w-full block cursor-zoom-in' : 'max-w-full block cursor-zoom-out';
+    }
+};
+
+window.toggleSheetViewMode = function() {
+    window.setSheetViewMode(currentSheetViewMode === 'fit' ? 'width' : 'fit');
+};
+
 async function loadExamSubmissions(examId) {
     let list = [];
-    try {
-        const qSnap = await getDocs(query(collection(db, "omr_submissions"), where("examId", "==", examId)));
-        list = qSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-    } catch(e) {}
 
+    // 1. Nạp từ localStorage trước (dữ liệu tại máy luôn tươi mới nhất, bảo toàn 100% tất cả các bài chấm)
     try {
         const localList = JSON.parse(localStorage.getItem(`omr_submissions_${examId}`) || '[]');
         if (Array.isArray(localList)) {
-            localList.forEach(loc => {
-                if (!loc || !loc.id) return;
-                const existing = list.find(x => x.id === loc.id);
+            list = [...localList];
+        }
+    } catch(e) {}
+
+    // 2. Đồng bộ thêm từ Firestore omr_submissions nếu trên máy bị thiếu bài
+    try {
+        if (state.teacherUid && typeof db !== 'undefined') {
+            const qSnap = await getDocs(query(collection(db, "omr_submissions"), where("examId", "==", examId)));
+            qSnap.docs.forEach(d => {
+                const cloudSub = { id: d.id, ...d.data() };
+                const existing = list.find(x => x.id === cloudSub.id);
                 if (!existing) {
-                    list.push(loc);
-                } else if (!existing.image_data && loc.image_data) {
-                    existing.image_data = loc.image_data;
-                    existing.stamped_image = loc.stamped_image || loc.image_data;
+                    list.push(cloudSub);
                 }
             });
         }
     } catch(e) {}
 
-    // Đồng bộ & khôi phục thêm từ bảng results trên Supabase (đảm bảo bài đã chấm luôn còn nguyên kể cả khi đổi thiết bị hoặc tràn localStorage)
+    // 3. Khôi phục thêm từ bảng results trên Supabase (Bảo toàn cả các bài trùng SBD, không lọc bỏ)
     try {
-        const resSnap = await getDocs(query(collection(db, "results"), where("examId", "==", examId)));
-        resSnap.docs.forEach(docSnap => {
-            const r = { id: docSnap.id, ...docSnap.data() };
-            if (r.gradingSource !== 'omr' && !String(r.id || '').startsWith('omr_')) return;
+        if (state.teacherUid && typeof db !== 'undefined') {
+            const resSnap = await getDocs(query(collection(db, "results"), where("examId", "==", examId)));
+            resSnap.docs.forEach(docSnap => {
+                const r = { id: docSnap.id, ...docSnap.data() };
+                if (r.gradingSource !== 'omr' && !String(r.id || '').startsWith('omr_')) return;
 
-            const rawSubId = String(r.id).replace(`omr_${examId}_`, '') || r.id;
-            const existing = list.find(x =>
-                x.id === rawSubId ||
-                x.lmsResultId === r.id ||
-                (x.student_no && r.studentNo && x.student_no === r.studentNo)
-            );
+                const rawSubId = String(r.id).replace(`omr_${examId}_`, '') || r.id;
+                const existing = list.find(x => x.id === rawSubId || x.lmsResultId === r.id);
 
-            if (!existing) {
-                const cleanName = (r.studentName && !r.studentName.startsWith('Thí sinh OMR') && !r.studentName.startsWith('Học sinh SBD '))
-                    ? r.studentName
-                    : '';
-                list.push({
-                    id: rawSubId,
-                    lmsResultId: r.id,
-                    examId: examId,
-                    teacherId: r.teacherId || state.teacherUid,
-                    student_no: r.studentNo || '',
-                    student_name: cleanName,
-                    student_uid: (r.studentId && !String(r.studentId).startsWith('omr_')) ? r.studentId : '',
-                    student_email: r.studentEmail || '',
-                    class_id: r.classId || '',
-                    class_name: r.className || '',
-                    code: r.examCode || '101',
-                    score: Number(r.score) || 0,
-                    part1_score: Number(r.part1Score) || 0,
-                    part2_score: Number(r.part2Score) || 0,
-                    part3_score: Number(r.part3Score) || 0,
-                    answers: r.omrPart1 || '',
-                    part2: Array.isArray(r.omrPart2) ? r.omrPart2 : [],
-                    part3: Array.isArray(r.omrPart3) ? r.omrPart3 : [],
-                    image_data: r.stampedImage || '',
-                    stamped_image: r.stampedImage || '',
-                    createdAt: r.submittedAt || r.gradedAt || r.updatedAt || new Date().toISOString()
-                });
-            } else {
-                existing.lmsResultId = existing.lmsResultId || r.id;
-                if (!existing.image_data && r.stampedImage) {
-                    existing.image_data = r.stampedImage;
-                    existing.stamped_image = r.stampedImage;
+                if (!existing) {
+                    const cleanName = (r.studentName && !r.studentName.startsWith('Thí sinh OMR') && !r.studentName.startsWith('Học sinh SBD '))
+                        ? r.studentName
+                        : '';
+                    list.push({
+                        id: rawSubId,
+                        lmsResultId: r.id,
+                        examId: examId,
+                        teacherId: r.teacherId || state.teacherUid,
+                        student_no: r.studentNo || '',
+                        student_name: cleanName,
+                        student_uid: (r.studentId && !String(r.studentId).startsWith('omr_')) ? r.studentId : '',
+                        student_email: r.studentEmail || '',
+                        class_id: r.classId || '',
+                        class_name: r.className || '',
+                        code: r.examCode || '101',
+                        score: Number(r.score) || 0,
+                        part1_score: Number(r.part1Score) || 0,
+                        part2_score: Number(r.part2Score) || 0,
+                        part3_score: Number(r.part3Score) || 0,
+                        answers: r.omrPart1 || '',
+                        part2: Array.isArray(r.omrPart2) ? r.omrPart2 : [],
+                        part3: Array.isArray(r.omrPart3) ? r.omrPart3 : [],
+                        image_data: r.stampedImage || '',
+                        stamped_image: r.stampedImage || '',
+                        telegram_photo_url: r.telegramPhotoUrl || '',
+                        createdAt: r.submittedAt || r.gradedAt || r.updatedAt || new Date().toISOString()
+                    });
+                } else {
+                    existing.lmsResultId = existing.lmsResultId || r.id;
+                    if (!existing.image_data && r.stampedImage) {
+                        existing.image_data = r.stampedImage;
+                        existing.stamped_image = r.stampedImage;
+                    }
+                    if (!existing.telegram_photo_url && r.telegramPhotoUrl) {
+                        existing.telegram_photo_url = r.telegramPhotoUrl;
+                    }
                 }
-            }
-        });
+            });
+        }
     } catch(e) {
         console.warn("Khôi phục bài chấm từ bảng results:", e);
     }
@@ -1065,6 +1380,39 @@ async function loadExamSubmissions(examId) {
     state.submissions = list;
     if (state.gradedCountsByExam) {
         state.gradedCountsByExam[examId] = list.length;
+    }
+}
+
+// ========================================================
+// HỆ THỐNG ĐỐI CHIẾU TRÙNG SỐ BÁO DANH & MÃ ĐỀ (DUPLICATE DETECTION ENGINE)
+// ========================================================
+function getSubmissionDuplicateStatus(sub, allSubmissions = state.submissions) {
+    if (!sub) return null;
+    const sbd = String(sub.student_no || '').trim();
+    if (!sbd) return null; // Không tính trùng nếu thí sinh chưa tô SBD
+
+    const dupes = (allSubmissions || []).filter(s => s.id !== sub.id && String(s.student_no || '').trim() === sbd);
+    if (dupes.length === 0) return null;
+
+    const subCode = String(sub.code || '').trim();
+    const hasSameCode = dupes.some(s => String(s.code || '').trim() === subCode);
+
+    if (hasSameCode) {
+        return {
+            type: 'both',
+            label: 'Trùng cả SBD & Mã',
+            badgeBg: 'bg-rose-100 text-rose-700 dark:bg-rose-900/60 dark:text-rose-200 border-rose-300 dark:border-rose-700',
+            rowBg: 'bg-rose-50/70 dark:bg-rose-950/30 hover:bg-rose-100/80 dark:hover:bg-rose-900/40 border-l-4 border-l-rose-500',
+            dupeCount: dupes.length + 1
+        };
+    } else {
+        return {
+            type: 'sbd_only',
+            label: 'Trùng SBD',
+            badgeBg: 'bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-200 border-amber-300 dark:border-amber-700',
+            rowBg: 'bg-amber-50/60 dark:bg-amber-950/20 hover:bg-amber-100/70 dark:hover:bg-amber-900/30 border-l-4 border-l-amber-500',
+            dupeCount: dupes.length + 1
+        };
     }
 }
 
@@ -1221,9 +1569,14 @@ function renderInlineSubmissionsList() {
             ? s.student_name
             : (s.student_no ? `Học sinh #${s.student_no}` : `Phiếu chưa tô SBD (#${idx + 1})`);
         const scoreNum = Number(s.score ?? 0);
+        const dupeStatus = getSubmissionDuplicateStatus(s, state.submissions);
+        const rowClass = dupeStatus ? dupeStatus.rowBg : 'hover:bg-gray-50 dark:hover:bg-[#262335]/60';
+        const dupeBadge = dupeStatus
+            ? `<span class="px-1.5 py-0.5 rounded text-[10px] font-bold border ${dupeStatus.badgeBg}" title="Phát hiện ${dupeStatus.dupeCount} bài có cùng SBD ${s.student_no}">${dupeStatus.label}</span>`
+            : '';
 
         return `
-            <div class="px-3 py-2.5 hover:bg-gray-50 dark:hover:bg-[#262335]/60 transition-colors border-b border-gray-100 dark:border-[#38344D]/50 last:border-b-0">
+            <div class="px-3 py-2.5 ${rowClass} transition-colors border-b border-gray-100 dark:border-[#38344D]/50 last:border-b-0">
                 <div class="flex items-center justify-between gap-2 min-w-0">
                     <!-- Left: STT + Họ tên học sinh + SBD & Mã đề (Clean, tuyệt đối không hiển thị điểm các phần bên ngoài) -->
                     <div onclick="window.viewSubmissionDetail('${s.id}')" class="flex items-center gap-2.5 min-w-0 flex-1 cursor-pointer">
@@ -1234,10 +1587,11 @@ function renderInlineSubmissionsList() {
                                 ${s.class_name ? `<span class="px-1.5 py-0.2 rounded bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold shrink-0 border border-emerald-200 dark:border-emerald-800">${s.class_name}</span>` : ''}
                                 ${!hasName && s.name_image ? `<img src="${s.name_image}" class="h-4 max-w-[80px] object-contain rounded border border-gray-200 dark:border-gray-700 bg-white shrink-0" alt="Tên viết tay">` : ''}
                             </div>
-                            <div class="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400 font-mono mt-0.5">
+                            <div class="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400 font-mono mt-0.5 flex-wrap">
                                 <span>SBD: <b class="text-slate-800 dark:text-slate-200">${s.student_no || '--'}</b></span>
                                 <span>·</span>
                                 <span>Mã: <b class="text-slate-800 dark:text-slate-200">${s.code || '--'}</b></span>
+                                ${dupeBadge}
                             </div>
                         </div>
                     </div>
@@ -1249,6 +1603,10 @@ function renderInlineSubmissionsList() {
                         </span>
 
                         <div class="flex items-center gap-1">
+                            ${s.telegram_photo_url ? `
+                            <a href="${s.telegram_photo_url}" target="_blank" rel="noopener noreferrer" class="w-7 h-7 rounded-lg bg-sky-50 hover:bg-sky-100 dark:bg-sky-950/50 text-sky-600 dark:text-sky-300 flex items-center justify-center text-xs active:scale-95 transition-all cursor-pointer border border-sky-200 dark:border-sky-800" title="Xem ảnh gốc lưu trên Telegram">
+                                <i class="fa-brands fa-telegram"></i>
+                            </a>` : ''}
                             <button type="button" onclick="window.quickAssignStudentToSubmission('${s.id}')" class="w-7 h-7 rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-[#1E1B29] dark:hover:bg-[#2D2A3D] text-slate-600 dark:text-slate-300 flex items-center justify-center text-xs active:scale-95 transition-all cursor-pointer border border-gray-200 dark:border-[#38344D]" title="Sửa tên / SBD">
                                 <i class="fa-solid fa-pen"></i>
                             </button>
@@ -1632,9 +1990,9 @@ window.handleFilesSelected = async (files) => {
     // Hợp nhất kết quả hàng loạt vào state 1 lần duy nhất để tối ưu tốc độ tối đa
     if (batchSubmissions.length > 0) {
         for (const sub of batchSubmissions) {
-            const existingIdx = state.submissions.findIndex(s => s.student_no === sub.student_no && s.student_no !== '');
+            // Không bao giờ ghi đè khi trùng SBD! Bảo toàn 100% tất cả các phiếu đã chấm
+            const existingIdx = state.submissions.findIndex(s => s.id === sub.id);
             if (existingIdx !== -1) {
-                sub.id = state.submissions[existingIdx].id || sub.id;
                 state.submissions[existingIdx] = sub;
             } else {
                 state.submissions.push(sub);
@@ -1925,6 +2283,13 @@ async function processSingleSheet(source, options = {}) {
         }
     } catch(stampErr) {
         console.warn("Lỗi đóng dấu kết quả phiếu thi:", stampErr);
+    }
+
+    // Tự động lưu ảnh bài chấm lên Kênh Telegram trong nền (8 Bot Round-Robin)
+    if (state.telegramConfig?.enabled && (state.telegramConfig?.botTokens || []).length > 0 && state.telegramConfig?.chatId) {
+        uploadGradedSheetToTelegram(submission, submission.stamped_image || rawResult.rectifiedImage).catch(tgErr => {
+            console.warn("Lỗi tải ảnh lên Telegram:", tgErr);
+        });
     }
 
     // Giải phóng ngay rectifiedCanvas sau khi đóng dấu xong để không giữ hàng gigabyte bộ nhớ GPU
@@ -2417,6 +2782,53 @@ async function displayLastResultInspector(sub, rawResult) {
             overrideBox.classList.add('hidden');
         }
     }
+
+    // Cảnh báo trùng SBD / Mã đề
+    const dupeBox = document.getElementById('resDuplicateNoticeBox');
+    if (dupeBox) {
+        const dupeStatus = getSubmissionDuplicateStatus(sub, state.submissions);
+        if (dupeStatus) {
+            dupeBox.className = `p-3 rounded-2xl text-xs font-bold border transition-all ${dupeStatus.badgeBg}`;
+            if (dupeStatus.type === 'both') {
+                dupeBox.innerHTML = `
+                    <div class="flex items-start gap-2.5">
+                        <i class="fa-solid fa-triangle-exclamation text-rose-600 dark:text-rose-400 text-base mt-0.5 shrink-0"></i>
+                        <div>
+                            <span class="block font-black text-rose-700 dark:text-rose-200">⚠️ TRÙNG CẢ SỐ BÁO DANH & MÃ ĐỀ:</span>
+                            <span class="text-[11px] font-normal opacity-95">Phát hiện ${dupeStatus.dupeCount} bài thi cùng SBD <b>${sub.student_no}</b> và Mã đề <b>${sub.code}</b>. Có thể học sinh quét lại hoặc 2 thí sinh trùng cả số báo danh lẫn đề. Hệ thống bảo toàn 100% tất cả các bài thi!</span>
+                        </div>
+                    </div>
+                `;
+            } else {
+                dupeBox.innerHTML = `
+                    <div class="flex items-start gap-2.5">
+                        <i class="fa-solid fa-circle-exclamation text-amber-600 dark:text-amber-400 text-base mt-0.5 shrink-0"></i>
+                        <div>
+                            <span class="block font-black text-amber-800 dark:text-amber-200">⚠️ TRÙNG SỐ BÁO DANH (KHÁC MÃ ĐỀ):</span>
+                            <span class="text-[11px] font-normal opacity-95">Có ${dupeStatus.dupeCount} bài thi cùng SBD <b>${sub.student_no}</b> nhưng khác mã đề. Có thể học sinh đã tô nhầm SBD. Bạn có thể sửa nhanh SBD bên dưới.</span>
+                        </div>
+                    </div>
+                `;
+            }
+            dupeBox.classList.remove('hidden');
+        } else {
+            dupeBox.classList.add('hidden');
+        }
+    }
+
+    // Nút xem ảnh Telegram nếu đã có URL tải lên
+    const tgBtn = document.getElementById('btnViewTelegram');
+    if (tgBtn) {
+        if (sub.telegram_photo_url) {
+            tgBtn.href = sub.telegram_photo_url;
+            tgBtn.classList.remove('hidden');
+        } else {
+            tgBtn.classList.add('hidden');
+        }
+    }
+
+    // Đảm bảo áp dụng chế độ xem (100% Phiếu vs Phóng to)
+    window.setSheetViewMode(currentSheetViewMode);
 
     // Edit fields
     document.getElementById('editSbdInput').value = sub.student_no || '';
@@ -3285,10 +3697,9 @@ async function saveSubmissionToStore(sub) {
         saveOmrImageToDb(sub.id, rawImg);
     }
 
-    // Check if duplicate SBD exists for this exam, replace it
-    const existingIdx = state.submissions.findIndex(s => s.student_no === sub.student_no && s.student_no !== '');
+    // Không bao giờ ghi đè khi trùng SBD! Giữ nguyên 100% bài nộp, chỉ cập nhật khi trùng đúng sub.id
+    const existingIdx = state.submissions.findIndex(s => s.id === sub.id);
     if (existingIdx !== -1) {
-        sub.id = state.submissions[existingIdx].id || sub.id;
         state.submissions[existingIdx] = sub;
     } else {
         state.submissions.push(sub);
@@ -3391,8 +3802,9 @@ async function compressStampedImageForCloud(dataUrl) {
 
 async function syncSubmissionToLmsResultsCollection(sub) {
     if (!state.exam) return null;
-    const sbdSafe = (sub.student_no || sub.id || '000').replace(/[^a-zA-Z0-9_-]/g, '');
-    const resultDocId = `omr_${state.exam.id}_${sbdSafe}`;
+    const sbdSafe = (sub.student_no || '').replace(/[^a-zA-Z0-9_-]/g, '');
+    const subIdSafe = (sub.id || '').replace(/[^a-zA-Z0-9_-]/g, '') || ('sub_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6));
+    const resultDocId = `omr_${state.exam.id}_${subIdSafe}`;
     const classId = sub.class_id || state.exam.classId || '';
     const className = sub.class_name || state.exam.className || '';
     const studentId = sub.student_uid || (sbdSafe ? `omr_sbd_${sbdSafe}` : sub.id);
@@ -3403,6 +3815,7 @@ async function syncSubmissionToLmsResultsCollection(sub) {
 
     const resultPayload = {
         id: resultDocId,
+        submissionId: sub.id,
         examId: state.exam.id,
         examTitle: state.exam.name || 'Bài thi OMR',
         teacherId: state.teacherUid,
@@ -3423,6 +3836,7 @@ async function syncSubmissionToLmsResultsCollection(sub) {
         omrPart2: sub.part2 || [],
         omrPart3: sub.part3 || [],
         stampedImage: compressedStamped || '',
+        telegramPhotoUrl: sub.telegram_photo_url || '',
         gradingSource: 'omr',
         submissionMode: 'offline_omr',
         gradedAt: new Date().toISOString(),
@@ -4418,10 +4832,20 @@ window.renderResultsTable = () => {
     tbody.innerHTML = sorted.map((s, idx) => {
         const hasRealName = s.student_name && !s.student_name.startsWith('Học sinh ');
         const displayName = hasRealName ? s.student_name : (s.student_no ? `Học sinh #${s.student_no}` : `Phiếu chưa tên #${idx + 1}`);
+        const dupeStatus = getSubmissionDuplicateStatus(s, sorted);
+        const rowClass = dupeStatus
+            ? dupeStatus.rowBg
+            : 'hover:bg-slate-50/80 dark:hover:bg-slate-750 transition-colors';
+
         return `
-        <tr class="hover:bg-slate-50/80 dark:hover:bg-slate-750 transition-colors">
+        <tr class="${rowClass} transition-colors">
             <td class="p-3 text-center text-slate-400 font-bold">${idx + 1}</td>
-            <td class="p-3 font-mono font-bold text-slate-800 dark:text-slate-100">${s.student_no || '---'}</td>
+            <td class="p-3">
+                <div class="flex flex-col items-start gap-1">
+                    <span class="font-mono font-bold text-slate-800 dark:text-slate-100">${s.student_no || '---'}</span>
+                    ${dupeStatus ? `<span class="px-1.5 py-0.5 rounded text-[10px] font-bold border ${dupeStatus.badgeBg}" title="Phát hiện ${dupeStatus.dupeCount} bài có cùng SBD ${s.student_no}">${dupeStatus.label}</span>` : ''}
+                </div>
+            </td>
             <td class="p-3">
                 <div class="font-bold text-slate-900 dark:text-white flex items-center gap-2 flex-wrap">
                     <span>${displayName}</span>
@@ -4437,6 +4861,10 @@ window.renderResultsTable = () => {
             <td class="p-3 text-center text-slate-400 text-[11px]">${new Date(s.createdAt).toLocaleTimeString('vi-VN', {hour:'2-digit', minute:'2-digit', day:'2-digit', month:'2-digit'})}</td>
             <td class="p-3 text-center">
                 <div class="flex items-center justify-center gap-1.5">
+                    ${s.telegram_photo_url ? `
+                    <a href="${s.telegram_photo_url}" target="_blank" rel="noopener noreferrer" class="w-8 h-8 rounded-xl bg-sky-50 hover:bg-sky-100 dark:bg-sky-950/50 text-sky-600 dark:text-sky-300 flex items-center justify-center transition-all active:scale-95 cursor-pointer border border-sky-200 dark:border-sky-800" title="Xem ảnh gốc lưu trên Kênh Telegram">
+                        <i class="fa-brands fa-telegram text-xs"></i>
+                    </a>` : ''}
                     <button type="button" onclick="window.quickAssignStudentToSubmission('${s.id}')" class="w-8 h-8 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 flex items-center justify-center transition-all active:scale-95 cursor-pointer" title="Gán tên / SBD học sinh cho phiếu này">
                         <i class="fa-solid fa-user-pen text-xs text-emerald-600 dark:text-emerald-400"></i>
                     </button>
@@ -4536,34 +4964,72 @@ window.deleteSubmission = async (subId) => {
 };
 
 window.clearAllSubmissionsForCurrentExam = async () => {
-    if (state.submissions.length === 0) return;
+    if (!state.submissions || state.submissions.length === 0) return;
+    const count = state.submissions.length;
     const res = await Swal.fire({
-        title: 'Xóa toàn bộ kết quả chấm của bài thi này?',
-        text: 'Thao tác này không thể hoàn tác!',
+        title: `Xóa toàn bộ ${count} kết quả chấm của bài thi này?`,
+        text: 'Thao tác này sẽ làm trống danh sách điểm ngay lập tức và không thể hoàn tác!',
         icon: 'warning',
         showCancelButton: true,
-        confirmButtonText: 'Xóa tất cả',
+        confirmButtonText: 'Xóa ngay tức thì',
         cancelButtonText: 'Hủy',
         confirmButtonColor: '#ef4444'
     });
     if (!res.isConfirmed) return;
 
-    for (const s of state.submissions) {
-        if (state.teacherUid) {
-            try { await deleteDoc(doc(db, "omr_submissions", s.id)); } catch(e) {}
-            const sbdSafe = (s.student_no || s.id || '000').replace(/[^a-zA-Z0-9_-]/g, '');
-            const resId = s.lmsResultId || `omr_${state.exam?.id}_${sbdSafe}`;
-            try { await deleteDoc(doc(db, "results", resId)); } catch(e) {}
-        }
-    }
+    // 1. Sao chép danh sách bài cần xóa để xử lý ngầm
+    const toDelete = [...state.submissions];
+    const examId = state.exam?.id;
+
+    // 2. Làm sạch UI & bộ nhớ NGAY LẬP TỨC (0ms latency)
     state.submissions = [];
-    if (state.gradedCountsByExam && state.exam?.id) {
-        state.gradedCountsByExam[state.exam.id] = 0;
+    if (state.gradedCountsByExam && examId) {
+        state.gradedCountsByExam[examId] = 0;
     }
-    localStorage.removeItem(`omr_submissions_${state.exam.id}`);
+    if (examId) {
+        localStorage.removeItem(`omr_submissions_${examId}`);
+    }
+    if (state.memoryImages) state.memoryImages = {};
+    document.getElementById('lastResultCard')?.classList.add('hidden');
     window.renderResultsTable();
+    if (typeof renderInlineSubmissionsList === 'function') renderInlineSubmissionsList();
     updateOverviewStats();
-    Swal.fire('Đã xóa', 'Toàn bộ bài chấm đã được làm trống!', 'success');
+
+    // 3. Thông báo thành công ngay tức thì
+    Swal.fire({
+        icon: 'success',
+        title: 'Đã xóa toàn bộ bài chấm!',
+        text: `Đã làm trống toàn bộ ${count} bài chấm thành công.`,
+        timer: 1500,
+        showConfirmButton: false
+    });
+
+    // 4. Thực hiện xóa trong cơ sở dữ liệu ngầm theo từng khối song song (chunked concurrency)
+    (async () => {
+        // Dọn dẹp IndexedDB
+        toDelete.forEach(s => {
+            deleteOmrImageFromDb(s.id).catch(() => {});
+            deleteOmrImageFromDb(s.id + '_clean').catch(() => {});
+        });
+
+        // Xóa Firestore & Supabase theo batch 12 bài song song
+        if (state.teacherUid && typeof db !== 'undefined' && examId) {
+            const chunkSize = 12;
+            for (let i = 0; i < toDelete.length; i += chunkSize) {
+                const chunk = toDelete.slice(i, i + chunkSize);
+                await Promise.allSettled(chunk.map(async (s) => {
+                    try { await deleteDoc(doc(db, "omr_submissions", s.id)); } catch(_) {}
+                    const subIdSafe = (s.id || '').replace(/[^a-zA-Z0-9_-]/g, '');
+                    const sbdSafe = (s.student_no || '').replace(/[^a-zA-Z0-9_-]/g, '');
+                    const resId = s.lmsResultId || `omr_${examId}_${subIdSafe}`;
+                    try { await deleteDoc(doc(db, "results", resId)); } catch(_) {}
+                    if (sbdSafe) {
+                        try { await deleteDoc(doc(db, "results", `omr_${examId}_${sbdSafe}`)); } catch(_) {}
+                    }
+                }));
+            }
+        }
+    })().catch(err => console.warn("Lỗi xóa bài ngầm:", err));
 };
 
 window.exportResultsToExcel = () => {
