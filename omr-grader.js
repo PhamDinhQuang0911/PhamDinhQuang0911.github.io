@@ -5804,23 +5804,88 @@ window.deleteExam = async (examId) => {
         Swal.fire('Lưu ý', 'Bạn cần giữ lại ít nhất một bài thi!', 'warning');
         return;
     }
+    const targetExam = state.exams.find(e => e.id === examId);
+    const examName = targetExam ? targetExam.name : 'bài thi này';
+    const gradedCount = (state.gradedCountsByExam && state.gradedCountsByExam[examId]) || (state.exam?.id === examId ? state.submissions.length : 0);
+
     const res = await Swal.fire({
-        title: 'Xóa bài thi này?',
-        text: 'Toàn bộ đáp án, danh sách học sinh và kết quả chấm của bài thi sẽ bị xóa!',
+        title: `Xóa đề "${examName}"?`,
+        text: gradedCount > 0 
+            ? `Đề này đã chấm ${gradedCount} bài. Toàn bộ đáp án, danh sách học sinh và kết quả chấm của bài thi sẽ bị xóa hoàn toàn!`
+            : 'Toàn bộ đáp án và thiết lập của bài thi này sẽ bị xóa!',
         icon: 'warning',
         showCancelButton: true,
-        confirmButtonText: 'Xóa',
+        confirmButtonText: 'Xóa vĩnh viễn',
+        cancelButtonText: 'Hủy',
         confirmButtonColor: '#ef4444'
     });
     if (!res.isConfirmed) return;
 
+    // Xóa trong state.exams
     state.exams = state.exams.filter(e => e.id !== examId);
+    saveLocalExams(state.exams);
+
+    // Xóa dữ liệu bài chấm của đề này
+    try {
+        localStorage.removeItem(`omr_submissions_${examId}`);
+        localStorage.removeItem(`omr_students_${examId}`);
+        if (state.gradedCountsByExam) delete state.gradedCountsByExam[examId];
+    } catch (_) {}
+
     if (state.teacherUid) {
         try { await deleteDoc(doc(db, "omr_exams", examId)); } catch(e) {}
     }
-    saveLocalExams(state.exams);
-    await selectExam(state.exams[0].id);
+
+    // Nếu đề bị xóa là đề đang chọn, chuyển sang đề đầu tiên còn lại
+    if (state.exam?.id === examId) {
+        state.submissions = [];
+        await selectExam(state.exams[0].id);
+    }
+
+    // Cập nhật lại UI ở cả Modal chọn đề và Tab danh sách đề
     window.renderExamsListTab();
+    window.renderLmsExamPickerList();
+    updateOverviewStats();
+
+    Swal.fire('Đã xóa', `Đã xóa đề "${examName}" thành công!`, 'success');
+};
+
+window.clearExamSubmissions = async (examId) => {
+    const targetExam = state.exams.find(e => e.id === examId) || state.exam;
+    if (!targetExam) return;
+    const gradedCount = (state.gradedCountsByExam && state.gradedCountsByExam[targetExam.id]) || (state.exam?.id === targetExam.id ? state.submissions.length : 0);
+    if (gradedCount === 0) {
+        Swal.fire('Thông báo', 'Đề này chưa có bài nào được chấm.', 'info');
+        return;
+    }
+
+    const res = await Swal.fire({
+        title: `Xóa ${gradedCount} bài đã chấm?`,
+        text: `Toàn bộ ${gradedCount} bài chấm của đề "${targetExam.name}" sẽ bị làm trống để giáo viên chấm lại từ đầu. Đề thi và đáp án vẫn được giữ nguyên.`,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'Xóa bài chấm (Làm sạch)',
+        cancelButtonText: 'Hủy',
+        confirmButtonColor: '#ef4444'
+    });
+    if (!res.isConfirmed) return;
+
+    if (state.exam?.id === targetExam.id) {
+        state.submissions = [];
+    }
+    if (state.gradedCountsByExam) {
+        state.gradedCountsByExam[targetExam.id] = 0;
+    }
+    try {
+        localStorage.removeItem(`omr_submissions_${targetExam.id}`);
+    } catch (_) {}
+
+    renderSubmissionsUI();
+    window.renderLmsExamPickerList();
+    window.renderExamsListTab();
+    updateOverviewStats();
+
+    Swal.fire('Đã làm sạch', `Đã xóa sạch kết quả chấm của đề "${targetExam.name}". Bạn có thể bắt đầu đợt chấm mới!`, 'success');
 };
 
 window.openCreateExamModal = () => {
@@ -6019,7 +6084,7 @@ window.renderLmsExamPickerList = () => {
                         ${item.name}
                     </h5>
                     <div class="flex items-center gap-1 shrink-0">
-                        ${gradedCount > 0 ? `<span class="px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border border-emerald-300/60 dark:border-emerald-700">✓ Đã chấm ${gradedCount} bài</span>` : ''}
+                        ${gradedCount > 0 ? `<button type="button" onclick="event.stopPropagation(); window.clearExamSubmissions('${item.id}')" class="px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-emerald-100 hover:bg-rose-100 text-emerald-800 hover:text-rose-700 dark:bg-emerald-950 dark:hover:bg-rose-950/60 dark:text-emerald-300 dark:hover:text-rose-300 border border-emerald-300/60 dark:border-emerald-700 transition-colors cursor-pointer" title="Bấm để xóa sạch ${gradedCount} bài đã chấm (chấm lại)">✓ Đã chấm ${gradedCount} bài <i class="fa-solid fa-rotate-left text-[9px] ml-1"></i></button>` : ''}
                         ${isCurrent ? '<span class="px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-emerald-600 text-white">Đang chọn</span>' : ''}
                     </div>
                 </div>
@@ -6032,10 +6097,17 @@ window.renderLmsExamPickerList = () => {
                         <span class="px-1.5 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 font-mono font-bold text-[10px]">Mã: ${omrCode}</span>
                         ${item.className ? `<span class="text-emerald-600 dark:text-emerald-400 font-bold truncate">• ${item.className}</span>` : ''}
                     </div>
-                    <span class="px-2.5 py-1 rounded-lg ${isCurrent ? 'bg-gray-100 dark:bg-[#1E1B29] text-slate-700 dark:text-slate-300' : 'btn-season-primary'} text-[11px] font-bold shrink-0 flex items-center gap-1">
-                        <span>${isCurrent ? 'Nạp lại' : 'Chọn chấm'}</span>
-                        <i class="fa-solid fa-arrow-right text-[10px]"></i>
-                    </span>
+                    <div class="flex items-center gap-1.5 shrink-0">
+                        ${!item.isLmsExam ? `
+                        <button type="button" onclick="event.stopPropagation(); window.deleteExam('${item.id}')" class="w-7 h-7 rounded-lg bg-gray-100 hover:bg-rose-50 dark:bg-[#1E1B29] dark:hover:bg-rose-950/50 text-slate-400 hover:text-rose-600 flex items-center justify-center text-xs active:scale-95 transition-all cursor-pointer border border-gray-200 dark:border-[#38344D]" title="Xóa đề thi này">
+                            <i class="fa-solid fa-trash-can"></i>
+                        </button>
+                        ` : ''}
+                        <span class="px-2.5 py-1 rounded-lg ${isCurrent ? 'bg-gray-100 dark:bg-[#1E1B29] text-slate-700 dark:text-slate-300' : 'btn-season-primary'} text-[11px] font-bold shrink-0 flex items-center gap-1">
+                            <span>${isCurrent ? 'Nạp lại' : 'Chọn chấm'}</span>
+                            <i class="fa-solid fa-arrow-right text-[10px]"></i>
+                        </span>
+                    </div>
                 </div>
             </div>
         `;
