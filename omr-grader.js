@@ -1201,18 +1201,26 @@ window.startCameraStream = async () => {
     window.stopCameraStream();
 
     try {
-        // High resolution constraints for uncropped wide sensor FOV (TNMaker style)
-        const videoConstraints = {
-            facingMode: state.currentCameraDeviceId ? undefined : { ideal: 'environment' },
-            deviceId: state.currentCameraDeviceId ? { exact: state.currentCameraDeviceId } : undefined,
-            width: { ideal: 1920, min: 1280 },
-            height: { ideal: 1080, min: 720 }
-        };
+        // FULL-SENSOR 4:3 constraints (like the native Photo app).
+        // Requesting 16:9 makes the browser crop the top/bottom of the 4:3 sensor => narrower FOV ("zoomed in").
+        const base = state.currentCameraDeviceId
+            ? { deviceId: { exact: state.currentCameraDeviceId } }
+            : { facingMode: { ideal: 'environment' } };
+        const attempts = [
+            { ...base, width: { ideal: 4032 }, height: { ideal: 3024 }, aspectRatio: { exact: 4/3 }, resizeMode: { ideal: 'none' } },
+            { ...base, width: { ideal: 2560 }, height: { ideal: 1920 }, aspectRatio: { ideal: 4/3 }, resizeMode: { ideal: 'none' } },
+            { ...base, width: { ideal: 1920 }, height: { ideal: 1440 }, aspectRatio: { ideal: 4/3 } },
+            { ...base }
+        ];
 
-        const stream = await navigator.mediaDevices.getUserMedia({
-            video: videoConstraints,
-            audio: false
-        });
+        let stream = null, lastErr = null;
+        for (const c of attempts) {
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({ video: c, audio: false });
+                break;
+            } catch (e) { lastErr = e; }
+        }
+        if (!stream) throw lastErr || new Error('No camera');
 
         state.currentCameraStream = stream;
         video.srcObject = stream;
@@ -1237,13 +1245,11 @@ window.startCameraStream = async () => {
                 // Zoom control setup
                 const zoomControls = document.getElementById('cameraZoomControls');
                 if (caps.zoom && typeof caps.zoom.min === 'number') {
-                    // If native zoom < 0.75, set min zoom (widest view)
-                    if (caps.zoom.min <= 0.75) {
-                        try {
-                            await track.applyConstraints({ advanced: [{ zoom: caps.zoom.min }] });
-                            state.cameraZoom = caps.zoom.min;
-                        } catch(e) {}
-                    }
+                    // Always reset to the widest zoom the lens allows (never digitally zoomed in)
+                    try {
+                        await track.applyConstraints({ advanced: [{ zoom: caps.zoom.min }] });
+                        state.cameraZoom = caps.zoom.min;
+                    } catch(e) {}
                 }
                 if (zoomControls) zoomControls.classList.remove('hidden');
 
@@ -1253,6 +1259,16 @@ window.startCameraStream = async () => {
                     torchBtn.classList.toggle('hidden', !caps.torch);
                 }
             }
+
+            // Show actual stream info so we can verify no sensor crop (4:3 = full sensor)
+            setTimeout(() => {
+                const w = video.videoWidth, h = video.videoHeight;
+                if (!w || !h) return;
+                const r = Math.max(w, h) / Math.min(w, h);
+                const ratioTxt = Math.abs(r - 4/3) < 0.05 ? '4:3 toàn cảm biến' : (Math.abs(r - 16/9) < 0.05 ? '16:9 (bị cắt)' : r.toFixed(2));
+                const z = track.getSettings ? track.getSettings().zoom : undefined;
+                showCameraHUDMessage(`📷 ${w}×${h} · ${ratioTxt}${z ? ' · zoom ' + Number(z).toFixed(2) + 'x' : ''}`, 3500);
+            }, 600);
         }
 
         // Determine active zoom UI based on active lens
