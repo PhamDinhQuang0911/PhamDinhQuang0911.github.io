@@ -109,17 +109,20 @@
         #cameraA4Guide {
             overflow: visible !important;
         }
-        /* Ensure the center guide wrapper doesn't clip brackets */
-        #scanCameraArea > div:nth-child(4) {
-            overflow: visible;
-        }
         /* Green glow when fiducials detected */
         .camera-corner-bracket.detected {
-            border-color: rgba(52, 211, 153, 0.95) !important;
+            border-color: #10b981 !important;
+            background-color: rgba(16, 185, 129, 0.32) !important;
+            box-shadow: 0 0 20px rgba(16, 185, 129, 0.85), inset 0 0 12px rgba(16, 185, 129, 0.45) !important;
+            transform: scale(1.06);
         }
-        .camera-corner-bracket.detected div div {
-            background-color: #34d399 !important;
-            box-shadow: 0 0 14px rgba(52, 211, 153, 1), 0 0 28px rgba(52, 211, 153, 0.6) !important;
+        .camera-corner-bracket.detected .corner-inner-box {
+            border-color: #34d399 !important;
+            background-color: rgba(52, 211, 153, 0.45) !important;
+        }
+        .camera-corner-bracket.detected .corner-center-dot {
+            background-color: #ecfdf5 !important;
+            box-shadow: 0 0 14px #34d399, 0 0 28px #10b981 !important;
         }
     </style>
 </head>
@@ -172,6 +175,7 @@
         <div class="flex items-center gap-2 min-w-0">
             <span class="px-2 py-0.5 bg-white/20 rounded-md font-bold text-[10px] uppercase tracking-wider">Bài thi đang chọn:</span>
             <span id="activeExamName" class="font-extrabold text-sm truncate max-w-md">Chưa chọn bài thi</span>
+            <span id="activeExamClassBadge" class="hidden px-2 py-0.5 bg-amber-400/25 border border-amber-300/40 text-amber-100 rounded-full text-[10px] font-bold">Lớp: ---</span>
             <span id="activeExamTemplateBadge" class="hidden sm:inline-block px-2 py-0.5 bg-white/10 rounded-full text-[10px] font-mono">QM 2025</span>
         </div>
         <div class="flex items-center gap-2 shrink-0">
@@ -358,7 +362,10 @@
                         </div>
                     </div>
 
-                    <div class="flex items-center gap-2">
+                    <div class="flex flex-wrap items-center gap-2">
+                        <button type="button" onclick="window.openSendParentModal()" id="btnSendParent" class="px-3.5 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white text-xs font-bold rounded-xl shadow-xs transition-all active:scale-95 flex items-center gap-1.5 cursor-pointer" title="Gửi kết quả & phiếu chấm cho Phụ huynh học sinh">
+                            <i class="fa-solid fa-paper-plane"></i> Gửi kết quả PHHS
+                        </button>
                         <button type="button" onclick="window.downloadGradedSheet()" id="btnDownloadStamped" class="px-3.5 py-2 bg-[#0c897d] hover:bg-[#0a786e] text-white text-xs font-bold rounded-xl shadow-xs transition-all active:scale-95 flex items-center gap-1.5 cursor-pointer" title="Tải ảnh kết quả đã làm phẳng và đóng dấu điểm chính thức">
                             <i class="fa-solid fa-download"></i> Tải phiếu đã đóng dấu
                         </button>
@@ -463,11 +470,14 @@
                     <span id="resultsCountLabel" class="text-xs text-slate-500 dark:text-slate-400 font-semibold">0 kết quả</span>
                 </div>
 
-                <div class="flex items-center gap-2">
-                    <button type="button" onclick="window.exportResultsToExcel()" class="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-2xs transition-all active:scale-95 flex items-center gap-1.5">
+                <div class="flex flex-wrap items-center gap-2">
+                    <button type="button" onclick="window.syncAllResultsToLmsClass()" class="px-3.5 py-1.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white rounded-xl text-xs font-bold shadow-2xs transition-all active:scale-95 flex items-center gap-1.5 cursor-pointer" title="Lưu toàn bộ kết quả chấm vào Lớp học trên QMath LMS để phụ huynh & học sinh xem trực tuyến">
+                        <i class="fa-solid fa-cloud-arrow-up"></i> Đồng bộ điểm vào Lớp LMS
+                    </button>
+                    <button type="button" onclick="window.exportResultsToExcel()" class="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-2xs transition-all active:scale-95 flex items-center gap-1.5 cursor-pointer">
                         <i class="fa-solid fa-file-excel"></i> Xuất Excel (CSV)
                     </button>
-                    <button type="button" onclick="window.clearAllSubmissionsForCurrentExam()" class="px-3 py-1.5 bg-rose-50 text-rose-600 hover:bg-rose-100 dark:bg-rose-950/40 dark:text-rose-400 rounded-xl text-xs font-bold transition-colors">
+                    <button type="button" onclick="window.clearAllSubmissionsForCurrentExam()" class="px-3 py-1.5 bg-rose-50 text-rose-600 hover:bg-rose-100 dark:bg-rose-950/40 dark:text-rose-400 rounded-xl text-xs font-bold transition-colors cursor-pointer">
                         <i class="fa-solid fa-trash-can"></i> Xóa tất cả
                     </button>
                 </div>
@@ -749,24 +759,35 @@
 
     <!-- MODAL: CHỌN ĐỀ TỪ KHO ĐỀ QMATH LMS -->
     <div id="lmsExamPickerModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
-        <div class="bg-white dark:bg-slate-800 rounded-3xl max-w-2xl w-full shadow-2xl border border-slate-200 dark:border-slate-700 overflow-hidden flex flex-col max-h-[85vh]">
+        <div class="bg-white dark:bg-slate-800 rounded-3xl max-w-2xl w-full shadow-2xl border border-slate-200 dark:border-slate-700 overflow-hidden flex flex-col max-h-[88vh]">
             <div class="px-6 py-4 bg-gradient-to-r from-emerald-600 to-teal-600 text-white flex items-center justify-between shrink-0">
                 <div class="flex items-center gap-2.5">
                     <div class="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center text-sm font-bold">
                         <i class="fa-solid fa-folder-tree"></i>
                     </div>
                     <div>
-                        <h3 class="font-extrabold text-sm sm:text-base">Kho Đề Thi QMath LMS</h3>
-                        <p class="text-[11px] text-emerald-100">Chọn đề thi có sẵn để nạp câu hỏi và đáp án tự động</p>
+                        <h3 class="font-extrabold text-sm sm:text-base">Kho Đề Thi &amp; Lớp Học QMath LMS</h3>
+                        <p class="text-[11px] text-emerald-100">Trích xuất tự động đáp án Phần I, II, III và gán Lớp để lưu kết quả gửi PHHS</p>
                     </div>
                 </div>
                 <button onclick="window.closeLmsExamPickerModal()" class="w-7 h-7 rounded-lg bg-white/20 hover:bg-white/30 text-white flex items-center justify-center cursor-pointer transition-colors"><i class="fa-solid fa-xmark"></i></button>
             </div>
             
-            <div class="p-4 border-b border-slate-100 dark:border-slate-700/60 shrink-0">
+            <div class="p-4 border-b border-slate-100 dark:border-slate-700/60 shrink-0 space-y-3 bg-slate-50/60 dark:bg-slate-900/40">
+                <!-- Chọn Lớp học để gán bài chấm & nạp SBD -->
+                <div class="flex flex-col sm:flex-row sm:items-center gap-2 p-3 rounded-2xl bg-indigo-50/80 dark:bg-indigo-950/30 border border-indigo-200/80 dark:border-indigo-800/70">
+                    <div class="flex items-center gap-2 text-xs font-bold text-indigo-900 dark:text-indigo-200 shrink-0">
+                        <i class="fa-solid fa-users-rectangle text-indigo-600 dark:text-indigo-400"></i>
+                        <span>Chấm cho Lớp học LMS:</span>
+                    </div>
+                    <select id="lmsPickerClassSelect" class="flex-1 px-3 py-1.5 text-xs font-bold rounded-xl bg-white dark:bg-slate-800 border border-indigo-200 dark:border-indigo-700 text-slate-800 dark:text-slate-100 outline-none focus:border-indigo-500">
+                        <option value="">-- Không gán lớp (hoặc chọn sau) --</option>
+                    </select>
+                </div>
+
                 <div class="relative">
                     <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
-                    <input type="search" id="lmsExamSearchInput" oninput="window.renderLmsExamPickerList()" placeholder="Tìm kiếm tên đề thi LMS..." class="w-full pl-9 pr-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 focus:outline-emerald-500">
+                    <input type="search" id="lmsExamSearchInput" oninput="window.renderLmsExamPickerList()" placeholder="Tìm kiếm tên đề thi trong Kho đề LMS..." class="w-full pl-9 pr-3 py-2 text-xs rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 focus:outline-emerald-500">
                 </div>
             </div>
 
@@ -774,29 +795,98 @@
                 <!-- Injected via JS -->
             </div>
 
-            <div class="px-6 py-3 bg-slate-100 dark:bg-slate-900 border-t border-slate-200 dark:border-slate-700 flex justify-end gap-2 shrink-0">
+            <div class="px-6 py-3 bg-slate-100 dark:bg-slate-900 border-t border-slate-200 dark:border-slate-700 flex items-center justify-between gap-2 shrink-0">
+                <span class="text-[11px] text-slate-500 dark:text-slate-400"><i class="fa-solid fa-wand-magic-sparkles text-emerald-500 mr-1"></i>Tự động trích xuất đáp án Trắc nghiệm, Đúng/Sai và Trả lời ngắn</span>
                 <button type="button" onclick="window.closeLmsExamPickerModal()" class="px-4 py-2 text-slate-600 dark:text-slate-400 font-bold text-xs rounded-xl hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors">Đóng</button>
             </div>
         </div>
     </div>
 
-    <!-- FULLSCREEN CAMERA SCANNER OVERLAY (TNMaker-Style Spacious Edge-to-Edge Scanner) -->
+    <!-- MODAL: GỬI KẾT QUẢ & PHIẾU CHẤM TỚI PHỤ HUYNH HỌC SINH (PHHS) -->
+    <div id="sendParentModal" class="hidden fixed inset-0 z-[100001] flex items-center justify-center bg-black/70 backdrop-blur-xs p-4">
+        <div class="bg-white dark:bg-slate-900 rounded-3xl max-w-lg w-full shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden flex flex-col max-h-[90vh]">
+            <div class="px-6 py-4 bg-gradient-to-r from-indigo-600 to-purple-600 text-white flex items-center justify-between shrink-0">
+                <div class="flex items-center gap-2.5">
+                    <div class="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center text-sm font-bold">
+                        <i class="fa-solid fa-paper-plane"></i>
+                    </div>
+                    <div>
+                        <h3 class="font-extrabold text-sm sm:text-base">Gửi Kết Quả Cho Phụ Huynh (PHHS)</h3>
+                        <p class="text-[11px] text-indigo-100">Chia sẻ phiếu chấm đóng dấu &amp; đường link theo dõi học tập</p>
+                    </div>
+                </div>
+                <button type="button" onclick="window.closeSendParentModal()" class="w-7 h-7 rounded-lg bg-white/20 hover:bg-white/30 text-white flex items-center justify-center cursor-pointer"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+
+            <div class="p-5 overflow-y-auto custom-scrollbar space-y-4 text-xs">
+                <!-- Thông tin học sinh & trạng thái đồng bộ LMS -->
+                <div class="p-3.5 rounded-2xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/70 flex items-center justify-between gap-3">
+                    <div>
+                        <div id="phhsStudentTitle" class="font-extrabold text-sm text-slate-900 dark:text-white">Học sinh: ---</div>
+                        <div id="phhsScoreSummary" class="text-xs text-emerald-700 dark:text-emerald-300 font-semibold mt-0.5">Tổng điểm: 0.00 đ</div>
+                    </div>
+                    <span id="phhsSyncStatusBadge" class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-600 text-white shrink-0">
+                        <i class="fa-solid fa-cloud-check mr-1"></i>Đã lưu LMS
+                    </span>
+                </div>
+
+                <!-- Link trang Phụ huynh theo dõi (parent-watch.html) -->
+                <div id="phhsLinkSection" class="space-y-1.5">
+                    <label class="block font-bold text-slate-700 dark:text-slate-300">Link Cổng Phụ Huynh QMath LMS (Xem điểm &amp; lịch sử học tập):</label>
+                    <div class="flex gap-2">
+                        <input type="text" id="phhsParentWatchUrl" readonly placeholder="Đang tạo link phụ huynh..." class="flex-1 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono text-[11px] text-indigo-600 dark:text-indigo-400 outline-none">
+                        <button type="button" onclick="window.copyParentWatchUrl()" class="px-3 py-2 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-300 rounded-xl font-bold text-xs shrink-0 cursor-pointer">
+                            <i class="fa-solid fa-copy mr-1"></i>Copy Link
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Nội dung tin nhắn gửi Zalo / SMS -->
+                <div class="space-y-1.5">
+                    <label class="block font-bold text-slate-700 dark:text-slate-300">Nội dung tin nhắn thông báo gửi Phụ huynh:</label>
+                    <textarea id="phhsMessageText" rows="5" class="w-full p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-200 outline-none leading-relaxed"></textarea>
+                </div>
+
+                <!-- Ảnh phiếu kết quả đã đóng dấu -->
+                <div class="space-y-1.5">
+                    <label class="block font-bold text-slate-700 dark:text-slate-300">Ảnh phiếu bài làm đã đóng dấu điểm:</label>
+                    <div class="max-h-56 overflow-y-auto rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-900 p-2 flex justify-center">
+                        <img id="phhsPreviewImg" class="max-w-full h-auto rounded-lg" alt="Phiếu chấm đóng dấu">
+                    </div>
+                </div>
+            </div>
+
+            <div class="px-5 py-3.5 bg-slate-100 dark:bg-slate-800/90 border-t border-slate-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-2 shrink-0">
+                <button type="button" onclick="window.copyPhhsMessageAndImage()" class="px-3.5 py-2 bg-white dark:bg-slate-700 hover:bg-slate-50 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-600 rounded-xl font-bold text-xs flex items-center gap-1.5 cursor-pointer">
+                    <i class="fa-solid fa-clipboard"></i> Copy Tin nhắn
+                </button>
+                <div class="flex items-center gap-2">
+                    <button type="button" onclick="window.downloadGradedSheet()" class="px-3.5 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 cursor-pointer">
+                        <i class="fa-solid fa-download"></i> Tải ảnh phiếu
+                    </button>
+                    <button type="button" onclick="window.shareResultToParent()" class="px-4 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white rounded-xl font-bold text-xs shadow-md flex items-center gap-1.5 cursor-pointer">
+                        <i class="fa-solid fa-share-nodes"></i> Chia sẻ ngay (Zalo / ĐT)
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- FULLSCREEN CAMERA SCANNER OVERLAY (Zero Black-Band Viewport + Large 4-Corner Target Boxes) -->
     <div id="scanCameraArea" class="hidden fixed inset-0 z-[99999] bg-black flex flex-col overflow-hidden select-none touch-none overscroll-none">
-        <!-- Native Camera Feed (object-contain: show 100% of the 4:3 sensor frame, NO crop/zoom) -->
-        <video id="cameraVideo" autoplay playsinline muted class="absolute inset-0 w-full h-full object-contain pointer-events-none select-none"></video>
         <canvas id="cameraCanvas" class="hidden"></canvas>
         
         <!-- White Flash effect on capture -->
-        <div id="cameraFlashOverlay" class="absolute inset-0 bg-white pointer-events-none opacity-0 transition-opacity duration-150 z-25"></div>
+        <div id="cameraFlashOverlay" class="absolute inset-0 bg-white pointer-events-none opacity-0 transition-opacity duration-150 z-35"></div>
 
         <!-- FLOATING STATUS PILL (HUD Notification for Lens & Auto-Scan) -->
-        <div id="cameraScanStatus" class="hidden absolute top-16 left-1/2 -translate-x-1/2 z-40 px-4 py-1.5 rounded-full bg-slate-900/95 text-white font-bold text-xs backdrop-blur-md shadow-xl border border-emerald-500/60 flex items-center gap-2 pointer-events-none transition-all duration-200">
+        <div id="cameraScanStatus" class="hidden absolute top-14 left-1/2 -translate-x-1/2 z-40 px-4 py-1.5 rounded-full bg-slate-900/95 text-white font-bold text-xs backdrop-blur-md shadow-xl border border-emerald-500/60 flex items-center gap-2 pointer-events-none transition-all duration-200">
             <i class="fa-solid fa-camera text-emerald-400"></i>
             <span id="cameraScanStatusText">Đang tải camera...</span>
         </div>
 
-        <!-- TOP BAR HUD (Clean Minimal Header) -->
-        <div class="relative z-30 flex items-center justify-between px-3 py-2 sm:px-4 sm:py-2.5 bg-black/85 pointer-events-auto shrink-0">
+        <!-- TOP BAR HUD (Solid Header Above Camera Viewport — Never Overlaps Top Corners!) -->
+        <div class="relative z-30 flex items-center justify-between px-3 py-2 sm:px-4 sm:py-2.5 bg-slate-950 border-b border-white/10 pointer-events-auto shrink-0">
             <!-- Close / Back Button -->
             <button type="button" onclick="window.closeCameraScanner()" class="px-3.5 py-1.5 rounded-xl bg-teal-100 hover:bg-teal-200 text-teal-950 font-extrabold text-xs sm:text-sm active:scale-95 transition-all shadow-md cursor-pointer">
                 <i class="fa-solid fa-xmark mr-1"></i> Đóng
@@ -828,52 +918,56 @@
             </div>
         </div>
 
-        <!-- CENTER GUIDES VIEW (Spacious & Forgiving Scanner Guides) -->
-        <div class="relative z-10 flex-1 flex flex-col items-center justify-center pointer-events-none select-none w-full overflow-visible px-3">
-            <div id="cameraA4Guide" class="relative w-full max-w-[400px] aspect-[1552/2254] landscape:max-w-none landscape:max-h-[60vh] landscape:aspect-[1552/2254] border border-white/20 border-dashed rounded-2xl flex items-center justify-center transition-all duration-200">
+        <!-- MIDDLE CAMERA VIEWPORT (100% Live Video Fill — Zero Black Letterbox Bars!) -->
+        <div id="cameraViewportContainer" class="relative z-10 flex-1 w-full overflow-hidden flex items-center justify-center bg-black p-3 sm:p-4">
+            <!-- Video fills this exact middle viewport (ratio ~3:4 matching native 4:3 sensor with zero black band) -->
+            <video id="cameraVideo" autoplay playsinline muted class="absolute inset-0 w-full h-full object-cover pointer-events-none select-none"></video>
+
+            <!-- Fiducial Guide Frame: exact 100:138 ratio of the 4 black corner markers on CV 1239 sheet, sized to fit all 4 corners comfortably -->
+            <div id="cameraA4Guide" class="relative z-10 h-[85%] max-h-full max-w-[86vw] aspect-[100/138] landscape:h-[82%] landscape:aspect-[138/100] border-2 border-white/35 border-dashed rounded-2xl flex items-center justify-center pointer-events-none select-none transition-all duration-200">
                 
                 <!-- Subtle Scanning Laser Line -->
                 <div class="hud-scan-line"></div>
 
                 <!-- Center Watermark Guide -->
-                <div class="text-white/15 flex flex-col items-center gap-1.5 pointer-events-none select-none">
-                    <i class="fa-solid fa-expand text-2xl"></i>
-                    <span class="text-[9px] font-bold tracking-widest uppercase">Khung định vị A4</span>
+                <div class="text-white/25 flex flex-col items-center gap-1 pointer-events-none select-none bg-black/20 px-3 py-1.5 rounded-xl backdrop-blur-[1px]">
+                    <i class="fa-solid fa-expand text-xl text-emerald-400/70"></i>
+                    <span class="text-[10px] font-extrabold tracking-wider uppercase text-white/80">Đưa 4 ô đen vào 4 ô vuông góc</span>
                 </div>
 
-                <!-- 4 Large L-shaped Corner Scanner Brackets -->
-                <!-- Top-Left Bracket -->
-                <div class="camera-corner-bracket absolute -top-3 -left-3 w-16 h-16 sm:w-20 sm:h-20 border-t-[5px] border-l-[5px] border-white/75 rounded-tl-2xl flex items-start justify-start p-2 transition-all duration-200">
-                    <div class="w-9 h-9 sm:w-11 sm:h-11 rounded-xl bg-white/10 border-2 border-white/50 flex items-center justify-center shadow-inner">
-                        <div class="w-4 h-4 sm:w-5 sm:h-5 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.9)]"></div>
+                <!-- 4 LARGE TRANSPARENT CORNER TARGET SQUARES (68x68px mobile, 80x80px desktop) -->
+                <!-- Top-Left Target Square -->
+                <div class="camera-corner-bracket absolute -top-3 -left-3 w-[68px] h-[68px] sm:w-20 sm:h-20 rounded-2xl border-[3.5px] border-white/95 bg-emerald-500/15 shadow-[0_0_15px_rgba(0,0,0,0.55)] flex items-center justify-center transition-all duration-150">
+                    <div class="corner-inner-box w-10 h-10 sm:w-12 sm:h-12 rounded-xl border-2 border-emerald-400/90 bg-emerald-400/15 flex items-center justify-center">
+                        <div class="corner-center-dot w-3.5 h-3.5 rounded-sm bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.95)]"></div>
                     </div>
                 </div>
 
-                <!-- Top-Right Bracket -->
-                <div class="camera-corner-bracket absolute -top-3 -right-3 w-16 h-16 sm:w-20 sm:h-20 border-t-[5px] border-r-[5px] border-white/75 rounded-tr-2xl flex items-start justify-end p-2 transition-all duration-200">
-                    <div class="w-9 h-9 sm:w-11 sm:h-11 rounded-xl bg-white/10 border-2 border-white/50 flex items-center justify-center shadow-inner">
-                        <div class="w-4 h-4 sm:w-5 sm:h-5 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.9)]"></div>
+                <!-- Top-Right Target Square -->
+                <div class="camera-corner-bracket absolute -top-3 -right-3 w-[68px] h-[68px] sm:w-20 sm:h-20 rounded-2xl border-[3.5px] border-white/95 bg-emerald-500/15 shadow-[0_0_15px_rgba(0,0,0,0.55)] flex items-center justify-center transition-all duration-150">
+                    <div class="corner-inner-box w-10 h-10 sm:w-12 sm:h-12 rounded-xl border-2 border-emerald-400/90 bg-emerald-400/15 flex items-center justify-center">
+                        <div class="corner-center-dot w-3.5 h-3.5 rounded-sm bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.95)]"></div>
                     </div>
                 </div>
 
-                <!-- Bottom-Left Bracket -->
-                <div class="camera-corner-bracket absolute -bottom-3 -left-3 w-16 h-16 sm:w-20 sm:h-20 border-b-[5px] border-l-[5px] border-white/75 rounded-bl-2xl flex items-end justify-start p-2 transition-all duration-200">
-                    <div class="w-9 h-9 sm:w-11 sm:h-11 rounded-xl bg-white/10 border-2 border-white/50 flex items-center justify-center shadow-inner">
-                        <div class="w-4 h-4 sm:w-5 sm:h-5 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.9)]"></div>
+                <!-- Bottom-Left Target Square -->
+                <div class="camera-corner-bracket absolute -bottom-3 -left-3 w-[68px] h-[68px] sm:w-20 sm:h-20 rounded-2xl border-[3.5px] border-white/95 bg-emerald-500/15 shadow-[0_0_15px_rgba(0,0,0,0.55)] flex items-center justify-center transition-all duration-150">
+                    <div class="corner-inner-box w-10 h-10 sm:w-12 sm:h-12 rounded-xl border-2 border-emerald-400/90 bg-emerald-400/15 flex items-center justify-center">
+                        <div class="corner-center-dot w-3.5 h-3.5 rounded-sm bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.95)]"></div>
                     </div>
                 </div>
 
-                <!-- Bottom-Right Bracket -->
-                <div class="camera-corner-bracket absolute -bottom-3 -right-3 w-16 h-16 sm:w-20 sm:h-20 border-b-[5px] border-r-[5px] border-white/75 rounded-br-2xl flex items-end justify-end p-2 transition-all duration-200">
-                    <div class="w-9 h-9 sm:w-11 sm:h-11 rounded-xl bg-white/10 border-2 border-white/50 flex items-center justify-center shadow-inner">
-                        <div class="w-4 h-4 sm:w-5 sm:h-5 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.9)]"></div>
+                <!-- Bottom-Right Target Square -->
+                <div class="camera-corner-bracket absolute -bottom-3 -right-3 w-[68px] h-[68px] sm:w-20 sm:h-20 rounded-2xl border-[3.5px] border-white/95 bg-emerald-500/15 shadow-[0_0_15px_rgba(0,0,0,0.55)] flex items-center justify-center transition-all duration-150">
+                    <div class="corner-inner-box w-10 h-10 sm:w-12 sm:h-12 rounded-xl border-2 border-emerald-400/90 bg-emerald-400/15 flex items-center justify-center">
+                        <div class="corner-center-dot w-3.5 h-3.5 rounded-sm bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.95)]"></div>
                     </div>
                 </div>
             </div>
         </div>
 
-        <!-- BOTTOM CONTROLS BAR (StarMind & TNMaker Hybrid) -->
-        <div class="relative z-20 shrink-0 pb-5 pt-1.5 px-4 flex flex-col items-center gap-2 bg-black/85 select-none">
+        <!-- BOTTOM CONTROLS BAR (Solid Bar Below Camera Viewport) -->
+        <div class="relative z-20 shrink-0 pb-4 pt-2 px-4 flex flex-col items-center gap-2 bg-slate-950 border-t border-white/10 select-none">
             <!-- Status / Guide Text -->
             <p id="cameraStatusText" class="text-xs text-center text-white/90 font-medium px-2 leading-snug max-w-sm drop-shadow-md">
                 Canh 4 ô đen góc phiếu vào 4 góc khung ngắm. Hệ thống sẽ tự nhận diện và chấm ngay.
@@ -937,14 +1031,18 @@
             </div>
             
             <!-- Action buttons inside bottom sheet -->
-            <div class="grid grid-cols-2 gap-2.5 mt-3 pt-2 border-t border-slate-800">
-                <button type="button" onclick="window.dismissCameraResultSheet()" class="py-2.5 px-4 rounded-xl bg-[#0c897d] hover:bg-[#0a786e] text-white font-bold text-xs flex items-center justify-center gap-2 active:scale-95 transition-all shadow-md cursor-pointer">
+            <div class="grid grid-cols-3 gap-2 mt-3 pt-2 border-t border-slate-800">
+                <button type="button" onclick="window.dismissCameraResultSheet()" class="py-2.5 px-3 rounded-xl bg-[#0c897d] hover:bg-[#0a786e] text-white font-bold text-xs flex items-center justify-center gap-1.5 active:scale-95 transition-all shadow-md cursor-pointer">
                     <i class="fa-solid fa-camera"></i>
-                    <span>Chụp bài tiếp theo</span>
+                    <span>Chụp tiếp</span>
                 </button>
-                <button type="button" onclick="window.viewDetailedLastResult()" class="py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 font-bold text-xs flex items-center justify-center gap-2 active:scale-95 transition-all cursor-pointer">
+                <button type="button" onclick="window.viewDetailedLastResult()" class="py-2.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 font-bold text-xs flex items-center justify-center gap-1.5 active:scale-95 transition-all cursor-pointer">
                     <i class="fa-solid fa-certificate text-emerald-400"></i>
-                    <span>Xem phiếu đóng dấu</span>
+                    <span>Xem phiếu</span>
+                </button>
+                <button type="button" onclick="window.openSendParentModal()" class="py-2.5 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 active:scale-95 transition-all shadow-md cursor-pointer">
+                    <i class="fa-solid fa-paper-plane"></i>
+                    <span>Gửi PHHS</span>
                 </button>
             </div>
         </div>
@@ -1018,10 +1116,10 @@
     <script src="./omr/bgd-original-sheet.js"></script>
     <script src="./omr/tnmaker-sheet.js"></script>
     <script src="./omr/phu-tho-sheet.js"></script>
-    <script src="./omr/qm-sheet.js"></script>
+    <script src="./omr/qm-sheet.js?v=5"></script>
     <script src="./omr/answer-import.js"></script>
 
     <!-- QMath LMS Unified Database & Auth Compatibility Module -->
-    <script type="module" src="./omr-grader.js?v=4"></script>
+    <script type="module" src="./omr-grader.js?v=5"></script>
 </body>
 </html>

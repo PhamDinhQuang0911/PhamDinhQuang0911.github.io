@@ -1,6 +1,7 @@
 import { 
     initializeApp, getAuth, onAuthStateChanged, signOut,
     getFirestore, doc, getDoc, setDoc, updateDoc, collection, query, where, getDocs, addDoc, deleteDoc,
+    limit, orderBy, includeQuestions, getOrCreateParentWatchToken,
     enableMultiTabIndexedDbPersistence
 } from "./supabase-db-compat.js?v=25";
 
@@ -149,16 +150,76 @@ window.switchTab = (tabName) => {
 // 3. EXAMS & DATA MANAGEMENT (Firestore + LocalStorage + LMS Integration)
 // ========================================================
 state.lmsExams = [];
+state.lmsClasses = [];
+
+function extractKeysFromQuestionArray(qList) {
+    const mcQuestions = qList.filter(q => q && (q.type === 'mc' || !q.type));
+    const p1Ans = mcQuestions.map(q => {
+        if (typeof q.correct === 'number' && q.correct >= 0 && q.correct <= 3) {
+            return ['A', 'B', 'C', 'D'][q.correct];
+        }
+        if (typeof q.correct === 'string' && q.correct.trim() !== '') {
+            const c = q.correct.trim().toUpperCase();
+            if (['0', '1', '2', '3'].includes(c)) return ['A', 'B', 'C', 'D'][Number(c)];
+            if (['A', 'B', 'C', 'D'].includes(c[0])) return c[0];
+        }
+        if (q.ans !== undefined && q.ans !== null && String(q.ans).trim() !== '') {
+            const a = String(q.ans).trim().toUpperCase();
+            if (['0', '1', '2', '3'].includes(a)) return ['A', 'B', 'C', 'D'][Number(a)];
+            if (['A', 'B', 'C', 'D'].includes(a[0])) return a[0];
+        }
+        if (Array.isArray(q.options)) {
+            const corrIdx = q.options.findIndex(o => o && (o.isCorrect || o.correct));
+            if (corrIdx !== -1) return ['A', 'B', 'C', 'D'][corrIdx] || 'A';
+        }
+        return 'A';
+    }).join('');
+
+    const tfQuestions = qList.filter(q => q && q.type === 'tf');
+    const p2Ans = tfQuestions.map(q => {
+        if (Array.isArray(q.statements) && q.statements.length > 0) {
+            return q.statements.slice(0, 4).map(s => {
+                if (!s) return 'S';
+                const v = s.isTrue !== undefined ? s.isTrue : (s.correct !== undefined ? s.correct : s.ans);
+                return (v === true || v === 'true' || v === 1 || v === 'Đ' || v === 'D') ? 'Đ' : 'S';
+            }).join('').padEnd(4, 'S');
+        }
+        if (Array.isArray(q.answers) && q.answers.length > 0) {
+            return q.answers.slice(0, 4).map(a => (a === 'Đ' || a === 'D' || a === true || a === 'true' || a === 1) ? 'Đ' : 'S').join('').padEnd(4, 'S');
+        }
+        if (Array.isArray(q.options) && q.options.length > 0) {
+            return q.options.slice(0, 4).map(opt => (opt && (opt.isCorrect || opt.correct || opt.isTrue)) ? 'Đ' : 'S').join('').padEnd(4, 'S');
+        }
+        return 'ĐSĐS';
+    });
+
+    const shortQuestions = qList.filter(q => q && q.type === 'short');
+    const p3Ans = shortQuestions.map(q => {
+        const rawVal = q.answer !== undefined ? q.answer : (q.ans !== undefined ? q.ans : (q.correct !== undefined ? q.correct : ''));
+        return String(rawVal ?? '').trim();
+    });
+
+    return { p1Ans, p2Ans, p3Ans, mcCount: mcQuestions.length, tfCount: tfQuestions.length, shortCount: shortQuestions.length };
+}
 
 function normalizeLmsExam(raw) {
     const qList = Array.isArray(raw.questions) ? raw.questions : [];
-    const mcCount = qList.filter(q => q.type === 'mc').length;
-    const tfCount = qList.filter(q => q.type === 'tf').length;
-    const shortCount = qList.filter(q => q.type === 'short').length;
+    const mcCount = qList.filter(q => q && (q.type === 'mc' || !q.type)).length;
+    const tfCount = qList.filter(q => q && q.type === 'tf').length;
+    const shortCount = qList.filter(q => q && q.type === 'short').length;
+
+    let codes = ['101'];
+    if (Array.isArray(raw.codes) && raw.codes.length > 0) {
+        codes = raw.codes.map(c => String(c).trim()).filter(Boolean);
+    } else if (raw.mixedExams && typeof raw.mixedExams === 'object' && Object.keys(raw.mixedExams).length > 0) {
+        codes = Object.keys(raw.mixedExams);
+    } else if (raw.examCode) {
+        codes = [String(raw.examCode).trim()];
+    }
 
     return {
         id: raw.id,
-        teacherId: raw.teacherId || state.teacherUid,
+        teacherId: raw.teacherId || raw.authorId || state.teacherUid,
         name: raw.title || raw.name || 'Đề thi LMS',
         subject: raw.subject || 'Toán học',
         sheet_template: raw.sheet_template || 'qmcv1239',
@@ -168,54 +229,80 @@ function normalizeLmsExam(raw) {
         part1_point: raw.part1_point || 0.25,
         part2_points: raw.part2_points || [0.1, 0.25, 0.5, 1.0],
         part3_point: raw.part3_point || 0.5,
-        codes: raw.codes && raw.codes.length > 0 ? raw.codes : (raw.mixedExams ? Object.keys(raw.mixedExams) : ['101', '102']),
+        codes,
         questions: qList,
+        mixedExams: raw.mixedExams || null,
+        classId: raw.classId || '',
+        className: raw.className || '',
         isLmsExam: true,
         createdAt: raw.createdAt || new Date().toISOString()
     };
 }
 
-function autoFillKeysFromLmsQuestions(ex) {
-    if (!ex.questions || ex.questions.length === 0) return;
-    const primaryCode = (ex.codes && ex.codes[0]) ? ex.codes[0] : '101';
-    
-    // Extract Part 1
-    const mcQuestions = ex.questions.filter(q => q.type === 'mc');
-    const p1Ans = mcQuestions.map(q => {
-        if (q.ans && typeof q.ans === 'string') return q.ans.trim().toUpperCase()[0] || 'A';
-        if (q.correct && typeof q.correct === 'string') return q.correct.trim().toUpperCase()[0] || 'A';
-        if (Array.isArray(q.options)) {
-            const corrIdx = q.options.findIndex(o => o.isCorrect || o.correct);
-            if (corrIdx !== -1) return ['A','B','C','D'][corrIdx] || 'A';
+function autoFillKeysFromLmsQuestions(ex, forceOverwrite = false) {
+    if (!ex) return false;
+    const hasQuestions = Array.isArray(ex.questions) && ex.questions.length > 0;
+    const hasMixed = ex.mixedExams && typeof ex.mixedExams === 'object' && Object.keys(ex.mixedExams).length > 0;
+    if (!hasQuestions && !hasMixed) return false;
+
+    let updated = false;
+
+    // 1. Nếu đề thi có nhiều mã đề trộn (mixedExams)
+    if (hasMixed) {
+        for (const [mCode, mData] of Object.entries(ex.mixedExams)) {
+            const qArr = Array.isArray(mData) ? mData : (Array.isArray(mData?.questions) ? mData.questions : []);
+            if (qArr.length > 0) {
+                const { p1Ans, p2Ans, p3Ans } = extractKeysFromQuestionArray(qArr);
+                if (forceOverwrite || !state.keys[mCode] || state.keys[mCode].isSample) {
+                    state.keys[mCode] = {
+                        id: `key_${ex.id}_${mCode}`,
+                        examId: ex.id,
+                        teacherId: state.teacherUid,
+                        code: mCode,
+                        answers: p1Ans,
+                        part2: p2Ans,
+                        part3: p3Ans,
+                        fromLms: true,
+                        updatedAt: new Date().toISOString()
+                    };
+                    updated = true;
+                }
+            }
         }
-        return 'A';
-    }).join('');
+    }
 
-    // Extract Part 2
-    const tfQuestions = ex.questions.filter(q => q.type === 'tf');
-    const p2Ans = tfQuestions.map(q => {
-        if (Array.isArray(q.answers)) return q.answers.map(a => a === 'D' || a === true ? 'Đ' : 'S').join('');
-        if (Array.isArray(q.options)) return q.options.map(opt => opt.isCorrect ? 'Đ' : 'S').join('');
-        return 'ĐSĐS';
-    });
+    // 2. Đề gốc (questions) -> gán cho mã đề chính (và các mã đề chưa có đáp án riêng)
+    if (hasQuestions) {
+        const { p1Ans, p2Ans, p3Ans, mcCount, tfCount, shortCount } = extractKeysFromQuestionArray(ex.questions);
+        if (mcCount > 0) ex.question_count = mcCount;
+        if (tfCount > 0) ex.part2_count = tfCount;
+        if (shortCount > 0) ex.part3_count = shortCount;
 
-    // Extract Part 3
-    const shortQuestions = ex.questions.filter(q => q.type === 'short');
-    const p3Ans = shortQuestions.map(q => String(q.ans || q.correct || '0').trim());
+        const targetCodes = (Array.isArray(ex.codes) && ex.codes.length > 0) ? ex.codes : ['101'];
+        targetCodes.forEach((code, idx) => {
+            const existing = state.keys[code];
+            const shouldWrite = forceOverwrite || !existing || existing.isSample || (idx === 0 && !existing.fromLms);
+            if (shouldWrite) {
+                state.keys[code] = {
+                    id: `key_${ex.id}_${code}`,
+                    examId: ex.id,
+                    teacherId: state.teacherUid,
+                    code: String(code),
+                    answers: p1Ans,
+                    part2: p2Ans,
+                    part3: p3Ans,
+                    fromLms: true,
+                    updatedAt: new Date().toISOString()
+                };
+                updated = true;
+            }
+        });
+    }
 
-    if (!state.keys[primaryCode]) {
-        state.keys[primaryCode] = {
-            id: `key_${ex.id}_${primaryCode}`,
-            examId: ex.id,
-            teacherId: state.teacherUid,
-            code: primaryCode,
-            answers: p1Ans,
-            part2: p2Ans,
-            part3: p3Ans,
-            updatedAt: new Date().toISOString()
-        };
+    if (updated) {
         localStorage.setItem(`omr_keys_${ex.id}`, JSON.stringify(Object.values(state.keys)));
     }
+    return updated;
 }
 
 async function loadTeacherExams() {
@@ -316,6 +403,7 @@ function createSampleKeys(examId) {
             answers: 'ABCDABCDABCD',
             part2: ['ĐSĐS', 'SĐSĐ', 'ĐĐSS', 'SSĐĐ'],
             part3: ['3', '-4,5', '12', '1,5', '20', '-1'],
+            isSample: true,
             updatedAt: new Date().toISOString()
         },
         {
@@ -326,6 +414,7 @@ function createSampleKeys(examId) {
             answers: 'BCDAABCDABCD',
             part2: ['SĐSĐ', 'ĐSĐS', 'SSĐĐ', 'ĐĐSS'],
             part3: ['-1', '3', '1,5', '12', '-4,5', '20'],
+            isSample: true,
             updatedAt: new Date().toISOString()
         }
     ];
@@ -347,27 +436,50 @@ function saveLocalExams(exams) {
 }
 
 async function selectExam(examId) {
-    const exam = state.exams.find(e => e.id === examId);
+    let exam = state.exams.find(e => e.id === examId);
     if (!exam) return;
+
+    // Nếu là đề thi LMS mà chưa tải chi tiết mảng questions (do list query rút gọn cột), tải ngay bằng getDoc
+    if (exam.isLmsExam && (!Array.isArray(exam.questions) || exam.questions.length === 0)) {
+        try {
+            const fullDoc = await getDoc(doc(db, "exams", exam.id));
+            if (fullDoc.exists()) {
+                const fullData = { id: fullDoc.id, ...fullDoc.data() };
+                const normalized = normalizeLmsExam({
+                    ...fullData,
+                    classId: exam.classId || fullData.classId || '',
+                    className: exam.className || fullData.className || ''
+                });
+                Object.assign(exam, normalized);
+            }
+        } catch(e) {
+            console.warn("Không tải được chi tiết câu hỏi đề LMS:", e);
+        }
+    }
+
+    // Khôi phục thông tin lớp học đã gán cho đề thi này (nếu có)
+    const savedClassMeta = localStorage.getItem(`omr_exam_class_${exam.id}`);
+    if (savedClassMeta) {
+        try {
+            const parsedMeta = JSON.parse(savedClassMeta);
+            if (parsedMeta.classId) exam.classId = parsedMeta.classId;
+            if (parsedMeta.className) exam.className = parsedMeta.className;
+        } catch(e) {}
+    }
+
     state.exam = exam;
     localStorage.setItem('omr_last_exam_id_' + state.teacherUid, exam.id);
-
-    // Update banner
-    const titleEl = document.getElementById('activeExamName');
-    const badgeEl = document.getElementById('activeExamTemplateBadge');
-    if (titleEl) titleEl.textContent = exam.name + (exam.isLmsExam ? ' (LMS)' : '');
-    if (badgeEl) {
-        const tplName = (window.MAU && window.MAU[exam.sheet_template]) ? window.MAU[exam.sheet_template].ten : exam.sheet_template;
-        badgeEl.textContent = (exam.isLmsExam ? 'LMS · ' : '') + (tplName || 'CV 1239');
-    }
 
     // Load Exam Keys
     await loadExamKeys(exam.id);
 
-    // If LMS exam with questions, auto-fill answer keys
-    if (exam.isLmsExam && exam.questions && exam.questions.length > 0) {
-        autoFillKeysFromLmsQuestions(exam);
+    // Nếu là đề LMS có câu hỏi, tự động trích xuất đáp án chuẩn từ đề LMS
+    if (exam.isLmsExam && ((exam.questions && exam.questions.length > 0) || exam.mixedExams)) {
+        autoFillKeysFromLmsQuestions(exam, false);
     }
+
+    // Update banner
+    updateActiveExamBanner();
 
     // Load Exam Students
     await loadExamStudents(exam.id);
@@ -375,6 +487,31 @@ async function selectExam(examId) {
     await loadExamSubmissions(exam.id);
 
     updateOverviewStats();
+    if (state.activeTab === 'keys') window.renderKeysTab();
+    if (state.activeTab === 'students') window.renderStudentsTab();
+    if (state.activeTab === 'results') window.renderResultsTable();
+}
+
+function updateActiveExamBanner() {
+    const exam = state.exam;
+    if (!exam) return;
+    const titleEl = document.getElementById('activeExamName');
+    const badgeEl = document.getElementById('activeExamTemplateBadge');
+    const classBadgeEl = document.getElementById('activeExamClassBadge');
+
+    if (titleEl) titleEl.textContent = exam.name + (exam.isLmsExam ? ' (Kho đề LMS)' : '');
+    if (badgeEl) {
+        const tplName = (window.MAU && window.MAU[exam.sheet_template]) ? window.MAU[exam.sheet_template].ten : exam.sheet_template;
+        badgeEl.textContent = `${exam.question_count || 12} TN · ${exam.part2_count || 4} Đ/S · ${exam.part3_count || 6} TLN · ${tplName || 'CV 1239'}`;
+    }
+    if (classBadgeEl) {
+        if (exam.className) {
+            classBadgeEl.textContent = `Lớp: ${exam.className}`;
+            classBadgeEl.classList.remove('hidden');
+        } else {
+            classBadgeEl.classList.add('hidden');
+        }
+    }
 }
 
 async function loadExamKeys(examId) {
@@ -559,9 +696,16 @@ async function processSingleSheet(fileOrBlob) {
 
     // Match student name from SBD
     const sbd = (rawResult.student_no || '').replace(/\D/g, '');
-    let matchedStudent = state.students.find(s => s.student_no === sbd || s.student_no === String(Number(sbd)));
+    const sbdNum = sbd ? String(Number(sbd)) : '';
+    let matchedStudent = state.students.find(s =>
+        s.student_no === sbd ||
+        (sbdNum && String(Number((s.student_no || '').replace(/\D/g, ''))) === sbdNum)
+    );
     const studentName = matchedStudent ? matchedStudent.name : '';
-    const className = matchedStudent ? matchedStudent.class_name : '';
+    const className = matchedStudent ? (matchedStudent.class_name || state.exam?.className || '') : (state.exam?.className || '');
+    const classId = matchedStudent?.class_id || state.exam?.classId || '';
+    const studentUid = matchedStudent?.student_uid || '';
+    const studentEmail = matchedStudent?.student_email || '';
 
     // Calculate score
     const scoreData = calculateExamScore(rawResult.code, rawResult.part1, rawResult.part2, rawResult.part3Text || rawResult.part3);
@@ -572,6 +716,9 @@ async function processSingleSheet(fileOrBlob) {
         teacherId: state.teacherUid,
         student_no: sbd,
         student_name: studentName,
+        student_uid: studentUid,
+        student_email: studentEmail,
+        class_id: classId,
         class_name: className,
         code: rawResult.code || state.exam.codes[0] || '101',
         score: scoreData.totalScore,
@@ -745,8 +892,38 @@ function cropCandidateHandwrittenName(rectifiedDataUrl) {
     });
 }
 
+function resolveKeyForCode(code) {
+    const c = String(code || '').trim();
+    if (c && state.keys[c]) return state.keys[c];
+    const stripped = c.replace(/^0+/, '');
+    if (stripped && state.keys[stripped]) return state.keys[stripped];
+    const padded4 = c.padStart(4, '0');
+    if (state.keys[padded4]) return state.keys[padded4];
+    for (const [k, v] of Object.entries(state.keys)) {
+        if (k.replace(/^0+/, '') === stripped && stripped !== '') return v;
+    }
+    const firstKey = Object.keys(state.keys)[0];
+    return firstKey ? state.keys[firstKey] : { answers: '', part2: [], part3: [] };
+}
+
+function normalizeP3Answer(val) {
+    const s = String(val ?? '').trim().replace(/\s+/g, '').replace(/\./g, ',');
+    if (!s) return '';
+    const num = Number(s.replace(',', '.'));
+    if (!Number.isNaN(num) && /^-?\d+([.,]\d+)?$/.test(s)) {
+        return String(num).replace('.', ',');
+    }
+    return s.toUpperCase();
+}
+
+function isP3Match(studentVal, keyVal) {
+    const ns = normalizeP3Answer(studentVal);
+    const nk = normalizeP3Answer(keyVal);
+    return Boolean(ns && nk && ns === nk);
+}
+
 function calculateExamScore(code, studentP1, studentP2, studentP3) {
-    const key = state.keys[code] || state.keys[Object.keys(state.keys)[0]] || { answers: '', part2: [], part3: [] };
+    const key = resolveKeyForCode(code);
     const p1Pt = state.exam?.part1_point ?? 0.25;
     const p2Pts = state.exam?.part2_points || [0.1, 0.25, 0.5, 1.0];
     const p3Pt = state.exam?.part3_point ?? 0.5;
@@ -772,7 +949,9 @@ function calculateExamScore(code, studentP1, studentP2, studentP3) {
         const kChunk = (key.part2 && key.part2[q]) ? key.part2[q] : '----';
         let matchCount = 0;
         for (let r = 0; r < 4; r++) {
-            if (sChunk[r] && kChunk[r] && sChunk[r] === kChunk[r] && sChunk[r] !== '-' && sChunk[r] !== '?') {
+            const sc = (sChunk[r] || '-').toUpperCase().replace('D', 'Đ');
+            const kc = (kChunk[r] || '-').toUpperCase().replace('D', 'Đ');
+            if (sc && kc && sc === kc && sc !== '-' && sc !== '?') {
                 matchCount++;
             }
         }
@@ -789,14 +968,14 @@ function calculateExamScore(code, studentP1, studentP2, studentP3) {
         let sAns = '';
         if (Array.isArray(studentP3)) {
             const item = studentP3[q];
-            if (typeof item === 'object') {
+            if (typeof item === 'object' && item !== null) {
                 sAns = (item.negative ? '-' : '') + (item.digits || '');
             } else {
                 sAns = String(item || '').trim();
             }
         }
         const kAns = String((key.part3 && key.part3[q]) || '').trim();
-        if (sAns && kAns && sAns.replace(/\s+/g, '') === kAns.replace(/\s+/g, '')) {
+        if (isP3Match(sAns, kAns)) {
             p3Correct++;
         }
     }
@@ -1100,7 +1279,7 @@ async function generateStampedGradedSheet(sub, rawResult) {
     ctx.drawImage(rectImg, 0, headerH, sheetW, sheetH);
 
     // 7. VẼ ĐÁNH DẤU CHI TIẾT TRỰC TIẾP CẢ 3 PHẦN LÊN ẢNH
-    const key = state.keys[sub.code] || state.keys[Object.keys(state.keys)[0]] || { answers: '', part2: [], part3: [] };
+    const key = resolveKeyForCode(sub.code);
     const kFrame = tpl.khung || [0, 0, 16.53, 23.39];
     const scaleX = sheetW / kFrame[2];
     const scaleY = sheetH / kFrame[3];
@@ -1192,7 +1371,7 @@ async function generateStampedGradedSheet(sub, rawResult) {
                 sAns = String(rawResult.part3Text[q] || '').trim();
             }
             const kAns = String((key.part3 && key.part3[q]) || '').trim();
-            const isMatch = Boolean(sAns && kAns && sAns.replace(/\s+/g, '') === kAns.replace(/\s+/g, ''));
+            const isMatch = isP3Match(sAns, kAns);
 
             // Khoanh tròn các ô số học sinh đã tô ở 4 cột
             if (rawResult.p3m && rawResult.p3m[q]) {
@@ -1250,7 +1429,7 @@ function renderSvgOverlay(rawResult, code) {
     }
 
     const tpl = rawResult.template;
-    const key = state.keys[code] || state.keys[Object.keys(state.keys)[0]] || { answers: '', part2: [], part3: [] };
+    const key = resolveKeyForCode(code);
 
     let marks = '';
     const ring = (pt, color, stroke = 2.5, r = 14, dashed = false) => {
@@ -1328,7 +1507,7 @@ function renderSvgOverlay(rawResult, code) {
             if (q >= tpl.p3.length) continue;
             const sAns = String((rawResult.part3Text && rawResult.part3Text[q]) || '').trim();
             const kAns = String((key.part3 && key.part3[q]) || '').trim();
-            const isMatch = Boolean(sAns && kAns && sAns.replace(/\s+/g, '') === kAns.replace(/\s+/g, ''));
+            const isMatch = isP3Match(sAns, kAns);
 
             if (rawResult.p3m && rawResult.p3m[q]) {
                 for (let col = 0; col < 4; col++) {
@@ -1425,22 +1604,110 @@ async function saveSubmissionToStore(sub) {
     // Check if duplicate SBD exists for this exam, replace it
     const existingIdx = state.submissions.findIndex(s => s.student_no === sub.student_no && s.student_no !== '');
     if (existingIdx !== -1) {
+        sub.id = state.submissions[existingIdx].id || sub.id;
         state.submissions[existingIdx] = sub;
     } else {
         state.submissions.push(sub);
     }
 
-    // Save to Firestore
+    // Save to Firestore omr_submissions
     if (state.teacherUid) {
         try {
             await setDoc(doc(db, "omr_submissions", sub.id), sub);
         } catch(e) {
-            console.warn("Lưu Firestore thất bại, lưu localStorage:", e);
+            console.warn("Lưu Firestore omr_submissions thất bại, lưu localStorage:", e);
+        }
+
+        // Tự động đồng bộ sang bảng "results" của Lớp học LMS để giáo viên & PHHS xem trực tuyến
+        try {
+            await syncSubmissionToLmsResultsCollection(sub);
+        } catch(syncErr) {
+            console.warn("Đồng bộ sang LMS results:", syncErr);
         }
     }
     // Save to localStorage
     localStorage.setItem(`omr_submissions_${sub.examId}`, JSON.stringify(state.submissions));
     updateOverviewStats();
+}
+
+function buildLmsAnswersObjectFromOmr(sub) {
+    const lmsAnswers = {};
+    const qList = Array.isArray(state.exam?.questions) ? state.exam.questions : [];
+    if (qList.length > 0) {
+        let mcIdx = 0, tfIdx = 0, shortIdx = 0;
+        qList.forEach((q, idx) => {
+            if (!q) return;
+            if (q.type === 'mc' || !q.type) {
+                const ch = (sub.answers || '')[mcIdx] || '';
+                const optIdx = ['A', 'B', 'C', 'D'].indexOf(ch);
+                if (optIdx !== -1) lmsAnswers[idx] = optIdx;
+                mcIdx++;
+            } else if (q.type === 'tf') {
+                const chunk = (Array.isArray(sub.part2) && sub.part2[tfIdx]) ? sub.part2[tfIdx] : '----';
+                const tfObj = {};
+                for (let r = 0; r < 4; r++) {
+                    const c = (chunk[r] || '-').toUpperCase().replace('D', 'Đ');
+                    if (c === 'Đ') tfObj[r] = true;
+                    else if (c === 'S') tfObj[r] = false;
+                }
+                lmsAnswers[idx] = tfObj;
+                tfIdx++;
+            } else if (q.type === 'short') {
+                const val = Array.isArray(sub.part3) ? (sub.part3[shortIdx] || '') : '';
+                lmsAnswers[idx] = String(val).trim();
+                shortIdx++;
+            }
+        });
+    } else {
+        // Fallback nếu đề không có danh sách câu hỏi chi tiết
+        const p1 = sub.answers || '';
+        for (let i = 0; i < p1.length; i++) {
+            const optIdx = ['A', 'B', 'C', 'D'].indexOf(p1[i]);
+            if (optIdx !== -1) lmsAnswers[i] = optIdx;
+        }
+    }
+    return lmsAnswers;
+}
+
+async function syncSubmissionToLmsResultsCollection(sub) {
+    if (!state.exam) return null;
+    const sbdSafe = (sub.student_no || sub.id || '000').replace(/[^a-zA-Z0-9_-]/g, '');
+    const resultDocId = `omr_${state.exam.id}_${sbdSafe}`;
+    const classId = sub.class_id || state.exam.classId || '';
+    const className = sub.class_name || state.exam.className || '';
+    const studentId = sub.student_uid || (sbdSafe ? `omr_sbd_${sbdSafe}` : sub.id);
+    const studentName = sub.student_name || (sub.student_no ? `Học sinh SBD ${sub.student_no}` : 'Thí sinh OMR');
+    const totalQ = (state.exam.question_count || 12) + (state.exam.part2_count || 4) + (state.exam.part3_count || 6);
+
+    const resultPayload = {
+        id: resultDocId,
+        examId: state.exam.id,
+        examTitle: state.exam.name || 'Bài thi OMR',
+        teacherId: state.teacherUid,
+        classId,
+        className,
+        studentId,
+        studentName,
+        studentEmail: sub.student_email || '',
+        studentNo: sub.student_no || '',
+        examCode: sub.code || '101',
+        score: Number(sub.score) || 0,
+        part1Score: Number(sub.part1_score) || 0,
+        part2Score: Number(sub.part2_score) || 0,
+        part3Score: Number(sub.part3_score) || 0,
+        totalQuestions: totalQ,
+        answers: buildLmsAnswersObjectFromOmr(sub),
+        omrPart1: sub.answers || '',
+        omrPart2: sub.part2 || [],
+        omrPart3: sub.part3 || [],
+        gradingSource: 'omr',
+        submittedAt: sub.createdAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+    };
+
+    await setDoc(doc(db, "results", resultDocId), resultPayload);
+    sub.lmsResultId = resultDocId;
+    return resultDocId;
 }
 
 function playBeepSound() {
@@ -1500,13 +1767,13 @@ window.toggleGuideOrientation = () => {
     if (!guide) return;
     state.guideOrientation = state.guideOrientation === 'portrait' ? 'landscape' : 'portrait';
     if (state.guideOrientation === 'landscape') {
-        guide.classList.remove('aspect-[1552/2254]', 'landscape:aspect-[1552/2254]');
-        guide.classList.add('aspect-[2254/1552]');
+        guide.classList.remove('aspect-[100/138]', 'landscape:aspect-[138/100]');
+        guide.classList.add('aspect-[138/100]');
         if (lbl) lbl.textContent = 'Khung ngang';
         showCameraHUDMessage('📐 Khung ngang (Phiếu 40 câu / Quét ngang)');
     } else {
-        guide.classList.remove('aspect-[2254/1552]');
-        guide.classList.add('aspect-[1552/2254]');
+        guide.classList.remove('aspect-[138/100]');
+        guide.classList.add('aspect-[100/138]', 'landscape:aspect-[138/100]');
         if (lbl) lbl.textContent = 'Khung dọc';
         showCameraHUDMessage('📐 Khung dọc (Chuẩn A4 BGD)');
     }
@@ -1585,17 +1852,16 @@ function startAutoScanLoop() {
     stopAutoScanLoop();
     if (!state.autoScanEnabled) return;
 
-    const intervalMs = state.autoScanSpeed === 'fast' ? 500 : (state.autoScanSpeed === 'slow' ? 1200 : 800);
+    const intervalMs = state.autoScanSpeed === 'fast' ? 450 : (state.autoScanSpeed === 'slow' ? 1050 : 680);
 
     autoScanInterval = setInterval(async () => {
         const video = document.getElementById('cameraVideo');
-        const guide = document.getElementById('cameraA4Guide');
         const sheetArea = document.getElementById('scanCameraArea');
         const resSheet = document.getElementById('cameraResultSheet');
 
         // Only scan if camera is open and video is actively streaming
         if (!video || !state.currentCameraStream || sheetArea?.classList.contains('hidden')) return;
-        if (state.isAutoScanning || video.readyState < 2) return;
+        if (state.isAutoScanning || video.readyState < 2 || video.videoWidth <= 0 || video.videoHeight <= 0) return;
 
         // Nghỉ giữa các lần quét khi kết quả đang hiển thị
         if (resSheet && !resSheet.classList.contains('hidden') && Date.now() - lastAutoScanTime < state.autoScanCooldown) {
@@ -1604,122 +1870,51 @@ function startAutoScanLoop() {
 
         try {
             state.isAutoScanning = true;
-            const vr = video.getBoundingClientRect();
-            const gr = guide ? guide.getBoundingClientRect() : null;
-            if (!gr || vr.width <= 0 || vr.height <= 0 || video.videoWidth <= 0 || video.videoHeight <= 0) {
-                state.isAutoScanning = false;
-                return;
-            }
 
-            const objFit = window.getComputedStyle(video).objectFit || 'cover';
-            const scale = objFit === 'cover'
-                ? Math.max(vr.width / video.videoWidth, vr.height / video.videoHeight)
-                : Math.min(vr.width / video.videoWidth, vr.height / video.videoHeight);
-
-            const drawW = video.videoWidth * scale;
-            const drawH = video.videoHeight * scale;
-            const offsetX = (vr.width - drawW) / 2;
-            const offsetY = (vr.height - drawH) / 2;
-
-            let computedSx = (gr.left - vr.left - offsetX) / scale;
-            let computedSy = (gr.top - vr.top - offsetY) / scale;
-            let computedSw = gr.width / scale;
-            let computedSh = gr.height / scale;
-
-            // 18% margin for detection
-            const padX = computedSw * 0.18;
-            const padY = computedSh * 0.18;
-            computedSx = Math.max(0, computedSx - padX);
-            computedSy = Math.max(0, computedSy - padY);
-            computedSw = Math.min(video.videoWidth - computedSx, computedSw + padX * 2);
-            computedSh = Math.min(video.videoHeight - computedSy, computedSh + padY * 2);
-
-            if (computedSw < 200 || computedSh < 200) {
-                state.isAutoScanning = false;
-                return;
-            }
-
-            // Fast lightweight test canvas
+            // Lấy toàn bộ khung hình cảm biến ở độ phân giải vừa phải (650px) để tìm 4 mốc đen chính xác tuyệt đối
             const testCanvas = document.createElement('canvas');
-            const targetW = 600;
-            const targetH = Math.round(targetW * (computedSh / computedSw));
+            const targetW = 650;
+            const targetH = Math.round(targetW * (video.videoHeight / video.videoWidth));
             testCanvas.width = targetW;
             testCanvas.height = targetH;
             const tCtx = testCanvas.getContext('2d', { willReadFrequently: true });
-            tCtx.drawImage(video, computedSx, computedSy, computedSw, computedSh, 0, 0, targetW, targetH);
+            tCtx.drawImage(video, 0, 0, targetW, targetH);
 
             const gray = window.OMR.xam(tCtx.getImageData(0, 0, targetW, targetH));
-            const small = window.OMR.thuNho(gray, 500);
-            const blocks = window.OMR.timKhoi(small.g).filter(b => b.c > small.g.w * 0.012 && b.c < small.g.w * 0.05);
+            const tplKey = state.exam?.sheet_template || 'qmcv1239';
+            const tpl = (window.MAU && window.MAU[tplKey]) ? window.MAU[tplKey] : window.MAU.qmcv1239;
 
-            if (blocks.length >= 4) {
-                const corners = [[0, 0], [small.g.w, 0], [small.g.w, small.g.h], [0, small.g.h]].map(([x, y]) => 
-                    blocks.reduce((best, b) => !best || Math.hypot(b.x - x, b.y - y) < Math.hypot(best.x - x, best.y - y) ? b : best, null)
-                );
-                const uniqueCorners = new Set(corners);
-                if (uniqueCorners.size === 4) {
-                    const [c0, c1, c2, c3] = corners;
-                    let isValidQuad = true;
+            // Sử dụng thuật toán tìm 4 góc hình bình hành chống nhiễu bàn phím / mép bàn
+            let detectedCorners = null;
+            if (window.findQMCorners) {
+                detectedCorners = window.findQMCorners(gray, tpl);
+            }
 
-                    if (state.strictFiducials) {
-                        // 1. Kiểm tra hình dạng vuông của từng mốc đen góc (chống nhận nhầm phím/vết bẩn)
-                        const isSquareish = b => b && b.w && b.h && Math.abs(b.w / b.h - 1) < 0.45;
-                        if (!isSquareish(c0) || !isSquareish(c1) || !isSquareish(c2) || !isSquareish(c3)) {
-                            isValidQuad = false;
-                        }
+            if (detectedCorners && detectedCorners.length === 4) {
+                state.consecutiveCornerDetections = (state.consecutiveCornerDetections || 0) + 1;
 
-                        // 2. Kích thước cạnh tứ giác
-                        const wTop = Math.hypot(c1.x - c0.x, c1.y - c0.y);
-                        const wBot = Math.hypot(c2.x - c3.x, c2.y - c3.y);
-                        const hLeft = Math.hypot(c3.x - c0.x, c3.y - c0.y);
-                        const hRight = Math.hypot(c2.x - c1.x, c2.y - c1.y);
+                // Làm sáng 4 ô vuông định vị màu xanh ngọc
+                document.querySelectorAll('.camera-corner-bracket').forEach(b => {
+                    b.classList.add('detected');
+                });
 
-                        // Chiếm tỷ lệ đủ lớn trong khung (> 30%)
-                        if (wTop < small.g.w * 0.30 || hLeft < small.g.h * 0.30) {
-                            isValidQuad = false;
-                        }
+                const statusText = document.getElementById('cameraStatusText');
+                if (statusText) {
+                    statusText.innerHTML = '<span class="text-emerald-400 font-extrabold">✓ Đã nhận diện đủ 4 ô định vị góc! Đang tự động chấm...</span>';
+                }
 
-                        // Tương quan cạnh đối
-                        if (Math.abs(wTop - wBot) / Math.max(wTop, wBot) > 0.40 || Math.abs(hLeft - hRight) / Math.max(hLeft, hRight) > 0.40) {
-                            isValidQuad = false;
-                        }
-
-                        // Tỷ lệ khổ giấy A4
-                        const avgW = (wTop + wBot) / 2;
-                        const avgH = (hLeft + hRight) / 2;
-                        const ratio = avgH / avgW;
-                        const isPortraitA4 = (ratio >= 1.15 && ratio <= 1.75);
-                        const isLandscapeA4 = (ratio >= 0.55 && ratio <= 0.90);
-                        if (!isPortraitA4 && !isLandscapeA4) {
-                            isValidQuad = false;
-                        }
-                    }
-
-                    if (isValidQuad) {
-                        state.consecutiveCornerDetections = (state.consecutiveCornerDetections || 0) + 1;
-                        
-                        // Làm sáng góc khung căn màu xanh ngọc – dùng CSS class để không bị purge
-                        document.querySelectorAll('.camera-corner-bracket').forEach(b => {
-                            b.classList.add('detected');
-                        });
-
-                        const reqFrames = state.autoScanSpeed === 'fast' ? 1 : 2;
-                        if (state.consecutiveCornerDetections >= reqFrames) {
-                            state.consecutiveCornerDetections = 0;
-                            lastAutoScanTime = Date.now();
-                            await window.captureCameraFrame();
-                        }
-                    } else {
-                        state.consecutiveCornerDetections = 0;
-                        document.querySelectorAll('.camera-corner-bracket').forEach(b => {
-                            b.classList.remove('detected');
-                        });
-                    }
-                } else {
+                // Tốc độ Nhanh/Vừa: chụp ngay khi xác nhận 4 mốc + >=45% mốc con của phiếu; Chậm: đợi 2 nhịp ổn định
+                const reqFrames = state.autoScanSpeed === 'slow' ? 2 : 1;
+                if (state.consecutiveCornerDetections >= reqFrames) {
                     state.consecutiveCornerDetections = 0;
+                    lastAutoScanTime = Date.now();
+                    await window.captureCameraFrame();
                 }
             } else {
                 state.consecutiveCornerDetections = 0;
+                document.querySelectorAll('.camera-corner-bracket').forEach(b => {
+                    b.classList.remove('detected');
+                });
             }
         } catch(e) {
             // Ignore frame detection error in periodic loop
@@ -2138,48 +2333,12 @@ window.captureCameraFrame = async () => {
         }, 120);
     }
 
-    // Precise cropping to A4 guide area
-    const vr = video.getBoundingClientRect();
-    const gr = guide ? guide.getBoundingClientRect() : null;
-
-    const canvas = document.createElement('canvas');
-    let sx = 0, sy = 0, sw = video.videoWidth || 1920, sh = video.videoHeight || 1440;
-
-    if (gr && vr.width > 0 && vr.height > 0 && video.videoWidth > 0 && video.videoHeight > 0) {
-        const objFit = window.getComputedStyle(video).objectFit || 'cover';
-        const scale = objFit === 'cover'
-            ? Math.max(vr.width / video.videoWidth, vr.height / video.videoHeight)
-            : Math.min(vr.width / video.videoWidth, vr.height / video.videoHeight);
-        const drawW = video.videoWidth * scale;
-        const drawH = video.videoHeight * scale;
-        const offsetX = (vr.width - drawW) / 2;
-        const offsetY = (vr.height - drawH) / 2;
-
-        let computedSx = (gr.left - vr.left - offsetX) / scale;
-        let computedSy = (gr.top - vr.top - offsetY) / scale;
-        let computedSw = gr.width / scale;
-        let computedSh = gr.height / scale;
-
-        // 20% generous padding margin so outer corner markers are never clipped
-        const padX = computedSw * 0.20;
-        const padY = computedSh * 0.20;
-        computedSx = Math.max(0, computedSx - padX);
-        computedSy = Math.max(0, computedSy - padY);
-        computedSw = Math.min(video.videoWidth - computedSx, computedSw + padX * 2);
-        computedSh = Math.min(video.videoHeight - computedSy, computedSh + padY * 2);
-
-        if (computedSw > 200 && computedSh > 200) {
-            sx = computedSx;
-            sy = computedSy;
-            sw = computedSw;
-            sh = computedSh;
-        }
-    }
-
-    canvas.width = Math.round(sw);
-    canvas.height = Math.round(sh);
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+    // Chụp toàn khung hình cảm biến camera trước (vì thuật toán findQMCorners đã tự lọc nền bàn phím/vật thể ngoài phiếu)
+    const fullCanvas = document.createElement('canvas');
+    fullCanvas.width = video.videoWidth || 1920;
+    fullCanvas.height = video.videoHeight || 1440;
+    const fCtx = fullCanvas.getContext('2d');
+    fCtx.drawImage(video, 0, 0, fullCanvas.width, fullCanvas.height);
 
     const statusBadge = document.getElementById('cameraScanStatus');
     const statusText = document.getElementById('cameraStatusText');
@@ -2191,28 +2350,56 @@ window.captureCameraFrame = async () => {
         statusText.innerHTML = '<span class="text-emerald-300 font-bold"><i class="fa-solid fa-spinner fa-spin"></i> Đang phân tích phiếu thi...</span>';
     }
 
-    canvas.toBlob(async (blob) => {
-        if (!blob) return;
+    fullCanvas.toBlob(async (fullBlob) => {
+        if (!fullBlob) return;
         try {
             let sub = null;
             try {
-                // Ưu tiên 1: Chấm vùng đã crop rộng 20% quanh khung ngắm
-                sub = await processSingleSheet(blob);
-            } catch(cropErr) {
-                console.warn("Chấm vùng crop chưa khớp 4 mốc, tự động quét toàn khung video sensor:", cropErr);
-                // Ưu tiên 2 (Tự động Fallback): Chụp trọn vẹn 100% cảm biến camera để không bị sót mép phiếu
-                const fullCanvas = document.createElement('canvas');
-                fullCanvas.width = video.videoWidth || 1920;
-                fullCanvas.height = video.videoHeight || 1440;
-                const fCtx = fullCanvas.getContext('2d');
-                fCtx.drawImage(video, 0, 0, fullCanvas.width, fullCanvas.height);
-                const fullBlob = await new Promise(r => fullCanvas.toBlob(r, 'image/jpeg', 0.95));
-                if (fullBlob) {
-                    sub = await processSingleSheet(fullBlob);
+                // Ưu tiên 1: Quét toàn khung cảm biến với bộ tìm 4 góc thông minh findQMCorners
+                sub = await processSingleSheet(fullBlob);
+            } catch(fullErr) {
+                console.warn("Quét toàn khung chưa khớp, thử vùng crop khung ngắm:", fullErr);
+                // Ưu tiên 2: Thử vùng crop theo khung ngắm
+                const vr = video.getBoundingClientRect();
+                const gr = guide ? guide.getBoundingClientRect() : null;
+                if (gr && vr.width > 0 && vr.height > 0 && video.videoWidth > 0 && video.videoHeight > 0) {
+                    const objFit = window.getComputedStyle(video).objectFit || 'cover';
+                    const scale = objFit === 'cover'
+                        ? Math.max(vr.width / video.videoWidth, vr.height / video.videoHeight)
+                        : Math.min(vr.width / video.videoWidth, vr.height / video.videoHeight);
+                    const drawW = video.videoWidth * scale;
+                    const drawH = video.videoHeight * scale;
+                    const offsetX = (vr.width - drawW) / 2;
+                    const offsetY = (vr.height - drawH) / 2;
+
+                    let sx = (gr.left - vr.left - offsetX) / scale;
+                    let sy = (gr.top - vr.top - offsetY) / scale;
+                    let sw = gr.width / scale;
+                    let sh = gr.height / scale;
+
+                    const padX = sw * 0.16;
+                    const padY = sh * 0.16;
+                    sx = Math.max(0, sx - padX);
+                    sy = Math.max(0, sy - padY);
+                    sw = Math.min(video.videoWidth - sx, sw + padX * 2);
+                    sh = Math.min(video.videoHeight - sy, sh + padY * 2);
+
+                    const cropCanvas = document.createElement('canvas');
+                    cropCanvas.width = Math.round(sw);
+                    cropCanvas.height = Math.round(sh);
+                    cropCanvas.getContext('2d').drawImage(video, sx, sy, sw, sh, 0, 0, cropCanvas.width, cropCanvas.height);
+                    const cropBlob = await new Promise(r => cropCanvas.toBlob(r, 'image/jpeg', 0.95));
+                    if (cropBlob) {
+                        sub = await processSingleSheet(cropBlob);
+                    } else {
+                        throw fullErr;
+                    }
                 } else {
-                    throw cropErr;
+                    throw fullErr;
                 }
             }
+
+            document.querySelectorAll('.camera-corner-bracket').forEach(b => b.classList.add('detected'));
 
             if (statusBadge) {
                 statusBadge.innerHTML = '<i class="fa-solid fa-check text-emerald-400"></i> Đã nhận diện!';
@@ -2227,13 +2414,14 @@ window.captureCameraFrame = async () => {
             showCameraResultSheet(sub);
         } catch(err) {
             console.warn("Scan frame error:", err);
+            document.querySelectorAll('.camera-corner-bracket').forEach(b => b.classList.remove('detected'));
             if (statusBadge) {
                 statusBadge.innerHTML = '<i class="fa-solid fa-triangle-exclamation text-amber-400"></i> Căn 4 góc đen chưa rõ, thử lại';
                 statusBadge.classList.remove('hidden');
                 setTimeout(() => statusBadge.classList.add('hidden'), 3500);
             }
             if (statusText) {
-                statusText.innerHTML = '<span class="text-amber-300 font-bold">⚠️ Chưa nhận diện đủ 4 mốc đen. Hãy đưa phiếu vào trọn khung hình!</span>';
+                statusText.innerHTML = '<span class="text-amber-300 font-bold">⚠️ Chưa nhận diện đủ 4 mốc đen. Hãy đưa 4 góc phiếu vào 4 ô vuông!</span>';
                 setTimeout(() => {
                     if (statusText) statusText.textContent = 'Canh 4 ô đen góc phiếu vào 4 góc khung ngắm để tự động chấm.';
                 }, 3200);
@@ -2289,10 +2477,13 @@ window.renderResultsTable = () => {
             <td class="p-3 text-center text-slate-400 text-[11px]">${new Date(s.createdAt).toLocaleTimeString('vi-VN', {hour:'2-digit', minute:'2-digit', day:'2-digit', month:'2-digit'})}</td>
             <td class="p-3 text-center">
                 <div class="flex items-center justify-center gap-1.5">
-                    <button type="button" onclick="window.viewSubmissionDetail('${s.id}')" class="w-7 h-7 rounded-lg bg-emerald-50 text-emerald-600 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-300 flex items-center justify-center transition-colors" title="Xem chi tiết phiếu chấm">
+                    <button type="button" onclick="window.openSendParentModal('${s.id}')" class="w-7 h-7 rounded-lg bg-indigo-50 text-indigo-600 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:text-indigo-300 flex items-center justify-center transition-colors cursor-pointer" title="Gửi kết quả & phiếu chấm cho Phụ huynh (PHHS)">
+                        <i class="fa-solid fa-paper-plane text-xs"></i>
+                    </button>
+                    <button type="button" onclick="window.viewSubmissionDetail('${s.id}')" class="w-7 h-7 rounded-lg bg-emerald-50 text-emerald-600 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-300 flex items-center justify-center transition-colors cursor-pointer" title="Xem chi tiết phiếu chấm">
                         <i class="fa-solid fa-eye text-xs"></i>
                     </button>
-                    <button type="button" onclick="window.deleteSubmission('${s.id}')" class="w-7 h-7 rounded-lg bg-rose-50 text-rose-600 hover:bg-rose-100 dark:bg-rose-950/40 dark:text-rose-400 flex items-center justify-center transition-colors" title="Xóa kết quả này">
+                    <button type="button" onclick="window.deleteSubmission('${s.id}')" class="w-7 h-7 rounded-lg bg-rose-50 text-rose-600 hover:bg-rose-100 dark:bg-rose-950/40 dark:text-rose-400 flex items-center justify-center transition-colors cursor-pointer" title="Xóa kết quả này">
                         <i class="fa-solid fa-trash text-xs"></i>
                     </button>
                 </div>
@@ -2590,6 +2781,85 @@ window.renderStudentsTab = () => {
     }).join('');
 };
 
+async function fetchTeacherLmsClasses() {
+    if (Array.isArray(state.lmsClasses) && state.lmsClasses.length > 0) return state.lmsClasses;
+    let classes = [];
+    try {
+        if (state.teacherUid) {
+            const qClasses = query(collection(db, "classes"), where("teacherId", "==", state.teacherUid));
+            const snap = await getDocs(qClasses);
+            classes = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(c => !c.isDeleted);
+        }
+        if (classes.length === 0) {
+            const snapAll = await getDocs(query(collection(db, "classes"), limit(50)));
+            classes = snapAll.docs.map(d => ({ id: d.id, ...d.data() })).filter(c => !c.isDeleted);
+        }
+    } catch(e) {
+        console.warn("Lỗi tải danh sách lớp LMS:", e);
+    }
+    state.lmsClasses = classes;
+    return classes;
+}
+
+async function syncStudentsFromClassIdToExam(classId, examObj, silent = false) {
+    if (!classId || !examObj) return [];
+    const classDoc = await getDoc(doc(db, "classes", classId));
+    if (!classDoc.exists()) {
+        if (!silent) throw new Error("Lớp học không tồn tại!");
+        return [];
+    }
+    const classData = classDoc.data();
+    const className = classData.name || 'Lớp LMS';
+
+    // Lưu liên kết lớp học vào bài thi hiện tại
+    examObj.classId = classId;
+    examObj.className = className;
+    localStorage.setItem(`omr_exam_class_${examObj.id}`, JSON.stringify({ classId, className }));
+    updateActiveExamBanner();
+
+    let rawStudents = Array.isArray(classData.students) ? classData.students : [];
+    if (rawStudents.length === 0) {
+        try {
+            const qSt = await getDocs(collection(db, `classes/${classId}/students`));
+            rawStudents = qSt.docs.map(d => ({ id: d.id, ...d.data() }));
+        } catch(e) {}
+    }
+
+    if (rawStudents.length === 0) {
+        if (!silent) Swal.fire('Thông báo', `Đã gán lớp ${className} (hiện chưa có học sinh trong danh sách lớp).`, 'info');
+        return [];
+    }
+
+    const newStudents = rawStudents.map((st, idx) => {
+        const sbd = st.sbd || st.student_no || String(idx + 1).padStart(3, '0');
+        const stName = (typeof st === 'string') ? st : (st.name || st.studentName || st.fullName || st.displayName || `Học sinh ${sbd}`);
+        const stUid = (typeof st === 'object' && st) ? (st.uid || st.id || st.studentId || '') : '';
+        const stEmail = (typeof st === 'object' && st) ? (st.email || '') : '';
+        return {
+            id: `st_${examObj.id}_${sbd}`,
+            examId: examObj.id,
+            teacherId: state.teacherUid,
+            student_no: String(sbd).padStart(3, '0'),
+            name: stName,
+            student_uid: stUid,
+            student_email: stEmail,
+            class_id: classId,
+            class_name: className
+        };
+    });
+
+    state.students = newStudents;
+    if (state.teacherUid) {
+        for (const s of newStudents) {
+            try { await setDoc(doc(db, "omr_students", s.id), s); } catch(e) {}
+        }
+    }
+    localStorage.setItem(`omr_students_${examObj.id}`, JSON.stringify(newStudents));
+    window.renderStudentsTab();
+    updateOverviewStats();
+    return newStudents;
+}
+
 window.openSyncLmsClassModal = async () => {
     const modal = document.getElementById('syncLmsClassModal');
     const select = document.getElementById('lmsClassSelector');
@@ -2599,20 +2869,14 @@ window.openSyncLmsClassModal = async () => {
     select.innerHTML = `<option value="">Đang tải danh sách lớp học của bạn...</option>`;
 
     try {
-        let classes = [];
-        if (state.teacherUid) {
-            const qClasses = query(collection(db, "classes"), where("teacherId", "==", state.teacherUid));
-            const snap = await getDocs(qClasses);
-            classes = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        }
-
+        const classes = await fetchTeacherLmsClasses();
         if (classes.length === 0) {
             select.innerHTML = `<option value="">Bạn chưa tạo lớp học nào trong QMath LMS</option>`;
             return;
         }
 
         select.innerHTML = classes.map(c => `
-            <option value="${c.id}">${c.name || 'Lớp học'} (${c.studentCount || (c.students?.length) || 0} học sinh)</option>
+            <option value="${c.id}" ${state.exam?.classId === c.id ? 'selected' : ''}>${c.name || 'Lớp học'} (${c.studentCount || (c.students?.length) || 0} học sinh)</option>
         `).join('');
     } catch(err) {
         console.error("Lỗi tải lớp LMS:", err);
@@ -2622,54 +2886,15 @@ window.openSyncLmsClassModal = async () => {
 
 window.confirmSyncFromLmsClass = async () => {
     const classId = document.getElementById('lmsClassSelector')?.value;
-    if (!classId) return;
+    if (!classId || !state.exam) return;
 
     try {
         Swal.showLoading();
-        const classDoc = await getDoc(doc(db, "classes", classId));
-        if (!classDoc.exists()) throw new Error("Lớp học không tồn tại!");
-        const classData = classDoc.data();
-        const className = classData.name || 'Lớp';
-
-        let rawStudents = classData.students || [];
-        if (rawStudents.length === 0) {
-            // Check subcollection
-            const qSt = await getDocs(collection(db, `classes/${classId}/students`));
-            rawStudents = qSt.docs.map(d => d.data());
-        }
-
-        if (rawStudents.length === 0) {
-            Swal.fire('Thông báo', 'Lớp học này hiện chưa có học sinh nào!', 'info');
-            return;
-        }
-
-        // Format to OMR Students with SBD (001, 002...)
-        const newStudents = rawStudents.map((st, idx) => {
-            const sbd = String(idx + 1).padStart(3, '0');
-            const stName = st.name || st.studentName || st.fullName || 'Học sinh';
-            return {
-                id: `st_${state.exam.id}_${sbd}`,
-                examId: state.exam.id,
-                teacherId: state.teacherUid,
-                student_no: sbd,
-                name: stName,
-                class_name: className
-            };
-        });
-
-        state.students = newStudents;
-        // Save to Firestore & localStorage
-        if (state.teacherUid) {
-            for (const s of newStudents) {
-                try { await setDoc(doc(db, "omr_students", s.id), s); } catch(e) {}
-            }
-        }
-        localStorage.setItem(`omr_students_${state.exam.id}`, JSON.stringify(newStudents));
-
+        const newStudents = await syncStudentsFromClassIdToExam(classId, state.exam, false);
         document.getElementById('syncLmsClassModal').classList.add('hidden');
-        window.renderStudentsTab();
-        updateOverviewStats();
-        Swal.fire('Thành công', `Đã đồng bộ ${newStudents.length} học sinh từ lớp ${className}!`, 'success');
+        if (newStudents.length > 0) {
+            Swal.fire('Thành công', `Đã gán lớp ${state.exam.className} và đồng bộ ${newStudents.length} học sinh kèm SBD!`, 'success');
+        }
     } catch(err) {
         Swal.fire('Lỗi đồng bộ', err.message, 'error');
     }
@@ -2928,9 +3153,9 @@ setTimeout(() => {
 }, 500);
 
 // ========================================================
-// 11. LMS EXAM PICKER MODAL (KHO ĐỀ THI LMS QMATH)
+// 11. LMS EXAM PICKER MODAL & PHHS PARENT RESULT SHARING
 // ========================================================
-window.openLmsExamPickerModal = () => {
+window.openLmsExamPickerModal = async () => {
     const modal = document.getElementById('lmsExamPickerModal');
     if (!modal) return;
     modal.classList.remove('hidden');
@@ -2939,6 +3164,34 @@ window.openLmsExamPickerModal = () => {
         searchInput.value = '';
         setTimeout(() => searchInput.focus(), 100);
     }
+
+    // Nạp danh sách lớp học vào ô chọn lớp trong Modal Kho đề LMS
+    const classSelect = document.getElementById('lmsPickerClassSelect');
+    if (classSelect) {
+        classSelect.innerHTML = `<option value="">-- Không gán lớp (hoặc chọn sau) --</option>`;
+        fetchTeacherLmsClasses().then(classes => {
+            classSelect.innerHTML = `<option value="">-- Không gán lớp (hoặc chọn sau) --</option>` +
+                classes.map(c => `<option value="${c.id}" ${state.exam?.classId === c.id ? 'selected' : ''}>Lớp: ${c.name || 'Lớp học'} (${c.studentCount || (c.students?.length) || 0} HS)</option>`).join('');
+        });
+    }
+
+    // Nếu danh sách đề LMS đang trống, thử tải lại từ Firestore exams
+    const lmsItems = (state.exams || []).filter(e => e.isLmsExam);
+    if (lmsItems.length === 0 && state.teacherUid) {
+        try {
+            const snapLms = await getDocs(query(collection(db, "exams"), limit(120)));
+            const loaded = snapLms.docs
+                .map(d => ({ id: d.id, ...d.data() }))
+                .filter(e => !e.isDeleted && (e.title || e.name))
+                .map(e => normalizeLmsExam(e));
+            loaded.forEach(ne => {
+                if (!state.exams.some(x => x.id === ne.id)) state.exams.push(ne);
+            });
+        } catch(e) {
+            console.warn("Tải lại kho đề LMS:", e);
+        }
+    }
+
     window.renderLmsExamPickerList();
 };
 
@@ -2952,9 +3205,7 @@ window.renderLmsExamPickerList = () => {
     if (!listEl) return;
     const filter = (document.getElementById('lmsExamSearchInput')?.value || '').toLowerCase().trim();
 
-    // Get LMS exams from state.exams or state.lmsExams
     const lmsItems = (state.exams || []).filter(e => e.isLmsExam);
-
     const filtered = lmsItems.filter(e => {
         return !filter || (e.name && e.name.toLowerCase().includes(filter));
     });
@@ -2964,7 +3215,7 @@ window.renderLmsExamPickerList = () => {
             <div class="p-8 text-center text-slate-400">
                 <i class="fa-solid fa-file-circle-question text-3xl mb-2 opacity-50"></i>
                 <p class="text-xs font-semibold">Không tìm thấy đề thi LMS nào ${filter ? 'khớp từ khóa "' + filter + '"' : 'trong tài khoản của bạn'}.</p>
-                <p class="text-[11px] text-slate-500 mt-1">Đề thi bạn tạo ở mục "Kho đề thi" hoặc "Soạn đề" trên LMS sẽ tự động xuất hiện tại đây.</p>
+                <p class="text-[11px] text-slate-500 mt-1">Đề thi bạn tạo ở mục "Kho đề thi" hoặc "Soạn đề" trên QMath LMS sẽ tự động xuất hiện tại đây.</p>
             </div>
         `;
         return;
@@ -2972,14 +3223,14 @@ window.renderLmsExamPickerList = () => {
 
     listEl.innerHTML = filtered.map(item => {
         const isCurrent = state.exam?.id === item.id;
-        const totalQ = (item.question_count || 0) + (item.part2_count || 0) + (item.part3_count || 0);
         return `
             <div class="pt-2.5 first:pt-0 flex items-center justify-between gap-3 group">
                 <div class="min-w-0 flex-1">
-                    <div class="flex items-center gap-1.5 mb-1">
+                    <div class="flex items-center gap-1.5 mb-1 flex-wrap">
                         <span class="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300">
                             Kho đề LMS
                         </span>
+                        ${item.className ? `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300">Lớp: ${item.className}</span>` : ''}
                         ${isCurrent ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-teal-500 text-white">Đang chọn</span>' : ''}
                         <span class="text-[11px] text-slate-400 font-mono">${item.createdAt ? new Date(item.createdAt).toLocaleDateString('vi-VN') : ''}</span>
                     </div>
@@ -2991,8 +3242,9 @@ window.renderLmsExamPickerList = () => {
                         <span>Mã đề: <b>${(item.codes || ['101']).join(', ')}</b></span>
                     </div>
                 </div>
-                <button type="button" onclick="window.selectLmsExamForGrading('${item.id}')" class="px-3.5 py-1.5 rounded-xl ${isCurrent ? 'bg-slate-100 dark:bg-slate-700 text-slate-500 cursor-default' : 'bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white shadow-xs cursor-pointer'} text-xs font-bold transition-all shrink-0">
-                    ${isCurrent ? 'Đang dùng' : 'Chọn chấm'}
+                <button type="button" onclick="window.selectLmsExamForGrading('${item.id}')" class="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white shadow-xs cursor-pointer text-xs font-bold transition-all shrink-0 flex items-center gap-1.5">
+                    <i class="fa-solid fa-check"></i>
+                    <span>${isCurrent ? 'Nạp lại Đ/A & Lớp' : 'Trích xuất Đ/A & Chấm'}</span>
                 </button>
             </div>
         `;
@@ -3000,15 +3252,283 @@ window.renderLmsExamPickerList = () => {
 };
 
 window.selectLmsExamForGrading = async (examId) => {
+    const pickedClassId = document.getElementById('lmsPickerClassSelect')?.value || '';
     window.closeLmsExamPickerModal();
-    await selectExam(examId);
-    window.switchTab('scan');
+
+    try {
+        Swal.fire({
+            title: 'Đang trích xuất đáp án từ Kho đề LMS...',
+            allowOutsideClick: false,
+            didOpen: () => Swal.showLoading()
+        });
+
+        // Luôn tải bản đầy đủ từ Firestore exams để lấy trọn vẹn mảng questions & mixedExams
+        let ex = state.exams.find(e => e.id === examId);
+        try {
+            const fullDoc = await getDoc(doc(db, "exams", examId));
+            if (fullDoc.exists()) {
+                const fullData = { id: fullDoc.id, ...fullDoc.data() };
+                const normalized = normalizeLmsExam(fullData);
+                if (ex) Object.assign(ex, normalized);
+                else {
+                    ex = normalized;
+                    state.exams.unshift(ex);
+                }
+            }
+        } catch(fetchErr) {
+            console.warn("Lỗi tải chi tiết đề LMS:", fetchErr);
+        }
+
+        await selectExam(examId);
+
+        // Ghi đè đáp án mới nhất vừa trích xuất từ câu hỏi LMS và lưu lên omr_keys
+        if (state.exam) {
+            autoFillKeysFromLmsQuestions(state.exam, true);
+            if (state.teacherUid) {
+                for (const kObj of Object.values(state.keys)) {
+                    try { await setDoc(doc(db, "omr_keys", kObj.id), kObj); } catch(e) {}
+                }
+            }
+        }
+
+        // Nếu giáo viên chọn Lớp học trong popup, tự động đồng bộ danh sách học sinh của lớp đó
+        let syncedCount = 0;
+        if (pickedClassId && state.exam) {
+            const stuList = await syncStudentsFromClassIdToExam(pickedClassId, state.exam, true);
+            syncedCount = stuList.length;
+        }
+
+        window.switchTab('scan');
+
+        const p1Count = state.exam?.question_count || 0;
+        const p2Count = state.exam?.part2_count || 0;
+        const p3Count = state.exam?.part3_count || 0;
+        const classNote = state.exam?.className ? ` · Lớp ${state.exam.className} (${syncedCount} HS)` : '';
+
+        Swal.fire({
+            toast: true,
+            position: 'top-end',
+            icon: 'success',
+            title: `Đã nạp đáp án (${p1Count} TN, ${p2Count} Đ/S, ${p3Count} TLN)${classNote}`,
+            showConfirmButton: false,
+            timer: 3200
+        });
+    } catch(err) {
+        console.error("Lỗi chọn đề LMS:", err);
+        Swal.fire('Lỗi', 'Không thể nạp đề thi từ Kho đề LMS: ' + err.message, 'error');
+    }
+};
+
+window.syncAllResultsToLmsClass = async () => {
+    if (!state.exam) return;
+    if (state.submissions.length === 0) {
+        Swal.fire('Thông báo', 'Chưa có bài chấm nào trong bài thi này để đồng bộ!', 'info');
+        return;
+    }
+
+    // Nếu bài thi chưa gắn Lớp LMS, hỏi giáo viên có muốn chọn lớp trước khi đồng bộ không
+    if (!state.exam.classId) {
+        const classes = await fetchTeacherLmsClasses();
+        if (classes.length > 0) {
+            const inputOptions = {};
+            classes.forEach(c => { inputOptions[c.id] = `${c.name || 'Lớp học'} (${c.studentCount || (c.students?.length) || 0} HS)`; });
+            const { value: chosenClassId } = await Swal.fire({
+                title: 'Chọn Lớp học LMS để lưu bảng điểm',
+                input: 'select',
+                inputOptions,
+                inputPlaceholder: '-- Chọn lớp học --',
+                showCancelButton: true,
+                confirmButtonText: 'Đồng bộ ngay',
+                cancelButtonText: 'Hủy',
+                confirmButtonColor: '#4f46e5'
+            });
+            if (!chosenClassId) return;
+            await syncStudentsFromClassIdToExam(chosenClassId, state.exam, true);
+        }
+    }
+
+    try {
+        Swal.fire({
+            title: 'Đang đồng bộ kết quả vào Lớp học LMS...',
+            allowOutsideClick: false,
+            didOpen: () => Swal.showLoading()
+        });
+
+        let okCount = 0;
+        for (const sub of state.submissions) {
+            // Ghép lại thông tin học sinh từ danh sách lớp nếu vừa đồng bộ lớp mới
+            const sbdNum = sub.student_no ? String(Number(sub.student_no)) : '';
+            const matched = state.students.find(st =>
+                st.student_no === sub.student_no ||
+                (sbdNum && String(Number((st.student_no || '').replace(/\D/g, ''))) === sbdNum)
+            );
+            if (matched) {
+                sub.student_name = sub.student_name || matched.name;
+                sub.student_uid = matched.student_uid || sub.student_uid || '';
+                sub.student_email = matched.student_email || sub.student_email || '';
+                sub.class_id = matched.class_id || state.exam.classId || '';
+                sub.class_name = matched.class_name || state.exam.className || '';
+            } else {
+                sub.class_id = sub.class_id || state.exam.classId || '';
+                sub.class_name = sub.class_name || state.exam.className || '';
+            }
+            await syncSubmissionToLmsResultsCollection(sub);
+            okCount++;
+        }
+
+        localStorage.setItem(`omr_submissions_${state.exam.id}`, JSON.stringify(state.submissions));
+        window.renderResultsTable();
+
+        Swal.fire({
+            icon: 'success',
+            title: 'Đã lưu kết quả vào Lớp học LMS!',
+            text: `Đã đồng bộ ${okCount} bài chấm vào đề "${state.exam.name}"${state.exam.className ? ` (Lớp ${state.exam.className})` : ''}. Phụ huynh có thể xem điểm trực tuyến qua Link Cổng Phụ Huynh!`,
+            confirmButtonColor: '#10b981'
+        });
+    } catch(err) {
+        Swal.fire('Lỗi đồng bộ', err.message, 'error');
+    }
+};
+
+let currentPhhsSubmission = null;
+
+window.openSendParentModal = async (subId) => {
+    const sub = subId ? state.submissions.find(s => s.id === subId) : state.lastSubmission;
+    if (!sub) {
+        Swal.fire('Thông báo', 'Chưa có kết quả bài chấm để gửi cho phụ huynh!', 'info');
+        return;
+    }
+    currentPhhsSubmission = sub;
+
+    const modal = document.getElementById('sendParentModal');
+    if (!modal) return;
+    modal.classList.remove('hidden');
+
+    const titleEl = document.getElementById('phhsStudentTitle');
+    const scoreEl = document.getElementById('phhsScoreSummary');
+    const badgeEl = document.getElementById('phhsSyncStatusBadge');
+    const urlInput = document.getElementById('phhsParentWatchUrl');
+    const msgInput = document.getElementById('phhsMessageText');
+    const previewImg = document.getElementById('phhsPreviewImg');
+
+    const stName = sub.student_name || (sub.student_no ? `Học sinh SBD ${sub.student_no}` : 'Học sinh');
+    const examTitle = state.exam?.name || 'Bài kiểm tra Toán';
+    const className = sub.class_name || state.exam?.className || '';
+    const totalScore = Number(sub.score || 0).toFixed(2);
+    const p1Score = Number(sub.part1_score || 0).toFixed(2);
+    const p2Score = Number(sub.part2_score || 0).toFixed(2);
+    const p3Score = Number(sub.part3_score || 0).toFixed(2);
+
+    if (titleEl) titleEl.textContent = `${stName} ${sub.student_no ? `(SBD: ${sub.student_no})` : ''}${className ? ` · ${className}` : ''}`;
+    if (scoreEl) scoreEl.textContent = `Tổng điểm: ${totalScore} / 10 đ (Phần I: ${p1Score}đ · Phần II: ${p2Score}đ · Phần III: ${p3Score}đ)`;
+    if (previewImg && sub.image_data) previewImg.src = sub.image_data;
+
+    // Đồng bộ bài chấm lên bảng "results" của LMS ngay để phụ huynh mở link thấy điểm tức thì
+    if (badgeEl) {
+        badgeEl.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i>Đang đồng bộ LMS...';
+    }
+    try {
+        await syncSubmissionToLmsResultsCollection(sub);
+        if (badgeEl) badgeEl.innerHTML = '<i class="fa-solid fa-cloud-check mr-1"></i>Đã lưu vào Lớp LMS';
+    } catch(e) {
+        if (badgeEl) badgeEl.innerHTML = '<i class="fa-solid fa-check mr-1"></i>Sẵn sàng gửi';
+    }
+
+    // Tạo link Cổng Phụ Huynh (parent-watch.html?t=...) nếu học sinh có tài khoản trong lớp LMS
+    let parentWatchUrl = `${window.location.origin}/parent-watch.html`;
+    if (urlInput) urlInput.value = 'Đang tạo đường link theo dõi cho Phụ huynh...';
+
+    const matchedStu = state.students.find(st => st.student_no === sub.student_no);
+    const studentUid = sub.student_uid || matchedStu?.student_uid || '';
+    if (studentUid && typeof getOrCreateParentWatchToken === 'function') {
+        try {
+            const token = await getOrCreateParentWatchToken(studentUid);
+            if (token) {
+                parentWatchUrl = `${window.location.origin}${window.location.pathname.replace(/[^/]+$/, '')}parent-watch.html?t=${encodeURIComponent(token)}`;
+            }
+        } catch(e) {
+            console.warn("Không tạo được parent watch token:", e);
+        }
+    }
+    if (urlInput) urlInput.value = parentWatchUrl;
+
+    if (msgInput) {
+        msgInput.value =
+`📊 THÔNG BÁO KẾT QUẢ BÀI THI - QMATH LMS
+👩‍🎓 Học sinh: ${stName}${sub.student_no ? ` (SBD: ${sub.student_no})` : ''}${className ? ` - Lớp: ${className}` : ''}
+📝 Bài thi: ${examTitle} (Mã đề: ${sub.code || '101'})
+🏆 Tổng điểm: ${totalScore} / 10 điểm
+   • Phần I (Trắc nghiệm): ${p1Score} đ
+   • Phần II (Đúng/Sai): ${p2Score} đ
+   • Phần III (Trả lời ngắn): ${p3Score} đ
+🔗 Xem chi tiết lịch sử học tập & bài chấm trực tuyến tại:
+${parentWatchUrl}`;
+    }
+};
+
+window.closeSendParentModal = () => {
+    const modal = document.getElementById('sendParentModal');
+    if (modal) modal.classList.add('hidden');
+};
+
+window.copyParentWatchUrl = async () => {
+    const url = document.getElementById('phhsParentWatchUrl')?.value || '';
+    if (!url) return;
+    try {
+        await navigator.clipboard.writeText(url);
+        Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Đã copy đường link Phụ huynh!', showConfirmButton: false, timer: 1800 });
+    } catch(e) {}
+};
+
+window.copyPhhsMessageAndImage = async () => {
+    const msg = document.getElementById('phhsMessageText')?.value || '';
+    try {
+        await navigator.clipboard.writeText(msg);
+        Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Đã copy nội dung tin nhắn gửi PHHS!', showConfirmButton: false, timer: 2000 });
+    } catch(e) {}
+};
+
+window.shareResultToParent = async () => {
+    const sub = currentPhhsSubmission || state.lastSubmission;
+    if (!sub) return;
+    const msg = document.getElementById('phhsMessageText')?.value || '';
+
+    try {
+        // Nếu trình duyệt hỗ trợ Web Share API (điện thoại iOS / Android hoặc Windows/macOS) -> chia sẻ trực tiếp cả File ảnh phiếu đã đóng dấu + Tin nhắn qua Zalo / Messenger!
+        if (navigator.share && sub.image_data) {
+            const res = await fetch(sub.image_data);
+            const blob = await res.blob();
+            const sbd = sub.student_no || 'SBD';
+            const file = new File([blob], `PhieuCham_${sbd}.jpg`, { type: 'image/jpeg' });
+
+            if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                await navigator.share({
+                    title: `Kết quả bài thi - ${sub.student_name || sbd}`,
+                    text: msg,
+                    files: [file]
+                });
+                return;
+            } else {
+                await navigator.share({
+                    title: `Kết quả bài thi - ${sub.student_name || sbd}`,
+                    text: msg
+                });
+                return;
+            }
+        }
+    } catch(shareErr) {
+        if (shareErr && shareErr.name === 'AbortError') return;
+        console.warn("Web Share fallback:", shareErr);
+    }
+
+    // Fallback trên máy tính: Tự động copy tin nhắn và tải ảnh phiếu đóng dấu để dán ngay vào Zalo PC
+    try { await navigator.clipboard.writeText(msg); } catch(e) {}
+    state.lastSubmission = sub;
+    window.downloadGradedSheet();
     Swal.fire({
-        toast: true,
-        position: 'top-end',
         icon: 'success',
-        title: `Đã chọn đề LMS: ${state.exam?.name}`,
-        showConfirmButton: false,
-        timer: 2500
+        title: 'Đã Copy tin nhắn & Tải ảnh phiếu!',
+        text: 'Bạn có thể mở Zalo / Messenger và nhấn Ctrl+V để gửi ngay cho Phụ huynh học sinh.',
+        confirmButtonColor: '#4f46e5'
     });
 };
