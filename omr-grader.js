@@ -1073,40 +1073,35 @@ function renderInlineSubmissionsList() {
     }
 
     inlineListEl.innerHTML = filtered.map((s, idx) => {
-        const hasName = !!(s.student_name && String(s.student_name).trim());
+        const hasName = !!(s.student_name && String(s.student_name).trim() && !String(s.student_name).startsWith('Học sinh #'));
         const displayName = hasName
             ? s.student_name
-            : (s.student_no ? `Thí sinh SBD ${s.student_no}` : `Phiếu chưa tô SBD (#${idx + 1})`);
+            : (s.student_no ? `Học sinh #${s.student_no}` : `Phiếu chưa tô SBD (#${idx + 1})`);
         const scoreNum = Number(s.score ?? 0);
-        const scoreBadgeClass = scoreNum >= 8
-            ? 'bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300'
-            : (scoreNum >= 5
-                ? 'bg-sky-50 dark:bg-sky-950/60 border border-sky-200 dark:border-sky-800 text-sky-700 dark:text-sky-300'
-                : 'bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300');
 
         return `
             <div class="px-3 py-2.5 hover:bg-gray-50 dark:hover:bg-[#262335]/60 transition-colors border-b border-gray-100 dark:border-[#38344D]/50 last:border-b-0">
                 <div class="flex items-center justify-between gap-2 min-w-0">
-                    <!-- Left: STT + Họ tên học sinh + SBD & Mã đề (Clean, không nhồi điểm các phần ra ngoài) -->
+                    <!-- Left: STT + Họ tên học sinh + SBD & Mã đề (Clean, tuyệt đối không hiển thị điểm các phần bên ngoài) -->
                     <div onclick="window.viewSubmissionDetail('${s.id}')" class="flex items-center gap-2.5 min-w-0 flex-1 cursor-pointer">
                         <span class="w-6 h-6 rounded-lg bg-gray-100 dark:bg-[#1E1B29] text-slate-600 dark:text-slate-300 font-mono font-bold text-[11px] flex items-center justify-center shrink-0 border border-gray-200/60 dark:border-[#38344D]">${idx + 1}</span>
                         <div class="min-w-0 flex-1">
-                            <div class="flex items-center gap-1.5 min-w-0">
+                            <div class="flex items-center gap-1.5 min-w-0 flex-wrap">
                                 <span class="font-bold text-xs sm:text-sm ${hasName ? 'text-slate-900 dark:text-white' : 'text-slate-500 dark:text-slate-400 italic'} truncate">${displayName}</span>
-                                ${s.class_name ? `<span class="px-1.5 py-0.2 rounded bg-gray-100 dark:bg-[#1E1B29] text-slate-600 dark:text-slate-300 text-[10px] font-semibold shrink-0 border border-gray-200 dark:border-[#38344D]">${s.class_name}</span>` : ''}
+                                ${s.class_name ? `<span class="px-1.5 py-0.2 rounded bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold shrink-0 border border-emerald-200 dark:border-emerald-800">${s.class_name}</span>` : ''}
                                 ${!hasName && s.name_image ? `<img src="${s.name_image}" class="h-4 max-w-[80px] object-contain rounded border border-gray-200 dark:border-gray-700 bg-white shrink-0" alt="Tên viết tay">` : ''}
                             </div>
                             <div class="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400 font-mono mt-0.5">
-                                <span>SBD: <b class="text-slate-700 dark:text-slate-200">${s.student_no || '--'}</b></span>
+                                <span>SBD: <b class="text-slate-800 dark:text-slate-200">${s.student_no || '--'}</b></span>
                                 <span>·</span>
-                                <span>Mã đề: <b class="text-slate-700 dark:text-slate-200">${s.code || '--'}</b></span>
+                                <span>Mã: <b class="text-slate-800 dark:text-slate-200">${s.code || '--'}</b></span>
                             </div>
                         </div>
                     </div>
 
-                    <!-- Right: Tổng điểm nổi bật + Cụm nút đồng bộ 1 màu hệ thống -->
+                    <!-- Right: Tổng điểm nổi bật + Cụm 3 nút đồng bộ 1 màu hệ thống -->
                     <div class="flex items-center gap-2 shrink-0">
-                        <span onclick="window.viewSubmissionDetail('${s.id}')" class="px-2.5 py-1 rounded-xl ${scoreBadgeClass} font-mono font-bold text-xs sm:text-sm tabular-nums cursor-pointer hover:scale-105 transition-transform" title="Bấm xem chi tiết bài chấm">
+                        <span onclick="window.viewSubmissionDetail('${s.id}')" class="px-2.5 py-1 rounded-xl bg-emerald-600 text-white font-mono font-extrabold text-xs sm:text-sm tabular-nums cursor-pointer hover:scale-105 transition-transform shadow-2xs" title="Bấm xem chi tiết bài chấm">
                             ${scoreNum.toFixed(2)}đ
                         </span>
 
@@ -1127,6 +1122,7 @@ function renderInlineSubmissionsList() {
         `;
     }).join('');
 }
+window.renderInlineSubmissionsList = renderInlineSubmissionsList;
 
 window.quickAssignStudentToSubmission = async (subId) => {
     const sub = state.submissions.find(s => s.id === subId);
