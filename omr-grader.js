@@ -519,12 +519,9 @@ async function loadTeacherExams() {
             }
 
             // 2.5. Load OMR results summary from Supabase results table to recover any graded exams & count submissions
-            try {
-                const snapRes = await getDocs(query(collection(db, "results"), where("teacherId", "==", state.teacherUid), limit(500)));
-                omrResultsRows = snapRes.docs
-                    .map(d => ({ id: d.id, ...d.data() }))
-                    .filter(r => r.gradingSource === 'omr' || String(r.id || '').startsWith('omr_'));
-            } catch(e) {}
+            // Lưu ý: bảng results chỉ có cột exam_id, không có teacher_id.
+            // Kết quả chi tiết của từng đề sẽ được tải chính xác theo examId khi mở đề thi.
+            omrResultsRows = [];
         }
 
         // 3. Check localStorage cache for LMS exams (from dashboard.html)

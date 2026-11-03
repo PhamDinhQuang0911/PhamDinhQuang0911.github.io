@@ -1868,6 +1868,12 @@ export async function getDocs(queryOrColRef) {
         for (const c of constraints) {
             if (c.type === 'where') {
                 const colName = mapFieldToColumn(c.field);
+                const validCols = TABLE_COLUMNS[table];
+                if (validCols && !validCols.includes(colName)) {
+                    // Cột không có trong schema Supabase SQL, bỏ qua query PostgREST tránh 400 Bad Request
+                    // Bộ lọc client-side ở bước sau sẽ lọc từ raw_data
+                    continue;
+                }
                 if (colName === 'allowed_class_ids') {
                     if (c.op === '==' || c.op === '===' || c.op === 'array-contains') {
                         queryBuilder = queryBuilder.contains('allowed_class_ids', JSON.stringify([c.value]));
@@ -1905,6 +1911,10 @@ export async function getDocs(queryOrColRef) {
                 }
             } else if (c.type === 'orderBy') {
                 const colName = mapFieldToColumn(c.field);
+                const validCols = TABLE_COLUMNS[table];
+                if (validCols && !validCols.includes(colName)) {
+                    continue;
+                }
                 queryBuilder = queryBuilder.order(colName, { ascending: c.direction === 'asc' });
             } else if (c.type === 'limit') {
                 queryBuilder = queryBuilder.limit(c.count);
