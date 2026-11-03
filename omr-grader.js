@@ -22,7 +22,8 @@ window.omrState = {
     currentCameraStream: null,
     currentFacingMode: 'environment',
     lastSubmission: null,
-    isProcessing: false
+    isProcessing: false,
+    failedBatchFiles: []
 };
 
 const state = window.omrState;
@@ -1089,20 +1090,20 @@ function renderInlineSubmissionsList() {
                         <span>Mã: <b class="font-mono text-amber-600 dark:text-amber-400">${s.code || '--'}</b></span>
                         <span class="text-slate-400 dark:text-slate-500 font-mono text-[10px] sm:text-[11px]">I:${(s.part1_score ?? 0).toFixed(2)} · II:${(s.part2_score ?? 0).toFixed(2)} · III:${(s.part3_score ?? 0).toFixed(2)}</span>
                     </div>
-                    <div class="flex items-center gap-1 shrink-0">
-                        <button type="button" onclick="window.quickAssignStudentToSubmission('${s.id}')" class="px-2 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 text-[10px] font-extrabold cursor-pointer flex items-center gap-1" title="Sửa tên học sinh / Chọn học sinh từ danh sách Lớp">
-                            <i class="fa-solid fa-user-pen"></i> <span class="hidden sm:inline">Gán tên</span>
+                    <div class="flex items-center gap-1.5 shrink-0">
+                        <button type="button" onclick="window.quickAssignStudentToSubmission('${s.id}')" class="px-2.5 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 text-xs font-extrabold cursor-pointer flex items-center gap-1 active:scale-95 transition-all" title="Sửa tên học sinh / Chọn học sinh từ danh sách Lớp">
+                            <i class="fa-solid fa-user-pen text-xs"></i> <span class="hidden sm:inline">Gán tên</span>
                         </button>
-                        <button type="button" onclick="window.viewSubmissionDetail('${s.id}')" class="w-7 h-7 rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-[#262335] text-slate-700 dark:text-slate-200 flex items-center justify-center text-[11px] cursor-pointer" title="Xem phiếu đã chấm">
+                        <button type="button" onclick="window.viewSubmissionDetail('${s.id}')" class="w-8.5 h-8.5 sm:w-8 sm:h-8 rounded-xl bg-gray-100 hover:bg-gray-200 dark:bg-[#262335] text-slate-700 dark:text-slate-200 flex items-center justify-center text-xs active:scale-95 transition-all cursor-pointer" title="Xem phiếu đã chấm">
                             <i class="fa-solid fa-eye"></i>
                         </button>
-                        <button type="button" onclick="window.downloadSubmissionById('${s.id}')" class="w-7 h-7 rounded-lg bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-300 flex items-center justify-center text-[11px] cursor-pointer" title="Tải ảnh phiếu đóng dấu">
+                        <button type="button" onclick="window.downloadSubmissionById('${s.id}')" class="w-8.5 h-8.5 sm:w-8 sm:h-8 rounded-xl bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-300 flex items-center justify-center text-xs active:scale-95 transition-all cursor-pointer" title="Tải ảnh phiếu đóng dấu">
                             <i class="fa-solid fa-download"></i>
                         </button>
-                        <button type="button" onclick="window.openSendParentModal('${s.id}')" class="w-7 h-7 rounded-lg bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-300 flex items-center justify-center text-[11px] cursor-pointer" title="Gửi kết quả cho Phụ huynh">
+                        <button type="button" onclick="window.openSendParentModal('${s.id}')" class="w-8.5 h-8.5 sm:w-8 sm:h-8 rounded-xl bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-300 flex items-center justify-center text-xs active:scale-95 transition-all cursor-pointer" title="Gửi kết quả cho Phụ huynh">
                             <i class="fa-solid fa-paper-plane"></i>
                         </button>
-                        <button type="button" onclick="window.deleteSubmission('${s.id}')" class="w-7 h-7 rounded-lg bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 text-rose-500 flex items-center justify-center text-[11px] cursor-pointer" title="Xóa bài chấm này">
+                        <button type="button" onclick="window.deleteSubmission('${s.id}')" class="w-8.5 h-8.5 sm:w-8 sm:h-8 rounded-xl bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 text-rose-500 flex items-center justify-center text-xs active:scale-95 transition-all cursor-pointer" title="Xóa bài chấm này">
                             <i class="fa-solid fa-trash"></i>
                         </button>
                     </div>
@@ -1421,6 +1422,10 @@ window.handleFilesSelected = async (files) => {
         return;
     }
 
+    // Reset hàng đợi ảnh lỗi trước đợt chấm mới
+    state.failedBatchFiles = [];
+    renderBatchFailedQueue();
+
     let successCount = 0;
     let failCount = 0;
     const batchScores = [];
@@ -1446,11 +1451,19 @@ window.handleFilesSelected = async (files) => {
         } catch(err) {
             console.error("Lỗi chấm bài:", file.name, err);
             failCount++;
+            state.failedBatchFiles.push({
+                file,
+                name: file.name || `Ảnh #${i + 1}`,
+                error: err.message || 'Không nhận diện được 4 góc đen định vị'
+            });
         }
     }
 
     // Ẩn thanh tiến trình ngay khi chấm xong để giao diện gọn sạch
     if (progressCard) progressCard.classList.add('hidden');
+
+    // Cập nhật hàng đợi ảnh lỗi nếu có
+    renderBatchFailedQueue();
 
     updateOverviewStats();
     window.renderResultsTable();
@@ -1462,19 +1475,22 @@ window.handleFilesSelected = async (files) => {
             icon: 'success',
             title: `🎉 Đã chấm xong ${successCount} phiếu!`,
             html: `
-                <div class="space-y-2 text-xs sm:text-sm text-slate-600 dark:text-slate-300 mt-1">
-                    <div class="inline-flex items-center gap-3 px-4 py-2 rounded-2xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 font-bold">
+                <div class="space-y-3 text-xs sm:text-sm text-slate-600 dark:text-slate-300 mt-2">
+                    <div class="inline-flex items-center gap-3 px-4 py-2.5 rounded-2xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 font-bold">
                         <span>Điểm TB: <b class="font-mono text-base">${avgBatch}đ</b></span>
                         <span>•</span>
                         <span>Cao nhất: <b class="font-mono text-base">${maxBatch}đ</b></span>
                     </div>
-                    ${failCount > 0 ? `<p class="text-rose-500 font-semibold text-xs">Lưu ý: Có ${failCount}/${fileList.length} ảnh không đọc được do mờ hoặc mất góc đen.</p>` : ''}
+                    ${failCount > 0 ? `<p class="text-rose-500 font-semibold text-xs">⚠️ Có ${failCount}/${fileList.length} ảnh không nhận diện được (đã đưa vào Hàng đợi xử lý lại bên dưới).</p>` : ''}
+                    <div class="pt-2">
+                        <button type="button" onclick="window.copyClassSummaryToZalo(); Swal.close();" class="w-full py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xs shadow-md flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-95">
+                            <i class="fa-solid fa-share-nodes"></i> Sao chép Bảng điểm gửi Zalo Lớp ngay
+                        </button>
+                    </div>
                 </div>
             `,
             confirmButtonText: 'Xem danh sách điểm',
-            confirmButtonColor: '#10b981',
-            timer: 3800,
-            timerProgressBar: true
+            confirmButtonColor: '#10b981'
         });
     } else {
         Swal.fire({
@@ -1482,6 +1498,125 @@ window.handleFilesSelected = async (files) => {
             title: 'Chưa nhận diện được phiếu',
             text: `Cả ${fileList.length} ảnh tải lên đều bị mờ hoặc thiếu 4 ô vuông đen ở 4 góc phiếu. Vui lòng kiểm tra lại ảnh chụp hoặc đổi đúng Loại phiếu chấm!`
         });
+    }
+};
+
+function renderBatchFailedQueue() {
+    const card = document.getElementById('batchFailedQueueCard');
+    const countEl = document.getElementById('batchFailedCountText');
+    const listEl = document.getElementById('batchFailedList');
+    if (!card) return;
+
+    const failed = Array.isArray(state.failedBatchFiles) ? state.failedBatchFiles : [];
+    if (failed.length === 0) {
+        card.classList.add('hidden');
+        if (listEl) listEl.innerHTML = '';
+        return;
+    }
+
+    card.classList.remove('hidden');
+    if (countEl) {
+        countEl.textContent = `Có ${failed.length} ảnh chưa nhận diện được góc phiếu / bị mờ`;
+    }
+    if (listEl) {
+        listEl.innerHTML = failed.map((item, idx) => `
+            <div class="flex items-center justify-between gap-2 py-1 px-2.5 rounded-lg bg-white/80 dark:bg-slate-900/60 border border-rose-200 dark:border-rose-900/50">
+                <span class="truncate font-semibold text-slate-800 dark:text-slate-200">#${idx + 1}. ${item.name}</span>
+                <span class="text-rose-600 dark:text-rose-400 font-mono text-[10px] shrink-0">${item.error}</span>
+            </div>
+        `).join('');
+    }
+}
+
+window.retryFailedBatch = async () => {
+    const failed = Array.isArray(state.failedBatchFiles) ? state.failedBatchFiles : [];
+    if (failed.length === 0) return;
+    const retryFiles = failed.map(item => item.file).filter(Boolean);
+    state.failedBatchFiles = [];
+    renderBatchFailedQueue();
+    await window.handleFilesSelected(retryFiles);
+};
+
+window.copyClassSummaryToZalo = async () => {
+    const subs = state.submissions || [];
+    if (subs.length === 0) {
+        Swal.fire('Chưa có dữ liệu bài chấm', 'Vui lòng chấm bài trước khi sao chép bảng điểm gửi Zalo!', 'warning');
+        return;
+    }
+
+    // Lấy tên đề thi và danh sách
+    const examName = state.exam?.name || 'Bài kiểm tra OMR';
+    const nowStr = new Date().toLocaleString('vi-VN', {
+        hour: '2-digit',
+        minute: '2-digit',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric'
+    });
+
+    // Sắp xếp theo điểm từ cao xuống thấp để lấy Top thủ khoa
+    const sorted = [...subs].sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0));
+    const scores = sorted.map(s => Number(s.score) || 0);
+    const avgScore = (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(2);
+    const maxScore = Math.max(...scores).toFixed(2);
+    const minScore = Math.min(...scores).toFixed(2);
+
+    // Xếp top 3
+    const topMedals = ['🥇', '🥈', '🥉'];
+    const topCount = Math.min(3, sorted.length);
+    let topText = '';
+    for (let i = 0; i < topCount; i++) {
+        const s = sorted[i];
+        const name = s.student_name || (s.student_no ? `SBD ${s.student_no}` : `Học sinh #${i + 1}`);
+        topText += `${topMedals[i]} Top ${i + 1}: ${name} — ${(Number(s.score) || 0).toFixed(2)}đ\n`;
+    }
+
+    // Danh sách chi tiết học sinh
+    let detailLines = '';
+    sorted.forEach((s, i) => {
+        const stt = String(i + 1).padStart(2, '0');
+        const sbd = s.student_no ? `SBD: ${s.student_no}` : 'SBD: --';
+        const code = s.code ? `Mã: ${s.code}` : 'Mã: --';
+        const sc = (Number(s.score) || 0).toFixed(2);
+        detailLines += `${stt}. ${s.student_name || 'Học sinh'} | ${sbd} | ${code} 👉 ${sc}đ\n`;
+    });
+
+    const zaloMessage = 
+`📊 BẢNG TỔNG KẾT ĐIỂM KIỂM TRA
+📝 Đề thi: ${examName}
+👨‍🏫 Giáo viên: Thầy Choang - Hệ thống Toán học QMath LMS
+📅 Thời gian tổng kết: ${nowStr}
+─────────────────────────────
+👥 Tổng số bài đã chấm: ${sorted.length} học sinh
+📈 Điểm trung bình: ${avgScore}đ
+🏆 Điểm cao nhất: ${maxScore}đ | Thấp nhất: ${minScore}đ
+
+🌟 VINH DANH THỦ KHOA:
+${topText}
+📋 DANH SÁCH CHI TIẾT:
+${detailLines}
+─────────────────────────────
+💡 Quý phụ huynh & học sinh có thể tra cứu chi tiết từng câu làm đúng/sai trên Cổng học sinh QMath LMS!`;
+
+    try {
+        await navigator.clipboard.writeText(zaloMessage);
+        Swal.fire({
+            icon: 'success',
+            title: '🎉 Đã sao chép Bảng điểm gửi Zalo!',
+            html: `
+                <div class="text-xs text-left space-y-2 mt-2">
+                    <p class="text-slate-600 dark:text-slate-300">Nội dung bảng điểm tổng kết (${sorted.length} học sinh) đã được sao chép vào bộ nhớ tạm.</p>
+                    <div class="p-3 rounded-xl bg-blue-50 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-900 text-blue-800 dark:text-blue-200 text-xs">
+                        👉 <b>Thầy/Cô chỉ cần mở nhóm Zalo lớp và bấm Dán (Ctrl + V)</b> là gửi được ngay bản tin điểm đẹp mắt cho phụ huynh & học sinh!
+                    </div>
+                </div>
+            `,
+            confirmButtonText: 'Đã hiểu',
+            confirmButtonColor: '#2563eb'
+        });
+    } catch(err) {
+        console.error("Lỗi copy Zalo:", err);
+        window.prompt("Sao chép nội dung gửi Zalo bên dưới:", zaloMessage);
     }
 };
 
@@ -3669,19 +3804,19 @@ window.renderResultsTable = () => {
             <td class="p-3 text-center text-slate-400 text-[11px]">${new Date(s.createdAt).toLocaleTimeString('vi-VN', {hour:'2-digit', minute:'2-digit', day:'2-digit', month:'2-digit'})}</td>
             <td class="p-3 text-center">
                 <div class="flex items-center justify-center gap-1.5">
-                    <button type="button" onclick="window.quickAssignStudentToSubmission('${s.id}')" class="w-7 h-7 rounded-lg bg-amber-50 text-amber-700 hover:bg-amber-100 dark:bg-amber-950/40 dark:text-amber-300 flex items-center justify-center transition-colors cursor-pointer" title="Gán tên / SBD học sinh cho phiếu này">
+                    <button type="button" onclick="window.quickAssignStudentToSubmission('${s.id}')" class="w-8 h-8 rounded-xl bg-amber-50 text-amber-700 hover:bg-amber-100 dark:bg-amber-950/40 dark:text-amber-300 flex items-center justify-center transition-all active:scale-95 cursor-pointer" title="Gán tên / SBD học sinh cho phiếu này">
                         <i class="fa-solid fa-user-pen text-xs"></i>
                     </button>
-                    <button type="button" onclick="window.viewSubmissionDetail('${s.id}')" class="w-7 h-7 rounded-lg bg-emerald-50 text-emerald-600 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-300 flex items-center justify-center transition-colors cursor-pointer" title="Xem chi tiết phiếu chấm">
+                    <button type="button" onclick="window.viewSubmissionDetail('${s.id}')" class="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-300 flex items-center justify-center transition-all active:scale-95 cursor-pointer" title="Xem chi tiết phiếu chấm">
                         <i class="fa-solid fa-eye text-xs"></i>
                     </button>
-                    <button type="button" onclick="window.downloadSubmissionById('${s.id}')" class="w-7 h-7 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 dark:bg-blue-950/40 dark:text-blue-300 flex items-center justify-center transition-colors cursor-pointer" title="Tải ảnh phiếu đã chấm">
+                    <button type="button" onclick="window.downloadSubmissionById('${s.id}')" class="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 hover:bg-blue-100 dark:bg-blue-950/40 dark:text-blue-300 flex items-center justify-center transition-all active:scale-95 cursor-pointer" title="Tải ảnh phiếu đã chấm">
                         <i class="fa-solid fa-download text-xs"></i>
                     </button>
-                    <button type="button" onclick="window.openSendParentModal('${s.id}')" class="w-7 h-7 rounded-lg bg-indigo-50 text-indigo-600 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:text-indigo-300 flex items-center justify-center transition-colors cursor-pointer" title="Gửi kết quả & phiếu chấm cho Phụ huynh (PHHS)">
+                    <button type="button" onclick="window.openSendParentModal('${s.id}')" class="w-8 h-8 rounded-xl bg-indigo-50 text-indigo-600 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:text-indigo-300 flex items-center justify-center transition-all active:scale-95 cursor-pointer" title="Gửi kết quả & phiếu chấm cho Phụ huynh (PHHS)">
                         <i class="fa-solid fa-paper-plane text-xs"></i>
                     </button>
-                    <button type="button" onclick="window.deleteSubmission('${s.id}')" class="w-7 h-7 rounded-lg bg-rose-50 text-rose-600 hover:bg-rose-100 dark:bg-rose-950/40 dark:text-rose-400 flex items-center justify-center transition-colors cursor-pointer" title="Xóa kết quả này">
+                    <button type="button" onclick="window.deleteSubmission('${s.id}')" class="w-8 h-8 rounded-xl bg-rose-50 text-rose-600 hover:bg-rose-100 dark:bg-rose-950/40 dark:text-rose-400 flex items-center justify-center transition-all active:scale-95 cursor-pointer" title="Xóa kết quả này">
                         <i class="fa-solid fa-trash text-xs"></i>
                     </button>
                 </div>
