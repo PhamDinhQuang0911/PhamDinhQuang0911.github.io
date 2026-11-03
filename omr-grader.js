@@ -587,6 +587,17 @@ async function processSingleSheet(fileOrBlob) {
         createdAt: new Date().toISOString()
     };
 
+    // Tự động làm phẳng phiếu và đóng dấu điểm số trang nhã kèm Logo QMath LMS
+    try {
+        const stampedImg = await generateStampedGradedSheet(submission, rawResult);
+        if (stampedImg) {
+            submission.image_data = stampedImg;
+            submission.stamped_image = stampedImg;
+        }
+    } catch(stampErr) {
+        console.warn("Lỗi đóng dấu kết quả phiếu thi:", stampErr);
+    }
+
     state.lastSubmission = submission;
     state.lastRawResult = rawResult;
 
@@ -671,7 +682,11 @@ function recognizeSheetWithOMR(fileOrBlob) {
                     rectifiedImage: outCanvas.toDataURL('image/jpeg', 0.92),
                     uncertain: result.nghi || [],
                     H: result.H,
-                    template: tpl
+                    template: tpl,
+                    p1m: result.p1m,
+                    p2m: result.p2m,
+                    p3m: result.p3m,
+                    raw: result
                 });
             } catch(e) {
                 reject(e);
@@ -839,17 +854,410 @@ function displayLastResultInspector(sub, rawResult) {
     card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
+// ========================================================
+// 4B. TẠO ẢNH PHIẾU NẮN PHẲNG & ĐÓNG DẤU ĐIỂM SỐ CHÍNH THỨC KÈM LOGO
+// ========================================================
+async function generateStampedGradedSheet(sub, rawResult) {
+    if (!rawResult || !rawResult.rectifiedImage) return null;
+    const tplKey = state.exam?.sheet_template || 'qmcv1239';
+    const tpl = rawResult.template || (window.MAU && window.MAU[tplKey]) || window.MAU.qmcv1239;
+    if (!tpl) return rawResult.rectifiedImage;
+
+    // Tải ảnh phiếu đã nắn phẳng
+    const rectImg = await new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = () => reject(new Error("Lỗi nạp ảnh nắn phẳng"));
+        img.src = rawResult.rectifiedImage;
+    });
+
+    const sheetW = rectImg.naturalWidth || 1552;
+    const sheetH = rectImg.naturalHeight || 2200;
+    const headerH = 260; // Khung thông tin & con dấu trang nhã phía trên
+
+    const canvas = document.createElement('canvas');
+    canvas.width = sheetW;
+    canvas.height = headerH + sheetH;
+    const ctx = canvas.getContext('2d');
+
+    // 1. NỀN HEADER SANG TRỌNG (SLATE-50)
+    ctx.fillStyle = '#f8fafc';
+    ctx.fillRect(0, 0, sheetW, headerH);
+
+    // Viền màu xanh ngọc thương hiệu QMath LMS ở đỉnh
+    const topBar = ctx.createLinearGradient(0, 0, sheetW, 0);
+    topBar.addColorStop(0, '#059669');
+    topBar.addColorStop(0.5, '#0d9488');
+    topBar.addColorStop(1, '#059669');
+    ctx.fillStyle = topBar;
+    ctx.fillRect(0, 0, sheetW, 6);
+
+    // Đường phân cách sắc nét phía dưới Header
+    ctx.strokeStyle = '#cbd5e1';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(0, headerH);
+    ctx.lineTo(sheetW, headerH);
+    ctx.stroke();
+
+    // 2. KHỐI LOGO & THƯƠNG HIỆU WEB (GÓC TRÁI: X: 35 -> 410)
+    const logoX = 35, logoY = 32, logoS = 68, rad = 16;
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(logoX + rad, logoY);
+    ctx.arcTo(logoX + logoS, logoY, logoX + logoS, logoY + logoS, rad);
+    ctx.arcTo(logoX + logoS, logoY + logoS, logoX, logoY + logoS, rad);
+    ctx.arcTo(logoX, logoY + logoS, logoX, logoY, rad);
+    ctx.arcTo(logoX, logoY, logoX + logoS, logoY, rad);
+    ctx.closePath();
+    const logoGrad = ctx.createLinearGradient(logoX, logoY, logoX + logoS, logoY + logoS);
+    logoGrad.addColorStop(0, '#059669');
+    logoGrad.addColorStop(1, '#047857');
+    ctx.fillStyle = logoGrad;
+    ctx.fill();
+
+    // Biểu tượng chữ QM trong logo
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 32px "Segoe UI", Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('QM', logoX + logoS / 2, logoY + logoS / 2 + 1);
+    ctx.restore();
+
+    // Tên thương hiệu
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = '#0f172a';
+    ctx.font = 'bold 23px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('QMATH LMS', logoX + logoS + 18, logoY + 28);
+
+    ctx.fillStyle = '#059669';
+    ctx.font = 'bold 12px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('HỆ THỐNG CHẤM THI OMR TỰ ĐỘNG', logoX + logoS + 18, logoY + 48);
+
+    ctx.fillStyle = '#64748b';
+    ctx.font = '11px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('Trung tâm Toán học & Khảo thí StarMind', logoX + logoS + 18, logoY + 66);
+
+    // 3. KHUNG THÔNG TIN THÍ SINH & ĐỀ THI (GIỮA: X: 430 -> 1060)
+    const cardX = 430, cardY = 22, cardW = 620, cardH = 216;
+    ctx.fillStyle = '#ffffff';
+    ctx.strokeStyle = '#e2e8f0';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(cardX, cardY, cardW, cardH, 14);
+    else ctx.rect(cardX, cardY, cardW, cardH);
+    ctx.fill();
+    ctx.stroke();
+
+    // Tên kỳ thi / bài kiểm tra
+    ctx.fillStyle = '#0f172a';
+    ctx.font = 'bold 17px "Segoe UI", Arial, sans-serif';
+    const examName = (state.exam?.name || 'BÀI KIỂM TRA ĐỊNH KỲ').toUpperCase();
+    ctx.fillText(examName, cardX + 20, cardY + 34);
+
+    ctx.strokeStyle = '#f1f5f9';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(cardX + 20, cardY + 48);
+    ctx.lineTo(cardX + cardW - 20, cardY + 48);
+    ctx.stroke();
+
+    // Chi tiết học sinh
+    ctx.fillStyle = '#475569';
+    ctx.font = '13px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('Họ và tên thí sinh:', cardX + 20, cardY + 78);
+    ctx.fillStyle = '#0f172a';
+    ctx.font = 'bold 17px "Segoe UI", Arial, sans-serif';
+    ctx.fillText(sub.student_name || 'Chưa cập nhật tên (Theo SBD)', cardX + 155, cardY + 78);
+
+    ctx.fillStyle = '#475569';
+    ctx.font = '13px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('Số báo danh (SBD):', cardX + 20, cardY + 110);
+    ctx.fillStyle = '#059669';
+    ctx.font = 'bold 16px "Courier New", monospace';
+    ctx.fillText(sub.student_no || '---', cardX + 155, cardY + 110);
+
+    ctx.fillStyle = '#475569';
+    ctx.font = '13px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('Mã đề thi:', cardX + 340, cardY + 110);
+    ctx.fillStyle = '#0f172a';
+    ctx.font = 'bold 16px "Courier New", monospace';
+    ctx.fillText(sub.code || '---', cardX + 415, cardY + 110);
+
+    ctx.fillStyle = '#475569';
+    ctx.font = '13px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('Lớp:', cardX + 20, cardY + 142);
+    ctx.fillStyle = '#0f172a';
+    ctx.font = 'bold 14px "Segoe UI", Arial, sans-serif';
+    ctx.fillText(sub.class_name || (state.exam?.classes?.[0] || '---'), cardX + 155, cardY + 142);
+
+    ctx.fillStyle = '#475569';
+    ctx.font = '13px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('Chấm lúc:', cardX + 340, cardY + 142);
+    ctx.fillStyle = '#64748b';
+    ctx.font = '13px "Segoe UI", Arial, sans-serif';
+    ctx.fillText(new Date(sub.createdAt).toLocaleString('vi-VN'), cardX + 415, cardY + 142);
+
+    // Mẫu phiếu chuẩn
+    ctx.fillStyle = '#64748b';
+    ctx.font = '12px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('Chuẩn hóa thị giác máy tính OMR · Mẫu BGD 2025 (CV 1239)', cardX + 20, cardY + 185);
+
+    // 4. KHUNG ĐIỂM SỐ TỪNG PHẦN (BÊN PHẢI: X: 1070 -> 1285)
+    const sbX = 1070, sbY = 22, sbW = 215, sbH = 216;
+    ctx.fillStyle = '#ffffff';
+    ctx.strokeStyle = '#e2e8f0';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(sbX, sbY, sbW, sbH, 14);
+    else ctx.rect(sbX, sbY, sbW, sbH);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = '#64748b';
+    ctx.font = 'bold 11px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('ĐIỂM TỪNG PHẦN', sbX + 16, sbY + 30);
+
+    const drawScoreLine = (label, scoreVal, yPos) => {
+        ctx.fillStyle = '#334155';
+        ctx.font = '12px "Segoe UI", Arial, sans-serif';
+        ctx.fillText(label, sbX + 16, yPos);
+        ctx.fillStyle = '#0f172a';
+        ctx.font = 'bold 15px "Courier New", monospace';
+        ctx.textAlign = 'right';
+        ctx.fillText((scoreVal ?? 0).toFixed(2) + ' đ', sbX + sbW - 16, yPos);
+        ctx.textAlign = 'left';
+    };
+
+    drawScoreLine('Phần I (TN 4 lựa chọn):', sub.part1_score, sbY + 66);
+    drawScoreLine('Phần II (Đúng / Sai):', sub.part2_score, sbY + 108);
+    drawScoreLine('Phần III (Trả lời ngắn):', sub.part3_score, sbY + 150);
+
+    ctx.strokeStyle = '#e2e8f0';
+    ctx.beginPath();
+    ctx.moveTo(sbX + 14, sbY + 172);
+    ctx.lineTo(sbX + sbW - 14, sbY + 172);
+    ctx.stroke();
+
+    ctx.fillStyle = '#059669';
+    ctx.font = 'bold 12px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('Tổng điểm:', sbX + 16, sbY + 196);
+    ctx.fillStyle = '#059669';
+    ctx.font = 'bold 18px "Courier New", monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText((sub.score ?? 0).toFixed(2) + ' đ', sbX + sbW - 16, sbY + 196);
+    ctx.textAlign = 'left';
+
+    // 5. CON DẤU XÁC NHẬN CHÍNH THỨC (SEAL: X: 1305 -> 1525, TÂM: 1415, Y: 130)
+    ctx.save();
+    const sealX = 1415, sealY = 130;
+    ctx.translate(sealX, sealY);
+    ctx.rotate(-0.08); // Nghiêng nhẹ -4.6 độ cho cảm giác mộc dấu thật
+
+    // Vòng tròn ngoài
+    ctx.strokeStyle = '#059669';
+    ctx.lineWidth = 3.5;
+    ctx.beginPath();
+    ctx.arc(0, 0, 75, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Vòng tròn nét đứt thứ 2
+    ctx.strokeStyle = '#059669';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath();
+    ctx.arc(0, 0, 68, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Vòng tròn trong
+    ctx.strokeStyle = '#059669';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.arc(0, 0, 48, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Chữ trong mộc dấu
+    ctx.fillStyle = '#059669';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    ctx.font = 'bold 11px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('QMATH LMS', 0, -56);
+
+    ctx.font = 'bold 36px "Segoe UI", Arial, sans-serif';
+    ctx.fillText((sub.score ?? 0).toFixed(2), 0, 0);
+
+    ctx.font = 'bold 10px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('ĐIỂM CHÍNH THỨC', 0, 24);
+
+    ctx.font = '9px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('★ ĐÃ CHẤM TỰ ĐỘNG ★', 0, 56);
+    ctx.restore();
+
+    // 6. VẼ PHIẾU NẮN PHẲNG BÊN DƯỚI HEADER (Y: headerH)
+    ctx.drawImage(rectImg, 0, headerH, sheetW, sheetH);
+
+    // 7. VẼ ĐÁNH DẤU CHI TIẾT TRỰC TIẾP CẢ 3 PHẦN LÊN ẢNH
+    const key = state.keys[sub.code] || state.keys[Object.keys(state.keys)[0]] || { answers: '', part2: [], part3: [] };
+    const kFrame = tpl.khung || [0, 0, 16.53, 23.39];
+    const scaleX = sheetW / kFrame[2];
+    const scaleY = sheetH / kFrame[3];
+
+    const drawRingOnCanvas = (pt, color, lineW = 3.5, r = 14, dashed = false) => {
+        if (!pt) return;
+        const cx = pt[0] * scaleX;
+        const cy = pt[1] * scaleY + headerH;
+        ctx.save();
+        ctx.strokeStyle = color;
+        ctx.lineWidth = lineW;
+        if (dashed) ctx.setLineDash([4, 3]);
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+    };
+
+    // Đánh dấu Phần I (Trắc nghiệm 4 lựa chọn)
+    if (tpl.p1) {
+        const qCount1 = Math.min(tpl.p1.length, state.exam?.question_count || 12);
+        for (let q = 0; q < qCount1; q++) {
+            const studentAns = (sub.answers || '')[q];
+            const keyAns = (key.answers || '')[q];
+            ['A', 'B', 'C', 'D'].forEach((char, optIdx) => {
+                const pt = tpl.p1[q][optIdx];
+                if (!pt) return;
+                const isStudentMark = studentAns === char;
+                const isKeyMark = keyAns === char;
+
+                if (isStudentMark && isKeyMark) {
+                    drawRingOnCanvas(pt, '#10b981', 3.5, 14); // Xanh lá: Đúng
+                } else if (isStudentMark && !isKeyMark) {
+                    drawRingOnCanvas(pt, '#ef4444', 3.5, 14); // Đỏ: Tô sai
+                } else if (!isStudentMark && isKeyMark && studentAns && studentAns !== '-') {
+                    drawRingOnCanvas(pt, '#f59e0b', 2.5, 13, true); // Vàng nét đứt: Vị trí đáp án đúng
+                }
+            });
+        }
+    }
+
+    // Đánh dấu Phần II (Đúng / Sai)
+    if (tpl.p2 && tpl.p2.length >= 4) {
+        const qCount2 = state.exam?.part2_count || 4;
+        for (let q = 0; q < qCount2; q++) {
+            const sChunk = (sub.part2 && sub.part2[q]) ? sub.part2[q] : '----';
+            const kChunk = (key.part2 && key.part2[q]) ? key.part2[q] : '----';
+            for (let r = 0; r < 4; r++) {
+                const idx = q * 4 + r;
+                if (idx >= tpl.p2.length) continue;
+                const ptD = tpl.p2[idx][0];
+                const ptS = tpl.p2[idx][1];
+                if (!ptD || !ptS) continue;
+
+                const sChar = (sChunk[r] || '-').toUpperCase().replace('D', 'Đ');
+                const kChar = (kChunk[r] || '-').toUpperCase().replace('D', 'Đ');
+
+                if (sChar === 'Đ') {
+                    if (kChar === 'Đ') {
+                        drawRingOnCanvas(ptD, '#10b981', 3.5, 14);
+                    } else {
+                        drawRingOnCanvas(ptD, '#ef4444', 3.5, 14);
+                        if (kChar === 'S') drawRingOnCanvas(ptS, '#f59e0b', 2.5, 13, true);
+                    }
+                } else if (sChar === 'S') {
+                    if (kChar === 'S') {
+                        drawRingOnCanvas(ptS, '#10b981', 3.5, 14);
+                    } else {
+                        drawRingOnCanvas(ptS, '#ef4444', 3.5, 14);
+                        if (kChar === 'Đ') drawRingOnCanvas(ptD, '#f59e0b', 2.5, 13, true);
+                    }
+                } else {
+                    if (kChar === 'Đ') drawRingOnCanvas(ptD, '#f59e0b', 2.5, 13, true);
+                    else if (kChar === 'S') drawRingOnCanvas(ptS, '#f59e0b', 2.5, 13, true);
+                }
+            }
+        }
+    }
+
+    // Đánh dấu Phần III (Trả lời ngắn - Điền số)
+    if (tpl.p3 && tpl.p3.length) {
+        const qCount3 = state.exam?.part3_count || 6;
+        for (let q = 0; q < qCount3; q++) {
+            if (q >= tpl.p3.length) continue;
+            let sAns = '';
+            if (Array.isArray(sub.part3)) {
+                sAns = String(sub.part3[q] || '').trim();
+            } else if (rawResult.part3Text) {
+                sAns = String(rawResult.part3Text[q] || '').trim();
+            }
+            const kAns = String((key.part3 && key.part3[q]) || '').trim();
+            const isMatch = Boolean(sAns && kAns && sAns.replace(/\s+/g, '') === kAns.replace(/\s+/g, ''));
+
+            // Khoanh tròn các ô số học sinh đã tô ở 4 cột
+            if (rawResult.p3m && rawResult.p3m[q]) {
+                for (let col = 0; col < 4; col++) {
+                    const v = rawResult.p3m[q][col];
+                    if (v >= 0 && tpl.p3[q][col] && tpl.p3[q][col][v]) {
+                        const pt = tpl.p3[q][col][v];
+                        drawRingOnCanvas(pt, isMatch ? '#10b981' : '#ef4444', 3.5, 13);
+                    }
+                }
+            }
+
+            // Vẽ bảng điểm / nhãn kết quả câu trả lời ngắn ngay trên đầu mỗi câu
+            if (tpl.p3[q][0] && tpl.p3[q][0][0]) {
+                const pt0 = tpl.p3[q][0][0];
+                const bx = pt0[0] * scaleX - 10;
+                const by = pt0[1] * scaleY + headerH - 44;
+                const bw = 150, bh = 34;
+
+                ctx.save();
+                ctx.fillStyle = isMatch ? '#ecfdf5' : '#fef2f2';
+                ctx.strokeStyle = isMatch ? '#10b981' : '#ef4444';
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                if (ctx.roundRect) ctx.roundRect(bx, by, bw, bh, 8);
+                else ctx.rect(bx, by, bw, bh);
+                ctx.fill();
+                ctx.stroke();
+
+                ctx.fillStyle = isMatch ? '#065f46' : '#991b1b';
+                ctx.font = 'bold 12px "Segoe UI", Arial, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                if (isMatch) {
+                    ctx.fillText(`✓ ${sAns || '---'} (+${state.exam?.part3_point ?? 0.5}đ)`, bx + bw / 2, by + bh / 2);
+                } else {
+                    ctx.fillText(`✗ ${sAns || 'Trống'} (Đ/A: ${kAns || '---'})`, bx + bw / 2, by + bh / 2);
+                }
+                ctx.restore();
+            }
+        }
+    }
+
+    return canvas.toDataURL('image/jpeg', 0.92);
+}
+
 function renderSvgOverlay(rawResult, code) {
     const svg = document.getElementById('resSvgOverlay');
     if (!svg || !rawResult || !rawResult.template) return;
+    
+    // Nếu phiếu đã được đóng dấu trực tiếp lên Canvas thì không chồng thêm SVG để chống lệch toạ độ
+    if (state.lastSubmission?.stamped_image) {
+        svg.innerHTML = '';
+        return;
+    }
+
     const tpl = rawResult.template;
     const key = state.keys[code] || state.keys[Object.keys(state.keys)[0]] || { answers: '', part2: [], part3: [] };
 
     let marks = '';
-    const ring = (pt, color, stroke = 2.5, r = 14) => {
+    const ring = (pt, color, stroke = 2.5, r = 14, dashed = false) => {
         const x = pt[0] * 100;
         const y = pt[1] * 100;
-        return `<circle cx="${x}" cy="${y}" r="${r}" fill="none" stroke="${color}" stroke-width="${stroke}" />`;
+        const dashAttr = dashed ? 'stroke-dasharray="4 3"' : '';
+        return `<circle cx="${x}" cy="${y}" r="${r}" fill="none" stroke="${color}" stroke-width="${stroke}" ${dashAttr} />`;
     };
 
     // Draw Part 1 circles
@@ -865,13 +1273,88 @@ function renderSvgOverlay(rawResult, code) {
                 const isKeyMark = keyAns === char;
 
                 if (isStudentMark && isKeyMark) {
-                    marks += ring(pt, '#10b981', 3, 15); // Green (Correct)
+                    marks += ring(pt, '#10b981', 3.5, 14); // Green (Correct)
                 } else if (isStudentMark && !isKeyMark) {
-                    marks += ring(pt, '#ef4444', 3, 15); // Red (Wrong)
+                    marks += ring(pt, '#ef4444', 3.5, 14); // Red (Wrong)
                 } else if (!isStudentMark && isKeyMark && studentAns && studentAns !== '-') {
-                    marks += ring(pt, '#f59e0b', 2, 14); // Yellow (Key position)
+                    marks += ring(pt, '#f59e0b', 2.5, 13, true); // Yellow (Key position)
                 }
             });
+        }
+    }
+
+    // Draw Part 2 circles (Đúng / Sai)
+    if (tpl.p2 && tpl.p2.length >= 4) {
+        const qCount2 = state.exam?.part2_count || 4;
+        for (let q = 0; q < qCount2; q++) {
+            const sChunk = (rawResult.part2 && rawResult.part2[q]) ? rawResult.part2[q] : '----';
+            const kChunk = (key.part2 && key.part2[q]) ? key.part2[q] : '----';
+            for (let r = 0; r < 4; r++) {
+                const idx = q * 4 + r;
+                if (idx >= tpl.p2.length) continue;
+                const ptD = tpl.p2[idx][0];
+                const ptS = tpl.p2[idx][1];
+                if (!ptD || !ptS) continue;
+
+                const sChar = (sChunk[r] || '-').toUpperCase().replace('D', 'Đ');
+                const kChar = (kChunk[r] || '-').toUpperCase().replace('D', 'Đ');
+
+                if (sChar === 'Đ') {
+                    if (kChar === 'Đ') {
+                        marks += ring(ptD, '#10b981', 3.5, 14);
+                    } else {
+                        marks += ring(ptD, '#ef4444', 3.5, 14);
+                        if (kChar === 'S') marks += ring(ptS, '#f59e0b', 2.5, 13, true);
+                    }
+                } else if (sChar === 'S') {
+                    if (kChar === 'S') {
+                        marks += ring(ptS, '#10b981', 3.5, 14);
+                    } else {
+                        marks += ring(ptS, '#ef4444', 3.5, 14);
+                        if (kChar === 'Đ') marks += ring(ptD, '#f59e0b', 2.5, 13, true);
+                    }
+                } else {
+                    if (kChar === 'Đ') marks += ring(ptD, '#f59e0b', 2.5, 13, true);
+                    else if (kChar === 'S') marks += ring(ptS, '#f59e0b', 2.5, 13, true);
+                }
+            }
+        }
+    }
+
+    // Draw Part 3 circles (Trả lời ngắn)
+    if (tpl.p3 && tpl.p3.length) {
+        const qCount3 = state.exam?.part3_count || 6;
+        for (let q = 0; q < qCount3; q++) {
+            if (q >= tpl.p3.length) continue;
+            const sAns = String((rawResult.part3Text && rawResult.part3Text[q]) || '').trim();
+            const kAns = String((key.part3 && key.part3[q]) || '').trim();
+            const isMatch = Boolean(sAns && kAns && sAns.replace(/\s+/g, '') === kAns.replace(/\s+/g, ''));
+
+            if (rawResult.p3m && rawResult.p3m[q]) {
+                for (let col = 0; col < 4; col++) {
+                    const v = rawResult.p3m[q][col];
+                    if (v >= 0 && tpl.p3[q][col] && tpl.p3[q][col][v]) {
+                        const pt = tpl.p3[q][col][v];
+                        marks += ring(pt, isMatch ? '#10b981' : '#ef4444', 3.5, 13);
+                    }
+                }
+            }
+
+            if (tpl.p3[q][0] && tpl.p3[q][0][0]) {
+                const pt0 = tpl.p3[q][0][0];
+                const bx = pt0[0] * 100 - 10;
+                const by = pt0[1] * 100 - 45;
+                const bg = isMatch ? '#ecfdf5' : '#fef2f2';
+                const stroke = isMatch ? '#10b981' : '#ef4444';
+                const textCol = isMatch ? '#065f46' : '#991b1b';
+                const label = isMatch ? `✓ ${sAns || '---'} (+${state.exam?.part3_point ?? 0.5}đ)` : `✗ ${sAns || 'Trống'} (Đ/A: ${kAns || '---'})`;
+                marks += `
+                    <g>
+                        <rect x="${bx}" y="${by}" width="150" height="34" rx="8" fill="${bg}" stroke="${stroke}" stroke-width="1.5" />
+                        <text x="${bx + 75}" y="${by + 22}" text-anchor="middle" font-size="12" font-weight="bold" fill="${textCol}" font-family="system-ui, sans-serif">${label}</text>
+                    </g>
+                `;
+            }
         }
     }
 
@@ -881,6 +1364,22 @@ function renderSvgOverlay(rawResult, code) {
     svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
     svg.innerHTML = marks;
 }
+
+window.downloadGradedSheet = () => {
+    if (!state.lastSubmission?.image_data) {
+        Swal.fire('Thông báo', 'Chưa có ảnh bài thi để tải về.', 'info');
+        return;
+    }
+    const a = document.createElement('a');
+    a.href = state.lastSubmission.image_data;
+    const sbd = state.lastSubmission.student_no || 'khong_sbd';
+    const name = (state.lastSubmission.student_name || 'thi_sinh').replace(/\s+/g, '_');
+    const score = (typeof state.lastSubmission.score === 'number' ? state.lastSubmission.score.toFixed(2) : state.lastSubmission.score);
+    a.download = `PhieuCham_${sbd}_${name}_${score}d.jpg`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+};
 
 window.recalcAndSaveEdit = async () => {
     if (!state.lastSubmission) return;
@@ -897,6 +1396,19 @@ window.recalcAndSaveEdit = async () => {
     state.lastSubmission.part1_score = scoreData.part1Score;
     state.lastSubmission.part2_score = scoreData.part2Score;
     state.lastSubmission.part3_score = scoreData.part3Score;
+
+    // Tự động vẽ lại ảnh đóng dấu với thông tin SBD, Mã đề, Tên mới
+    if (state.lastRawResult) {
+        try {
+            const stampedImg = await generateStampedGradedSheet(state.lastSubmission, state.lastRawResult);
+            if (stampedImg) {
+                state.lastSubmission.image_data = stampedImg;
+                state.lastSubmission.stamped_image = stampedImg;
+            }
+        } catch(e) {
+            console.warn("Lỗi cập nhật ảnh đóng dấu:", e);
+        }
+    }
 
     displayLastResultInspector(state.lastSubmission, state.lastRawResult);
     await saveSubmissionToStore(state.lastSubmission);
@@ -960,6 +1472,10 @@ state.mainCamera = null;
 state.guideOrientation = 'portrait';
 state.autoScanEnabled = true;
 state.isAutoScanning = false;
+state.autoScanSpeed = localStorage.getItem('omr_scan_speed') || 'normal'; // 'slow', 'normal', 'fast'
+state.autoScanCooldown = parseInt(localStorage.getItem('omr_scan_cooldown') || '3500');
+state.strictFiducials = localStorage.getItem('omr_strict_fiducials') !== 'false';
+state.consecutiveCornerDetections = 0;
 let autoScanInterval = null;
 let lastAutoScanTime = 0;
 
@@ -1015,9 +1531,61 @@ window.toggleAutoScan = () => {
     }
 };
 
+// Cài đặt Tự động quét (Auto-Scan Modal Controls)
+window.openAutoScanSettings = () => {
+    const modal = document.getElementById('autoScanSettingsModal');
+    if (!modal) return;
+    document.querySelectorAll('.speed-opt-btn').forEach(b => {
+        b.className = 'speed-opt-btn py-2 px-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-center font-bold text-slate-600 dark:text-slate-300 cursor-pointer';
+    });
+    const activeBtn = document.getElementById(`speedBtn_${state.autoScanSpeed}`);
+    if (activeBtn) {
+        activeBtn.className = 'speed-opt-btn py-2 px-1 rounded-xl border-2 border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 font-bold text-center cursor-pointer';
+    }
+    const cdSelect = document.getElementById('autoScanCooldownSelect');
+    if (cdSelect) cdSelect.value = String(state.autoScanCooldown);
+    const strictCheck = document.getElementById('strictFiducialsCheck');
+    if (strictCheck) strictCheck.checked = state.strictFiducials;
+
+    modal.classList.remove('hidden');
+};
+
+window.closeAutoScanSettings = () => {
+    const modal = document.getElementById('autoScanSettingsModal');
+    if (modal) modal.classList.add('hidden');
+    if (state.autoScanEnabled) {
+        startAutoScanLoop();
+    }
+};
+
+window.setAutoScanSpeed = (speed) => {
+    state.autoScanSpeed = speed;
+    localStorage.setItem('omr_scan_speed', speed);
+    document.querySelectorAll('.speed-opt-btn').forEach(b => {
+        b.className = 'speed-opt-btn py-2 px-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-center font-bold text-slate-600 dark:text-slate-300 cursor-pointer';
+    });
+    const activeBtn = document.getElementById(`speedBtn_${speed}`);
+    if (activeBtn) {
+        activeBtn.className = 'speed-opt-btn py-2 px-1 rounded-xl border-2 border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 font-bold text-center cursor-pointer';
+    }
+    if (state.autoScanEnabled) startAutoScanLoop();
+};
+
+window.setAutoScanCooldown = (val) => {
+    state.autoScanCooldown = parseInt(val) || 3500;
+    localStorage.setItem('omr_scan_cooldown', String(state.autoScanCooldown));
+};
+
+window.setStrictFiducials = (val) => {
+    state.strictFiducials = Boolean(val);
+    localStorage.setItem('omr_strict_fiducials', String(state.strictFiducials));
+};
+
 function startAutoScanLoop() {
     stopAutoScanLoop();
     if (!state.autoScanEnabled) return;
+
+    const intervalMs = state.autoScanSpeed === 'fast' ? 500 : (state.autoScanSpeed === 'slow' ? 1200 : 800);
 
     autoScanInterval = setInterval(async () => {
         const video = document.getElementById('cameraVideo');
@@ -1029,8 +1597,8 @@ function startAutoScanLoop() {
         if (!video || !state.currentCameraStream || sheetArea?.classList.contains('hidden')) return;
         if (state.isAutoScanning || video.readyState < 2) return;
 
-        // Pause auto-scan for 3.2s when a result is newly displayed
-        if (resSheet && !resSheet.classList.contains('hidden') && Date.now() - lastAutoScanTime < 3200) {
+        // Nghỉ giữa các lần quét khi kết quả đang hiển thị
+        if (resSheet && !resSheet.classList.contains('hidden') && Date.now() - lastAutoScanTime < state.autoScanCooldown) {
             return;
         }
 
@@ -1058,8 +1626,9 @@ function startAutoScanLoop() {
             let computedSw = gr.width / scale;
             let computedSh = gr.height / scale;
 
-            const padX = computedSw * 0.08;
-            const padY = computedSh * 0.08;
+            // 18% margin for detection
+            const padX = computedSw * 0.18;
+            const padY = computedSh * 0.18;
             computedSx = Math.max(0, computedSx - padX);
             computedSy = Math.max(0, computedSy - padY);
             computedSw = Math.min(video.videoWidth - computedSx, computedSw + padX * 2);
@@ -1089,25 +1658,77 @@ function startAutoScanLoop() {
                 );
                 const uniqueCorners = new Set(corners);
                 if (uniqueCorners.size === 4) {
-                    lastAutoScanTime = Date.now();
-                    // Glow effect on 4 target boxes
-                    document.querySelectorAll('.camera-target-corner').forEach(b => {
-                        b.classList.add('bg-emerald-500/50', 'border-emerald-300', 'shadow-[0_0_20px_rgba(16,185,129,0.9)]');
-                    });
-                    setTimeout(() => {
-                        document.querySelectorAll('.camera-target-corner').forEach(b => {
-                            b.classList.remove('bg-emerald-500/50', 'border-emerald-300', 'shadow-[0_0_20px_rgba(16,185,129,0.9)]');
+                    const [c0, c1, c2, c3] = corners;
+                    let isValidQuad = true;
+
+                    if (state.strictFiducials) {
+                        // 1. Kiểm tra hình dạng vuông của từng mốc đen góc (chống nhận nhầm phím/vết bẩn)
+                        const isSquareish = b => b && b.w && b.h && Math.abs(b.w / b.h - 1) < 0.45;
+                        if (!isSquareish(c0) || !isSquareish(c1) || !isSquareish(c2) || !isSquareish(c3)) {
+                            isValidQuad = false;
+                        }
+
+                        // 2. Kích thước cạnh tứ giác
+                        const wTop = Math.hypot(c1.x - c0.x, c1.y - c0.y);
+                        const wBot = Math.hypot(c2.x - c3.x, c2.y - c3.y);
+                        const hLeft = Math.hypot(c3.x - c0.x, c3.y - c0.y);
+                        const hRight = Math.hypot(c2.x - c1.x, c2.y - c1.y);
+
+                        // Chiếm tỷ lệ đủ lớn trong khung (> 30%)
+                        if (wTop < small.g.w * 0.30 || hLeft < small.g.h * 0.30) {
+                            isValidQuad = false;
+                        }
+
+                        // Tương quan cạnh đối
+                        if (Math.abs(wTop - wBot) / Math.max(wTop, wBot) > 0.40 || Math.abs(hLeft - hRight) / Math.max(hLeft, hRight) > 0.40) {
+                            isValidQuad = false;
+                        }
+
+                        // Tỷ lệ khổ giấy A4
+                        const avgW = (wTop + wBot) / 2;
+                        const avgH = (hLeft + hRight) / 2;
+                        const ratio = avgH / avgW;
+                        const isPortraitA4 = (ratio >= 1.15 && ratio <= 1.75);
+                        const isLandscapeA4 = (ratio >= 0.55 && ratio <= 0.90);
+                        if (!isPortraitA4 && !isLandscapeA4) {
+                            isValidQuad = false;
+                        }
+                    }
+
+                    if (isValidQuad) {
+                        state.consecutiveCornerDetections = (state.consecutiveCornerDetections || 0) + 1;
+                        
+                        // Làm sáng góc khung căn màu xanh ngọc
+                        document.querySelectorAll('.camera-corner-bracket').forEach(b => {
+                            b.classList.add('border-emerald-300', 'shadow-[0_0_15px_rgba(16,185,129,0.85)]');
+                            b.classList.remove('border-white/60');
                         });
-                    }, 500);
-                    await window.captureCameraFrame();
+
+                        const reqFrames = state.autoScanSpeed === 'fast' ? 1 : 2;
+                        if (state.consecutiveCornerDetections >= reqFrames) {
+                            state.consecutiveCornerDetections = 0;
+                            lastAutoScanTime = Date.now();
+                            await window.captureCameraFrame();
+                        }
+                    } else {
+                        state.consecutiveCornerDetections = 0;
+                        document.querySelectorAll('.camera-corner-bracket').forEach(b => {
+                            b.classList.remove('border-emerald-300', 'shadow-[0_0_15px_rgba(16,185,129,0.85)]');
+                            b.classList.add('border-white/60');
+                        });
+                    }
+                } else {
+                    state.consecutiveCornerDetections = 0;
                 }
+            } else {
+                state.consecutiveCornerDetections = 0;
             }
         } catch(e) {
             // Ignore frame detection error in periodic loop
         } finally {
             state.isAutoScanning = false;
         }
-    }, 750);
+    }, intervalMs);
 }
 
 function stopAutoScanLoop() {
@@ -1541,9 +2162,9 @@ window.captureCameraFrame = async () => {
         let computedSw = gr.width / scale;
         let computedSh = gr.height / scale;
 
-        // 12% generous padding margin so outer corner markers are never clipped
-        const padX = computedSw * 0.12;
-        const padY = computedSh * 0.12;
+        // 20% generous padding margin so outer corner markers are never clipped
+        const padX = computedSw * 0.20;
+        const padY = computedSh * 0.20;
         computedSx = Math.max(0, computedSx - padX);
         computedSy = Math.max(0, computedSy - padY);
         computedSw = Math.min(video.videoWidth - computedSx, computedSw + padX * 2);
@@ -1575,7 +2196,26 @@ window.captureCameraFrame = async () => {
     canvas.toBlob(async (blob) => {
         if (!blob) return;
         try {
-            const sub = await processSingleSheet(blob);
+            let sub = null;
+            try {
+                // Ưu tiên 1: Chấm vùng đã crop rộng 20% quanh khung ngắm
+                sub = await processSingleSheet(blob);
+            } catch(cropErr) {
+                console.warn("Chấm vùng crop chưa khớp 4 mốc, tự động quét toàn khung video sensor:", cropErr);
+                // Ưu tiên 2 (Tự động Fallback): Chụp trọn vẹn 100% cảm biến camera để không bị sót mép phiếu
+                const fullCanvas = document.createElement('canvas');
+                fullCanvas.width = video.videoWidth || 1920;
+                fullCanvas.height = video.videoHeight || 1440;
+                const fCtx = fullCanvas.getContext('2d');
+                fCtx.drawImage(video, 0, 0, fullCanvas.width, fullCanvas.height);
+                const fullBlob = await new Promise(r => fullCanvas.toBlob(r, 'image/jpeg', 0.95));
+                if (fullBlob) {
+                    sub = await processSingleSheet(fullBlob);
+                } else {
+                    throw cropErr;
+                }
+            }
+
             if (statusBadge) {
                 statusBadge.innerHTML = '<i class="fa-solid fa-check text-emerald-400"></i> Đã nhận diện!';
                 setTimeout(() => statusBadge.classList.add('hidden'), 2000);
@@ -1583,7 +2223,7 @@ window.captureCameraFrame = async () => {
             if (statusText) {
                 statusText.innerHTML = `<span class="text-emerald-300 font-bold">✓ Đã chấm xong: ${(typeof sub.score === 'number' ? sub.score.toFixed(2) : sub.score)} điểm · ${sub.student_name || ('SBD ' + sub.student_no)}</span>`;
                 setTimeout(() => {
-                    if (statusText) statusText.textContent = 'Canh bốn ô đen vào bốn khung nhỏ. Khi chụp, hệ thống chỉ lấy vùng A4 bên trong khung xanh.';
+                    if (statusText) statusText.textContent = 'Canh 4 ô đen góc phiếu vào 4 góc khung ngắm để tự động chấm.';
                 }, 3200);
             }
             showCameraResultSheet(sub);
@@ -1595,9 +2235,9 @@ window.captureCameraFrame = async () => {
                 setTimeout(() => statusBadge.classList.add('hidden'), 3500);
             }
             if (statusText) {
-                statusText.innerHTML = '<span class="text-amber-300 font-bold">⚠️ Chưa nhận diện đủ 4 mốc đen. Hãy đưa phiếu vào trọn 4 ô vuông!</span>';
+                statusText.innerHTML = '<span class="text-amber-300 font-bold">⚠️ Chưa nhận diện đủ 4 mốc đen. Hãy đưa phiếu vào trọn khung hình!</span>';
                 setTimeout(() => {
-                    if (statusText) statusText.textContent = 'Canh bốn ô đen vào bốn khung nhỏ. Khi chụp, hệ thống chỉ lấy vùng A4 bên trong khung xanh.';
+                    if (statusText) statusText.textContent = 'Canh 4 ô đen góc phiếu vào 4 góc khung ngắm để tự động chấm.';
                 }, 3200);
             }
         }
