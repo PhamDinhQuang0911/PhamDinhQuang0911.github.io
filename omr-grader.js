@@ -902,7 +902,9 @@ const OMR_DB_NAME = 'QMath_OMR_Storage';
 const OMR_DB_VERSION = 1;
 const OMR_STORE_IMAGES = 'sheet_images';
 
+let cachedOmrDb = null;
 function openOmrIndexedDb() {
+    if (cachedOmrDb) return Promise.resolve(cachedOmrDb);
     return new Promise((resolve) => {
         if (!window.indexedDB) return resolve(null);
         try {
@@ -913,7 +915,15 @@ function openOmrIndexedDb() {
                     db.createObjectStore(OMR_STORE_IMAGES);
                 }
             };
-            req.onsuccess = () => resolve(req.result);
+            req.onsuccess = () => {
+                cachedOmrDb = req.result;
+                cachedOmrDb.onclose = () => { cachedOmrDb = null; };
+                cachedOmrDb.onversionchange = () => {
+                    try { cachedOmrDb.close(); } catch(_) {}
+                    cachedOmrDb = null;
+                };
+                resolve(cachedOmrDb);
+            };
             req.onerror = () => resolve(null);
         } catch (_) {
             resolve(null);
@@ -1033,8 +1043,10 @@ async function loadExamSubmissions(examId) {
         console.warn("Khôi phục bài chấm từ bảng results:", e);
     }
 
-    // Khôi phục ảnh độ phân giải cao từ bộ nhớ phiên và IndexedDB vĩnh viễn trên máy
-    for (let s of list) {
+    // Khôi phục ảnh độ phân giải cao từ bộ nhớ phiên và IndexedDB: preload tối đa 5 bài gần nhất để tiết kiệm RAM và mở đề tức thì
+    const preloadLimit = Math.min(5, list.length);
+    for (let i = 0; i < preloadLimit; i++) {
+        const s = list[i];
         if (state.memoryImages && state.memoryImages[s.id]) {
             s.image_data = state.memoryImages[s.id];
             s.stamped_image = state.memoryImages[s.id];
@@ -1313,9 +1325,12 @@ window.quickAssignStudentToSubmission = async (subId) => {
     sub._headerV25Upgraded = false;
     await ensureSubmissionStampedHeaderUpgraded(sub);
 
-    localStorage.setItem(`omr_submissions_${state.exam.id}`, JSON.stringify(state.submissions));
+    saveSubmissionsToLocalSafe(state.exam.id, state.submissions);
     if (state.teacherUid) {
-        try { await setDoc(doc(db, "omr_submissions", sub.id), sub); } catch (_) {}
+        try {
+            const { image_data, stamped_image, clean_image, raw_warped_image, ...cloudMeta } = sub;
+            await setDoc(doc(db, "omr_submissions", sub.id), cloudMeta);
+        } catch (_) {}
     }
     await syncSubmissionToLmsResultsCollection(sub);
     updateOverviewStats();
@@ -1571,6 +1586,7 @@ window.handleFilesSelected = async (files) => {
     let successCount = 0;
     let failCount = 0;
     const batchScores = [];
+    const batchSubmissions = [];
 
     for (let i = 0; i < fileList.length; i++) {
         const file = fileList[i];
@@ -1581,14 +1597,20 @@ window.handleFilesSelected = async (files) => {
             progressLabel.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Đang chấm phiếu ${i + 1}/${fileList.length}...`;
         }
 
-        // Nhường 1 nhịp UI để thanh tiến trình chạy mượt
-        await new Promise(r => setTimeout(r, 15));
+        // Nhường 1 nhịp UI rất ngắn để thanh tiến trình mượt mà
+        await new Promise(r => setTimeout(r, 6));
 
         try {
-            const sub = await processSingleSheet(file, { isUploadedFile: true, silentInspector: true });
+            const sub = await processSingleSheet(file, {
+                isUploadedFile: true,
+                silentInspector: true,
+                silentBeep: true,
+                deferSave: true
+            });
             if (sub) {
                 successCount++;
                 batchScores.push(Number(sub.score) || 0);
+                batchSubmissions.push(sub);
             }
         } catch(err) {
             console.error("Lỗi chấm bài:", file.name, err);
@@ -1607,10 +1629,41 @@ window.handleFilesSelected = async (files) => {
     // Cập nhật hàng đợi ảnh lỗi nếu có
     renderBatchFailedQueue();
 
+    // Hợp nhất kết quả hàng loạt vào state 1 lần duy nhất để tối ưu tốc độ tối đa
+    if (batchSubmissions.length > 0) {
+        for (const sub of batchSubmissions) {
+            const existingIdx = state.submissions.findIndex(s => s.student_no === sub.student_no && s.student_no !== '');
+            if (existingIdx !== -1) {
+                sub.id = state.submissions[existingIdx].id || sub.id;
+                state.submissions[existingIdx] = sub;
+            } else {
+                state.submissions.push(sub);
+            }
+        }
+        if (state.gradedCountsByExam && state.exam?.id) {
+            state.gradedCountsByExam[state.exam.id] = state.submissions.length;
+        }
+
+        // Lưu localStorage 1 lần duy nhất (không lưu ảnh nặng nên cực nhẹ)
+        saveSubmissionsToLocalSafe(state.exam?.id, state.submissions);
+
+        // Hiển thị phiếu soi của bài chấm cuối cùng
+        if (state.lastSubmission && typeof displayLastResultInspector === 'function') {
+            displayLastResultInspector(state.lastSubmission, null).catch(() => {});
+        }
+
+        // Đồng bộ lên Cloud trong nền với hàng đợi kiểm soát tải (concurrency 3)
+        const autoSave = document.getElementById('cameraAutoSave')?.checked ?? (document.getElementById('autoSaveToggle')?.checked ?? true);
+        if (autoSave && state.teacherUid) {
+            syncBatchSubmissionsToCloud(batchSubmissions);
+        }
+    }
+
     updateOverviewStats();
     window.renderResultsTable();
 
     if (successCount > 0) {
+        playBatchSuccessChime();
         const avgBatch = (batchScores.reduce((a, b) => a + b, 0) / batchScores.length).toFixed(2);
         const maxBatch = Math.max(...batchScores).toFixed(2);
         Swal.fire({
@@ -1852,7 +1905,7 @@ async function processSingleSheet(source, options = {}) {
         flags: rawResult.uncertain || [],
         template_key: rawResult.templateKey || state.exam?.sheet_template || 'qmcv1239',
         p3m: rawResult.p3m || null,
-        clean_image: rawResult.rectifiedImage || '',
+        clean_image: '', // Đã lưu vào IndexedDB với key submission.id + '_clean' để giải phóng RAM
         image_data: rawResult.rectifiedImage,
         name_image: nameImg,
         createdAt: new Date().toISOString()
@@ -1874,20 +1927,31 @@ async function processSingleSheet(source, options = {}) {
         console.warn("Lỗi đóng dấu kết quả phiếu thi:", stampErr);
     }
 
+    // Giải phóng ngay rectifiedCanvas sau khi đóng dấu xong để không giữ hàng gigabyte bộ nhớ GPU
+    if (rawResult && rawResult.rectifiedCanvas) {
+        try {
+            rawResult.rectifiedCanvas.width = 1;
+            rawResult.rectifiedCanvas.height = 1;
+            rawResult.rectifiedCanvas = null;
+        } catch (_) {}
+    }
+
     state.lastSubmission = submission;
     state.lastRawResult = rawResult;
 
-    // Play pleasant scan sound immediately upon grading
-    playBeepSound();
+    // Play pleasant scan sound immediately upon grading (bỏ qua khi đang chấm hàng loạt)
+    if (!options.silentInspector && !options.silentBeep) {
+        playBeepSound();
+    }
 
     // Chỉ mở bảng soi chi tiết phiếu (#lastResultCard) nếu không phải đang nạp ảnh hàng loạt
     if (!options.silentInspector) {
         displayLastResultInspector(submission, rawResult);
     }
 
-    // Auto save if enabled (non-blocking cloud sync so UI responds instantaneously)
+    // Auto save if enabled (chỉ chạy ngay nếu không phải chế độ deferSave của hàng loạt)
     const autoSave = document.getElementById('cameraAutoSave')?.checked ?? (document.getElementById('autoSaveToggle')?.checked ?? true);
-    if (autoSave) {
+    if (autoSave && !options.deferSave) {
         saveSubmissionToStore(submission).catch(e => console.warn("Background save error:", e));
     }
 
@@ -2080,21 +2144,32 @@ function recognizeSheetWithOMR(source, options = {}) {
 
                 let lastErr = null;
                 for (const att of attempts) {
+                    let canvas = null;
                     try {
                         const scale = Math.min(1, att.maxDim / Math.max(att.sw || 1, att.sh || 1));
-                        const canvas = document.createElement('canvas');
+                        canvas = document.createElement('canvas');
                         canvas.width = Math.max(1, Math.round(att.sw * scale));
                         canvas.height = Math.max(1, Math.round(att.sh * scale));
                         const ctx = canvas.getContext('2d', { willReadFrequently: true });
                         ctx.drawImage(img, att.sx, att.sy, att.sw, att.sh, 0, 0, canvas.width, canvas.height);
 
                         const gray = window.OMR.xam(ctx.getImageData(0, 0, canvas.width, canvas.height));
+                        // Giải phóng tức thì GPU/RAM bitmap của canvas
+                        canvas.width = 1;
+                        canvas.height = 1;
+                        canvas = null;
+
                         const res = recognizeSheetFromGray(gray, options);
                         if (res) {
                             resolve(res);
                             return;
                         }
                     } catch (err) {
+                        if (canvas) {
+                            canvas.width = 1;
+                            canvas.height = 1;
+                            canvas = null;
+                        }
                         lastErr = err;
                     }
                 }
@@ -2103,10 +2178,12 @@ function recognizeSheetWithOMR(source, options = {}) {
                 reject(e);
             } finally {
                 URL.revokeObjectURL(url);
+                try { img.src = ''; } catch(_) {}
             }
         };
         img.onerror = () => {
             URL.revokeObjectURL(url);
+            try { img.src = ''; } catch(_) {}
             reject(new Error("Không tải được ảnh phiếu thi"));
         };
         img.src = url;
@@ -2152,7 +2229,10 @@ function cropCandidateHandwrittenName(rectifiedSource, tplKey = null) {
         canvas.width = Math.max(1, Math.round(sw));
         canvas.height = Math.max(1, Math.round(sh));
         canvas.getContext('2d').drawImage(rectifiedSource, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
-        return Promise.resolve(canvas.toDataURL('image/jpeg', 0.85));
+        const data = canvas.toDataURL('image/jpeg', 0.85);
+        canvas.width = 1;
+        canvas.height = 1;
+        return Promise.resolve(data);
     }
 
     return new Promise(resolve => {
@@ -2166,9 +2246,16 @@ function cropCandidateHandwrittenName(rectifiedSource, tplKey = null) {
             canvas.width = Math.max(1, Math.round(sw));
             canvas.height = Math.max(1, Math.round(sh));
             canvas.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
-            resolve(canvas.toDataURL('image/jpeg', 0.85));
+            const data = canvas.toDataURL('image/jpeg', 0.85);
+            canvas.width = 1;
+            canvas.height = 1;
+            try { img.src = ''; } catch(_) {}
+            resolve(data);
         };
-        img.onerror = () => resolve(null);
+        img.onerror = () => {
+            try { img.src = ''; } catch(_) {}
+            resolve(null);
+        };
         img.src = rectifiedSource;
     });
 }
@@ -2724,7 +2811,10 @@ async function generateStampedGradedSheet(sub, rawResult) {
     ctx.drawImage(rectImg, 0, headerH, sheetW, sheetH);
 
     if (rawResult.onlyHeaderUpgrade) {
-        return canvas.toDataURL('image/jpeg', 0.92);
+        const outUrl = canvas.toDataURL('image/jpeg', 0.90);
+        canvas.width = 1;
+        canvas.height = 1;
+        return outUrl;
     }
 
     // 7. VẼ ĐÁNH DẤU CHI TIẾT TRỰC TIẾP CẢ 3 PHẦN LÊN ẢNH (Vòng tròn đậm rõ hơn)
@@ -2938,7 +3028,10 @@ async function generateStampedGradedSheet(sub, rawResult) {
         }
     }
 
-    return canvas.toDataURL('image/jpeg', 0.92);
+    const outUrl = canvas.toDataURL('image/jpeg', 0.90);
+    canvas.width = 1;
+    canvas.height = 1;
+    return outUrl;
 }
 
 function renderSvgOverlay(rawResult, code) {
@@ -3167,28 +3260,28 @@ window.saveCurrentSubmissionManually = async () => {
 function saveSubmissionsToLocalSafe(examId, subs) {
     if (!examId) return;
     try {
-        // Thử lưu bản rút gọn không chứa chuỗi ảnh nặng trùng lặp để tránh lỗi QuotaExceededError 5MB của trình duyệt
+        // Loại bỏ sạch toàn bộ các chuỗi ảnh base64 lớn (image_data, stamped_image, clean_image, raw_warped_image)
+        // Các ảnh này đã được lưu bền vững trong IndexedDB và Cloud
         const liteSubs = (subs || []).map(s => {
-            const { stamped_image, raw_warped_image, ...rest } = s;
+            const { image_data, stamped_image, clean_image, raw_warped_image, ...rest } = s;
             return rest;
         });
         localStorage.setItem(`omr_submissions_${examId}`, JSON.stringify(liteSubs));
     } catch (quotaErr) {
-        try {
-            // Nếu vẫn vượt dung lượng 5MB (khi chấm >30 phiếu), lưu toàn bộ điểm & đáp án (ảnh đóng dấu đã được lưu trên đám mây results & bộ nhớ RAM)
-            const ultraLite = (subs || []).map(s => {
-                const { image_data, stamped_image, raw_warped_image, ...rest } = s;
-                return rest;
-            });
-            localStorage.setItem(`omr_submissions_${examId}`, JSON.stringify(ultraLite));
-        } catch(e2) {}
+        console.warn("localStorage quota exceeded for submissions metadata:", quotaErr);
     }
 }
 
 async function saveSubmissionToStore(sub) {
     const rawImg = sub.stamped_image || sub.image_data;
     if (rawImg) {
-        if (state.memoryImages) state.memoryImages[sub.id] = rawImg;
+        if (state.memoryImages) {
+            state.memoryImages[sub.id] = rawImg;
+            const imgKeys = Object.keys(state.memoryImages);
+            if (imgKeys.length > 25) {
+                delete state.memoryImages[imgKeys[0]];
+            }
+        }
         saveOmrImageToDb(sub.id, rawImg);
     }
 
@@ -3212,7 +3305,7 @@ async function saveSubmissionToStore(sub) {
     // Save to Firestore omr_submissions (lightweight metadata) & LMS results (with compressed stampedImage)
     if (state.teacherUid) {
         try {
-            const { image_data, stamped_image, raw_warped_image, ...cloudMeta } = sub;
+            const { image_data, stamped_image, clean_image, raw_warped_image, ...cloudMeta } = sub;
             await setDoc(doc(db, "omr_submissions", sub.id), cloudMeta);
         } catch(e) {
             console.warn("Lưu Firestore omr_submissions thất bại, đã lưu localStorage:", e);
@@ -3279,12 +3372,19 @@ async function compressStampedImageForCloud(dataUrl) {
                 c.height = Math.max(1, Math.round((img.naturalHeight || 1280) * scale));
                 const ctx = c.getContext('2d');
                 ctx.drawImage(img, 0, 0, c.width, c.height);
-                resolve(c.toDataURL('image/jpeg', 0.68));
+                const res = c.toDataURL('image/jpeg', 0.68);
+                c.width = 1;
+                c.height = 1;
+                try { img.src = ''; } catch(_) {}
+                resolve(res);
             } catch (e) {
                 resolve('');
             }
         };
-        img.onerror = () => resolve('');
+        img.onerror = () => {
+            try { img.src = ''; } catch(_) {}
+            resolve('');
+        };
         img.src = dataUrl;
     });
 }
@@ -3354,26 +3454,82 @@ async function syncSubmissionToLmsResultsCollection(sub) {
     return resultDocId;
 }
 
+// Đồng bộ hàng loạt bài chấm lên Cloud theo nhóm song song có giới hạn (concurrency 3)
+async function syncBatchSubmissionsToCloud(submissions) {
+    if (!state.teacherUid || !submissions || submissions.length === 0) return;
+    const queue = [...submissions];
+    const concurrency = 3;
+    let completed = 0;
+
+    async function worker() {
+        while (queue.length > 0) {
+            const sub = queue.shift();
+            if (!sub) continue;
+            try {
+                const { image_data, stamped_image, clean_image, raw_warped_image, ...cloudMeta } = sub;
+                await setDoc(doc(db, "omr_submissions", sub.id), cloudMeta);
+                await syncSubmissionToLmsResultsCollection(sub);
+            } catch (err) {
+                console.warn("Lỗi sync cloud bài chấm hàng loạt:", sub.id, err);
+            }
+            completed++;
+        }
+    }
+
+    const workers = [];
+    for (let i = 0; i < Math.min(concurrency, queue.length); i++) {
+        workers.push(worker());
+    }
+    Promise.all(workers).then(() => {
+        console.log(`Đã đồng bộ xong toàn bộ ${completed} bài chấm lên LMS cloud!`);
+    }).catch(e => {
+        console.warn("Batch sync error:", e);
+    });
+}
+
+// ========================================================
+// SINGLETON AUDIO CONTEXT & CHIME ENGINE (KHÔNG LẶP LẠI TẠO AUDIO CONTEXT)
+// ========================================================
+let sharedAudioCtx = null;
+function getSharedAudioContext() {
+    try {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx) return null;
+        if (!sharedAudioCtx || sharedAudioCtx.state === 'closed') {
+            sharedAudioCtx = new AudioCtx();
+        }
+        if (sharedAudioCtx.state === 'suspended') {
+            sharedAudioCtx.resume().catch(() => {});
+        }
+        return sharedAudioCtx;
+    } catch (e) {
+        return null;
+    }
+}
+
 function playBeepSound() {
     try {
         if (navigator.vibrate) {
             try { navigator.vibrate([70, 45, 110]); } catch(e) {}
         }
-        const AudioCtx = window.AudioContext || window.webkitAudioContext;
-        if (!AudioCtx) return;
-        const ctx = new AudioCtx();
+        const ctx = getSharedAudioContext();
+        if (!ctx) return;
 
+        const now = ctx.currentTime;
         // Note 1: A5 (880 Hz)
         const osc1 = ctx.createOscillator();
         const gain1 = ctx.createGain();
         osc1.connect(gain1);
         gain1.connect(ctx.destination);
         osc1.type = 'triangle';
-        osc1.frequency.setValueAtTime(880, ctx.currentTime);
-        gain1.gain.setValueAtTime(0.25, ctx.currentTime);
-        gain1.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.12);
-        osc1.start(ctx.currentTime);
-        osc1.stop(ctx.currentTime + 0.12);
+        osc1.frequency.setValueAtTime(880, now);
+        gain1.gain.setValueAtTime(0.22, now);
+        gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+        osc1.start(now);
+        osc1.stop(now + 0.12);
+        osc1.onended = () => {
+            try { osc1.disconnect(); gain1.disconnect(); } catch (_) {}
+        };
 
         // Note 2: E6 (1318.5 Hz) — Cheerful "Ting-Tinh!" completion chime
         const osc2 = ctx.createOscillator();
@@ -3381,12 +3537,47 @@ function playBeepSound() {
         osc2.connect(gain2);
         gain2.connect(ctx.destination);
         osc2.type = 'sine';
-        osc2.frequency.setValueAtTime(1318.5, ctx.currentTime + 0.11);
-        gain2.gain.setValueAtTime(0.28, ctx.currentTime + 0.11);
-        gain2.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.36);
-        osc2.start(ctx.currentTime + 0.11);
-        osc2.stop(ctx.currentTime + 0.36);
+        osc2.frequency.setValueAtTime(1318.5, now + 0.10);
+        gain2.gain.setValueAtTime(0.25, now + 0.10);
+        gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+        osc2.start(now + 0.10);
+        osc2.stop(now + 0.35);
+        osc2.onended = () => {
+            try { osc2.disconnect(); gain2.disconnect(); } catch (_) {}
+        };
     } catch(e) {}
+}
+
+function playBatchSuccessChime() {
+    try {
+        if (navigator.vibrate) {
+            try { navigator.vibrate([80, 50, 80, 50, 160]); } catch(e) {}
+        }
+        const ctx = getSharedAudioContext();
+        if (!ctx) return;
+        const now = ctx.currentTime;
+        const notes = [
+            { f: 587.33, t: 0, d: 0.10 },    // D5
+            { f: 739.99, t: 0.08, d: 0.12 }, // F#5
+            { f: 880.00, t: 0.16, d: 0.14 }, // A5
+            { f: 1174.66, t: 0.26, d: 0.40 } // D6
+        ];
+        notes.forEach(({ f, t, d }) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = 'triangle';
+            osc.frequency.setValueAtTime(f, now + t);
+            gain.gain.setValueAtTime(0.24, now + t);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + t + d);
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start(now + t);
+            osc.stop(now + t + d);
+            osc.onended = () => {
+                try { osc.disconnect(); gain.disconnect(); } catch (_) {}
+            };
+        });
+    } catch (_) {}
 }
 
 // ========================================================
@@ -6102,14 +6293,7 @@ window.handleDecodedQrText = (rawText) => {
         }
     }
 
-    try {
-        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        const osc = audioCtx.createOscillator();
-        osc.frequency.setValueAtTime(800, audioCtx.currentTime);
-        osc.connect(audioCtx.destination);
-        osc.start();
-        osc.stop(audioCtx.currentTime + 0.12);
-    } catch(e) {}
+    playBeepSound();
 };
 
 window.confirmApplyQrKey = async () => {
@@ -7936,7 +8120,7 @@ window.syncAllResultsToLmsClass = async () => {
             okCount++;
         }
 
-        localStorage.setItem(`omr_submissions_${state.exam.id}`, JSON.stringify(state.submissions));
+        saveSubmissionsToLocalSafe(state.exam.id, state.submissions);
         window.renderResultsTable();
 
         Swal.fire({
