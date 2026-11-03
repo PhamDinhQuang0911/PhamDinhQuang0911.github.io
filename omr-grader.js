@@ -874,6 +874,11 @@ async function loadExamKeys(examId) {
     }
     state.keys = {};
     keys.forEach(k => { state.keys[k.code] = k; });
+    // Tự động gộp tất cả mã đề đã lưu vào danh sách mã đề của bài thi
+    if (state.exam && keys.length > 0) {
+        const keyCodes = keys.map(k => String(k.code));
+        state.exam.codes = Array.from(new Set([...(state.exam.codes || []).map(String), ...keyCodes])).sort();
+    }
 }
 
 async function loadExamStudents(examId) {
@@ -4316,13 +4321,33 @@ window.exportResultsToExcel = () => {
 // ========================================================
 // 7. KEYS & BAREM TAB
 // ========================================================
-window.renderKeysTab = () => {
+window.renderKeysTab = (preferredCode) => {
     if (!state.exam) return;
     const selector = document.getElementById('keyCodeSelector');
+    
+    // Hợp nhất toàn bộ mã đề từ cấu hình đề thi VÀ toàn bộ đáp án đã nạp vào state.keys
+    const keyCodes = Object.keys(state.keys || {}).map(String);
+    const examCodes = (Array.isArray(state.exam.codes) ? state.exam.codes : []).map(String);
+    
+    // Nếu đã nạp đáp án thực tế, ưu tiên bỏ các mã mặc định mẫu (101-104) nếu chúng không có đáp án thực
+    const allCodesSet = new Set([...examCodes, ...keyCodes]);
+    if (allCodesSet.size === 0) allCodesSet.add('101');
+    const allCodes = Array.from(allCodesSet).filter(Boolean).sort();
+    
+    // Đồng bộ ngược lại vào state.exam.codes
+    state.exam.codes = allCodes;
+
     if (selector) {
-        selector.innerHTML = state.exam.codes.map(c => `<option value="${c}">${c}</option>`).join('');
+        selector.innerHTML = allCodes.map(c => `<option value="${c}">${c}</option>`).join('');
+        if (preferredCode && allCodes.includes(String(preferredCode))) {
+            selector.value = String(preferredCode);
+        } else if (selector.value && allCodes.includes(selector.value)) {
+            // Giữ nguyên mã đề đang chọn
+        } else {
+            selector.value = allCodes[0];
+        }
     }
-    const currentCode = selector?.value || state.exam.codes[0] || '101';
+    const currentCode = selector?.value || allCodes[0] || '101';
     window.loadCodeKeyInputs(currentCode);
 };
 
@@ -5721,16 +5746,20 @@ window.confirmApplyImportedKeys = async () => {
 
     localStorage.setItem(`omr_keys_${state.exam.id}`, JSON.stringify(Object.values(state.keys)));
 
-    const selector = document.getElementById('keyCodeSelector');
-    if (selector) {
-        const existingCodes = new Set(Array.from(selector.options).map(o => o.value));
-        codes.forEach(c => existingCodes.add(c));
-        selector.innerHTML = Array.from(existingCodes).sort().map(c => `<option value="${c}">${c}</option>`).join('');
-        selector.value = codes[0];
+    // Cập nhật và lưu toàn bộ mã đề mới vào cấu hình bài thi
+    const combinedCodes = Array.from(new Set([...(state.exam.codes || []).map(String), ...codes.map(String)])).sort();
+    state.exam.codes = combinedCodes;
+    const exIdx = (state.exams || []).findIndex(e => e.id === state.exam.id);
+    if (exIdx !== -1) {
+        state.exams[exIdx].codes = combinedCodes;
+    }
+    saveLocalExams(state.exams);
+    if (state.teacherUid) {
+        try { await setDoc(doc(db, "omr_exams", state.exam.id), { codes: combinedCodes }, { merge: true }); } catch(e) {}
     }
 
     document.getElementById('importKeysExcelModal').classList.add('hidden');
-    window.renderKeysTab();
+    window.renderKeysTab(codes[0]);
 
     Swal.fire({
         icon: 'success',
@@ -6029,16 +6058,20 @@ window.confirmApplyQrKey = async () => {
 
     localStorage.setItem(`omr_keys_${state.exam.id}`, JSON.stringify(Object.values(state.keys)));
 
-    const selector = document.getElementById('keyCodeSelector');
-    if (selector) {
-        const existingCodes = new Set(Array.from(selector.options).map(o => o.value));
-        appliedCodes.forEach(c => existingCodes.add(c));
-        selector.innerHTML = Array.from(existingCodes).sort().map(c => `<option value="${c}">${c}</option>`).join('');
-        selector.value = appliedCodes[0];
+    // Cập nhật và lưu toàn bộ mã đề mới vào cấu hình bài thi
+    const combinedCodes = Array.from(new Set([...(state.exam.codes || []).map(String), ...appliedCodes.map(String)])).sort();
+    state.exam.codes = combinedCodes;
+    const exIdx = (state.exams || []).findIndex(e => e.id === state.exam.id);
+    if (exIdx !== -1) {
+        state.exams[exIdx].codes = combinedCodes;
+    }
+    saveLocalExams(state.exams);
+    if (state.teacherUid) {
+        try { await setDoc(doc(db, "omr_exams", state.exam.id), { codes: combinedCodes }, { merge: true }); } catch(e) {}
     }
 
     window.closeScanKeyQrModal();
-    window.renderKeysTab();
+    window.renderKeysTab(appliedCodes[0]);
 
     Swal.fire({
         icon: 'success',
