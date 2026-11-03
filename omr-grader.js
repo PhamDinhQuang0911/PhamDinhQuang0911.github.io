@@ -158,6 +158,37 @@ window.toggleDarkMode = () => {
     }
 })();
 
+window.toggleOmrSidebar = () => {
+    const sb = document.getElementById('mainSidebar');
+    const ov = document.getElementById('omrSidebarOverlay');
+    if (!sb) return;
+    const isClosed = sb.classList.contains('-translate-x-full');
+    if (isClosed) {
+        sb.classList.remove('-translate-x-full');
+        if (ov) ov.classList.remove('hidden');
+    } else {
+        sb.classList.add('-translate-x-full');
+        if (ov) ov.classList.add('hidden');
+    }
+};
+
+window.closeOmrSidebar = () => {
+    const sb = document.getElementById('mainSidebar');
+    const ov = document.getElementById('omrSidebarOverlay');
+    if (sb) sb.classList.add('-translate-x-full');
+    if (ov) ov.classList.add('hidden');
+};
+
+const TAB_SUBTITLES = {
+    scan: 'Chấm bài (Cam / Ảnh)',
+    results: 'Bảng điểm & Báo PHHS',
+    overview: 'Thống kê & Phổ điểm',
+    keys: 'Đáp án & Thang điểm',
+    students: 'Danh sách Lớp & SBD',
+    exams: 'Danh sách Đề thi',
+    downloads: 'Mẫu Phiếu In A4 (PDF)'
+};
+
 window.switchTab = (tabName) => {
     state.activeTab = tabName;
     ['overview', 'scan', 'results', 'keys', 'students', 'downloads', 'exams'].forEach(t => {
@@ -166,22 +197,17 @@ window.switchTab = (tabName) => {
         if (v) v.classList.toggle('hidden', t !== tabName);
         if (btn) {
             if (t === tabName) {
-                btn.className = "tab-btn w-full px-3 py-2.5 rounded-xl font-bold text-xs flex items-center justify-between transition-all cursor-pointer bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300";
+                btn.className = "tab-btn active-omr-tab w-full px-2.5 py-2 rounded-xl font-bold text-xs flex items-center justify-between transition-all cursor-pointer";
             } else {
-                btn.className = "tab-btn w-full px-3 py-2.5 rounded-xl font-bold text-xs flex items-center justify-between text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800/70 transition-all cursor-pointer";
+                btn.className = "tab-btn w-full px-2.5 py-2 rounded-xl font-bold text-xs flex items-center justify-between text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-[#262335] transition-all cursor-pointer";
             }
         }
     });
 
-    // Update mobile pill navigation buttons
-    document.querySelectorAll('[data-mobile-tab]').forEach(mBtn => {
-        const mTab = mBtn.getAttribute('data-mobile-tab');
-        if (mTab === tabName) {
-            mBtn.className = "mobile-tab-btn px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 shrink-0 bg-emerald-600 text-white shadow-2xs cursor-pointer";
-        } else {
-            mBtn.className = "mobile-tab-btn px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 shrink-0 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 cursor-pointer";
-        }
-    });
+    const subEl = document.getElementById('mobileCurrentTabSubtitle');
+    if (subEl && TAB_SUBTITLES[tabName]) {
+        subEl.textContent = TAB_SUBTITLES[tabName];
+    }
 
     if (tabName !== 'scan') {
         window.stopCameraStream();
@@ -251,20 +277,32 @@ function extractKeysFromQuestionArray(qList) {
     return { p1Ans, p2Ans, p3Ans, mcCount: mcQuestions.length, tfCount: tfQuestions.length, shortCount: shortQuestions.length };
 }
 
+function computeOmrExam4DigitCode(id) {
+    const str = String(id || '1010');
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+        hash = ((hash << 5) - hash + str.charCodeAt(i)) | 0;
+    }
+    const num = (Math.abs(hash) % 8999) + 1001; // 1001..9999 (4 chữ số cố định theo ID đề)
+    return String(num);
+}
+window.computeOmrExam4DigitCode = computeOmrExam4DigitCode;
+
 function normalizeLmsExam(raw) {
     const qList = Array.isArray(raw.questions) ? raw.questions : [];
     const mcCount = qList.filter(q => q && (q.type === 'mc' || !q.type)).length;
     const tfCount = qList.filter(q => q && q.type === 'tf').length;
     const shortCount = qList.filter(q => q && q.type === 'short').length;
 
-    let codes = ['101'];
+    const omrCode = String(raw.omrCode || raw.examCode || computeOmrExam4DigitCode(raw.id)).trim();
+    let codes = [omrCode];
     if (Array.isArray(raw.codes) && raw.codes.length > 0) {
         codes = raw.codes.map(c => String(c).trim()).filter(Boolean);
     } else if (raw.mixedExams && typeof raw.mixedExams === 'object' && Object.keys(raw.mixedExams).length > 0) {
         codes = Object.keys(raw.mixedExams);
-    } else if (raw.examCode) {
-        codes = [String(raw.examCode).trim()];
     }
+    if (!codes.includes(omrCode)) codes.unshift(omrCode);
+    if (!codes.includes('101')) codes.push('101');
 
     return {
         id: raw.id,
@@ -278,11 +316,13 @@ function normalizeLmsExam(raw) {
         part1_point: raw.part1_point || 0.25,
         part2_points: raw.part2_points || [0.1, 0.25, 0.5, 1.0],
         part3_point: raw.part3_point || 0.5,
+        omrCode,
         codes,
         questions: qList,
         mixedExams: raw.mixedExams || null,
-        classId: raw.classId || '',
+        classId: raw.classId || (Array.isArray(raw.allowedClassIds) && raw.allowedClassIds[0]) || raw.allowedClassId || '',
         className: raw.className || '',
+        allowedClassIds: Array.isArray(raw.allowedClassIds) ? raw.allowedClassIds : [],
         isLmsExam: true,
         createdAt: raw.createdAt || new Date().toISOString()
     };
@@ -416,6 +456,16 @@ async function loadTeacherExams() {
         }
 
         state.exams = combined;
+
+        // Ưu tiên kiểm tra tham số URL (?examId=...&classId=...) khi mở trực tiếp từ Lớp học hoặc Kho đề LMS
+        const urlParams = new URLSearchParams(window.location.search);
+        const urlExamId = (urlParams.get('examId') || '').trim();
+        const urlClassId = (urlParams.get('classId') || '').trim();
+        if (urlExamId) {
+            await window.selectLmsExamForGrading(urlExamId, urlClassId);
+            return;
+        }
+
         const lastSelectedId = localStorage.getItem('omr_last_exam_id_' + state.teacherUid);
         const targetExam = state.exams.find(e => e.id === lastSelectedId) || state.exams[0];
         await selectExam(targetExam.id);
@@ -551,8 +601,9 @@ function updateActiveExamBanner() {
     const sidebarMetaEl = document.getElementById('sidebarActiveExamMeta');
     const mobileTitleEl = document.getElementById('mobileActiveExamName');
 
-    const displayTitle = exam.name + (exam.isLmsExam ? ' (Kho đề LMS)' : '');
-    const structSummary = `${exam.question_count || 12} TN · ${exam.part2_count || 4} Đ/S · ${exam.part3_count || 6} TLN`;
+    const displayTitle = exam.name;
+    const omr4Code = exam.omrCode || computeOmrExam4DigitCode(exam.id);
+    const structSummary = `Mã OMR: ${omr4Code} · ${exam.question_count || 12} TN · ${exam.part2_count || 4} Đ/S · ${exam.part3_count || 6} TLN`;
 
     if (titleEl) titleEl.textContent = displayTitle;
     if (sidebarTitleEl) sidebarTitleEl.textContent = displayTitle;
@@ -922,6 +973,46 @@ window.handleFilesSelected = async (files) => {
 async function processSingleSheet(source, options = {}) {
     const rawResult = await recognizeSheetWithOMR(source, options);
     if (!rawResult) throw new Error("Không tìm đủ 4 mốc đen góc phiếu!");
+
+    // Tự động kiểm tra nếu Mã đề 4 số học sinh tô trên phiếu (từ sách/kho đề) khớp với một đề khác trong Kho đề LMS
+    const scannedCode = (rawResult.code || '').replace(/\D/g, '');
+    if (scannedCode && scannedCode.length >= 3 && state.exam) {
+        const currentCodes = (state.exam.codes || []).map(c => String(c).trim());
+        if (!currentCodes.includes(scannedCode) && state.exam.omrCode !== scannedCode) {
+            const matchedExamInBank = (state.exams || []).find(ex =>
+                ex.id !== state.exam.id && (
+                    ex.omrCode === scannedCode ||
+                    (Array.isArray(ex.codes) && ex.codes.includes(scannedCode))
+                )
+            );
+            if (matchedExamInBank) {
+                const prevClassId = state.exam.classId;
+                const prevClassName = state.exam.className;
+                const prevStudents = state.students ? [...state.students] : [];
+                try {
+                    if (matchedExamInBank.isLmsExam && (!Array.isArray(matchedExamInBank.questions) || matchedExamInBank.questions.length === 0)) {
+                        const fullDoc = await getDoc(doc(db, "exams", matchedExamInBank.id));
+                        if (fullDoc.exists()) {
+                            Object.assign(matchedExamInBank, normalizeLmsExam({ id: fullDoc.id, ...fullDoc.data() }));
+                        }
+                    }
+                    await selectExam(matchedExamInBank.id);
+                    if (state.exam) {
+                        autoFillKeysFromLmsQuestions(state.exam, true);
+                        if (prevClassId && !state.exam.classId) {
+                            state.exam.classId = prevClassId;
+                            state.exam.className = prevClassName;
+                        }
+                        if (prevStudents.length > 0 && (!state.students || state.students.length === 0)) {
+                            state.students = prevStudents;
+                        }
+                    }
+                } catch (switchErr) {
+                    console.warn("Không tự chuyển đề theo mã đề:", switchErr);
+                }
+            }
+        }
+    }
 
     // Crop candidate handwriting name (synchronously from rectifiedCanvas if available)
     let nameImg = null;
@@ -1985,6 +2076,29 @@ function buildLmsAnswersObjectFromOmr(sub) {
     return lmsAnswers;
 }
 
+async function compressStampedImageForCloud(dataUrl) {
+    if (!dataUrl || typeof dataUrl !== 'string') return '';
+    return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+            try {
+                const maxW = 900;
+                const scale = Math.min(1, maxW / (img.naturalWidth || 900));
+                const c = document.createElement('canvas');
+                c.width = Math.max(1, Math.round((img.naturalWidth || 900) * scale));
+                c.height = Math.max(1, Math.round((img.naturalHeight || 1280) * scale));
+                const ctx = c.getContext('2d');
+                ctx.drawImage(img, 0, 0, c.width, c.height);
+                resolve(c.toDataURL('image/jpeg', 0.68));
+            } catch (e) {
+                resolve('');
+            }
+        };
+        img.onerror = () => resolve('');
+        img.src = dataUrl;
+    });
+}
+
 async function syncSubmissionToLmsResultsCollection(sub) {
     if (!state.exam) return null;
     const sbdSafe = (sub.student_no || sub.id || '000').replace(/[^a-zA-Z0-9_-]/g, '');
@@ -1994,6 +2108,8 @@ async function syncSubmissionToLmsResultsCollection(sub) {
     const studentId = sub.student_uid || (sbdSafe ? `omr_sbd_${sbdSafe}` : sub.id);
     const studentName = sub.student_name || (sub.student_no ? `Học sinh SBD ${sub.student_no}` : 'Thí sinh OMR');
     const totalQ = (state.exam.question_count || 12) + (state.exam.part2_count || 4) + (state.exam.part3_count || 6);
+
+    const compressedStamped = await compressStampedImageForCloud(sub.stamped_image || sub.image_data || '');
 
     const resultPayload = {
         id: resultDocId,
@@ -2006,7 +2122,7 @@ async function syncSubmissionToLmsResultsCollection(sub) {
         studentName,
         studentEmail: sub.student_email || '',
         studentNo: sub.student_no || '',
-        examCode: sub.code || '101',
+        examCode: sub.code || state.exam.omrCode || '101',
         score: Number(sub.score) || 0,
         part1Score: Number(sub.part1_score) || 0,
         part2Score: Number(sub.part2_score) || 0,
@@ -2016,12 +2132,34 @@ async function syncSubmissionToLmsResultsCollection(sub) {
         omrPart1: sub.answers || '',
         omrPart2: sub.part2 || [],
         omrPart3: sub.part3 || [],
+        stampedImage: compressedStamped || '',
         gradingSource: 'omr',
+        submissionMode: 'offline_omr',
+        gradedAt: new Date().toISOString(),
         submittedAt: sub.createdAt || new Date().toISOString(),
         updatedAt: new Date().toISOString()
     };
 
     await setDoc(doc(db, "results", resultDocId), resultPayload);
+
+    // Nếu đề thi là đề LMS và được chấm cho một Lớp học cụ thể, đảm bảo lớp đó được gắn vào allowedClassIds của đề để Học sinh & Giáo viên thấy bài Offline trong Lớp!
+    if (classId && state.exam.isLmsExam) {
+        try {
+            const currentAllowed = Array.isArray(state.exam.allowedClassIds) ? [...state.exam.allowedClassIds] : [];
+            if (!currentAllowed.includes(classId)) {
+                currentAllowed.push(classId);
+                state.exam.allowedClassIds = currentAllowed;
+                await updateDoc(doc(db, "exams", state.exam.id), {
+                    allowedClassIds: currentAllowed,
+                    hasOmrOfflineGrading: true,
+                    omrCode: state.exam.omrCode || computeOmrExam4DigitCode(state.exam.id)
+                });
+            }
+        } catch (linkErr) {
+            console.warn("Cập nhật allowedClassIds cho đề OMR:", linkErr);
+        }
+    }
+
     sub.lmsResultId = resultDocId;
     return resultDocId;
 }
@@ -3475,37 +3613,41 @@ window.renderExamsListTab = () => {
     const cont = document.getElementById('examsListContainer');
     if (!cont) return;
 
-    cont.innerHTML = state.exams.map(e => `
-        <div class="bg-white dark:bg-slate-800 p-5 rounded-2xl border ${state.exam?.id === e.id ? 'border-emerald-500 ring-2 ring-emerald-500/20' : 'border-slate-200 dark:border-slate-700'} shadow-2xs flex flex-col justify-between space-y-4">
-            <div class="space-y-2">
-                <div class="flex items-center justify-between">
-                    <div class="flex items-center gap-1.5">
-                        <span class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${state.exam?.id === e.id ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300' : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300'}">
-                            ${state.exam?.id === e.id ? 'Đang chọn' : (e.isLmsExam ? 'LMS' : 'Bài thi')}
-                        </span>
-                        ${e.isLmsExam ? '<span class="text-[9px] font-bold px-1.5 py-0.5 rounded bg-teal-50 text-teal-700 border border-teal-200">Kho đề</span>' : ''}
-                    </div>
-                    <span class="text-[10px] text-slate-400 font-mono">${new Date(e.createdAt || Date.now()).toLocaleDateString('vi-VN')}</span>
-                </div>
-                <h4 class="font-extrabold text-base text-slate-800 dark:text-white leading-tight">${e.name}</h4>
-                <div class="text-xs text-slate-500 dark:text-slate-400 space-y-0.5">
-                    <div>Mẫu phiếu: <b class="text-slate-700 dark:text-slate-300">${(window.MAU && window.MAU[e.sheet_template]) ? window.MAU[e.sheet_template].ten : e.sheet_template}</b></div>
-                    <div>Mã đề: <b class="font-mono text-slate-700 dark:text-slate-300">${(e.codes || []).join(', ')}</b></div>
-                    <div>Cấu trúc: <b class="text-slate-700 dark:text-slate-300">${e.question_count || 12} TN · ${e.part2_count || 4} Đ/S · ${e.part3_count || 6} TLN</b></div>
+    cont.innerHTML = state.exams.map(e => {
+        const isCurrent = state.exam?.id === e.id;
+        const omrCode = e.omrCode || (e.codes && e.codes[0]) || '101';
+        return `
+        <div onclick="window.selectExamAndSwitch('${e.id}')" class="bg-white dark:bg-[#262335] p-4 sm:p-5 rounded-2xl border ${isCurrent ? 'border-emerald-500 ring-2 ring-emerald-500/20' : 'border-gray-200 dark:border-[#38344D] hover:border-emerald-400'} shadow-2xs flex flex-col justify-between gap-3 cursor-pointer transition-all group">
+            <div class="space-y-1.5">
+                <h4 class="font-extrabold text-sm sm:text-base text-slate-900 dark:text-white leading-snug line-clamp-2 group-hover:text-emerald-600 transition-colors" title="${(e.name || '').replace(/"/g, '&quot;')}">${e.name}</h4>
+                <div class="flex items-center flex-wrap gap-2 text-[11px] text-slate-500 dark:text-slate-400">
+                    <span><b>${e.question_count || 12}</b> TN · <b>${e.part2_count || 4}</b> Đ/S · <b>${e.part3_count || 6}</b> TLN</span>
+                    <span>•</span>
+                    <span>Mã OMR: <b class="font-mono text-emerald-700 dark:text-emerald-400">${omrCode}</b></span>
+                    ${e.className ? `<span>• Lớp: <b>${e.className}</b></span>` : ''}
                 </div>
             </div>
 
-            <div class="flex items-center gap-2 pt-2 border-t border-slate-100 dark:border-slate-700">
-                <button type="button" onclick="window.selectExamAndSwitch('${e.id}')" class="flex-1 py-2 ${state.exam?.id === e.id ? 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300' : 'bg-emerald-600 hover:bg-emerald-700 text-white'} rounded-xl text-xs font-bold transition-all shadow-xs">
-                    ${state.exam?.id === e.id ? 'Đang chấm bài này' : 'Chọn bài này'}
-                </button>
-                ${!e.isLmsExam ? `
-                <button type="button" onclick="window.deleteExam('${e.id}')" class="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl text-xs font-bold transition-colors" title="Xóa bài thi này">
-                    <i class="fa-solid fa-trash"></i>
-                </button>` : ''}
+            <div class="flex items-center justify-between gap-2 pt-2.5 border-t border-gray-100 dark:border-[#38344D]">
+                <div class="flex items-center gap-1.5">
+                    <span class="text-[10px] font-bold px-2 py-0.5 rounded-md ${isCurrent ? 'bg-emerald-600 text-white' : 'badge-season'}">
+                        ${isCurrent ? '✓ Đang chấm đề này' : (e.isLmsExam ? 'Kho đề LMS' : 'Đề rời')}
+                    </span>
+                    <span class="text-[10px] text-slate-400 font-mono">${new Date(e.createdAt || Date.now()).toLocaleDateString('vi-VN')}</span>
+                </div>
+                <div class="flex items-center gap-1.5">
+                    ${!e.isLmsExam ? `
+                    <button type="button" onclick="event.stopPropagation(); window.deleteExam('${e.id}')" class="w-7 h-7 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg text-xs font-bold flex items-center justify-center transition-colors" title="Xóa bài thi này">
+                        <i class="fa-solid fa-trash"></i>
+                    </button>` : ''}
+                    <span class="px-2.5 py-1 rounded-lg ${isCurrent ? 'bg-gray-100 dark:bg-[#1E1B29] text-slate-600 dark:text-slate-300' : 'btn-season-primary'} text-[11px] font-bold">
+                        ${isCurrent ? 'Mở quét' : 'Chọn chấm →'}
+                    </span>
+                </div>
             </div>
         </div>
-    `).join('');
+        `;
+    }).join('');
 };
 
 window.selectExamAndSwitch = async (id) => {
@@ -3650,7 +3792,10 @@ window.renderLmsExamPickerList = () => {
 
     const lmsItems = (state.exams || []).filter(e => e.isLmsExam);
     const filtered = lmsItems.filter(e => {
-        return !filter || (e.name && e.name.toLowerCase().includes(filter));
+        if (!filter) return true;
+        const nameMatch = e.name && e.name.toLowerCase().includes(filter);
+        const codeMatch = (e.omrCode && e.omrCode.includes(filter)) || (Array.isArray(e.codes) && e.codes.some(c => c.includes(filter)));
+        return nameMatch || codeMatch;
     });
 
     if (filtered.length === 0) {
@@ -3666,36 +3811,36 @@ window.renderLmsExamPickerList = () => {
 
     listEl.innerHTML = filtered.map(item => {
         const isCurrent = state.exam?.id === item.id;
+        const omrCode = item.omrCode || (item.codes && item.codes[0]) || '101';
         return `
-            <div class="pt-2.5 first:pt-0 flex items-center justify-between gap-3 group">
-                <div class="min-w-0 flex-1">
-                    <div class="flex items-center gap-1.5 mb-1 flex-wrap">
-                        <span class="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300">
-                            Kho đề LMS
-                        </span>
-                        ${item.className ? `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300">Lớp: ${item.className}</span>` : ''}
-                        ${isCurrent ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-teal-500 text-white">Đang chọn</span>' : ''}
-                        <span class="text-[11px] text-slate-400 font-mono">${item.createdAt ? new Date(item.createdAt).toLocaleDateString('vi-VN') : ''}</span>
-                    </div>
-                    <h5 class="text-xs sm:text-sm font-bold text-slate-800 dark:text-slate-100 truncate group-hover:text-emerald-600 transition-colors">
+            <div onclick="window.selectLmsExamForGrading('${item.id}')" class="p-3.5 rounded-2xl bg-white dark:bg-[#262335] border ${isCurrent ? 'border-emerald-500 ring-2 ring-emerald-500/20' : 'border-gray-200/90 dark:border-[#38344D] hover:border-emerald-400'} shadow-2xs cursor-pointer transition-all group space-y-2">
+                <!-- Dòng 1: Dành trọn 100% chiều ngang cho Tên Đề Thi (tối đa 2 dòng rõ ràng, không bị nút che khuất) -->
+                <div class="flex items-start justify-between gap-2">
+                    <h5 class="text-xs sm:text-sm font-extrabold text-slate-900 dark:text-white leading-snug line-clamp-2 flex-1 group-hover:text-emerald-600 transition-colors" title="${(item.name || '').replace(/"/g, '&quot;')}">
                         ${item.name}
                     </h5>
-                    <div class="flex items-center gap-3 text-[11px] text-slate-500 mt-0.5">
-                        <span>Cấu trúc: <b>${item.question_count || 12} TN · ${item.part2_count || 4} Đ/S · ${item.part3_count || 6} TLN</b></span>
-                        <span>Mã đề: <b>${(item.codes || ['101']).join(', ')}</b></span>
-                    </div>
+                    ${isCurrent ? '<span class="px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-emerald-600 text-white shrink-0">Đang chọn</span>' : ''}
                 </div>
-                <button type="button" onclick="window.selectLmsExamForGrading('${item.id}')" class="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white shadow-xs cursor-pointer text-xs font-bold transition-all shrink-0 flex items-center gap-1.5">
-                    <i class="fa-solid fa-check"></i>
-                    <span>${isCurrent ? 'Nạp lại Đ/A & Lớp' : 'Trích xuất Đ/A & Chấm'}</span>
-                </button>
+
+                <!-- Dòng 2: Thông tin cấu trúc + Mã đề OMR + Nút chọn gọn gàng -->
+                <div class="flex items-center justify-between gap-2 pt-1 border-t border-gray-100 dark:border-[#38344D]/70 text-[11px] text-slate-500 dark:text-slate-400">
+                    <div class="flex items-center flex-wrap gap-x-2.5 gap-y-1 min-w-0">
+                        <span><b>${item.question_count || 12}</b> TN · <b>${item.part2_count || 4}</b> Đ/S · <b>${item.part3_count || 6}</b> TLN</span>
+                        <span class="px-1.5 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 font-mono font-bold text-[10px]">Mã OMR: ${omrCode}</span>
+                        ${item.className ? `<span class="text-indigo-600 dark:text-indigo-300 font-bold truncate">• ${item.className}</span>` : ''}
+                    </div>
+                    <span class="px-2.5 py-1 rounded-lg ${isCurrent ? 'bg-gray-100 dark:bg-[#1E1B29] text-slate-700 dark:text-slate-300' : 'btn-season-primary'} text-[11px] font-bold shrink-0 flex items-center gap-1">
+                        <span>${isCurrent ? 'Nạp lại' : 'Chọn chấm'}</span>
+                        <i class="fa-solid fa-arrow-right text-[10px]"></i>
+                    </span>
+                </div>
             </div>
         `;
     }).join('');
 };
 
-window.selectLmsExamForGrading = async (examId) => {
-    const pickedClassId = document.getElementById('lmsPickerClassSelect')?.value || '';
+window.selectLmsExamForGrading = async (examId, forcedClassId = '') => {
+    const pickedClassId = forcedClassId || document.getElementById('lmsPickerClassSelect')?.value || '';
     window.closeLmsExamPickerModal();
 
     try {

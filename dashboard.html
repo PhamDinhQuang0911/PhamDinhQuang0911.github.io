@@ -13697,6 +13697,19 @@ function renderTagFilterUI() {
                         : '');
 
                 const createdDate = exam.createdAt ? new Date(exam.createdAt).toLocaleDateString('vi-VN') : '';
+                if (!window.computeOmrExam4DigitCode) {
+                    window.computeOmrExam4DigitCode = (id) => {
+                        const str = String(id || '0000');
+                        let hash = 0;
+                        for (let i = 0; i < str.length; i++) {
+                            hash = ((hash << 5) - hash) + str.charCodeAt(i);
+                            hash |= 0;
+                        }
+                        return String(1000 + (Math.abs(hash) % 9000));
+                    };
+                }
+                const omrCode = exam.omrCode || window.computeOmrExam4DigitCode(exam.id);
+                const omrCodeBadge = `<span class="bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300 border border-amber-200/70 dark:border-amber-800/60 text-[10px] font-black font-mono px-2 py-0.5 rounded-full inline-flex items-center gap-1" title="Mã đề 4 chữ số dùng cho học sinh tô trên Phiếu OMR khi in sách / thi giấy"><i class="fa-solid fa-qrcode text-[9px]"></i> Mã OMR: ${omrCode}</span>`;
 
                 if (currentExplorerView === 'list') {
                     // Giao diện LIST cho Exam (Gọn gàng: bỏ nhãn đã xuất bản & số câu/thời lượng, đưa nút [i] ra ngoài thao tác nhanh)
@@ -13709,11 +13722,14 @@ function renderTagFilterUI() {
                             <div class="w-9 h-9 rounded-xl bg-season-from/10 text-season-from flex items-center justify-center text-base shrink-0 mt-0.5 sm:mt-0"><i class="fa-regular fa-file-lines"></i></div>
                             <div class="flex flex-col overflow-hidden min-w-0 flex-1">
                                 <p class="text-xs sm:text-sm font-bold text-gray-800 dark:text-gray-100 line-clamp-2 leading-snug" title="${exam.title}">${exam.title}</p>
-                                ${examBadge ? `<div class="flex items-center gap-2 mt-1 flex-wrap">${examBadge}</div>` : ''}
+                                <div class="flex items-center gap-1.5 mt-1 flex-wrap">${omrCodeBadge}${examBadge ? examBadge : ''}</div>
                                 ${getTagsHtml(exam)}
                             </div>
                         </div>
                         <div class="flex items-center gap-1 sm:gap-1.5 shrink-0 mt-0.5 sm:mt-0">
+                            <button onclick="event.stopPropagation(); window.open('omr-grader.html?examId=${exam.id}', '_blank')" class="w-8 h-8 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/40 transition-colors cursor-pointer" title="Chấm phiếu tô OMR cho đề này (Mã OMR: ${omrCode})" aria-label="Chấm OMR">
+                                <i class="fa-solid fa-camera-retro text-sm"></i>
+                            </button>
                             <button onclick="event.stopPropagation(); window.showExamInfo('${exam.id}')" class="w-8 h-8 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center text-slate-400 hover:text-season-from hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors cursor-pointer" title="Xem thông tin đề" aria-label="Thông tin đề thi">
                                 <i class="fa-solid fa-circle-info text-base"></i>
                             </button>
@@ -13821,6 +13837,9 @@ function renderTagFilterUI() {
                     <button onclick="window.quickExportSingleLatex('${exam.id}'); window.closeExamActionDropdown();" class="w-full px-3 py-2 text-left hover:bg-gray-50 dark:hover:bg-gray-700/60 text-gray-700 dark:text-gray-200 flex items-center gap-2.5 font-bold transition">
                         <i class="fa-solid fa-file-code w-4 text-center text-season-from"></i> Xuất mã nguồn TeX
                     </button>
+                    <button onclick="window.open('omr-grader.html?examId=${exam.id}', '_blank'); window.closeExamActionDropdown();" class="w-full px-3 py-2 text-left hover:bg-amber-50 dark:hover:bg-amber-950/40 text-amber-700 dark:text-amber-300 flex items-center gap-2.5 font-extrabold transition">
+                        <i class="fa-solid fa-camera-retro w-4 text-center text-amber-600"></i> Chấm phiếu OMR (Mã: ${exam.omrCode || (window.computeOmrExam4DigitCode ? window.computeOmrExam4DigitCode(exam.id) : '')})
+                    </button>
                     <button onclick="window.open('exam-print.html?id=${exam.id}', '_blank'); window.closeExamActionDropdown();" class="w-full px-3 py-2 text-left hover:bg-gray-50 dark:hover:bg-gray-700/60 text-rose-600 dark:text-rose-400 flex items-center gap-2.5 font-bold transition">
                         <i class="fa-solid fa-file-pdf w-4 text-center"></i> Xem & In PDF
                     </button>
@@ -13925,6 +13944,9 @@ function renderTagFilterUI() {
             items.innerHTML = `
                 <button onclick="window.closeMobileExamActionBottomSheet(); window.promptAssignExamToAnyClass('${exam.id}')" class="w-full p-3 rounded-2xl btn-season-primary text-white font-bold text-xs flex items-center gap-3 shadow-sm active:scale-[0.98] transition">
                     <i class="fa-solid fa-paper-plane text-sm w-5 text-center"></i> <span>Giao bài cho lớp ngay</span>
+                </button>
+                <button onclick="window.closeMobileExamActionBottomSheet(); window.open('omr-grader.html?examId=${exam.id}', '_blank')" class="w-full p-3 rounded-2xl bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 text-amber-800 dark:text-amber-200 border border-amber-200/80 dark:border-amber-800/60 font-extrabold text-xs flex items-center gap-3 active:scale-[0.98] transition">
+                    <i class="fa-solid fa-camera-retro text-amber-600 text-sm w-5 text-center"></i> <span>Chấm phiếu OMR (Mã đề 4 số: ${exam.omrCode || (window.computeOmrExam4DigitCode ? window.computeOmrExam4DigitCode(exam.id) : '')})</span>
                 </button>
                 <button onclick="window.closeMobileExamActionBottomSheet(); window.open('exam-print.html?id=${exam.id}', '_blank')" class="w-full p-3 rounded-2xl bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 font-bold text-xs flex items-center gap-3 active:scale-[0.98] transition">
                     <i class="fa-solid fa-file-pdf text-rose-500 text-sm w-5 text-center"></i> <span>Xem đề & In PDF</span>
@@ -14652,6 +14674,15 @@ function renderTagFilterUI() {
                         </button>
                         <button onclick="window.openExportWordModal('${exam.id}')" class="py-2 px-2.5 bg-blue-50 hover:bg-blue-100 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer active:scale-95">
                             <i class="fa-solid fa-file-word"></i> Xuất Word
+                        </button>
+                    </div>
+                    <div class="mt-2 p-2.5 rounded-xl bg-amber-50/90 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 flex items-center justify-between gap-2">
+                        <div>
+                            <div class="text-[10px] font-extrabold text-amber-800 dark:text-amber-300 uppercase">Mã đề OMR (In sách / Phiếu tô)</div>
+                            <div class="text-sm font-black font-mono text-amber-700 dark:text-amber-200">${exam.omrCode || (window.computeOmrExam4DigitCode ? window.computeOmrExam4DigitCode(exam.id) : '')}</div>
+                        </div>
+                        <button onclick="window.open('omr-grader.html?examId=${exam.id}', '_blank')" class="px-3 py-2 rounded-xl btn-season-primary text-white text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer">
+                            <i class="fa-solid fa-camera-retro"></i> Mở Chấm OMR
                         </button>
                     </div>
                     ${!isPublished ? `<p class="text-[11px] text-amber-700 dark:text-amber-400 mt-1.5 flex items-center gap-1"><i class="fa-solid fa-circle-info"></i> Đề thi đang ở trạng thái Bản nháp. Vào <a href="exam-editor.html?id=${exam.id}&view=settings" target="_blank" class="font-bold underline hover:text-amber-900 dark:hover:text-amber-200">Cài đặt đề thi</a> bấm "Xuất bản" để học sinh làm bài.</p>` : ''}
@@ -16099,8 +16130,11 @@ function renderTagFilterUI() {
                                     <button onclick="window.location.href='exam-editor.html?assignTo=${classId}'" class="w-full text-left px-4 py-3 hover:bg-green-50 flex items-center gap-3 text-sm font-bold text-gray-700 last:rounded-b-xl transition-colors">
                                         <span class="w-8 h-8 rounded-lg bg-green-100 text-green-600 flex items-center justify-center"><i class="fa-solid fa-pen-to-square"></i></span> Soạn đề mới
                                     </button>
-                                    <button onclick="window.location.href='exam-editor.html?assignTo=${classId}&type=homework'" class="w-full text-left px-4 py-3 hover:bg-red-50 flex items-center gap-3 text-sm font-bold text-gray-700 rounded-b-xl transition-colors border-t border-gray-50">
+                                    <button onclick="window.location.href='exam-editor.html?assignTo=${classId}&type=homework'" class="w-full text-left px-4 py-3 hover:bg-red-50 flex items-center gap-3 text-sm font-bold text-gray-700 transition-colors border-t border-gray-50">
                                     <span class="w-8 h-8 rounded-lg bg-red-100 text-red-700 flex items-center justify-center"><i class="fa-solid fa-file-pdf"></i></span> Giao bài Tự luận
+                                    </button>
+                                    <button onclick="window.open('omr-grader.html?classId=' + encodeURIComponent('${classId}'), '_blank')" class="w-full text-left px-4 py-3 hover:bg-amber-50 flex items-center gap-3 text-sm font-bold text-amber-800 rounded-b-xl transition-colors border-t border-gray-100">
+                                        <span class="w-8 h-8 rounded-lg bg-amber-100 text-amber-700 flex items-center justify-center"><i class="fa-solid fa-camera-retro"></i></span> Chấm bài Offline (Phiếu OMR)
                                     </button>
                                 </div>
                             </div>
@@ -16256,10 +16290,15 @@ function renderTagFilterUI() {
                         <div class="min-h-[52px] px-2.5 md:px-3 py-2 flex items-center gap-2">
                             <div class="w-8 h-8 ${iconColor} rounded-lg flex items-center justify-center text-sm shrink-0">${icon}</div>
                             <div class="flex-1 min-w-0">
-                                <h4 class="font-bold text-gray-800 text-[13px] md:text-sm hover:text-primary-600 cursor-pointer leading-tight truncate" onclick="window.openExamEditorFast('${ex.id}', 'grading')" title="${ex.title.replace(/"/g, '&quot;')}">${ex.title}</h4>
+                                <div class="flex items-center gap-1.5 flex-wrap">
+                                    <h4 class="font-bold text-gray-800 text-[13px] md:text-sm hover:text-primary-600 cursor-pointer leading-tight truncate" onclick="window.openExamEditorFast('${ex.id}', 'grading')" title="${ex.title.replace(/"/g, '&quot;')}">${ex.title}</h4>
+                                    <span class="text-[10px] font-mono font-extrabold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded shrink-0" title="Mã đề OMR 4 số để học sinh tô trên phiếu giấy">Mã OMR: ${ex.omrCode || (window.computeOmrExam4DigitCode ? window.computeOmrExam4DigitCode(ex.id) : '')}</span>
+                                </div>
                             </div>
                             <div class="hidden sm:block shrink-0">${statusBadge}</div>
                             <div class="flex items-center gap-0.5 sm:gap-1 shrink-0">
+                                <button onclick="window.open('omr-grader.html?examId=${ex.id}&classId=' + encodeURIComponent(window.currentAssignClassId || window.currentClassId || ''), '_blank')" class="h-7 px-2 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 flex items-center justify-center gap-1 text-[10px] sm:text-[11px] font-extrabold cursor-pointer" title="Mở Camera / Tải ảnh chấm Phiếu tô OMR cho đề này của lớp"><i class="fa-solid fa-camera-retro"></i><span class="hidden md:inline">Chấm OMR</span></button>
+                                <button onclick="window.openClassOmrResultsModal('${ex.id}')" class="h-7 px-2 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 flex items-center justify-center gap-1 text-[10px] sm:text-[11px] font-extrabold cursor-pointer" title="Xem Bảng điểm Offline OMR, ảnh phiếu đã đóng dấu & Báo kết quả Zalo cho Phụ huynh"><i class="fa-solid fa-square-poll-vertical"></i><span class="hidden lg:inline">Kết quả OMR</span></button>
                                 <button onclick="window.open('live-monitor.html?examId=${ex.id}&classId=' + encodeURIComponent(window.currentAssignClassId || window.currentClassId || ''), '_blank')" class="h-7 px-2 rounded-lg btn-season-secondary flex items-center justify-center gap-1 text-[10px] sm:text-[11px] font-extrabold cursor-pointer" title="Theo dõi trực tiếp học sinh làm bài & Gửi mã QR cho Phụ huynh"><i class="fa-solid fa-satellite-dish"></i><span class="hidden md:inline">Live</span></button>
                                 <button onclick="window.showExerciseInfo('${ex.id}')" class="w-7 h-7 sm:w-8 sm:h-8 btn-explorer-action flex items-center justify-center cursor-pointer" title="Thông tin"><i class="fa-solid fa-circle-info text-xs"></i></button>
                                 <button onclick="window.openExamEditorFast('${ex.id}', 'settings')" onmouseenter="window.hoverPrefetchExam('${ex.id}')" onmouseleave="if(window.clearHoverPrefetch)window.clearHoverPrefetch()" class="w-7 h-7 sm:w-8 sm:h-8 btn-explorer-action flex items-center justify-center cursor-pointer" title="Sửa"><i class="fa-solid fa-pen text-xs"></i></button>
@@ -16279,9 +16318,148 @@ function renderTagFilterUI() {
             const qCount = ex.questions?.length || ex.questionCount || 0;
             const deadline = ex.endTime ? new Date(ex.endTime).toLocaleString('vi-VN') : 'Vô hạn';
             const created = ex.createdAt ? new Date(ex.createdAt).toLocaleDateString('vi-VN') : 'N/A';
+            const omrCode = ex.omrCode || (window.computeOmrExam4DigitCode ? window.computeOmrExam4DigitCode(ex.id) : '');
             document.getElementById('actionModalTitle').textContent = 'Thông tin bài tập';
-            document.getElementById('dynamicContent').innerHTML = `<div class="space-y-3 text-left"><div class="p-3 bg-primary-50 rounded-lg border border-primary-100"><p class="text-xs text-primary-500 font-bold uppercase mb-1">Tên bài tập</p><p class="text-sm font-bold text-gray-800 break-words">${ex.title}</p></div><div class="grid grid-cols-2 gap-3"><div class="p-3 bg-gray-50 rounded-lg border border-gray-200"><p class="text-xs text-slate-600 font-bold mb-1"><i class="fa-regular fa-clock mr-1"></i> Thời gian</p><p class="text-sm font-bold text-gray-800">${ex.duration || 0} phút</p></div><div class="p-3 bg-gray-50 rounded-lg border border-gray-200"><p class="text-xs text-slate-600 font-bold mb-1"><i class="fa-regular fa-calendar mr-1"></i> Ngày tạo</p><p class="text-sm font-bold text-gray-800">${created}</p></div></div><div class="grid grid-cols-2 gap-3"><div class="p-3 bg-green-50 rounded-lg border border-green-200"><p class="text-xs text-green-600 font-bold mb-1"><i class="fa-solid fa-list-check mr-1"></i> Số câu hỏi</p><p class="text-sm font-bold text-gray-800">${qCount} câu</p></div><div class="p-3 bg-orange-50 rounded-lg border border-orange-200"><p class="text-xs text-orange-800 font-bold mb-1"><i class="fa-regular fa-calendar-check mr-1"></i> Hạn nộp</p><p class="text-sm font-bold text-gray-800">${deadline}</p></div></div></div>`;
+            document.getElementById('dynamicContent').innerHTML = `<div class="space-y-3 text-left"><div class="p-3 bg-primary-50 rounded-lg border border-primary-100"><p class="text-xs text-primary-500 font-bold uppercase mb-1">Tên bài tập</p><p class="text-sm font-bold text-gray-800 break-words">${ex.title}</p></div><div class="p-3 bg-amber-50 rounded-lg border border-amber-200 flex items-center justify-between"><div><p class="text-xs text-amber-700 font-bold uppercase">Mã Đề OMR (4 số trên phiếu giấy)</p><p class="text-base font-black font-mono text-amber-800">${omrCode}</p></div><button onclick="window.open('omr-grader.html?examId=${ex.id}&classId=' + encodeURIComponent(window.currentAssignClassId || window.currentClassId || ''), '_blank')" class="px-3 py-1.5 rounded-lg bg-amber-600 text-white text-xs font-bold hover:bg-amber-700"><i class="fa-solid fa-camera-retro mr-1"></i> Chấm OMR</button></div><div class="grid grid-cols-2 gap-3"><div class="p-3 bg-gray-50 rounded-lg border border-gray-200"><p class="text-xs text-slate-600 font-bold mb-1"><i class="fa-regular fa-clock mr-1"></i> Thời gian</p><p class="text-sm font-bold text-gray-800">${ex.duration || 0} phút</p></div><div class="p-3 bg-gray-50 rounded-lg border border-gray-200"><p class="text-xs text-slate-600 font-bold mb-1"><i class="fa-regular fa-calendar mr-1"></i> Ngày tạo</p><p class="text-sm font-bold text-gray-800">${created}</p></div></div><div class="grid grid-cols-2 gap-3"><div class="p-3 bg-green-50 rounded-lg border border-green-200"><p class="text-xs text-green-600 font-bold mb-1"><i class="fa-solid fa-list-check mr-1"></i> Số câu hỏi</p><p class="text-sm font-bold text-gray-800">${qCount} câu</p></div><div class="p-3 bg-orange-50 rounded-lg border border-orange-200"><p class="text-xs text-orange-800 font-bold mb-1"><i class="fa-regular fa-calendar-check mr-1"></i> Hạn nộp</p><p class="text-sm font-bold text-gray-800">${deadline}</p></div></div></div>`;
             window.toggleModal('actionModal', true);
+        };
+
+        // 2B. BẢNG ĐIỂM BÀI THI OFFLINE (PHIẾU OMR) & BÁO KẾT QUẢ PHỤ HUYNH TRONG LỚP HỌC
+        window._classOmrResultsCache = [];
+        window.openClassOmrResultsModal = async (examId) => {
+            const classId = window.currentAssignClassId || window.currentClassId || '';
+            const ex = (window.currentClassExamsData || []).find(item => item.id === examId) || (window.examData || []).find(item => item.id === examId) || { id: examId, title: 'Đề kiểm tra' };
+            const omrCode = ex.omrCode || (window.computeOmrExam4DigitCode ? window.computeOmrExam4DigitCode(examId) : '');
+
+            document.getElementById('actionModalTitle').innerHTML = `<span class="flex items-center gap-2"><i class="fa-solid fa-square-poll-vertical text-emerald-600"></i> Kết quả Thi Offline (OMR) & Online</span>`;
+            document.getElementById('dynamicContent').innerHTML = `
+                <div class="py-8 text-center text-slate-500">
+                    <i class="fa-solid fa-circle-notch fa-spin text-2xl text-primary-500 mb-2"></i>
+                    <p class="text-xs font-bold">Đang tải danh sách bài chấm OMR & kết quả của lớp...</p>
+                </div>
+            `;
+            window.toggleModal('actionModal', true);
+
+            try {
+                const qRes = query(collection(db, "results"), where("examId", "==", examId));
+                const snap = await getDocs(qRes);
+                let allRows = [];
+                snap.forEach(d => allRows.push({ id: d.id, ...d.data() }));
+
+                // Lọc theo lớp nếu có danh sách học sinh của lớp hoặc classId trên bản ghi
+                const classStudents = window.currentClassStudents || [];
+                const classStudentIds = new Set(classStudents.map(s => s.id || s.uid));
+                let rows = allRows.filter(r => {
+                    if (!classId) return true;
+                    if (r.classId === classId) return true;
+                    if (r.studentId && classStudentIds.has(r.studentId)) return true;
+                    return false;
+                });
+                if (rows.length === 0 && allRows.length > 0) {
+                    rows = allRows;
+                }
+                rows.sort((a, b) => Number(b.score || 0) - Number(a.score || 0));
+                window._classOmrResultsCache = rows;
+
+                const omrCount = rows.filter(r => r.gradingSource === 'omr' || r.stampedImage).length;
+                const onlineCount = rows.length - omrCount;
+
+                let listHtml = '';
+                if (rows.length === 0) {
+                    listHtml = `
+                        <div class="py-8 text-center border-2 border-dashed border-gray-200 rounded-xl bg-gray-50">
+                            <i class="fa-solid fa-camera-retro text-3xl text-slate-300 mb-2"></i>
+                            <p class="text-xs font-bold text-slate-600">Chưa có bài chấm OMR hoặc bài làm nào cho đề này.</p>
+                            <button onclick="window.open('omr-grader.html?examId=${examId}&classId=' + encodeURIComponent('${classId}'), '_blank')" class="mt-3 px-4 py-2 rounded-xl btn-season-primary text-white text-xs font-bold inline-flex items-center gap-1.5">
+                                <i class="fa-solid fa-camera"></i> Mở Camera / Tải ảnh chấm OMR ngay
+                            </button>
+                        </div>
+                    `;
+                } else {
+                    listHtml = `<div class="max-h-[55vh] overflow-y-auto space-y-2 pr-1">` + rows.map((r, idx) => {
+                        const isOmr = r.gradingSource === 'omr' || !!r.stampedImage;
+                        const stObj = classStudents.find(s => (s.id || s.uid) === r.studentId);
+                        const sName = r.studentName || (stObj ? (stObj.fullName || stObj.name) : 'Học sinh');
+                        const sbdStr = r.omrSbd || (stObj && stObj.sbd) || '';
+                        const subBadge = isOmr
+                            ? `<span class="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[10px] font-extrabold"><i class="fa-solid fa-camera-retro mr-0.5"></i>Phiếu OMR</span>`
+                            : `<span class="px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 text-[10px] font-extrabold"><i class="fa-solid fa-globe mr-0.5"></i>Online</span>`;
+                        const breakdownStr = isOmr && (r.omrScoreP1 !== undefined)
+                            ? `P.I: ${r.omrScoreP1 || 0}đ • P.II: ${r.omrScoreP2 || 0}đ • P.III: ${r.omrScoreP3 || 0}đ`
+                            : (r.submittedAt ? new Date(r.submittedAt).toLocaleString('vi-VN') : '');
+
+                        return `
+                            <div class="p-2.5 rounded-xl border border-gray-200 bg-white hover:border-primary-300 flex items-center justify-between gap-2 transition">
+                                <div class="min-w-0 flex-1">
+                                    <div class="flex items-center gap-1.5 flex-wrap">
+                                        <span class="text-xs font-black text-slate-400">#${idx + 1}</span>
+                                        <span class="text-xs sm:text-sm font-extrabold text-gray-800 truncate">${sName}</span>
+                                        ${sbdStr ? `<span class="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">SBD: ${sbdStr}</span>` : ''}
+                                        ${subBadge}
+                                    </div>
+                                    <div class="text-[11px] text-slate-500 font-semibold mt-0.5">${breakdownStr}</div>
+                                </div>
+                                <div class="flex items-center gap-1.5 shrink-0">
+                                    <span class="px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 font-black text-xs sm:text-sm">${r.score ?? 0}đ</span>
+                                    ${r.stampedImage ? `<button onclick="window.viewOmrStampedSheetModal('${r.id}')" class="px-2 py-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 text-[11px] font-bold cursor-pointer" title="Xem ảnh Phiếu tô OMR đã chấm & đóng dấu"><i class="fa-solid fa-image"></i> Phiếu</button>` : ''}
+                                    <button onclick="window.sendOmrParentReportZalo('${r.id}', '${examId}')" class="px-2 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-[11px] font-bold cursor-pointer" title="Gửi báo cáo điểm & link xem phiếu tô + lời giải cho Phụ huynh qua Zalo"><i class="fa-solid fa-paper-plane"></i> Báo PHHS</button>
+                                </div>
+                            </div>
+                        `;
+                    }).join('') + `</div>`;
+                }
+
+                document.getElementById('dynamicContent').innerHTML = `
+                    <div class="space-y-3 text-left">
+                        <div class="p-3 rounded-xl bg-amber-50/90 border border-amber-200 flex flex-wrap items-center justify-between gap-2">
+                            <div class="min-w-0 flex-1">
+                                <div class="text-[10px] font-black uppercase text-amber-700">Đề thi • Mã OMR: <span class="font-mono text-xs">${omrCode}</span></div>
+                                <div class="text-xs sm:text-sm font-extrabold text-gray-800 line-clamp-1">${ex.title}</div>
+                                <div class="text-[11px] text-slate-600 font-semibold mt-0.5">Tổng: <b>${rows.length}</b> bài (${omrCount} Phiếu OMR • ${onlineCount} Online)</div>
+                            </div>
+                            <button onclick="window.open('omr-grader.html?examId=${examId}&classId=' + encodeURIComponent('${classId}'), '_blank')" class="px-3 py-2 rounded-xl btn-season-primary text-white text-xs font-extrabold flex items-center gap-1.5 shrink-0 cursor-pointer shadow-xs">
+                                <i class="fa-solid fa-camera-retro"></i> Chấm thêm OMR
+                            </button>
+                        </div>
+                        ${listHtml}
+                    </div>
+                `;
+            } catch (err) {
+                console.error('openClassOmrResultsModal error:', err);
+                document.getElementById('dynamicContent').innerHTML = `<div class="p-4 text-center text-red-600 text-xs font-bold">Lỗi tải kết quả: ${err.message}</div>`;
+            }
+        };
+
+        window.viewOmrStampedSheetModal = (resultId) => {
+            const r = (window._classOmrResultsCache || []).find(item => item.id === resultId);
+            if (!r || !r.stampedImage) return;
+            const win = window.open('', '_blank');
+            if (win) {
+                win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Phiếu OMR Đã Chấm - ${r.studentName || r.omrSbd || ''}</title><style>body{margin:0;background:#0f172a;color:#fff;font-family:sans-serif;display:flex;flex-direction:column;align-items:center;padding:16px}img{max-width:100%;height:auto;border-radius:12px;box-shadow:0 20px 50px rgba(0,0,0,0.5)}</style></head><body><h3 style="margin:0 0 12px 0">${r.studentName || 'Học sinh'} — Điểm: ${r.score} / 10 (SBD: ${r.omrSbd || '--'})</h3><img src="${r.stampedImage}" alt="Stamped OMR Sheet"></body></html>`);
+                win.document.close();
+            }
+        };
+
+        window.sendOmrParentReportZalo = async (resultId, examId) => {
+            const r = (window._classOmrResultsCache || []).find(item => item.id === resultId);
+            if (!r) return;
+            const classStudents = window.currentClassStudents || [];
+            const stObj = classStudents.find(s => (s.id || s.uid) === r.studentId);
+            const sName = r.studentName || (stObj ? (stObj.fullName || stObj.name) : 'Học sinh');
+            const parentPhone = (stObj && (stObj.parentPhone || stObj.phone)) ? String(stObj.parentPhone || stObj.phone).replace(/\D/g, '') : '';
+            const reviewUrl = `${window.location.origin}/exam.html?id=${examId}&mode=review`;
+            const msg = `[THÔNG BÁO KẾT QUẢ BÀI THI OFFLINE - TOÁN THẦY CHOANG]\n- Học sinh: ${sName}${r.omrSbd ? ' (SBD: ' + r.omrSbd + ')' : ''}\n- Đề thi: ${r.examTitle || 'Bài kiểm tra định kỳ'}\n- Tổng điểm: ${r.score} / 10 điểm${r.omrScoreP1 !== undefined ? ` (Phần I: ${r.omrScoreP1}đ | Phần II: ${r.omrScoreP2}đ | Phần III: ${r.omrScoreP3}đ)` : ''}\n- Xem lại ảnh phiếu tô OMR đã chấm & lời giải chi tiết tại: ${reviewUrl}`;
+
+            try {
+                await navigator.clipboard.writeText(msg);
+                if (window.showToast) window.showToast('Đã sao chép nội dung báo điểm PHHS vào bộ nhớ tạm!', 'success');
+            } catch (_) {}
+
+            if (parentPhone) {
+                window.open(`https://zalo.me/${parentPhone}`, '_blank');
+            } else {
+                alert('Đã sao chép nội dung báo kết quả OMR! Thầy có thể dán (Ctrl+V) gửi trực tiếp vào Zalo Phụ huynh:\n\n' + msg);
+            }
         };
 
         const examEditorPrefetches = new Map();
