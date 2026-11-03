@@ -700,7 +700,279 @@ async function loadExamSubmissions(examId) {
     state.submissions = list;
 }
 
+function enrichSubmissionsFromClassRoster() {
+    if (!Array.isArray(state.submissions) || state.submissions.length === 0) return;
+    const roster = Array.isArray(state.students) ? state.students : [];
+    const defaultClass = state.exam?.className || (Array.isArray(state.exam?.classes) && state.exam.classes[0]) || '';
+
+    state.submissions.forEach(s => {
+        if (s.student_no && roster.length > 0) {
+            const rawNo = String(s.student_no).trim();
+            const numNo = parseInt(rawNo, 10);
+            const matched = roster.find(st => {
+                if (!st.student_no) return false;
+                if (String(st.student_no).trim() === rawNo) return true;
+                if (!isNaN(numNo) && parseInt(String(st.student_no).trim(), 10) === numNo) return true;
+                return false;
+            });
+            if (matched) {
+                if (!s.student_name && matched.name) s.student_name = matched.name;
+                if (!s.class_name && matched.class_name) s.class_name = matched.class_name;
+            }
+        }
+        if (!s.class_name && defaultClass) {
+            s.class_name = defaultClass;
+        }
+    });
+}
+
+function getVietnameseGivenNameSortKey(fullName) {
+    const clean = String(fullName || '').trim();
+    if (!clean) return 'zzzzzz';
+    const parts = clean.split(/\s+/);
+    const given = parts[parts.length - 1] || clean;
+    return `${given.toLowerCase()} ${clean.toLowerCase()}`;
+}
+
+function compareSbdValues(aNo, bNo) {
+    const aClean = String(aNo || '').trim();
+    const bClean = String(bNo || '').trim();
+    if (!aClean && !bClean) return 0;
+    if (!aClean) return 1;
+    if (!bClean) return -1;
+    const aNum = parseInt(aClean, 10);
+    const bNum = parseInt(bClean, 10);
+    if (!isNaN(aNum) && !isNaN(bNum) && aNum !== bNum) return aNum - bNum;
+    return aClean.localeCompare(bClean, 'vi');
+}
+
+function syncSubmissionClassFilterOptions() {
+    const classSet = new Set();
+    if (state.exam?.className) classSet.add(state.exam.className);
+    (state.students || []).forEach(st => { if (st.class_name) classSet.add(st.class_name); });
+    (state.submissions || []).forEach(s => { if (s.class_name) classSet.add(s.class_name); });
+    const classes = Array.from(classSet).filter(Boolean).sort((a, b) => a.localeCompare(b, 'vi'));
+
+    ['inlineClassFilter', 'resultsClassFilter'].forEach(selId => {
+        const el = document.getElementById(selId);
+        if (!el) return;
+        const prev = el.value || 'all';
+        el.innerHTML = `<option value="all">🏫 Tất cả lớp (${state.submissions.length})</option>` +
+            classes.map(c => `<option value="${c}">🏫 Lớp ${c}</option>`).join('');
+        if (classes.includes(prev)) el.value = prev;
+        else el.value = 'all';
+    });
+}
+
+function getFilteredSortedSubmissions(mode = 'inline') {
+    enrichSubmissionsFromClassRoster();
+    const classVal = document.getElementById(mode === 'inline' ? 'inlineClassFilter' : 'resultsClassFilter')?.value || 'all';
+    const sortVal = document.getElementById(mode === 'inline' ? 'inlineSortSelect' : 'resultsSortSelect')?.value || 'score_desc';
+    const queryStr = (document.getElementById(mode === 'inline' ? 'inlineSearchInput' : 'resultSearchInput')?.value || '').toLowerCase().trim();
+
+    let list = [...state.submissions];
+    if (classVal !== 'all') {
+        list = list.filter(s => (s.class_name || '') === classVal);
+    }
+    if (queryStr) {
+        list = list.filter(s =>
+            (s.student_no && String(s.student_no).toLowerCase().includes(queryStr)) ||
+            (s.student_name && String(s.student_name).toLowerCase().includes(queryStr)) ||
+            (s.code && String(s.code).toLowerCase().includes(queryStr)) ||
+            (s.class_name && String(s.class_name).toLowerCase().includes(queryStr))
+        );
+    }
+
+    list.sort((a, b) => {
+        if (sortVal === 'score_desc') {
+            const diff = Number(b.score || 0) - Number(a.score || 0);
+            if (diff !== 0) return diff;
+            return compareSbdValues(a.student_no, b.student_no);
+        }
+        if (sortVal === 'score_asc') {
+            const diff = Number(a.score || 0) - Number(b.score || 0);
+            if (diff !== 0) return diff;
+            return compareSbdValues(a.student_no, b.student_no);
+        }
+        if (sortVal === 'sbd_asc') {
+            return compareSbdValues(a.student_no, b.student_no);
+        }
+        if (sortVal === 'name_asc') {
+            const keyA = getVietnameseGivenNameSortKey(a.student_name);
+            const keyB = getVietnameseGivenNameSortKey(b.student_name);
+            const cmp = keyA.localeCompare(keyB, 'vi');
+            if (cmp !== 0) return cmp;
+            return compareSbdValues(a.student_no, b.student_no);
+        }
+        // newest
+        return new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
+    });
+
+    return list;
+}
+
+window.handleSubmissionsFilterSortChange = (source = 'inline') => {
+    const srcClass = document.getElementById(source === 'inline' ? 'inlineClassFilter' : 'resultsClassFilter');
+    const dstClass = document.getElementById(source === 'inline' ? 'resultsClassFilter' : 'inlineClassFilter');
+    if (srcClass && dstClass) dstClass.value = srcClass.value;
+
+    const srcSort = document.getElementById(source === 'inline' ? 'inlineSortSelect' : 'resultsSortSelect');
+    const dstSort = document.getElementById(source === 'inline' ? 'resultsSortSelect' : 'inlineSortSelect');
+    if (srcSort && dstSort) dstSort.value = srcSort.value;
+
+    renderInlineSubmissionsList();
+    if (window.renderResultsTable) window.renderResultsTable();
+};
+
+function renderInlineSubmissionsList() {
+    const inlineCountEl = document.getElementById('scanInlineCount');
+    const inlineStatsEl = document.getElementById('scanInlineStatsText');
+    const inlineListEl = document.getElementById('scanInlineSubmissionsList');
+    if (!inlineListEl) return;
+
+    const filtered = getFilteredSortedSubmissions('inline');
+    if (inlineCountEl) inlineCountEl.textContent = filtered.length;
+
+    if (filtered.length > 0) {
+        const scores = filtered.map(s => Number(s.score) || 0);
+        const avg = (scores.reduce((a, b) => a + b, 0) / filtered.length).toFixed(2);
+        const max = Math.max(...scores).toFixed(2);
+        if (inlineStatsEl) inlineStatsEl.textContent = `Điểm TB: ${avg}đ · Cao nhất: ${max}đ`;
+    } else {
+        if (inlineStatsEl) inlineStatsEl.textContent = `Điểm TB: 0.00đ · Cao nhất: 0.00đ`;
+    }
+
+    if (filtered.length === 0) {
+        inlineListEl.innerHTML = `<div class="py-8 text-center text-xs text-slate-400">Chưa có bài chấm nào phù hợp bộ lọc.</div>`;
+        return;
+    }
+
+    inlineListEl.innerHTML = filtered.map((s, idx) => {
+        const hasName = !!(s.student_name && String(s.student_name).trim());
+        const displayName = hasName
+            ? s.student_name
+            : (s.student_no ? `Thí sinh SBD ${s.student_no}` : `Phiếu chưa tô SBD (#${idx + 1})`);
+        const scoreNum = Number(s.score ?? 0);
+        const scoreBadgeClass = scoreNum >= 8
+            ? 'bg-emerald-600 text-white'
+            : (scoreNum >= 5 ? 'bg-blue-600 text-white' : 'bg-amber-600 text-white');
+
+        return `
+            <div class="px-3.5 py-2.5 hover:bg-gray-50 dark:hover:bg-[#262335]/80 transition-colors">
+                <!-- Dòng 1: STT + Họ và tên học sinh (rộng thoáng 100%) + Điểm tổng bên phải -->
+                <div class="flex items-center justify-between gap-2">
+                    <div onclick="window.viewSubmissionDetail('${s.id}')" class="flex items-center gap-2 min-w-0 flex-1 cursor-pointer">
+                        <span class="w-6 h-6 rounded-lg bg-slate-100 dark:bg-[#262335] text-slate-600 dark:text-slate-300 font-mono font-extrabold text-[11px] flex items-center justify-center shrink-0">${idx + 1}</span>
+                        <span class="font-extrabold text-xs sm:text-sm ${hasName ? 'text-slate-900 dark:text-white' : 'text-slate-500 dark:text-slate-400 italic'} truncate">${displayName}</span>
+                        ${s.class_name ? `<span class="px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-300 text-[10px] font-bold shrink-0">${s.class_name}</span>` : ''}
+                        ${!hasName && s.name_image ? `<img src="${s.name_image}" class="h-5 max-w-[90px] object-contain rounded border border-gray-200 bg-white shrink-0" alt="Tên viết tay">` : ''}
+                    </div>
+                    <span onclick="window.viewSubmissionDetail('${s.id}')" class="px-2.5 py-0.5 rounded-lg ${scoreBadgeClass} font-mono font-black text-xs sm:text-sm tabular-nums shrink-0 cursor-pointer shadow-2xs">
+                        ${scoreNum.toFixed(2)}đ
+                    </span>
+                </div>
+
+                <!-- Dòng 2: Thông tin SBD · Mã đề · Điểm thành phần trên 1 hàng ngang + Cụm nút gọn bên phải -->
+                <div class="flex items-center justify-between gap-2 mt-1.5 pl-8">
+                    <div onclick="window.viewSubmissionDetail('${s.id}')" class="flex items-center gap-x-2.5 gap-y-0.5 flex-wrap text-[11px] text-slate-500 dark:text-slate-400 font-semibold min-w-0 cursor-pointer">
+                        <span>SBD: <b class="font-mono text-slate-800 dark:text-slate-200">${s.student_no || '--'}</b></span>
+                        <span>Mã: <b class="font-mono text-amber-600 dark:text-amber-400">${s.code || '--'}</b></span>
+                        <span class="text-slate-400 dark:text-slate-500 font-mono text-[10px] sm:text-[11px]">I:${(s.part1_score ?? 0).toFixed(2)} · II:${(s.part2_score ?? 0).toFixed(2)} · III:${(s.part3_score ?? 0).toFixed(2)}</span>
+                    </div>
+                    <div class="flex items-center gap-1 shrink-0">
+                        <button type="button" onclick="window.quickAssignStudentToSubmission('${s.id}')" class="px-2 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 text-[10px] font-extrabold cursor-pointer flex items-center gap-1" title="Sửa tên học sinh / Chọn học sinh từ danh sách Lớp">
+                            <i class="fa-solid fa-user-pen"></i> <span class="hidden sm:inline">Gán tên</span>
+                        </button>
+                        <button type="button" onclick="window.viewSubmissionDetail('${s.id}')" class="w-7 h-7 rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-[#262335] text-slate-700 dark:text-slate-200 flex items-center justify-center text-[11px] cursor-pointer" title="Xem phiếu đã chấm">
+                            <i class="fa-solid fa-eye"></i>
+                        </button>
+                        <button type="button" onclick="window.downloadSubmissionById('${s.id}')" class="w-7 h-7 rounded-lg bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-300 flex items-center justify-center text-[11px] cursor-pointer" title="Tải ảnh phiếu đóng dấu">
+                            <i class="fa-solid fa-download"></i>
+                        </button>
+                        <button type="button" onclick="window.openSendParentModal('${s.id}')" class="w-7 h-7 rounded-lg bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-300 flex items-center justify-center text-[11px] cursor-pointer" title="Gửi kết quả cho Phụ huynh">
+                            <i class="fa-solid fa-paper-plane"></i>
+                        </button>
+                        <button type="button" onclick="window.deleteSubmission('${s.id}')" class="w-7 h-7 rounded-lg bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 text-rose-500 flex items-center justify-center text-[11px] cursor-pointer" title="Xóa bài chấm này">
+                            <i class="fa-solid fa-trash"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+window.quickAssignStudentToSubmission = async (subId) => {
+    const sub = state.submissions.find(s => s.id === subId);
+    if (!sub) return;
+    const roster = Array.isArray(state.students) ? state.students : [];
+    const optionsHtml = roster.length > 0
+        ? `<div class="text-left mb-3">
+               <label class="block text-xs font-bold text-slate-600 mb-1">Chọn nhanh từ danh sách lớp (${roster.length} HS):</label>
+               <select id="swalPickRosterStudent" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-bold" onchange="var opt=this.options[this.selectedIndex]; if(opt.value){ document.getElementById('swalEditStuName').value=opt.getAttribute('data-name')||''; document.getElementById('swalEditStuSbd').value=opt.value; document.getElementById('swalEditStuClass').value=opt.getAttribute('data-class')||''; }">
+                   <option value="">-- Chọn học sinh trong lớp --</option>
+                   ${roster.map(st => `<option value="${st.student_no || ''}" data-name="${(st.name || '').replace(/"/g, '&quot;')}" data-class="${(st.class_name || '').replace(/"/g, '&quot;')}" ${st.student_no === sub.student_no ? 'selected' : ''}>SBD ${st.student_no || '---'} — ${st.name} ${st.class_name ? '(' + st.class_name + ')' : ''}</option>`).join('')}
+               </select>
+           </div>`
+        : `<div class="text-left mb-3 p-2.5 rounded-xl bg-amber-50 text-amber-800 text-xs">
+               Mẹo: Bấm nút <b>"Gán Lớp LMS"</b> để nạp danh sách học sinh tự động theo SBD.
+           </div>`;
+
+    const { value: formValues } = await Swal.fire({
+        title: 'Cập nhật Tên & SBD Học sinh',
+        html: `
+            ${optionsHtml}
+            <div class="text-left space-y-2.5">
+                <div>
+                    <label class="block text-xs font-bold text-slate-600 mb-1">Họ và tên học sinh:</label>
+                    <input id="swalEditStuName" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-sm font-bold" value="${(sub.student_name || '').replace(/"/g, '&quot;')}" placeholder="Ví dụ: Nguyễn Văn An">
+                </div>
+                <div class="grid grid-cols-2 gap-2">
+                    <div>
+                        <label class="block text-xs font-bold text-slate-600 mb-1">Số báo danh (SBD):</label>
+                        <input id="swalEditStuSbd" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-sm font-mono font-bold" value="${(sub.student_no || '').replace(/"/g, '&quot;')}" placeholder="001">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-slate-600 mb-1">Lớp:</label>
+                        <input id="swalEditStuClass" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-sm font-bold" value="${(sub.class_name || state.exam?.className || '').replace(/"/g, '&quot;')}" placeholder="12A1">
+                    </div>
+                </div>
+            </div>
+        `,
+        focusConfirm: false,
+        showCancelButton: true,
+        confirmButtonText: 'Lưu & Cập nhật phiếu',
+        cancelButtonText: 'Hủy',
+        confirmButtonColor: '#10b981',
+        preConfirm: () => {
+            return {
+                name: document.getElementById('swalEditStuName').value.trim(),
+                sbd: document.getElementById('swalEditStuSbd').value.trim(),
+                cls: document.getElementById('swalEditStuClass').value.trim()
+            };
+        }
+    });
+
+    if (!formValues) return;
+    sub.student_name = formValues.name;
+    sub.student_no = formValues.sbd;
+    if (formValues.cls) sub.class_name = formValues.cls;
+    sub._headerV25Upgraded = false;
+    await ensureSubmissionStampedHeaderUpgraded(sub);
+
+    localStorage.setItem(`omr_submissions_${state.exam.id}`, JSON.stringify(state.submissions));
+    if (state.teacherUid) {
+        try { await setDoc(doc(db, "omr_submissions", sub.id), sub); } catch (_) {}
+    }
+    await syncSubmissionToLmsResultsCollection(sub);
+    updateOverviewStats();
+    if (window.renderResultsTable) window.renderResultsTable();
+};
+
 function updateOverviewStats() {
+    enrichSubmissionsFromClassRoster();
+    syncSubmissionClassFilterOptions();
+
     const totalSub = state.submissions.length;
     const badge = document.getElementById('resultsCountBadge');
     if (badge) badge.textContent = totalSub;
@@ -732,56 +1004,7 @@ function updateOverviewStats() {
         if (elMax) elMax.textContent = '0.0';
     }
 
-    // Cập nhật danh sách tất cả bài đã chấm trực tiếp ngay tại màn hình Chấm bài (#view-scan)
-    const inlineCountEl = document.getElementById('scanInlineCount');
-    const inlineStatsEl = document.getElementById('scanInlineStatsText');
-    const inlineListEl = document.getElementById('scanInlineSubmissionsList');
-    if (inlineCountEl) inlineCountEl.textContent = totalSub;
-    if (inlineStatsEl) {
-        inlineStatsEl.textContent = `Điểm TB: ${avg}đ · Cao nhất: ${max}đ`;
-    }
-    if (inlineListEl) {
-        if (totalSub === 0) {
-            inlineListEl.innerHTML = `<div class="py-8 text-center text-xs text-slate-400">Chưa có bài chấm nào trong đề kiểm tra này.</div>`;
-        } else {
-            const ordered = [...state.submissions].reverse();
-            inlineListEl.innerHTML = ordered.map((s, idx) => {
-                const stt = totalSub - idx;
-                const sName = s.student_name || (s.student_no ? `Thí sinh SBD ${s.student_no}` : `Phiếu #${stt}`);
-                const scoreStr = (typeof s.score === 'number' ? s.score.toFixed(2) : (s.score ?? 0)) + 'đ';
-                const timeStr = s.createdAt ? new Date(s.createdAt).toLocaleTimeString('vi-VN', {hour:'2-digit', minute:'2-digit'}) : '';
-                return `
-                    <div class="p-2.5 sm:px-3.5 rounded-2xl bg-gray-50/90 dark:bg-[#1E1B29] border border-gray-200/80 dark:border-[#38344D] flex items-center justify-between gap-2 hover:border-emerald-400 transition-all">
-                        <div onclick="window.viewSubmissionDetail('${s.id}')" class="flex items-center gap-2.5 min-w-0 flex-1 cursor-pointer">
-                            <span class="w-7 h-7 rounded-xl badge-season font-mono font-black text-xs flex items-center justify-center shrink-0">#${stt}</span>
-                            <div class="min-w-0 flex-1">
-                                <div class="flex items-center gap-1.5 flex-wrap">
-                                    <span class="font-extrabold text-xs sm:text-sm text-slate-900 dark:text-white truncate">${sName}</span>
-                                    <span class="px-1.5 py-0.5 rounded bg-slate-200/70 dark:bg-slate-800 text-[10px] font-mono font-bold text-slate-700 dark:text-slate-300">SBD: ${s.student_no || '---'}</span>
-                                    <span class="px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-950/60 text-[10px] font-mono font-bold text-amber-800 dark:text-amber-300">Mã: ${s.code || '---'}</span>
-                                </div>
-                                <div class="text-[11px] text-slate-500 dark:text-slate-400 font-semibold mt-0.5">
-                                    P.I: <b>${(s.part1_score ?? 0).toFixed(2)}đ</b> · P.II: <b>${(s.part2_score ?? 0).toFixed(2)}đ</b> · P.III: <b>${(s.part3_score ?? 0).toFixed(2)}đ</b>${timeStr ? ` · ${timeStr}` : ''}
-                                </div>
-                            </div>
-                        </div>
-                        <div class="flex items-center gap-1 sm:gap-1.5 shrink-0">
-                            <span class="px-2.5 py-1 rounded-xl bg-emerald-600 text-white font-mono font-black text-xs sm:text-sm tabular-nums">${scoreStr}</span>
-                            <button type="button" onclick="window.viewSubmissionDetail('${s.id}')" class="w-8 h-8 rounded-xl bg-white dark:bg-[#262335] border border-gray-200 dark:border-[#38344D] text-slate-700 dark:text-slate-200 hover:text-emerald-600 flex items-center justify-center text-xs cursor-pointer" title="Xem chi tiết phiếu chấm này">
-                                <i class="fa-solid fa-eye"></i>
-                            </button>
-                            <button type="button" onclick="window.downloadSubmissionById('${s.id}')" class="w-8 h-8 rounded-xl bg-white dark:bg-[#262335] border border-gray-200 dark:border-[#38344D] text-emerald-600 hover:bg-emerald-50 flex items-center justify-center text-xs cursor-pointer" title="Tải ảnh phiếu đóng dấu">
-                                <i class="fa-solid fa-download"></i>
-                            </button>
-                            <button type="button" onclick="window.openParentNotifyModal('${s.id}')" class="w-8 h-8 rounded-xl bg-white dark:bg-[#262335] border border-gray-200 dark:border-[#38344D] text-indigo-600 hover:bg-indigo-50 flex items-center justify-center text-xs cursor-pointer" title="Gửi kết quả cho Phụ huynh">
-                                <i class="fa-solid fa-paper-plane"></i>
-                            </button>
-                        </div>
-                    </div>
-                `;
-            }).join('');
-        }
-    }
+    renderInlineSubmissionsList();
 
     // Recent list preview in overview
     const recentCont = document.getElementById('overviewRecentList');
@@ -797,7 +1020,7 @@ function updateOverviewStats() {
                             ${s.student_no || '---'}
                         </div>
                         <div>
-                            <div class="font-bold text-slate-800 dark:text-slate-200">${s.student_name || 'Học sinh SBD ' + s.student_no}</div>
+                            <div class="font-bold text-slate-800 dark:text-slate-200">${s.student_name || 'Học sinh SBD ' + (s.student_no || '---')}</div>
                             <div class="text-[11px] text-slate-400">Mã đề: <b class="font-mono">${s.code}</b> · ${s.class_name || ''}</div>
                         </div>
                     </div>
@@ -3198,36 +3421,29 @@ window.renderResultsTable = () => {
     const label = document.getElementById('resultsCountLabel');
     if (!tbody) return;
 
-    const queryStr = (document.getElementById('resultSearchInput')?.value || '').toLowerCase().trim();
-    let filtered = state.submissions;
-    if (queryStr) {
-        filtered = state.submissions.filter(s => 
-            (s.student_no && s.student_no.toLowerCase().includes(queryStr)) ||
-            (s.student_name && s.student_name.toLowerCase().includes(queryStr)) ||
-            (s.code && s.code.toLowerCase().includes(queryStr))
-        );
-    }
+    syncSubmissionClassFilterOptions();
+    const sorted = getFilteredSortedSubmissions('table');
 
-    if (label) label.textContent = `${filtered.length} kết quả`;
+    if (label) label.textContent = `${sorted.length} / ${state.submissions.length} kết quả`;
 
-    if (filtered.length === 0) {
+    if (sorted.length === 0) {
         tbody.innerHTML = `<tr><td colspan="10" class="p-8 text-center text-slate-400 italic">Không tìm thấy kết quả nào phù hợp.</td></tr>`;
         return;
     }
 
-    // Sort by SBD or score
-    const sorted = [...filtered].sort((a, b) => Number(a.student_no || 0) - Number(b.student_no || 0));
-
-    tbody.innerHTML = sorted.map((s, idx) => `
+    tbody.innerHTML = sorted.map((s, idx) => {
+        const hasRealName = s.student_name && !s.student_name.startsWith('Học sinh ');
+        const displayName = hasRealName ? s.student_name : (s.student_no ? `Học sinh #${s.student_no}` : `Phiếu chưa tên #${idx + 1}`);
+        return `
         <tr class="hover:bg-slate-50/80 dark:hover:bg-slate-750 transition-colors">
             <td class="p-3 text-center text-slate-400 font-bold">${idx + 1}</td>
             <td class="p-3 font-mono font-bold text-slate-800 dark:text-slate-100">${s.student_no || '---'}</td>
             <td class="p-3">
-                <div class="font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                    ${s.student_name || 'Học sinh ' + (s.student_no || '')}
-                    ${s.name_image ? `<img src="${s.name_image}" class="h-5 max-w-[80px] object-contain border border-slate-200 dark:border-slate-700 rounded bg-white" title="Chữ viết tay gốc">` : ''}
+                <div class="font-bold text-slate-900 dark:text-white flex items-center gap-2 flex-wrap">
+                    <span>${displayName}</span>
+                    ${s.class_name ? `<span class="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 text-[10px] font-bold border border-indigo-200/70 dark:border-indigo-800/60">${s.class_name}</span>` : ''}
+                    ${s.name_image ? `<img src="${s.name_image}" class="h-5 max-w-[90px] object-contain border border-slate-200 dark:border-slate-700 rounded bg-white" title="Chữ viết tay gốc">` : ''}
                 </div>
-                <div class="text-[11px] text-slate-400">${s.class_name || ''}</div>
             </td>
             <td class="p-3 text-center font-mono font-bold text-slate-700 dark:text-slate-300">${s.code || '---'}</td>
             <td class="p-3 text-center font-mono text-slate-600 dark:text-slate-400">${(s.part1_score ?? 0).toFixed(2)}</td>
@@ -3237,11 +3453,17 @@ window.renderResultsTable = () => {
             <td class="p-3 text-center text-slate-400 text-[11px]">${new Date(s.createdAt).toLocaleTimeString('vi-VN', {hour:'2-digit', minute:'2-digit', day:'2-digit', month:'2-digit'})}</td>
             <td class="p-3 text-center">
                 <div class="flex items-center justify-center gap-1.5">
-                    <button type="button" onclick="window.openSendParentModal('${s.id}')" class="w-7 h-7 rounded-lg bg-indigo-50 text-indigo-600 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:text-indigo-300 flex items-center justify-center transition-colors cursor-pointer" title="Gửi kết quả & phiếu chấm cho Phụ huynh (PHHS)">
-                        <i class="fa-solid fa-paper-plane text-xs"></i>
+                    <button type="button" onclick="window.quickAssignStudentToSubmission('${s.id}')" class="w-7 h-7 rounded-lg bg-amber-50 text-amber-700 hover:bg-amber-100 dark:bg-amber-950/40 dark:text-amber-300 flex items-center justify-center transition-colors cursor-pointer" title="Gán tên / SBD học sinh cho phiếu này">
+                        <i class="fa-solid fa-user-pen text-xs"></i>
                     </button>
                     <button type="button" onclick="window.viewSubmissionDetail('${s.id}')" class="w-7 h-7 rounded-lg bg-emerald-50 text-emerald-600 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-300 flex items-center justify-center transition-colors cursor-pointer" title="Xem chi tiết phiếu chấm">
                         <i class="fa-solid fa-eye text-xs"></i>
+                    </button>
+                    <button type="button" onclick="window.downloadSubmissionById('${s.id}')" class="w-7 h-7 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 dark:bg-blue-950/40 dark:text-blue-300 flex items-center justify-center transition-colors cursor-pointer" title="Tải ảnh phiếu đã chấm">
+                        <i class="fa-solid fa-download text-xs"></i>
+                    </button>
+                    <button type="button" onclick="window.openSendParentModal('${s.id}')" class="w-7 h-7 rounded-lg bg-indigo-50 text-indigo-600 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:text-indigo-300 flex items-center justify-center transition-colors cursor-pointer" title="Gửi kết quả & phiếu chấm cho Phụ huynh (PHHS)">
+                        <i class="fa-solid fa-paper-plane text-xs"></i>
                     </button>
                     <button type="button" onclick="window.deleteSubmission('${s.id}')" class="w-7 h-7 rounded-lg bg-rose-50 text-rose-600 hover:bg-rose-100 dark:bg-rose-950/40 dark:text-rose-400 flex items-center justify-center transition-colors cursor-pointer" title="Xóa kết quả này">
                         <i class="fa-solid fa-trash text-xs"></i>
@@ -3249,7 +3471,8 @@ window.renderResultsTable = () => {
                 </div>
             </td>
         </tr>
-    `).join('');
+        `;
+    }).join('');
 };
 
 window.viewSubmissionDetail = async (subId) => {
