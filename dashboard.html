@@ -31,6 +31,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Pacifico&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <script>/* Áp dark mode ngay để tránh chớp trắng trên mobile */ try { if (localStorage.theme === 'dark' || localStorage.getItem('qmath_theme') === 'dark') document.documentElement.classList.add('dark'); } catch(e) {}</script>
     <style>
         * { -webkit-tap-highlight-color: transparent; }
@@ -6239,6 +6240,7 @@
             }
 
             if (viewName === 'exambank') {
+                if (typeof renderExplorer === 'function') renderExplorer();
                 loadFileManager();
             }
 
@@ -13284,6 +13286,13 @@ async function loadFileManager(forceRefresh = false) {
     const cacheKeyE = `bank_exams_${effectiveUid}_${isSuper ? bankFilter : (canUseShared ? 'shared' : 'own')}`;
     const cacheKeyT = `bank_tags_${effectiveUid}`;
 
+    // Đọc danh sách ID đề đã xóa để loại bỏ tức thì khỏi bộ nhớ đệm
+    const localDeletedIds = new Set();
+    try {
+        const rawDel = JSON.parse(localStorage.getItem('omr_deleted_exam_ids') || '[]');
+        if (Array.isArray(rawDel)) rawDel.forEach(id => localDeletedIds.add(String(id)));
+    } catch (_) {}
+
     let hasValidCache = false;
     const cachedF = localStorage.getItem(cacheKeyF);
     const cachedE = localStorage.getItem(cacheKeyE);
@@ -13292,7 +13301,7 @@ async function loadFileManager(forceRefresh = false) {
     if (cachedF && cachedE) {
         try {
             folderData = JSON.parse(cachedF) || [];
-            examData = JSON.parse(cachedE) || [];
+            examData = (JSON.parse(cachedE) || []).filter(e => e && e.id && !e.isDeleted && !localDeletedIds.has(e.id));
             tagData = cachedT ? (JSON.parse(cachedT) || []) : [];
             if (!canUseShared) {
                 folderData = folderData.filter(f => !f.isSystem && (!f.teacherId || f.teacherId === effectiveUid));
@@ -13418,9 +13427,9 @@ async function loadFileManager(forceRefresh = false) {
                 }
             }
             
-            // Cập nhật lại mảng và Cache gọn nhẹ
+            // Cập nhật lại mảng và Cache gọn nhẹ (loại trừ các đề đã bị xóa trên các thiết bị khác)
             folderData = typeof window.sanitizeFolders === 'function' ? window.sanitizeFolders(newFolderData) : newFolderData; 
-            examData = (newExamData || []).filter(e => e && e.id && !e.isDeleted && e.title && e.title !== 'null');
+            examData = (newExamData || []).filter(e => e && e.id && !e.isDeleted && !localDeletedIds.has(e.id) && e.title && e.title !== 'null');
             tagData = newTagData;
             const statExFresh = document.getElementById('homeStatExams');
             if (statExFresh && examData) statExFresh.textContent = examData.length;
@@ -15206,17 +15215,45 @@ function renderTagFilterUI() {
                                 }
                             });
                         }
+                        const deletedExamIdsInFolder = [];
                         examData.forEach(e => {
                             if (e.folderId && idsToDelete.has(e.folderId)) {
+                                deletedExamIdsInFolder.push(e.id);
                                 deleteDoc(doc(db, "exams", e.id)).catch(()=>{});
+                                deleteDoc(doc(db, "omr_exams", e.id)).catch(()=>{});
+                                setDoc(doc(db, "omr_deleted_exams", e.id), {
+                                    id: e.id,
+                                    teacherId: currentUserUid,
+                                    deletedAt: new Date().toISOString()
+                                }).catch(()=>{});
                             }
                         });
+                        if (deletedExamIdsInFolder.length > 0) {
+                            try {
+                                const delIds = JSON.parse(localStorage.getItem('omr_deleted_exam_ids') || '[]');
+                                deletedExamIdsInFolder.forEach(id => { if (!delIds.includes(id)) delIds.push(id); });
+                                localStorage.setItem('omr_deleted_exam_ids', JSON.stringify(delIds.slice(-500)));
+                            } catch (_) {}
+                        }
                         folderData = folderData.filter(f => !idsToDelete.has(f.id));
                         examData = examData.filter(e => !e.folderId || !idsToDelete.has(e.folderId));
                         localStorage.setItem('bank_folders', JSON.stringify(folderData));
                         localStorage.setItem('bank_exams', JSON.stringify(examData));
                         saveBankCache();
                     } else {
+                        // Đề thi đơn lẻ: Đồng bộ xóa sang cả omr_exams & lưu tombstone cho mọi thiết bị
+                        deleteDoc(doc(db, "omr_exams", currentActionItem.id)).catch(()=>{});
+                        setDoc(doc(db, "omr_deleted_exams", currentActionItem.id), {
+                            id: currentActionItem.id,
+                            teacherId: currentUserUid,
+                            deletedAt: new Date().toISOString()
+                        }).catch(()=>{});
+                        try {
+                            const delIds = JSON.parse(localStorage.getItem('omr_deleted_exam_ids') || '[]');
+                            if (!delIds.includes(currentActionItem.id)) delIds.push(currentActionItem.id);
+                            localStorage.setItem('omr_deleted_exam_ids', JSON.stringify(delIds.slice(-500)));
+                        } catch (_) {}
+
                         examData = examData.filter(e => e.id !== currentActionItem.id);
                         localStorage.setItem('bank_exams', JSON.stringify(examData));
                         saveBankCache();
@@ -22855,6 +22892,23 @@ function renderTagFilterUI() {
             } catch(e) { console.error("Lỗi lấy API/Webhook Config:", e); }
         };
 
+        // Hàm thông báo thông minh tương thích cả SweetAlert2 và Notification của Dashboard
+        const safeDashAlert = (options, text, icon) => {
+            if (typeof Swal !== 'undefined' && Swal && Swal.fire) {
+                if (typeof options === 'string') return Swal.fire(options, text, icon);
+                return Swal.fire(options);
+            }
+            const title = typeof options === 'string' ? options : (options.title || options.text || '');
+            const body = typeof options === 'string' ? (text || '') : (options.text || options.html || '');
+            const type = typeof options === 'string' ? (icon || 'info') : (options.icon || 'info');
+            const cleanMsg = (title + (body ? ': ' + body : '')).replace(/<[^>]*>/g, '');
+            if (window.showNotification) {
+                window.showNotification(cleanMsg, type === 'warning' ? 'warning' : (type === 'error' ? 'error' : 'success'));
+            } else {
+                alert(cleanMsg);
+            }
+        };
+
         window.saveDashTelegramConfig = async () => {
             const chk = document.getElementById('dashTgConfigEnabled');
             const txtChat = document.getElementById('dashTgConfigChatId');
@@ -22865,7 +22919,7 @@ function renderTagFilterUI() {
             const rawTokens = (txtTokens?.value || '').split('\n').map(t => t.trim()).filter(Boolean);
 
             if (enabled && (!chatId || rawTokens.length === 0)) {
-                Swal.fire('Thiếu thông tin', 'Vui lòng nhập Chat/Channel ID và ít nhất 1 mã Bot Token trước khi bật!', 'warning');
+                safeDashAlert('Thiếu thông tin', 'Vui lòng nhập Chat/Channel ID và ít nhất 1 mã Bot Token trước khi bật!', 'warning');
                 return;
             }
 
@@ -22881,7 +22935,7 @@ function renderTagFilterUI() {
             } catch(_) {}
 
             updateAiModalBadges();
-            Swal.fire({
+            safeDashAlert({
                 icon: 'success',
                 title: 'Đã lưu cấu hình Kênh Telegram!',
                 text: enabled
@@ -22900,18 +22954,22 @@ function renderTagFilterUI() {
             const rawTokens = (txtTokens?.value || '').split('\n').map(t => t.trim()).filter(Boolean);
 
             if (!chatId || rawTokens.length === 0) {
-                Swal.fire('Thiếu thông tin', 'Vui lòng nhập ID Kênh và ít nhất 1 mã Bot Token để kiểm tra kết nối!', 'warning');
+                safeDashAlert('Thiếu thông tin', 'Vui lòng nhập ID Kênh và ít nhất 1 mã Bot Token để kiểm tra kết nối!', 'warning');
                 return;
             }
 
-            Swal.fire({
-                title: 'Đang kiểm tra kết nối Telegram...',
-                html: `Đang gửi ảnh kiểm tra qua <b>${rawTokens.length} bot</b>... Vui lòng chờ vài giây!`,
-                allowOutsideClick: false,
-                didOpen: () => {
-                    Swal.showLoading();
-                }
-            });
+            if (typeof Swal !== 'undefined' && Swal && Swal.fire) {
+                Swal.fire({
+                    title: 'Đang kiểm tra kết nối Telegram...',
+                    html: `Đang gửi ảnh kiểm tra qua <b>${rawTokens.length} bot</b>... Vui lòng chờ vài giây!`,
+                    allowOutsideClick: false,
+                    didOpen: () => {
+                        if (Swal.showLoading) Swal.showLoading();
+                    }
+                });
+            } else if (window.showNotification) {
+                window.showNotification(`Đang gửi ảnh kiểm tra qua ${rawTokens.length} bot Telegram...`, 'info');
+            }
 
             try {
                 const cvs = document.createElement('canvas');
@@ -22948,7 +23006,7 @@ function renderTagFilterUI() {
                 const resJson = await resp.json();
 
                 if (resJson.ok) {
-                    Swal.fire({
+                    safeDashAlert({
                         icon: 'success',
                         title: '🎉 Kết nối thành công!',
                         html: `Bot đã gửi ảnh test lên Kênh Telegram <b>${chatId}</b> thành công! Hãy mở Kênh Telegram để kiểm tra.`,
@@ -22956,14 +23014,14 @@ function renderTagFilterUI() {
                         confirmButtonColor: '#0ea5e9'
                     });
                 } else {
-                    Swal.fire({
+                    safeDashAlert({
                         icon: 'error',
                         title: 'Lỗi gửi ảnh Telegram',
                         html: `Telegram báo lỗi: <br><code class="text-rose-500 font-bold">${resJson.description || 'Không rõ lỗi'}</code><br><br><span class="text-xs text-slate-500">Gợi ý: Hãy đảm bảo bạn đã thêm Bot vào Kênh và cấp quyền <b>Admin (Đăng bài)</b> cho Bot!</span>`
                     });
                 }
             } catch (err) {
-                Swal.fire({
+                safeDashAlert({
                     icon: 'error',
                     title: 'Lỗi kết nối mạng',
                     html: `Không thể kết nối đến Telegram API: <br><code>${err.message || err}</code>`

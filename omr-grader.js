@@ -506,13 +506,54 @@ async function loadTeacherExams() {
         let omrLoaded = [];
         let lmsLoaded = [];
         let omrResultsRows = [];
+        let omrSnapSuccess = false;
+        let lmsSnapSuccess = false;
+
+        // Tải danh sách đề đã xóa từ localStorage để chống hiện tượng "hồi sinh" đề cũ từ cache
+        const localDeletedIds = new Set();
+        try {
+            const rawDel = JSON.parse(localStorage.getItem('omr_deleted_exam_ids') || '[]');
+            if (Array.isArray(rawDel)) rawDel.forEach(id => localDeletedIds.add(String(id)));
+        } catch (_) {}
 
         // 1. Try loading omr_exams from Firestore / Supabase virtual config
         if (state.teacherUid) {
+            // Đồng bộ danh sách đề đã bị xóa từ Cloud (khi người dùng xóa trên điện thoại hoặc máy khác)
+            try {
+                const qDel = query(collection(db, "omr_deleted_exams"), where("teacherId", "==", state.teacherUid), limit(150));
+                const snapDel = await getDocs(qDel);
+                snapDel.docs.forEach(d => {
+                    localDeletedIds.add(d.id);
+                    if (d.data()?.id) localDeletedIds.add(String(d.data().id));
+                });
+                try {
+                    localStorage.setItem('omr_deleted_exam_ids', JSON.stringify([...localDeletedIds].slice(-500)));
+                } catch (_) {}
+            } catch (_) {}
+
+            // Đồng bộ cấu hình Kênh Telegram từ Cloud nếu có
+            try {
+                const snapTg = await getDoc(doc(db, "configurations", "telegram_storage"));
+                if (snapTg && snapTg.exists()) {
+                    const cloudTg = snapTg.data();
+                    if (cloudTg && (cloudTg.chatId || (cloudTg.botTokens && cloudTg.botTokens.length > 0))) {
+                        state.telegramConfig = { ...state.telegramConfig, ...cloudTg };
+                        try {
+                            localStorage.setItem('omr_telegram_storage_config', JSON.stringify(state.telegramConfig));
+                            localStorage.setItem('qmath_telegram_config', JSON.stringify(state.telegramConfig));
+                        } catch (_) {}
+                        if (typeof updateTelegramStatusIndicator === 'function') updateTelegramStatusIndicator();
+                    }
+                }
+            } catch (_) {}
+
             try {
                 const qOmr = query(collection(db, "omr_exams"), where("teacherId", "==", state.teacherUid));
                 const snapOmr = await getDocs(qOmr);
-                omrLoaded = snapOmr.docs.map(d => ({ id: d.id, ...d.data() }));
+                omrLoaded = snapOmr.docs
+                    .map(d => ({ id: d.id, ...d.data() }))
+                    .filter(e => !e.isDeleted && !localDeletedIds.has(e.id));
+                omrSnapSuccess = true;
             } catch(e) {
                 console.warn("Firestore omr_exams failed:", e);
             }
@@ -523,21 +564,21 @@ async function loadTeacherExams() {
                 const snapLms = await getDocs(qLms);
                 lmsLoaded = snapLms.docs
                     .map(d => ({ id: d.id, ...d.data() }))
-                    .filter(e => !e.isDeleted && (e.title || e.name));
+                    .filter(e => !e.isDeleted && (e.title || e.name) && !localDeletedIds.has(e.id));
+                lmsSnapSuccess = true;
             } catch(e) {
                 try {
                     const snapLms2 = await getDocs(query(collection(db, "exams"), limit(300)));
                     lmsLoaded = snapLms2.docs
                         .map(d => ({ id: d.id, ...d.data() }))
-                        .filter(ex => !ex.isDeleted && (ex.title || ex.name));
+                        .filter(ex => !ex.isDeleted && (ex.title || ex.name) && !localDeletedIds.has(ex.id));
+                    lmsSnapSuccess = true;
                 } catch(e2) {
                     console.warn("Firestore exams query failed:", e2);
                 }
             }
 
             // 2.5. Load OMR results summary from Supabase results table to recover any graded exams & count submissions
-            // Lưu ý: bảng results chỉ có cột exam_id, không có teacher_id.
-            // Kết quả chi tiết của từng đề sẽ được tải chính xác theo examId khi mở đề thi.
             omrResultsRows = [];
         }
 
@@ -547,15 +588,24 @@ async function loadTeacherExams() {
         if (cachedBankExams) {
             try {
                 const parsedCached = JSON.parse(cachedBankExams) || [];
-                parsedCached.forEach(ce => {
-                    if (ce && !ce.isDeleted && ce.title && !lmsLoaded.some(l => l.id === ce.id)) {
-                        lmsLoaded.push(ce);
+                if (lmsSnapSuccess) {
+                    // Khi đã kết nối Cloud thành công, loại bỏ các đề đã bị xóa trên thiết bị khác khỏi cache
+                    const cleanCached = parsedCached.filter(ce => ce && ce.id && !ce.isDeleted && !localDeletedIds.has(ce.id) && lmsLoaded.some(l => l.id === ce.id));
+                    if (cleanCached.length !== parsedCached.length) {
+                        try { localStorage.setItem(`bank_exams_${uid}_own`, JSON.stringify(cleanCached)); } catch (_) {}
                     }
-                });
+                } else {
+                    // Chỉ thêm từ cache cục bộ khi đang offline mất mạng
+                    parsedCached.forEach(ce => {
+                        if (ce && !ce.isDeleted && ce.title && !localDeletedIds.has(ce.id) && !lmsLoaded.some(l => l.id === ce.id)) {
+                            lmsLoaded.push(ce);
+                        }
+                    });
+                }
             } catch(e) {}
         }
 
-        // 4. Merge with all localStorage omr_exams (never discard local exams when cloud also has exams!)
+        // 4. Merge with localStorage omr_exams (đồng bộ đa thiết bị: KHÔNG hồi sinh đề đã bị xóa trên Cloud)
         const candidateKeys = new Set([
             'omr_exams_' + (state.teacherUid || 'guest'),
             'omr_exams_guest'
@@ -568,11 +618,28 @@ async function loadTeacherExams() {
             try {
                 const arr = JSON.parse(localStorage.getItem(k) || '[]');
                 if (Array.isArray(arr)) {
-                    arr.forEach(locEx => {
-                        if (locEx && locEx.id && !locEx.isLmsExam && !omrLoaded.some(x => x.id === locEx.id)) {
-                            omrLoaded.push(locEx);
-                        }
-                    });
+                    if (omrSnapSuccess) {
+                        // Nếu đã đồng bộ Cloud thành công: chỉ giữ lại đề còn tồn tại trên Cloud hoặc đề nháp offline cục bộ
+                        const keptLocal = [];
+                        arr.forEach(locEx => {
+                            if (!locEx || !locEx.id) return;
+                            if (locEx.isDeleted || localDeletedIds.has(locEx.id)) return;
+                            if (omrLoaded.some(x => x.id === locEx.id)) {
+                                keptLocal.push(locEx);
+                            } else if (locEx._isLocalDraft) {
+                                omrLoaded.push(locEx);
+                                keptLocal.push(locEx);
+                            }
+                        });
+                        localStorage.setItem(k, JSON.stringify(keptLocal));
+                    } else {
+                        // Khi đang offline mất mạng: nạp từ cache cục bộ nhưng bỏ qua các đề đã nằm trong danh sách đã xóa
+                        arr.forEach(locEx => {
+                            if (locEx && locEx.id && !locEx.isLmsExam && !locEx.isDeleted && !localDeletedIds.has(locEx.id) && !omrLoaded.some(x => x.id === locEx.id)) {
+                                omrLoaded.push(locEx);
+                            }
+                        });
+                    }
                 }
             } catch(e) {}
         });
@@ -3618,12 +3685,35 @@ async function generateStampedGradedSheet(sub, rawResult) {
                 }
             }
 
-            // Vẽ bảng điểm / nhãn kết quả câu trả lời ngắn CỠ LỚN ngay trên đầu mỗi câu
-            if (tpl.p3[q][0] && tpl.p3[q][0][0]) {
-                const pt0 = tpl.p3[q][0][0];
-                const bw = 216, bh = 50;
-                const bx = Math.max(12, pt0[0] * scaleX - 24);
-                const by = pt0[1] * scaleY + headerH - 56;
+            // Vẽ bảng điểm / nhãn kết quả câu trả lời ngắn CỠ LỚN đặt dưới đáy mỗi câu (nằm hoàn toàn ngoài khung tô)
+            let qMaxY = -Infinity;
+            let qMinX = Infinity, qMaxX = -Infinity;
+            if (tpl.p3[q]) {
+                tpl.p3[q].forEach(colPts => {
+                    if (Array.isArray(colPts)) {
+                        colPts.forEach(pt => {
+                            if (pt) {
+                                if (pt[0] < qMinX) qMinX = pt[0];
+                                if (pt[0] > qMaxX) qMaxX = pt[0];
+                                if (pt[1] > qMaxY) qMaxY = pt[1];
+                            }
+                        });
+                    }
+                });
+            }
+
+            if (qMaxY > -Infinity) {
+                const centerX = ((qMinX + qMaxX) / 2 - kx0) * scaleX;
+                const bw = 210, bh = 46;
+                let bx = Math.round(centerX - bw / 2);
+                if (bx < 8) bx = 8;
+                if (bx + bw > sheetW - 8) bx = sheetW - bw - 8;
+
+                const bottomBubbleCanvasY = (qMaxY - ky0) * scaleY + headerH;
+                const tableBottomCanvasY = (22.00 - ky0) * scaleY + headerH;
+                let by = Math.round(Math.max(bottomBubbleCanvasY + 46, tableBottomCanvasY + 10));
+                const maxBy = canvas.height - bh - 8;
+                if (by > maxBy) by = maxBy;
 
                 ctx.save();
                 ctx.fillStyle = isP3Override ? '#faf5ff' : (isMatch ? '#ecfdf5' : '#fef2f2');
@@ -3636,7 +3726,7 @@ async function generateStampedGradedSheet(sub, rawResult) {
                 ctx.stroke();
 
                 ctx.fillStyle = isP3Override ? '#6b21a8' : (isMatch ? '#065f46' : '#991b1b');
-                ctx.font = '900 20px "Segoe UI", Arial, sans-serif';
+                ctx.font = '900 19px "Segoe UI", Arial, sans-serif';
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
                 if (isP3Override) {
@@ -3760,10 +3850,26 @@ function renderSvgOverlay(rawResult, code) {
                 }
             }
 
-            if (tpl.p3[q][0] && tpl.p3[q][0][0]) {
-                const pt0 = tpl.p3[q][0][0];
-                const bx = pt0[0] * 100 - 10;
-                const by = pt0[1] * 100 - 45;
+            // Vẽ nhãn kết quả câu trả lời ngắn dưới đáy mỗi câu trong SVG Overlay
+            let qMaxY = -Infinity, qMinX = Infinity, qMaxX = -Infinity;
+            if (tpl.p3[q]) {
+                tpl.p3[q].forEach(colPts => {
+                    if (Array.isArray(colPts)) {
+                        colPts.forEach(pt => {
+                            if (pt) {
+                                if (pt[0] < qMinX) qMinX = pt[0];
+                                if (pt[0] > qMaxX) qMaxX = pt[0];
+                                if (pt[1] > qMaxY) qMaxY = pt[1];
+                            }
+                        });
+                    }
+                });
+            }
+
+            if (qMaxY > -Infinity) {
+                const centerX = ((qMinX + qMaxX) / 2) * 100;
+                const bx = Math.round(centerX - 75);
+                const by = Math.max(Math.round(qMaxY * 100 + 35), 2205);
                 const bg = isMatch ? '#ecfdf5' : '#fef2f2';
                 const stroke = isMatch ? '#10b981' : '#ef4444';
                 const textCol = isMatch ? '#065f46' : '#991b1b';
@@ -3771,7 +3877,7 @@ function renderSvgOverlay(rawResult, code) {
                 marks += `
                     <g>
                         <rect x="${bx}" y="${by}" width="150" height="34" rx="8" fill="${bg}" stroke="${stroke}" stroke-width="1.5" />
-                        <text x="${bx + 75}" y="${by + 22}" text-anchor="middle" font-size="12" font-weight="bold" fill="${textCol}" font-family="system-ui, sans-serif">${label}</text>
+                        <text x="${centerX}" y="${by + 22}" text-anchor="middle" font-size="12" font-weight="bold" fill="${textCol}" font-family="system-ui, sans-serif">${label}</text>
                     </g>
                 `;
             }
@@ -7616,15 +7722,44 @@ window.deleteExam = async (examId) => {
     state.exams = state.exams.filter(e => e.id !== examId);
     saveLocalExams(state.exams);
 
-    // Xóa dữ liệu bài chấm của đề này
+    // Ghi nhận tombstone xóa vào localStorage để chống hồi sinh từ cache
+    try {
+        const delIds = JSON.parse(localStorage.getItem('omr_deleted_exam_ids') || '[]');
+        if (!delIds.includes(examId)) delIds.push(examId);
+        localStorage.setItem('omr_deleted_exam_ids', JSON.stringify(delIds.slice(-500)));
+    } catch (_) {}
+
+    // Xóa sạch dữ liệu bài chấm và cache của đề này trên toàn bộ localStorage
     try {
         localStorage.removeItem(`omr_submissions_${examId}`);
         localStorage.removeItem(`omr_students_${examId}`);
+        localStorage.removeItem(`omr_exam_class_${examId}`);
         if (state.gradedCountsByExam) delete state.gradedCountsByExam[examId];
+
+        for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            if (k && (k.startsWith('omr_exams_') || k.startsWith('bank_exams_'))) {
+                try {
+                    const arr = JSON.parse(localStorage.getItem(k) || '[]');
+                    if (Array.isArray(arr) && arr.some(x => x && x.id === examId)) {
+                        localStorage.setItem(k, JSON.stringify(arr.filter(x => x && x.id !== examId)));
+                    }
+                } catch (_) {}
+            }
+        }
     } catch (_) {}
 
+    // Đồng bộ xóa vĩnh viễn lên Cloud Database & lưu tombstone cho mọi thiết bị
     if (state.teacherUid) {
         try { await deleteDoc(doc(db, "omr_exams", examId)); } catch(e) {}
+        try { await deleteDoc(doc(db, "exams", examId)); } catch(e) {}
+        try {
+            await setDoc(doc(db, "omr_deleted_exams", examId), {
+                id: examId,
+                teacherId: state.teacherUid,
+                deletedAt: new Date().toISOString()
+            });
+        } catch(e) {}
     }
 
     // Nếu đề bị xóa là đề đang chọn, chuyển sang đề đầu tiên còn lại
