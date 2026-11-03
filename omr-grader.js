@@ -65,6 +65,34 @@ onAuthStateChanged(auth, async (user) => {
     await loadTeacherExams();
 });
 
+function preloadBrandLogo(url) {
+    if (!url) return;
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+        try {
+            const testC = document.createElement('canvas');
+            testC.width = 2; testC.height = 2;
+            testC.getContext('2d').drawImage(img, 0, 0, 2, 2);
+            testC.toDataURL();
+            state.brandLogoElement = img;
+        } catch (err) {
+            if (url !== './apple-touch-icon.png') {
+                preloadBrandLogo('./apple-touch-icon.png');
+            }
+        }
+    };
+    img.onerror = () => {
+        if (url !== './apple-touch-icon.png') {
+            preloadBrandLogo('./apple-touch-icon.png');
+        }
+    };
+    img.src = url;
+}
+
+// Preload default Thầy Choang logo immediately
+preloadBrandLogo('./apple-touch-icon.png');
+
 function initTeacherUI() {
     const nameEl = document.getElementById('userDisplayName');
     const avatarEl = document.getElementById('userAvatar');
@@ -74,6 +102,19 @@ function initTeacherUI() {
         const initial = name.trim().charAt(0).toUpperCase() || 'G';
         avatarEl.textContent = initial;
     }
+
+    // Đồng bộ Logo Thầy Choang từ cài đặt giao diện qmath.io.vn (site_settings/homepage_hero)
+    getDoc(doc(db, "site_settings", "homepage_hero")).then(snap => {
+        if (snap && snap.exists()) {
+            const d = snap.data();
+            if (d && d.logo) {
+                document.querySelectorAll('.global-logo-img').forEach(el => {
+                    el.src = d.logo;
+                });
+                preloadBrandLogo(d.logo);
+            }
+        }
+    }).catch(e => console.warn("Không tải được logo từ site_settings, dùng logo mặc định:", e));
 }
 
 window.handleLmsLogout = async () => {
@@ -1342,8 +1383,8 @@ async function generateStampedGradedSheet(sub, rawResult) {
     ctx.lineTo(sheetW, headerH);
     ctx.stroke();
 
-    // 2. KHỐI LOGO & THƯƠNG HIỆU WEB (GÓC TRÁI: X: 35 -> 410)
-    const logoX = 35, logoY = 32, logoS = 68, rad = 16;
+    // 2. KHỐI LOGO THẦY CHOANG & THƯƠNG HIỆU WEB (GÓC TRÁI: X: 35 -> 415)
+    const logoX = 35, logoY = 30, logoS = 72, rad = 16;
     ctx.save();
     ctx.beginPath();
     ctx.moveTo(logoX + rad, logoY);
@@ -1352,34 +1393,43 @@ async function generateStampedGradedSheet(sub, rawResult) {
     ctx.arcTo(logoX, logoY + logoS, logoX, logoY, rad);
     ctx.arcTo(logoX, logoY, logoX + logoS, logoY, rad);
     ctx.closePath();
-    const logoGrad = ctx.createLinearGradient(logoX, logoY, logoX + logoS, logoY + logoS);
-    logoGrad.addColorStop(0, '#059669');
-    logoGrad.addColorStop(1, '#047857');
-    ctx.fillStyle = logoGrad;
-    ctx.fill();
 
-    // Biểu tượng chữ QM trong logo
-    ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 32px "Segoe UI", Arial, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('QM', logoX + logoS / 2, logoY + logoS / 2 + 1);
+    if (state.brandLogoElement && state.brandLogoElement.complete && state.brandLogoElement.naturalWidth > 0) {
+        ctx.fillStyle = '#ffffff';
+        ctx.fill();
+        ctx.strokeStyle = '#cbd5e1';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        ctx.clip();
+        ctx.drawImage(state.brandLogoElement, logoX + 2, logoY + 2, logoS - 4, logoS - 4);
+    } else {
+        const logoGrad = ctx.createLinearGradient(logoX, logoY, logoX + logoS, logoY + logoS);
+        logoGrad.addColorStop(0, '#059669');
+        logoGrad.addColorStop(1, '#047857');
+        ctx.fillStyle = logoGrad;
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 30px "Segoe UI", Arial, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('TC', logoX + logoS / 2, logoY + logoS / 2 + 1);
+    }
     ctx.restore();
 
-    // Tên thương hiệu
+    // Tên thương hiệu Toán Thầy Choang
     ctx.textAlign = 'left';
     ctx.textBaseline = 'alphabetic';
     ctx.fillStyle = '#0f172a';
-    ctx.font = 'bold 23px "Segoe UI", Arial, sans-serif';
-    ctx.fillText('QMATH LMS', logoX + logoS + 18, logoY + 28);
+    ctx.font = 'bold 21px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('TOÁN THẦY CHOANG', logoX + logoS + 16, logoY + 28);
 
     ctx.fillStyle = '#059669';
     ctx.font = 'bold 12px "Segoe UI", Arial, sans-serif';
-    ctx.fillText('HỆ THỐNG CHẤM THI OMR TỰ ĐỘNG', logoX + logoS + 18, logoY + 48);
+    ctx.fillText('HỆ THỐNG CHẤM THI OMR · QMATH LMS', logoX + logoS + 16, logoY + 48);
 
     ctx.fillStyle = '#64748b';
     ctx.font = '11px "Segoe UI", Arial, sans-serif';
-    ctx.fillText('Trung tâm Toán học & Khảo thí StarMind', logoX + logoS + 18, logoY + 66);
+    ctx.fillText('Luyện thi Toán tư duy & Khảo thí (qmath.io.vn)', logoX + logoS + 16, logoY + 66);
 
     // 3. KHUNG THÔNG TIN THÍ SINH & ĐỀ THI (GIỮA: X: 430 -> 1060)
     const cardX = 430, cardY = 22, cardW = 620, cardH = 216;
@@ -1525,8 +1575,8 @@ async function generateStampedGradedSheet(sub, rawResult) {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
-    ctx.font = 'bold 11px "Segoe UI", Arial, sans-serif';
-    ctx.fillText('QMATH LMS', 0, -56);
+    ctx.font = 'bold 10px "Segoe UI", Arial, sans-serif';
+    ctx.fillText('THẦY CHOANG · QMATH', 0, -56);
 
     ctx.font = 'bold 36px "Segoe UI", Arial, sans-serif';
     ctx.fillText((sub.score ?? 0).toFixed(2), 0, 0);
