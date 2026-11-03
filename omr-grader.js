@@ -2211,13 +2211,13 @@ function renderInlineSubmissionsList() {
             ? `<span class="px-1.5 py-0.5 rounded text-[10px] font-bold border ${dupeStatus.badgeBg}" title="Phát hiện ${dupeStatus.dupeCount} bài có cùng SBD ${s.student_no}">${dupeStatus.label}</span>`
             : '';
 
-        // Tự động cắt chữ viết tay trong nền nếu chưa có name_image nhưng có ảnh bài chấm
-        if (!hasName && !s.name_image && (s.stamped_image || s.image_data)) {
+        // Tự động cắt chữ viết tay trong nền nếu chưa có hoặc là bản cắt cũ
+        if (!hasName && (!s.name_image || !s._nameImageV2) && (s.stamped_image || s.image_data)) {
             const rawSrc = s.image_data || s.stamped_image;
-            const isStamped = !s.image_data && !!s.stamped_image;
-            cropCandidateHandwrittenName(rawSrc, s.template_key, isStamped).then(cropUrl => {
+            cropCandidateHandwrittenName(rawSrc, s.template_key).then(cropUrl => {
                 if (cropUrl) {
                     s.name_image = cropUrl;
+                    s._nameImageV2 = true;
                     const imgEl = document.getElementById(`subNameImg_${s.id}`);
                     if (imgEl) {
                         imgEl.src = cropUrl;
@@ -2234,10 +2234,17 @@ function renderInlineSubmissionsList() {
             : (scoreNum >= 5 ? 'bg-sky-600 dark:bg-sky-500' : 'bg-rose-600 dark:bg-rose-500');
 
         return `
-            <div onclick="window.viewSubmissionDetail('${s.id}')" class="px-3 py-2.5 ${rowClass} transition-colors border-b border-gray-100 dark:border-[#38344D]/50 last:border-b-0 cursor-pointer active:bg-gray-100 dark:active:bg-[#2e2a40] select-none">
-                <div class="flex items-center justify-between gap-2.5 min-w-0">
+            <div class="swipe-item relative overflow-hidden select-none border-b border-gray-100 dark:border-[#38344D]/50 last:border-b-0" data-sub-id="${s.id}">
+                <!-- Lớp nền Đỏ hiện ra khi vuốt trái để xóa -->
+                <div class="swipe-bg absolute inset-0 bg-rose-600 flex items-center justify-end px-5 text-white font-bold gap-2 text-xs sm:text-sm tracking-wide z-0 opacity-0 transition-opacity pointer-events-none">
+                    <i class="fa-solid fa-trash-can text-base sm:text-lg animate-pulse"></i>
+                    <span class="swipe-action-text font-bold uppercase tracking-wider text-[11px] sm:text-xs">Vuốt để xóa</span>
+                </div>
+
+                <!-- Lớp Card nội dung phía trên: Vuốt mượt mà sang trái -->
+                <div class="swipe-content relative z-10 bg-white dark:bg-[#1E1B29] px-3.5 py-2.5 flex items-center justify-between gap-3 cursor-pointer ${rowClass} active:bg-slate-50 dark:active:bg-[#262335] transition-colors" onclick="window.viewSubmissionDetail('${s.id}')">
                     <!-- Left: STT tròn gọn gàng -->
-                    <span class="w-6 h-6 sm:w-7 sm:h-7 rounded-lg bg-gray-100 dark:bg-[#1E1B29] text-slate-600 dark:text-slate-300 font-mono font-bold text-[11px] sm:text-xs flex items-center justify-center shrink-0 border border-gray-200/60 dark:border-[#38344D]">${idx + 1}</span>
+                    <span class="w-6 h-6 sm:w-7 sm:h-7 rounded-lg bg-gray-100 dark:bg-[#282438] text-slate-600 dark:text-slate-300 font-mono font-bold text-[11px] sm:text-xs flex items-center justify-center shrink-0 border border-gray-200/60 dark:border-[#38344D]">${idx + 1}</span>
 
                     <!-- Center: Dành trọn vẹn khoảng trống cho Tên học sinh hoặc Ảnh cắt chữ viết tay -->
                     <div class="flex-1 min-w-0 pr-1">
@@ -2255,45 +2262,271 @@ function renderInlineSubmissionsList() {
                             ${dupeBadge}
                         </div>
                         ` : `
-                        <!-- Trường hợp 2: Chưa ghép tên học sinh -> Hiển thị ảnh cắt phần tên viết tay trên phiếu -->
-                        <div class="flex items-center gap-2 sm:gap-3 min-w-0">
-                            <div class="h-10 sm:h-12 w-28 sm:w-40 shrink-0 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 bg-white flex items-center justify-center shadow-2xs">
+                        <!-- Trường hợp 2: Chưa ghép tên học sinh -> Hiển thị ảnh cắt chữ viết tay siêu gọn và thanh thoát -->
+                        <div class="flex items-center gap-2.5 min-w-0">
+                            <div class="h-9 sm:h-10 w-24 sm:w-32 shrink-0 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 bg-white flex items-center justify-center shadow-2xs">
                                 <img src="${s.name_image || ''}" id="subNameImg_${s.id}" class="w-full h-full object-contain p-0.5 ${s.name_image ? '' : 'hidden'}" alt="Tên viết tay" loading="lazy">
-                                <div id="subNamePlaceholder_${s.id}" class="text-[10px] text-slate-400 font-bold italic text-center px-1 ${s.name_image ? 'hidden' : ''}">
-                                    <i class="fa-solid fa-signature mr-1"></i>Chữ viết tay
+                                <div id="subNamePlaceholder_${s.id}" class="text-[9px] text-slate-400 font-bold italic text-center px-1 ${s.name_image ? 'hidden' : ''}">
+                                    <i class="fa-solid fa-signature mr-1"></i>Viết tay
                                 </div>
                             </div>
                             <div class="min-w-0 flex-1">
-                                <div class="text-[11px] font-bold text-amber-600 dark:text-amber-400 flex items-center gap-1 truncate">
-                                    <i class="fa-solid fa-triangle-exclamation text-[10px] shrink-0"></i>
-                                    <span class="truncate">Chưa gán tên</span>
-                                </div>
-                                <div class="flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400 font-mono mt-0.5 flex-wrap">
-                                    <span>SBD: <b class="text-slate-800 dark:text-slate-200 font-bold">${s.student_no || '--'}</b></span>
+                                <div class="flex items-center gap-2 text-[11px] text-slate-600 dark:text-slate-300 font-mono flex-wrap">
+                                    <span>SBD: <b class="text-slate-900 dark:text-white font-extrabold">${s.student_no || '--'}</b></span>
                                     <span>·</span>
-                                    <span>Mã: <b class="text-slate-800 dark:text-slate-200 font-bold">${s.code || '--'}</b></span>
+                                    <span>Mã: <b class="text-slate-900 dark:text-white font-extrabold">${s.code || '--'}</b></span>
                                     ${(s.telegram_photo_url || s.telegram_file_id) ? `<span class="text-sky-500 text-[10px] inline-flex items-center gap-0.5" title="Đã lưu ảnh lên Telegram"><i class="fa-brands fa-telegram"></i></span>` : ''}
                                     ${dupeBadge}
+                                </div>
+                                <div class="text-[10px] font-semibold text-amber-600 dark:text-amber-400 flex items-center gap-1 mt-0.5 truncate">
+                                    <i class="fa-solid fa-pencil text-[9px] shrink-0"></i>
+                                    <span class="truncate">Chưa gán tên</span>
                                 </div>
                             </div>
                         </div>
                         `}
                     </div>
 
-                    <!-- Right: Điểm số nổi bật & Nút Xóa siêu gọn gàng (Không còn nút mắt, bút, tele gây chật chội) -->
-                    <div class="flex items-center gap-2 shrink-0">
+                    <!-- Right: Điểm số nổi bật DUY NHẤT (Loại bỏ nút thùng rác, xóa bằng cử chỉ vuốt) -->
+                    <div class="shrink-0 flex items-center">
                         <span class="px-2.5 py-1.5 rounded-xl ${scoreColorClass} text-white font-mono font-extrabold text-xs sm:text-sm tabular-nums shadow-2xs leading-none">
                             ${scoreNum.toFixed(2)}đ
                         </span>
-
-                        <button type="button" onclick="event.stopPropagation(); window.deleteSubmission('${s.id}')" class="w-7 h-7 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/50 flex items-center justify-center text-xs active:scale-95 transition-colors cursor-pointer border border-transparent hover:border-rose-200 dark:hover:border-rose-900/50" title="Xóa bài chấm này">
-                            <i class="fa-solid fa-trash-can"></i>
-                        </button>
                     </div>
                 </div>
             </div>
         `;
     }).join('');
+
+    // Khởi tạo cử chỉ vuốt sang trái để xóa (Swipe-to-Delete)
+    initSwipeToDelete(inlineListEl);
+}
+window.renderInlineSubmissionsList = renderInlineSubmissionsList;
+
+// ========================================================
+// CỬ CHỈ VUỐT SANG TRÁI ĐỂ XÓA BÀI (SWIPE-TO-DELETE ENGINE)
+// ========================================================
+function initSwipeToDelete(container) {
+    if (!container) return;
+    const items = container.querySelectorAll('.swipe-item');
+    items.forEach(item => {
+        const subId = item.getAttribute('data-sub-id');
+        const content = item.querySelector('.swipe-content');
+        const bg = item.querySelector('.swipe-bg');
+        if (!content || !bg || !subId) return;
+
+        let startX = 0, startY = 0;
+        let currentX = 0;
+        let isSwiping = false;
+        let isScrolling = false;
+        let hasMovedFar = false;
+
+        const onTouchStart = (e) => {
+            if (e.touches.length !== 1) return;
+            const touch = e.touches[0];
+            startX = touch.clientX;
+            startY = touch.clientY;
+            currentX = 0;
+            isSwiping = false;
+            isScrolling = false;
+            hasMovedFar = false;
+            content.style.transition = 'none';
+        };
+
+        const onTouchMove = (e) => {
+            if (e.touches.length !== 1) return;
+            const touch = e.touches[0];
+            const diffX = touch.clientX - startX;
+            const diffY = touch.clientY - startY;
+
+            if (!isSwiping && !isScrolling) {
+                if (Math.abs(diffY) > 8 && Math.abs(diffY) > Math.abs(diffX)) {
+                    isScrolling = true;
+                    return;
+                }
+                if (diffX < -8 && Math.abs(diffX) > Math.abs(diffY)) {
+                    isSwiping = true;
+                }
+            }
+
+            if (!isSwiping) return;
+
+            if (e.cancelable) e.preventDefault();
+
+            currentX = Math.min(0, diffX);
+            if (currentX < -200) {
+                currentX = -200 + (currentX + 200) * 0.4;
+            }
+
+            if (Math.abs(currentX) > 10) hasMovedFar = true;
+
+            content.style.transform = `translateX(${currentX}px)`;
+
+            const width = item.offsetWidth || 320;
+            const progress = Math.min(1, Math.abs(currentX) / (width * 0.4));
+            bg.style.opacity = Math.max(0.3, progress).toString();
+
+            const actionText = bg.querySelector('.swipe-action-text');
+            const icon = bg.querySelector('i');
+            if (actionText) {
+                if (Math.abs(currentX) >= Math.min(150, width * 0.38)) {
+                    actionText.textContent = 'Thả tay để xóa';
+                    bg.classList.add('bg-rose-700');
+                    bg.classList.remove('bg-rose-600');
+                    if (icon) icon.className = 'fa-solid fa-trash-can text-lg sm:text-xl scale-125 transition-transform';
+                } else {
+                    actionText.textContent = 'Vuốt để xóa';
+                    bg.classList.remove('bg-rose-700');
+                    bg.classList.add('bg-rose-600');
+                    if (icon) icon.className = 'fa-solid fa-trash-can text-base sm:text-lg animate-pulse';
+                }
+            }
+        };
+
+        const onTouchEnd = () => {
+            if (!isSwiping) return;
+            isSwiping = false;
+
+            const width = item.offsetWidth || 320;
+            const threshold = Math.min(145, width * 0.38);
+            const isFullSwipe = Math.abs(currentX) >= threshold;
+
+            if (isFullSwipe) {
+                if (navigator.vibrate) try { navigator.vibrate(40); } catch(_) {}
+
+                // Trượt hoàn toàn ra khỏi màn hình sang trái
+                content.style.transition = 'transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1)';
+                content.style.transform = `translateX(-${width + 30}px)`;
+
+                setTimeout(() => {
+                    item.style.transition = 'max-height 0.25s ease-out, opacity 0.2s ease-out, margin 0.25s ease-out, padding 0.25s ease-out';
+                    item.style.maxHeight = `${item.offsetHeight}px`;
+                    item.offsetHeight; // force reflow
+                    item.style.maxHeight = '0px';
+                    item.style.opacity = '0';
+                    item.style.paddingTop = '0px';
+                    item.style.paddingBottom = '0px';
+                    item.style.borderBottomWidth = '0px';
+
+                    setTimeout(() => {
+                        window.deleteSubmissionDirect(subId);
+                    }, 250);
+                }, 180);
+            } else {
+                content.style.transition = 'transform 0.25s cubic-bezier(0.2, 0.8, 0.2, 1)';
+                content.style.transform = 'translateX(0px)';
+                bg.style.opacity = '0';
+                setTimeout(() => {
+                    content.style.transition = '';
+                    content.style.transform = '';
+                }, 260);
+            }
+        };
+
+        content.addEventListener('touchstart', onTouchStart, { passive: true });
+        content.addEventListener('touchmove', onTouchMove, { passive: false });
+        content.addEventListener('touchend', onTouchEnd, { passive: true });
+        content.addEventListener('touchcancel', onTouchEnd, { passive: true });
+
+        // Chặn sự kiện click mở xem chi tiết nếu đang thực hiện vuốt
+        content.addEventListener('click', (e) => {
+            if (hasMovedFar || Math.abs(currentX) > 10) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+        }, true);
+    });
+}
+
+// Xóa bài trực tiếp từ cử chỉ vuốt và hiển thị nút Hoàn tác (Undo)
+let undoToastTimeout = null;
+function showUndoToast(message, onUndo) {
+    const existing = document.getElementById('omrUndoToast');
+    if (existing) existing.remove();
+    if (undoToastTimeout) clearTimeout(undoToastTimeout);
+
+    const toast = document.createElement('div');
+    toast.id = 'omrUndoToast';
+    toast.className = 'fixed bottom-5 left-1/2 -translate-x-1/2 z-[9999] flex items-center gap-3 bg-slate-900/95 text-white px-4 py-2.5 rounded-2xl shadow-2xl border border-slate-700/80 text-xs sm:text-sm backdrop-blur-md transition-all';
+    toast.innerHTML = `
+        <i class="fa-solid fa-circle-check text-emerald-400 text-base shrink-0"></i>
+        <span class="font-medium truncate max-w-[190px] sm:max-w-[280px]">${message}</span>
+        <button id="btnOmrUndoAction" class="px-2.5 py-1 bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-white font-bold text-xs rounded-xl transition cursor-pointer shrink-0 ml-1">
+            Hoàn tác
+        </button>
+        <button id="btnOmrUndoClose" class="text-slate-400 hover:text-white p-1 text-xs">
+            <i class="fa-solid fa-xmark"></i>
+        </button>
+    `;
+
+    document.body.appendChild(toast);
+
+    const btnUndo = toast.querySelector('#btnOmrUndoAction');
+    const btnClose = toast.querySelector('#btnOmrUndoClose');
+
+    btnUndo?.addEventListener('click', () => {
+        toast.remove();
+        if (typeof onUndo === 'function') onUndo();
+    });
+
+    btnClose?.addEventListener('click', () => {
+        toast.remove();
+    });
+
+    undoToastTimeout = setTimeout(() => {
+        if (toast.parentNode) {
+            toast.style.transition = 'opacity 0.3s ease-out, transform 0.3s ease-out';
+            toast.style.opacity = '0';
+            toast.style.transform = 'translate(-50%, 15px)';
+            setTimeout(() => toast.remove(), 300);
+        }
+    }, 4500);
+}
+
+window.deleteSubmissionDirect = async (subId) => {
+    deleteOmrImageFromDb(subId);
+    const targetIdx = state.submissions.findIndex(s => s.id === subId);
+    if (targetIdx === -1) return;
+    const removedSub = state.submissions[targetIdx];
+    state.submissions.splice(targetIdx, 1);
+
+    if (state.gradedCountsByExam && state.exam?.id) {
+        state.gradedCountsByExam[state.exam.id] = state.submissions.length;
+    }
+
+    if (state.teacherUid) {
+        try { await deleteDoc(doc(db, "omr_submissions", subId)); } catch(e) {}
+        if (removedSub) {
+            const sbdSafe = (removedSub.student_no || removedSub.id || '000').replace(/[^a-zA-Z0-9_-]/g, '');
+            const resId = removedSub.lmsResultId || `omr_${state.exam?.id}_${sbdSafe}`;
+            try { await deleteDoc(doc(db, "results", resId)); } catch(e) {}
+        }
+    }
+
+    saveSubmissionsToLocalSafe(state.exam?.id, state.submissions);
+    window.renderResultsTable();
+    updateOverviewStats();
+    renderInlineSubmissionsList();
+
+    // Thông báo Toast Hoàn tác nổi
+    const stuTitle = removedSub.student_name && !removedSub.student_name.startsWith('Học sinh #') 
+        ? removedSub.student_name 
+        : `SBD ${removedSub.student_no || '---'}`;
+
+    showUndoToast(`Đã xóa bài: ${stuTitle}`, async () => {
+        state.submissions.splice(targetIdx, 0, removedSub);
+        if (removedSub.image_data) {
+            saveOmrImageToDb(removedSub.id, removedSub.image_data);
+        }
+        if (state.teacherUid) {
+            try { await setDoc(doc(db, "omr_submissions", removedSub.id), removedSub); } catch(e) {}
+        }
+        saveSubmissionsToLocalSafe(state.exam?.id, state.submissions);
+        window.renderResultsTable();
+        updateOverviewStats();
+        renderInlineSubmissionsList();
+    });
+};
 }
 window.renderInlineSubmissionsList = renderInlineSubmissionsList;
 
@@ -2352,8 +2585,8 @@ window.quickAssignStudentToSubmission = async (subId) => {
     sub.student_name = formValues.name;
     sub.student_no = formValues.sbd;
     if (formValues.cls) sub.class_name = formValues.cls;
-    sub._headerV25Upgraded = false;
-    await ensureSubmissionStampedHeaderUpgraded(sub);
+    sub._headerV25Upgraded = true;
+    await reStampSubmission(sub);
 
     saveSubmissionsToLocalSafe(state.exam.id, state.submissions);
     if (state.teacherUid) {
@@ -3348,51 +3581,103 @@ function getSheetTransform(tplKey, tpl, outH, outW = 1552) {
     return window.OMR.phepChieu([[pad, pad], [outW - pad, pad], [outW - pad, outH - pad], [pad, outH - pad]], tpl.moc.slice(0, 4).map(m => [m.x, m.y]));
 }
 
+// Phát hiện độ cao các header đã đóng dấu trên ảnh (0, 380, 760, v.v.)
+function detectExistingHeadersOffset(canvasOrImg) {
+    if (!canvasOrImg) return 0;
+    const w = canvasOrImg.width || canvasOrImg.naturalWidth;
+    const h = canvasOrImg.height || canvasOrImg.naturalHeight;
+    if (!w || !h || h < 500) return 0;
+
+    const c = document.createElement('canvas');
+    c.width = Math.min(w, 800);
+    c.height = Math.round(h * (c.width / w));
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(canvasOrImg, 0, 0, c.width, c.height);
+
+    const sampleW = c.width;
+    const sampleH = c.height;
+    const scaleBack = w / sampleW;
+
+    let totalHeaderOffset = 0;
+    let curY = 0;
+
+    // Quét xuống tối đa 45% chiều cao ảnh để phát hiện toàn bộ các dải header xanh ngọc
+    while (curY < sampleH * 0.45) {
+        let foundGreenY = -1;
+        const searchLimit = Math.min(sampleH, curY + Math.max(25, Math.round(sampleH * 0.035)));
+
+        for (let y = Math.round(curY); y < searchLimit; y++) {
+            let greenHits = 0;
+            for (const xr of [0.25, 0.4, 0.5, 0.6, 0.75]) {
+                const px = Math.round(sampleW * xr);
+                const p = ctx.getImageData(px, y, 1, 1).data;
+                // Dải xanh ngọc thương hiệu QMath: R < 55, G trong 115..175, B trong 85..155
+                if (p[0] < 55 && p[1] > 115 && p[1] < 175 && p[2] > 85 && p[2] < 155) {
+                    greenHits++;
+                }
+            }
+            if (greenHits >= 2) {
+                foundGreenY = y;
+                break;
+            }
+        }
+
+        if (foundGreenY !== -1) {
+            // Chuẩn header QMath 380px trên khổ rộng 1552px
+            const headerH = sampleW * (380.0 / 1552.0);
+            totalHeaderOffset = Math.round((foundGreenY + headerH) * scaleBack);
+            curY = foundGreenY + headerH * 0.88;
+        } else {
+            curY += 5;
+        }
+    }
+
+    return totalHeaderOffset;
+}
+
 function cropCandidateHandwrittenName(rectifiedSource, tplKey = null, isStamped = false) {
     if (!rectifiedSource) return Promise.resolve(null);
     const activeKey = tplKey || state.exam?.sheet_template || 'qmcv1239';
-    // Mở rộng và tối ưu tọa độ vùng họ tên viết tay để bao trọn chữ viết tay của học sinh
-    let rect = [645/1653, 455/2339, 430/1653, 85/2339]; // default qmcv1239
+    // Toạ độ dòng 4. Họ và tên thí sinh chuẩn xác trên phiếu QMCV1239 (Khung [16.53, 23.39])
+    let rect = [570/1653, 470/2339, 505/1653, 110/2339]; // default qmcv1239 bao trọn cả nhãn và tên viết tay
     if (activeKey === 'bgd2025original' || activeKey === 'bgd2') rect = [700/1638, 410/2339, 390/1638, 95/2339];
     else if (activeKey === 'phutho') rect = [665/1654, 380/2339, 440/1654, 85/2339];
     else if (activeKey === 'tnmaker40') rect = [1020/2479, 440/1746, 580/2479, 140/1746];
     else if (activeKey === 'qm40') rect = [1120/1735, 75/919, 380/1735, 120/919];
 
-    const headerH = isStamped ? 380 : 0;
-
-    if (rectifiedSource instanceof HTMLCanvasElement) {
-        const canvas = document.createElement('canvas');
-        const sheetH = Math.max(1, rectifiedSource.height - headerH);
-        const sx = rectifiedSource.width * rect[0];
-        const sy = headerH + sheetH * rect[1];
-        const sw = rectifiedSource.width * rect[2];
-        const sh = sheetH * rect[3];
-        canvas.width = Math.max(1, Math.round(sw));
-        canvas.height = Math.max(1, Math.round(sh));
-        canvas.getContext('2d').drawImage(rectifiedSource, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
-        const data = canvas.toDataURL('image/jpeg', 0.88);
-        canvas.width = 1;
-        canvas.height = 1;
-        return Promise.resolve(data);
-    }
-
     return new Promise(resolve => {
-        const img = new Image();
-        img.onload = () => {
+        const processSource = (source) => {
+            const srcW = source.width || source.naturalWidth || 1552;
+            const srcH = source.height || source.naturalHeight || 2200;
+            // Tự động nhận diện và bóc tách mọi header đã đóng dấu để định vị chuẩn mực dòng họ tên trên thân phiếu
+            const headerOffset = detectExistingHeadersOffset(source);
+            const sheetH = Math.max(1, srcH - headerOffset);
+
             const canvas = document.createElement('canvas');
-            const sheetH = Math.max(1, (img.naturalHeight || img.height) - headerH);
-            const sx = (img.naturalWidth || img.width) * rect[0];
-            const sy = headerH + sheetH * rect[1];
-            const sw = (img.naturalWidth || img.width) * rect[2];
-            const sh = sheetH * rect[3];
-            canvas.width = Math.max(1, Math.round(sw));
-            canvas.height = Math.max(1, Math.round(sh));
-            canvas.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+            const sx = Math.round(srcW * rect[0]);
+            const sy = Math.round(headerOffset + sheetH * rect[1]);
+            const sw = Math.round(srcW * rect[2]);
+            const sh = Math.round(sheetH * rect[3]);
+
+            canvas.width = Math.max(1, sw);
+            canvas.height = Math.max(1, sh);
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(source, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
             const data = canvas.toDataURL('image/jpeg', 0.88);
             canvas.width = 1;
             canvas.height = 1;
-            try { img.src = ''; } catch(_) {}
             resolve(data);
+        };
+
+        if (rectifiedSource instanceof HTMLCanvasElement || rectifiedSource instanceof HTMLImageElement) {
+            processSource(rectifiedSource);
+            return;
+        }
+
+        const img = new Image();
+        img.onload = () => {
+            processSource(img);
+            try { img.src = ''; } catch(_) {}
         };
         img.onerror = () => {
             try { img.src = ''; } catch(_) {}
@@ -3615,9 +3900,22 @@ async function displayLastResultInspector(sub, rawResult) {
     document.getElementById('editCodeInput').value = sub.code || '';
     document.getElementById('editStudentNameInput').value = sub.student_name || '';
 
-    // Handwriting Image
+    // Handwriting Image: Cập nhật lại ảnh chữ viết tay nếu chưa có hoặc bản cũ
     const hwImg = document.getElementById('resHandwrittenImg');
     const noHwText = document.getElementById('resNoHandwritingText');
+    if ((!sub.name_image || !sub._nameImageV2) && (sub.stamped_image || sub.image_data)) {
+        cropCandidateHandwrittenName(sub.image_data || sub.stamped_image, sub.template_key).then(cropUrl => {
+            if (cropUrl) {
+                sub.name_image = cropUrl;
+                sub._nameImageV2 = true;
+                if (hwImg && state.lastSubmission?.id === sub.id) {
+                    hwImg.src = cropUrl;
+                    hwImg.classList.remove('hidden');
+                    if (noHwText) noHwText.classList.add('hidden');
+                }
+            }
+        }).catch(()=>{});
+    }
     if (sub.name_image) {
         hwImg.src = sub.name_image;
         hwImg.classList.remove('hidden');
@@ -4486,8 +4784,8 @@ async function ensureSubmissionStampedHeaderUpgraded(sub, forceRestamp = false) 
         return sub.stamped_image || sub.image_data;
     }
 
-    // Nếu cần force restamp (do tên học sinh hoặc lớp được cập nhật)
-    if (forceRestamp || sub._needsRestamp) {
+    // Nếu cần restamp lại (do đổi tên học sinh, lớp, hoặc chưa có _headerV25Upgraded)
+    if (forceRestamp || sub._needsRestamp || !sub._headerV25Upgraded) {
         sub._needsRestamp = false;
         sub._headerV25Upgraded = true;
         const restamped = await reStampSubmission(sub);
@@ -4505,41 +4803,7 @@ async function ensureSubmissionStampedHeaderUpgraded(sub, forceRestamp = false) 
         }
     }
 
-    // Dự phòng nâng cấp header phiếu phiên bản cũ (260px lên 380px)
-    if (!sub.image_data) return sub.stamped_image || null;
-    try {
-        const img = await new Promise((resolve, reject) => {
-            const i = new Image();
-            i.onload = () => resolve(i);
-            i.onerror = () => reject(new Error('Image load error'));
-            i.src = sub.image_data;
-        });
-        if (img.naturalWidth === 1552 && img.naturalHeight > 2250 && img.naturalHeight < 2520) {
-            const oldHeaderH = 260;
-            const bodyH = img.naturalHeight - oldHeaderH;
-            const bodyCanvas = document.createElement('canvas');
-            bodyCanvas.width = img.naturalWidth;
-            bodyCanvas.height = bodyH;
-            bodyCanvas.getContext('2d').drawImage(img, 0, oldHeaderH, img.naturalWidth, bodyH, 0, 0, img.naturalWidth, bodyH);
-            const upgraded = await generateStampedGradedSheet(sub, {
-                rectifiedCanvas: bodyCanvas,
-                onlyHeaderUpgrade: true
-            });
-            if (upgraded) {
-                sub.image_data = upgraded;
-                sub.stamped_image = upgraded;
-                sub._headerV25Upgraded = true;
-                saveOmrImageToDb(sub.id, upgraded);
-                const imgEl = document.getElementById('resRectifiedImg');
-                if (imgEl && state.lastSubmission?.id === sub.id) {
-                    imgEl.src = upgraded;
-                }
-            }
-        } else {
-            sub._headerV25Upgraded = true;
-        }
-    } catch (_) {}
-    return sub.image_data;
+    return sub.stamped_image || sub.image_data || null;
 }
 
 window.downloadGradedSheet = async () => {
@@ -8680,13 +8944,16 @@ async function reStampSubmission(sub) {
         if (isClean) {
             bodyCanvas = img;
         } else {
-            const headerH = img.naturalHeight > 2520 ? 380 : (img.naturalHeight > 2300 ? 260 : 0);
-            const bodyH = img.naturalHeight - headerH;
+            // Tự động phát hiện và bóc tách sạch sẽ toàn bộ các header đã đóng dấu trước đó (dù có 1 hay 2 header)
+            const headerH = detectExistingHeadersOffset(img);
+            const naturalW = img.naturalWidth || img.width;
+            const naturalH = img.naturalHeight || img.height;
+            const bodyH = Math.max(1, naturalH - headerH);
             bodyCanvas = document.createElement('canvas');
-            bodyCanvas.width = img.naturalWidth;
+            bodyCanvas.width = naturalW;
             bodyCanvas.height = bodyH;
             const bCtx = bodyCanvas.getContext('2d');
-            bCtx.drawImage(img, 0, headerH, img.naturalWidth, bodyH, 0, 0, img.naturalWidth, bodyH);
+            bCtx.drawImage(img, 0, headerH, naturalW, bodyH, 0, 0, naturalW, bodyH);
         }
 
         const tplKey = sub.template_key || state.exam?.sheet_template || 'qmcv1239';
@@ -8695,14 +8962,21 @@ async function reStampSubmission(sub) {
             rectifiedCanvas: bodyCanvas,
             template: tpl,
             templateKey: tplKey,
-            onlyHeaderUpgrade: !isClean
+            onlyHeaderUpgrade: true
         });
 
         if (newStamped) {
             sub.image_data = newStamped;
             sub.stamped_image = newStamped;
+            sub._headerV25Upgraded = true;
             saveOmrImageToDb(sub.id, newStamped);
             if (state.memoryImages) state.memoryImages[sub.id] = newStamped;
+
+            // Đồng bộ cập nhật ảnh lên giao diện chi tiết nếu đang mở bài này
+            const imgEl = document.getElementById('resRectifiedImg');
+            if (imgEl && state.lastSubmission?.id === sub.id) {
+                imgEl.src = newStamped;
+            }
         }
         return newStamped;
     } catch(err) {
