@@ -90,6 +90,33 @@ function preloadBrandLogo(url) {
     img.src = url;
 }
 
+async function ensureBrandLogoReady() {
+    if (state.brandLogoElement && state.brandLogoElement.complete && state.brandLogoElement.naturalWidth > 0) {
+        return state.brandLogoElement;
+    }
+    const domLogo = document.getElementById('omrBrandLogoImg') || document.querySelector('.global-logo-img');
+    if (domLogo && domLogo.complete && domLogo.naturalWidth > 0) {
+        try {
+            const testC = document.createElement('canvas');
+            testC.width = 2; testC.height = 2;
+            testC.getContext('2d').drawImage(domLogo, 0, 0, 2, 2);
+            testC.toDataURL();
+            state.brandLogoElement = domLogo;
+            return domLogo;
+        } catch (_) {}
+    }
+    return new Promise((resolve) => {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => {
+            state.brandLogoElement = img;
+            resolve(img);
+        };
+        img.onerror = () => resolve(null);
+        img.src = './apple-touch-icon.png';
+    });
+}
+
 // Preload default Thầy Choang logo immediately
 preloadBrandLogo('./apple-touch-icon.png');
 
@@ -1474,8 +1501,9 @@ async function generateStampedGradedSheet(sub, rawResult) {
     ctx.lineTo(sheetW, headerH);
     ctx.stroke();
 
-    // 2. KHỐI LOGO THẦY CHOANG & THƯƠNG HIỆU WEB (GÓC TRÁI: X: 35 -> 415)
-    const logoX = 35, logoY = 30, logoS = 72, rad = 16;
+    // 2. KHỐI LOGO THẦY CHOANG & THƯƠNG HIỆU WEB (GÓC TRÁI: X: 28 -> 418)
+    const logoImg = await ensureBrandLogoReady();
+    const logoX = 28, logoY = 26, logoS = 84, rad = 18;
     ctx.save();
     ctx.beginPath();
     ctx.moveTo(logoX + rad, logoY);
@@ -1485,14 +1513,14 @@ async function generateStampedGradedSheet(sub, rawResult) {
     ctx.arcTo(logoX, logoY, logoX + logoS, logoY, rad);
     ctx.closePath();
 
-    if (state.brandLogoElement && state.brandLogoElement.complete && state.brandLogoElement.naturalWidth > 0) {
+    if (logoImg && logoImg.complete && logoImg.naturalWidth > 0) {
         ctx.fillStyle = '#ffffff';
         ctx.fill();
         ctx.strokeStyle = '#cbd5e1';
         ctx.lineWidth = 1.5;
         ctx.stroke();
         ctx.clip();
-        ctx.drawImage(state.brandLogoElement, logoX + 2, logoY + 2, logoS - 4, logoS - 4);
+        ctx.drawImage(logoImg, logoX + 2, logoY + 2, logoS - 4, logoS - 4);
     } else {
         const logoGrad = ctx.createLinearGradient(logoX, logoY, logoX + logoS, logoY + logoS);
         logoGrad.addColorStop(0, '#059669');
@@ -1512,15 +1540,15 @@ async function generateStampedGradedSheet(sub, rawResult) {
     ctx.textBaseline = 'alphabetic';
     ctx.fillStyle = '#0f172a';
     ctx.font = 'bold 21px "Segoe UI", Arial, sans-serif';
-    ctx.fillText('TOÁN THẦY CHOANG', logoX + logoS + 16, logoY + 28);
+    ctx.fillText('TOÁN THẦY CHOANG', logoX + logoS + 14, logoY + 32);
 
     ctx.fillStyle = '#059669';
     ctx.font = 'bold 12px "Segoe UI", Arial, sans-serif';
-    ctx.fillText('HỆ THỐNG CHẤM THI OMR · QMATH LMS', logoX + logoS + 16, logoY + 48);
+    ctx.fillText('HỆ THỐNG CHẤM THI OMR · QMATH LMS', logoX + logoS + 14, logoY + 53);
 
     ctx.fillStyle = '#64748b';
     ctx.font = '11px "Segoe UI", Arial, sans-serif';
-    ctx.fillText('Luyện thi Toán tư duy & Khảo thí (qmath.io.vn)', logoX + logoS + 16, logoY + 66);
+    ctx.fillText('Luyện thi Toán tư duy & Khảo thí (qmath.io.vn)', logoX + logoS + 14, logoY + 72);
 
     // 3. KHUNG THÔNG TIN THÍ SINH & ĐỀ THI (GIỮA: X: 430 -> 1060)
     const cardX = 430, cardY = 22, cardW = 620, cardH = 216;
