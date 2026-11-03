@@ -120,7 +120,13 @@
       }
     }
     if(!bestRefined)return null;
-    return {refined:bestRefined,corners:bestCorners,length:4};
+    return {
+      refined: bestRefined,
+      corners: bestCorners,
+      origCorners: bestCorners ? bestCorners.map(b => [b.x * small.k, b.y * small.k]) : null,
+      smallK: small.k,
+      length: 4
+    };
   };
   window.readQMSheet=function(gray,tpl=MAU.qm40,guideHints=null){
     const found=window.findQMCorners(gray,tpl,guideHints);

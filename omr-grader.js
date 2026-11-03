@@ -1809,7 +1809,7 @@ async function processSingleSheet(source, options = {}) {
     // Crop candidate handwriting name (synchronously from rectifiedCanvas if available)
     let nameImg = null;
     if (rawResult.rectifiedCanvas || rawResult.rectifiedImage) {
-        nameImg = await cropCandidateHandwrittenName(rawResult.rectifiedCanvas || rawResult.rectifiedImage);
+        nameImg = await cropCandidateHandwrittenName(rawResult.rectifiedCanvas || rawResult.rectifiedImage, rawResult.templateKey);
     }
 
     // Match student name from SBD
@@ -1850,11 +1850,18 @@ async function processSingleSheet(source, options = {}) {
         _original_part2: rawResult.part2,
         _original_part3: rawResult.part3Text || rawResult.part3,
         flags: rawResult.uncertain || [],
+        template_key: rawResult.templateKey || state.exam?.sheet_template || 'qmcv1239',
+        p3m: rawResult.p3m || null,
         clean_image: rawResult.rectifiedImage || '',
         image_data: rawResult.rectifiedImage,
         name_image: nameImg,
         createdAt: new Date().toISOString()
     };
+
+    // Lưu ảnh nắn phẳng sạch vào IndexedDB để tái đóng dấu chính xác khi cập nhật đáp án
+    if (rawResult.rectifiedImage) {
+        saveOmrImageToDb(submission.id + '_clean', rawResult.rectifiedImage);
+    }
 
     // Tự động làm phẳng phiếu và đóng dấu điểm số trang nhã kèm Logo QMath LMS
     try {
@@ -1894,21 +1901,19 @@ async function processSingleSheet(source, options = {}) {
 const TEMPLATE_SPECS = {
     qmcv1239: { maxP1: 40, maxP2: 8, maxP3: 6, name: 'QM 2025 - CV 1239' },
     bgd2025original: { maxP1: 40, maxP2: 8, maxP3: 6, name: 'BGD 2025 Gốc' },
+    bgd2: { maxP1: 40, maxP2: 8, maxP3: 6, name: 'BGD 2025 (Mẫu 2)' },
+    phutho: { maxP1: 50, maxP2: 10, maxP3: 12, name: 'HSG Phú Thọ' },
     tnmaker40: { maxP1: 40, maxP2: 0, maxP3: 0, name: 'TNMaker 40 câu ngang' },
-    qm_sheet: { maxP1: 40, maxP2: 0, maxP3: 0, name: 'QM 40 câu dọc' },
-    phutho: { maxP1: 50, maxP2: 10, maxP3: 12, name: 'HSG Phú Thọ' }
+    qm40: { maxP1: 40, maxP2: 0, maxP3: 0, name: 'QM 40 câu ngang' },
+    nk1846: { maxP1: 18, maxP2: 4, maxP3: 6, name: 'Phiếu 18-4-6' }
 };
 
 function getCompatibleTemplatesForExam(exam) {
-    const p1Count = exam?.question_count || 12;
-    const p2Count = exam?.part2_count || 0;
-    const p3Count = exam?.part3_count || 0;
     const active = exam?.sheet_template || 'qmcv1239';
-
+    const allKnown = ['qmcv1239', 'bgd2025original', 'tnmaker40', 'phutho', 'bgd2', 'qm40', 'nk1846'];
     const candidates = [active];
-    for (const [key, spec] of Object.entries(TEMPLATE_SPECS)) {
-        if (key === active) continue;
-        if (spec.maxP1 >= p1Count && spec.maxP2 >= p2Count && spec.maxP3 >= p3Count) {
+    for (const key of allKnown) {
+        if (!candidates.includes(key) && window.MAU && window.MAU[key]) {
             candidates.push(key);
         }
     }
@@ -1918,35 +1923,59 @@ function getCompatibleTemplatesForExam(exam) {
 function recognizeSheetFromGray(gray, options = {}) {
     const candidateKeys = getCompatibleTemplatesForExam(state.exam);
     const guideHints = options.guideHints || null;
+    const activeTpl = state.exam?.sheet_template || 'qmcv1239';
 
     let bestResult = null;
     let matchedTplKey = null;
+    let bestScore = -1e9;
     let lastErr = null;
 
-    // Duyệt qua danh sách các mẫu phiếu tương thích với cấu hình đề thi
+    // Duyệt qua tất cả các mẫu phiếu tương thích và so sánh độ khớp (confidence score)
     for (const tplKey of candidateKeys) {
-        const tpl = (window.MAU && window.MAU[tplKey]) ? window.MAU[tplKey] : window.MAU.qmcv1239;
+        const tpl = (window.MAU && window.MAU[tplKey]) || null;
         if (!tpl) continue;
 
         try {
             let result = null;
-            if (options.preFound && options.preFound.refined) {
-                const { refined } = options.preFound;
-                result = window.OMR.docPhieu(gray, refined.H, tpl, refined.den);
-                result.H = refined.H;
-                result.soMoc = refined.soMoc;
+            if (options.preFound && options.preFound.origCorners && options.preFound.origCorners.length === 4) {
+                // Tái tính toán Homography H chính xác theo toạ độ mốc góc (tpl.moc) của RIÊNG mẫu phiếu này!
+                const origCorners = options.preFound.origCorners;
+                const H = window.OMR.phepChieu(tpl.moc.slice(0, 4).map(m => [m.x, m.y]), origCorners);
+                if (H) {
+                    const refined = window.OMR.tinhChinh(gray, H, tpl);
+                    if (refined && refined.soMoc >= Math.max(4, Math.floor((tpl.moc.length || 10) * 0.35))) {
+                        result = window.OMR.docPhieu(gray, refined.H, tpl, refined.den);
+                        result.H = refined.H;
+                        result.soMoc = refined.soMoc;
+                    }
+                }
             } else if (['qm40', 'bgd2025original', 'phutho', 'tnmaker40', 'qmcv1239'].includes(tplKey) && window.readQMSheet) {
                 result = window.readQMSheet(gray, tpl, guideHints);
-            } else {
+            } else if (window.OMR && window.OMR.docAnh) {
                 result = window.OMR.docAnh(gray, tpl, window.OMR.thuNho(gray, 900));
             }
 
-            if (result && (result.soMoc >= 3 || (result.den && result.den.length >= 3) || result.H)) {
-                const hasAnswers = (result.p1 && result.p1.replace(/\*/g, '').length > 0) || (result.sbd && result.sbd.length > 0) || (result.made && result.made.length > 0);
-                if (hasAnswers || !bestResult) {
+            if (result && (result.soMoc >= 4 || result.H)) {
+                const totalMoc = (tpl.moc && tpl.moc.length) ? tpl.moc.length : 12;
+                const soMoc = result.soMoc || 0;
+                const mocRatio = soMoc / totalMoc;
+                const sbdDigits = (result.sbd || '').replace(/\D/g, '').length;
+                const codeDigits = (result.made || '').replace(/\D/g, '').length;
+                const ansCount = (result.p1 || '').replace(/[\*\?]/g, '').length;
+
+                // Tính điểm độ khớp chính xác
+                let score = mocRatio * 150;
+                if (mocRatio >= 0.70) score += 60;
+                if (mocRatio < 0.35) score -= 80;
+                if (codeDigits >= 3) score += 35;
+                if (sbdDigits >= 3) score += 25;
+                if (ansCount >= 3) score += 20;
+                if (tplKey === activeTpl) score += 15; // Ưu tiên nhẹ mẫu đang chọn nếu 2 mẫu ngang điểm
+
+                if (score > bestScore) {
+                    bestScore = score;
                     bestResult = result;
                     matchedTplKey = tplKey;
-                    if (hasAnswers) break; // Khớp thành công mẫu phiếu này
                 }
             }
         } catch(err) {
@@ -1954,11 +1983,11 @@ function recognizeSheetFromGray(gray, options = {}) {
         }
     }
 
-    if (!bestResult) {
+    if (!bestResult || bestScore < 30) {
         throw (lastErr || new Error("Không nhận diện được đủ 4 mốc đen góc phiếu trên các mẫu phiếu tương thích!"));
     }
 
-    const tplKey = matchedTplKey || state.exam?.sheet_template || 'qmcv1239';
+    const tplKey = matchedTplKey || activeTpl;
     const tpl = (window.MAU && window.MAU[tplKey]) ? window.MAU[tplKey] : window.MAU.qmcv1239;
 
     // Fast perspective rectification với mẫu phiếu đã khớp
@@ -2085,30 +2114,34 @@ function recognizeSheetWithOMR(source, options = {}) {
 }
 
 function getSheetHeight(tplKey, tpl, baseW = 1552) {
+    if (tpl?.khung && tpl.khung[2] > 0) {
+        const kw = tpl.khung[2] - (tpl.khung[0] || 0);
+        const kh = tpl.khung[3] - (tpl.khung[1] || 0);
+        return Math.round(baseW * kh / kw);
+    }
     if (tplKey === 'tnmaker40') return Math.round(baseW * 1746 / 2479);
     if (tplKey === 'qm40') return Math.round(baseW * 919 / 1735);
-    if (['bgd2025original', 'phutho', 'qmcv1239'].includes(tplKey) && tpl?.khung) {
-        return Math.round(baseW * tpl.khung[3] / tpl.khung[2]);
-    }
     return Math.round(baseW * 2254 / 1552);
 }
 
 function getSheetTransform(tplKey, tpl, outH, outW = 1552) {
-    if (['bgd2025original', 'phutho', 'qmcv1239', 'tnmaker40', 'qm40'].includes(tplKey) && tpl?.khung) {
+    if (tpl?.khung) {
         const k = tpl.khung;
-        return window.OMR.phepChieu([[0, 0], [outW, 0], [outW, outH], [0, outH]], [[k[0], k[1]], [k[2], k[1]], [k[2], k[3]], [k[0], k[3]]]);
+        const kx0 = k[0] || 0, ky0 = k[1] || 0;
+        const kx1 = k[2], ky1 = k[3];
+        return window.OMR.phepChieu([[0, 0], [outW, 0], [outW, outH], [0, outH]], [[kx0, ky0], [kx1, ky0], [kx1, ky1], [kx0, ky1]]);
     }
     const pad = Math.round(50 * outW / 1552);
     return window.OMR.phepChieu([[pad, pad], [outW - pad, pad], [outW - pad, outH - pad], [pad, outH - pad]], tpl.moc.slice(0, 4).map(m => [m.x, m.y]));
 }
 
-function cropCandidateHandwrittenName(rectifiedSource) {
-    const tplKey = state.exam?.sheet_template || 'qmcv1239';
+function cropCandidateHandwrittenName(rectifiedSource, tplKey = null) {
+    const activeKey = tplKey || state.exam?.sheet_template || 'qmcv1239';
     let rect = [670/1653, 480/2339, 385/1653, 54/2339]; // default qmcv1239
-    if (tplKey === 'bgd2025original') rect = [708/1638, 419/2339, 363/1638, 82/2339];
-    else if (tplKey === 'phutho') rect = [676/1654, 391/2339, 420/1654, 65/2339];
-    else if (tplKey === 'tnmaker40') rect = [1028/2479, 446/1746, 561/2479, 126/1746];
-    else if (tplKey === 'qm40') rect = [1132/1735, 82/919, 357/1735, 101/919];
+    if (activeKey === 'bgd2025original' || activeKey === 'bgd2') rect = [708/1638, 419/2339, 363/1638, 82/2339];
+    else if (activeKey === 'phutho') rect = [676/1654, 391/2339, 420/1654, 65/2339];
+    else if (activeKey === 'tnmaker40') rect = [1028/2479, 446/1746, 561/2479, 126/1746];
+    else if (activeKey === 'qm40') rect = [1132/1735, 82/919, 357/1735, 101/919];
 
     if (rectifiedSource instanceof HTMLCanvasElement) {
         const canvas = document.createElement('canvas');
@@ -2403,9 +2436,9 @@ async function displayLastResultInspector(sub, rawResult) {
 // ========================================================
 async function generateStampedGradedSheet(sub, rawResult) {
     if (!rawResult || (!rawResult.rectifiedCanvas && !rawResult.rectifiedImage)) return null;
-    const tplKey = state.exam?.sheet_template || 'qmcv1239';
-    const tpl = rawResult.template || (window.MAU && window.MAU[tplKey]) || window.MAU.qmcv1239;
-    if (!tpl) return rawResult.rectifiedImage;
+    const tplKey = sub?.template_key || rawResult?.templateKey || state.exam?.sheet_template || 'qmcv1239';
+    const tpl = rawResult?.template || (window.MAU && window.MAU[tplKey]) || window.MAU.qmcv1239;
+    if (!tpl) return rawResult?.rectifiedImage || null;
 
     // Dùng trực tiếp rectifiedCanvas trong bộ nhớ để bỏ qua độ trễ giải mã ảnh base64
     const rectImg = rawResult.rectifiedCanvas || await new Promise((resolve, reject) => {
@@ -2697,13 +2730,17 @@ async function generateStampedGradedSheet(sub, rawResult) {
     // 7. VẼ ĐÁNH DẤU CHI TIẾT TRỰC TIẾP CẢ 3 PHẦN LÊN ẢNH (Vòng tròn đậm rõ hơn)
     const key = resolveKeyForCode(sub.code);
     const kFrame = tpl.khung || [0, 0, 16.53, 23.39];
-    const scaleX = sheetW / kFrame[2];
-    const scaleY = sheetH / kFrame[3];
+    const kx0 = kFrame[0] || 0;
+    const ky0 = kFrame[1] || 0;
+    const kw = (kFrame[2] || 16.53) - kx0;
+    const kh = (kFrame[3] || 23.39) - ky0;
+    const scaleX = sheetW / kw;
+    const scaleY = sheetH / kh;
 
     const drawRingOnCanvas = (pt, color, lineW = 4.5, r = 15, dashed = false) => {
         if (!pt) return;
-        const cx = pt[0] * scaleX;
-        const cy = pt[1] * scaleY + headerH;
+        const cx = (pt[0] - kx0) * scaleX;
+        const cy = (pt[1] - ky0) * scaleY + headerH;
         ctx.save();
         ctx.strokeStyle = color;
         ctx.lineWidth = lineW;
@@ -3112,6 +3149,8 @@ window.recalcAndSaveEdit = async () => {
         } catch(e) {
             console.warn("Lỗi cập nhật ảnh đóng dấu:", e);
         }
+    } else {
+        await reStampSubmission(state.lastSubmission);
     }
 
     displayLastResultInspector(state.lastSubmission, state.lastRawResult);
@@ -3576,6 +3615,11 @@ function startAutoScanLoop() {
             let found = null;
             if (window.findQMCorners) {
                 found = window.findQMCorners(gray, tpl, info.guideHints);
+                // Nếu chưa tìm thấy theo mẫu đang chọn, tự động thử các mẫu phiếu phổ biến khác (TNMaker, BGD...)
+                if (!found && window.MAU) {
+                    if (window.MAU.tnmaker40) found = window.findQMCorners(gray, window.MAU.tnmaker40, info.guideHints);
+                    if (!found && window.MAU.bgd2025original) found = window.findQMCorners(gray, window.MAU.bgd2025original, info.guideHints);
+                }
             }
 
             if (found && found.corners && found.corners.length === 4) {
@@ -4243,8 +4287,10 @@ window.viewSubmissionDetail = async (subId) => {
     }
 
     // Hiển thị chi tiết bài chấm
+    const tplKey = sub.template_key || state.exam?.sheet_template || 'qmcv1239';
     await displayLastResultInspector(sub, {
-        template: (window.MAU && window.MAU[state.exam.sheet_template]) || window.MAU.qmcv1239,
+        template: (window.MAU && window.MAU[tplKey]) || window.MAU.qmcv1239,
+        templateKey: tplKey,
         part1: sub.answers,
         code: sub.code
     });
@@ -6624,9 +6670,16 @@ window.calcExamScorePreview = (mode = 'create') => {
 // ========================================================
 async function reStampSubmission(sub) {
     if (!sub) return null;
-    let baseImgSrc = sub.clean_image || sub.stamped_image || sub.image_data;
+    let baseImgSrc = sub.clean_image;
     if (!baseImgSrc && sub.id) {
-        baseImgSrc = await getOmrImageFromDb(sub.id);
+        baseImgSrc = await getOmrImageFromDb(sub.id + '_clean');
+        if (baseImgSrc) sub.clean_image = baseImgSrc;
+    }
+    if (!baseImgSrc) {
+        baseImgSrc = sub.stamped_image || sub.image_data;
+        if (!baseImgSrc && sub.id) {
+            baseImgSrc = await getOmrImageFromDb(sub.id);
+        }
     }
     if (!baseImgSrc) return null;
 
@@ -6651,11 +6704,12 @@ async function reStampSubmission(sub) {
             bCtx.drawImage(img, 0, headerH, img.naturalWidth, bodyH, 0, 0, img.naturalWidth, bodyH);
         }
 
-        const tplKey = state.exam?.sheet_template || 'qmcv1239';
+        const tplKey = sub.template_key || state.exam?.sheet_template || 'qmcv1239';
         const tpl = (window.MAU && window.MAU[tplKey]) || window.MAU.qmcv1239;
         const newStamped = await generateStampedGradedSheet(sub, {
             rectifiedCanvas: bodyCanvas,
-            template: tpl
+            template: tpl,
+            templateKey: tplKey
         });
 
         if (newStamped) {
