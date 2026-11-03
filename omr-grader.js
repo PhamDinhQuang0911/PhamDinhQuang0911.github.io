@@ -4344,21 +4344,18 @@ window.loadCodeKeyInputs = (code) => {
             const currentAns = (key.answers || '')[i] || '-';
             const isBonus = !!(bonusP1[i] || bonusP1[String(i)]);
             return `
-                <div class="p-2 bg-slate-50 dark:bg-slate-900 rounded-xl border ${isBonus ? 'border-amber-400 bg-amber-50/40 dark:bg-amber-950/20' : 'border-slate-200 dark:border-slate-700'} space-y-1">
-                    <div class="flex items-center justify-between gap-1">
-                        <span class="font-bold text-slate-500 text-[11px] shrink-0">Câu ${i + 1}</span>
-                        <select data-p1="${i}" class="px-1.5 py-0.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 font-bold text-emerald-600 outline-none text-xs w-12 text-center">
+                <div class="px-2 py-1.5 bg-slate-50 dark:bg-slate-900 rounded-xl border ${isBonus ? 'border-amber-400 bg-amber-50/50 dark:bg-amber-950/30' : 'border-slate-200 dark:border-slate-700'} flex items-center justify-between gap-1 transition-colors">
+                    <span class="font-bold text-slate-600 dark:text-slate-300 text-xs shrink-0 whitespace-nowrap">Câu ${i + 1}</span>
+                    <div class="flex items-center gap-1.5 shrink-0">
+                        <select data-p1="${i}" class="px-1.5 py-0.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 font-bold text-emerald-600 dark:text-emerald-400 outline-none text-xs w-11 text-center cursor-pointer">
                             <option value="-" ${currentAns==='-'?'selected':''}>-</option>
                             <option value="A" ${currentAns==='A'?'selected':''}>A</option>
                             <option value="B" ${currentAns==='B'?'selected':''}>B</option>
                             <option value="C" ${currentAns==='C'?'selected':''}>C</option>
                             <option value="D" ${currentAns==='D'?'selected':''}>D</option>
                         </select>
+                        <input type="checkbox" data-bonus-p1="${i}" ${isBonus ? 'checked' : ''} onchange="this.closest('.rounded-xl').classList.toggle('border-amber-400', this.checked); this.closest('.rounded-xl').classList.toggle('bg-amber-50/50', this.checked)" title="Tích chọn để luôn cho điểm câu này (phòng khi đề sai/lỗi)" class="rounded text-amber-500 w-4 h-4 border-slate-300 dark:border-slate-600 focus:ring-0 cursor-pointer shrink-0">
                     </div>
-                    <label class="flex items-center gap-1 cursor-pointer select-none" title="Cho điểm tất cả HS câu này">
-                        <input type="checkbox" data-bonus-p1="${i}" ${isBonus ? 'checked' : ''} onchange="this.closest('[class*=p-2]').classList.toggle('border-amber-400', this.checked); this.closest('[class*=p-2]').classList.toggle('bg-amber-50/40', this.checked)" class="rounded text-amber-500 w-3 h-3 border-slate-300 focus:ring-0">
-                        <span class="text-[10px] font-bold ${isBonus ? 'text-amber-600' : 'text-slate-400'}">🎁 Cho điểm</span>
-                    </label>
                 </div>
             `;
         }).join('');
@@ -4421,6 +4418,18 @@ window.loadCodeKeyInputs = (code) => {
 };
 
 
+
+window.selectP2Btn = (btn, q, r, val) => {
+    const parent = btn.parentElement;
+    if (!parent) return;
+    parent.querySelectorAll('.p2-btn').forEach(b => {
+        b.className = "p2-btn px-2.5 py-0.5 rounded text-xs font-bold border transition-all bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-600";
+    });
+    btn.className = val === 'Đ' 
+        ? "p2-btn px-2.5 py-0.5 rounded text-xs font-bold border transition-all bg-emerald-600 text-white border-emerald-600"
+        : "p2-btn px-2.5 py-0.5 rounded text-xs font-bold border transition-all bg-rose-600 text-white border-rose-600";
+    btn.dataset.val = val;
+};
 window.applyBulkKey = () => {
     const text = document.getElementById('bulkKeyInput')?.value || '';
     if (!text) return;
