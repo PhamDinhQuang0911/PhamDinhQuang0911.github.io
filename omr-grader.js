@@ -125,16 +125,24 @@ window.switchTab = (tabName) => {
         if (v) v.classList.toggle('hidden', t !== tabName);
         if (btn) {
             if (t === tabName) {
-                btn.className = "tab-btn px-3 sm:px-4 py-3 font-bold text-xs sm:text-sm border-b-2 border-emerald-600 text-emerald-600 dark:text-emerald-400 dark:border-emerald-400 transition-all flex items-center gap-2 shrink-0";
+                btn.className = "tab-btn w-full px-3 py-2.5 rounded-xl font-bold text-xs flex items-center justify-between transition-all cursor-pointer bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300";
             } else {
-                btn.className = "tab-btn px-3 sm:px-4 py-3 font-bold text-xs sm:text-sm border-b-2 border-transparent text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 transition-all flex items-center gap-2 shrink-0";
+                btn.className = "tab-btn w-full px-3 py-2.5 rounded-xl font-bold text-xs flex items-center justify-between text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800/70 transition-all cursor-pointer";
             }
         }
     });
 
-    if (tabName === 'scan') {
-        // If switching away from camera, ensure camera is stopped
-    } else {
+    // Update mobile pill navigation buttons
+    document.querySelectorAll('[data-mobile-tab]').forEach(mBtn => {
+        const mTab = mBtn.getAttribute('data-mobile-tab');
+        if (mTab === tabName) {
+            mBtn.className = "mobile-tab-btn px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 shrink-0 bg-emerald-600 text-white shadow-2xs cursor-pointer";
+        } else {
+            mBtn.className = "mobile-tab-btn px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 shrink-0 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 cursor-pointer";
+        }
+    });
+
+    if (tabName !== 'scan') {
         window.stopCameraStream();
     }
 
@@ -498,11 +506,24 @@ function updateActiveExamBanner() {
     const titleEl = document.getElementById('activeExamName');
     const badgeEl = document.getElementById('activeExamTemplateBadge');
     const classBadgeEl = document.getElementById('activeExamClassBadge');
+    const sidebarTitleEl = document.getElementById('sidebarActiveExamTitle');
+    const sidebarMetaEl = document.getElementById('sidebarActiveExamMeta');
+    const mobileTitleEl = document.getElementById('mobileActiveExamName');
 
-    if (titleEl) titleEl.textContent = exam.name + (exam.isLmsExam ? ' (Kho đề LMS)' : '');
+    const displayTitle = exam.name + (exam.isLmsExam ? ' (Kho đề LMS)' : '');
+    const structSummary = `${exam.question_count || 12} TN · ${exam.part2_count || 4} Đ/S · ${exam.part3_count || 6} TLN`;
+
+    if (titleEl) titleEl.textContent = displayTitle;
+    if (sidebarTitleEl) sidebarTitleEl.textContent = displayTitle;
+    if (mobileTitleEl) mobileTitleEl.textContent = displayTitle + (exam.className ? ` · Lớp ${exam.className}` : '');
+    if (sidebarMetaEl) {
+        sidebarMetaEl.textContent = `${structSummary}${exam.className ? ` · Lớp ${exam.className}` : ''}`;
+    }
+
     if (badgeEl) {
         const tplName = (window.MAU && window.MAU[exam.sheet_template]) ? window.MAU[exam.sheet_template].ten : exam.sheet_template;
-        badgeEl.textContent = `${exam.question_count || 12} TN · ${exam.part2_count || 4} Đ/S · ${exam.part3_count || 6} TLN · ${tplName || 'CV 1239'}`;
+        badgeEl.textContent = `${structSummary} · ${tplName || 'CV 1239'}`;
+        badgeEl.classList.remove('hidden');
     }
     if (classBadgeEl) {
         if (exam.className) {
@@ -560,6 +581,9 @@ function updateOverviewStats() {
     const badge = document.getElementById('resultsCountBadge');
     if (badge) badge.textContent = totalSub;
 
+    const stuBadge = document.getElementById('studentsCountBadge');
+    if (stuBadge) stuBadge.textContent = state.students.length;
+
     const elSub = document.getElementById('statTotalSubmissions');
     const elAvg = document.getElementById('statAvgScore');
     const elMax = document.getElementById('statMaxScore');
@@ -608,14 +632,11 @@ function updateOverviewStats() {
 }
 
 // ========================================================
-// 4. OMR SCANNING & RECOGNITION CORE ENGINE
+// 4. OMR SCANNING & RECOGNITION CORE ENGINE (CAMERA + MULTI-IMAGE + ZIP)
 // ========================================================
 window.setScanMode = (mode) => {
     const isUpload = mode === 'upload';
-    const uploadArea = document.getElementById('scanUploadArea');
     const cameraArea = document.getElementById('scanCameraArea');
-    const btnUpload = document.getElementById('btnModeUpload');
-    const btnCamera = document.getElementById('btnModeCamera');
 
     if (isUpload) {
         window.closeCameraScanner();
@@ -624,16 +645,110 @@ window.setScanMode = (mode) => {
             Swal.fire('Lưu ý', 'Vui lòng chọn hoặc tạo bài thi trước khi quét camera!', 'warning');
             return;
         }
-        if (uploadArea) uploadArea.classList.add('hidden');
         if (cameraArea) {
             cameraArea.classList.remove('hidden');
             document.body.style.overflow = 'hidden';
         }
-        if (btnUpload) btnUpload.className = "px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all text-slate-500 hover:text-slate-800 dark:text-slate-400";
-        if (btnCamera) btnCamera.className = "px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all bg-white dark:bg-slate-800 text-emerald-600 shadow-xs";
         window.startCameraStream();
     }
 };
+
+window.triggerImageFilePicker = (e) => {
+    if (e) e.stopPropagation();
+    const input = document.getElementById('filePickerInput');
+    if (input) {
+        input.value = '';
+        input.click();
+    }
+};
+
+window.triggerZipFilePicker = (e) => {
+    if (e) e.stopPropagation();
+    const input = document.getElementById('zipPickerInput') || document.getElementById('filePickerInput');
+    if (input) {
+        input.value = '';
+        input.click();
+    }
+};
+
+function initUploadDropZone() {
+    const dropZone = document.getElementById('dropZone');
+    if (!dropZone || dropZone._boundDrag) return;
+    dropZone._boundDrag = true;
+
+    ['dragenter', 'dragover'].forEach(evtName => {
+        dropZone.addEventListener(evtName, (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dropZone.classList.add('drag-over');
+        });
+    });
+
+    ['dragleave', 'dragend'].forEach(evtName => {
+        dropZone.addEventListener(evtName, (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dropZone.classList.remove('drag-over');
+        });
+    });
+
+    dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropZone.classList.remove('drag-over');
+        const dtFiles = e.dataTransfer?.files;
+        if (dtFiles && dtFiles.length > 0) {
+            window.handleFilesSelected(dtFiles);
+        }
+    });
+}
+
+// Khởi tạo vùng kéo thả ảnh / ZIP ngay khi DOM sẵn sàng
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initUploadDropZone);
+} else {
+    initUploadDropZone();
+}
+
+async function extractImagesFromFilesOrZips(rawFiles, onStatus) {
+    const imageItems = [];
+    const imgExtRegex = /\.(jpe?g|png|webp|bmp)$/i;
+
+    for (const file of rawFiles) {
+        const nameLower = (file.name || '').toLowerCase();
+        const isZip = nameLower.endsWith('.zip') || (file.type && file.type.includes('zip'));
+
+        if (isZip) {
+            if (!window.JSZip) {
+                throw new Error('Thư viện giải nén JSZip chưa sẵn sàng. Vui lòng kiểm tra kết nối mạng và tải lại trang!');
+            }
+            if (onStatus) onStatus(`Đang giải nén file: ${file.name}...`);
+            const zip = await window.JSZip.loadAsync(file);
+            const entries = [];
+            zip.forEach((relPath, zipEntry) => {
+                if (zipEntry.dir) return;
+                if (relPath.includes('__MACOSX') || relPath.startsWith('.') || /\/\./.test(relPath)) return;
+                if (imgExtRegex.test(relPath)) {
+                    entries.push(zipEntry);
+                }
+            });
+
+            entries.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+
+            for (const entry of entries) {
+                const blob = await entry.async('blob');
+                const shortName = entry.name.split('/').pop() || entry.name;
+                const ext = (shortName.split('.').pop() || 'jpg').toLowerCase();
+                const mime = ext === 'png' ? 'image/png' : (ext === 'webp' ? 'image/webp' : 'image/jpeg');
+                const imgFile = new File([blob], shortName, { type: mime });
+                imageItems.push(imgFile);
+            }
+        } else if ((file.type && file.type.startsWith('image/')) || imgExtRegex.test(nameLower)) {
+            imageItems.push(file);
+        }
+    }
+    return imageItems;
+}
 
 window.handleFilesSelected = async (files) => {
     if (!files || files.length === 0) return;
@@ -642,56 +757,135 @@ window.handleFilesSelected = async (files) => {
         return;
     }
 
-    const fileList = Array.from(files);
+    const rawList = Array.from(files);
     const progressCard = document.getElementById('batchProgressBar');
     const progressFill = document.getElementById('batchProgressFill');
     const progressLabel = document.getElementById('batchProgressLabel');
     const progressPercent = document.getElementById('batchProgressPercent');
+    const logContainer = document.getElementById('batchUploadResultsList');
 
-    if (fileList.length > 1) {
-        progressCard.classList.remove('hidden');
+    if (progressCard) progressCard.classList.remove('hidden');
+    if (logContainer) logContainer.innerHTML = '';
+    if (progressFill) progressFill.style.width = '5%';
+    if (progressPercent) progressPercent.textContent = 'Chuẩn bị...';
+    if (progressLabel) {
+        progressLabel.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Đang kiểm tra tệp tải lên...`;
+    }
+
+    let fileList = [];
+    try {
+        fileList = await extractImagesFromFilesOrZips(rawList, (msg) => {
+            if (progressLabel) progressLabel.innerHTML = `<i class="fa-solid fa-file-zipper fa-bounce"></i> ${msg}`;
+        });
+    } catch (zipErr) {
+        Swal.fire('Lỗi đọc file nén (.ZIP)', zipErr.message || 'Không thể giải nén file .zip này.', 'error');
+        if (progressCard) progressCard.classList.add('hidden');
+        return;
+    }
+
+    if (fileList.length === 0) {
+        if (progressCard) progressCard.classList.add('hidden');
+        Swal.fire('Không tìm thấy ảnh hợp lệ', 'Vui lòng chọn file ảnh (.JPG, .PNG, .WebP) hoặc file .ZIP có chứa ảnh phiếu trả lời trắc nghiệm.', 'warning');
+        return;
     }
 
     let successCount = 0;
     let failCount = 0;
+    let lastErrorMsg = '';
 
     for (let i = 0; i < fileList.length; i++) {
         const file = fileList[i];
-        if (progressPercent) progressPercent.textContent = `${i + 1}/${fileList.length} (${Math.round((i + 1) / fileList.length * 100)}%)`;
-        if (progressFill) progressFill.style.width = `${Math.round((i + 1) / fileList.length * 100)}%`;
-        if (progressLabel) progressLabel.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Đang chấm ảnh: ${file.name}`;
+        const pct = Math.round(((i + 1) / fileList.length) * 100);
+        if (progressPercent) progressPercent.textContent = `${i + 1}/${fileList.length} (${pct}%)`;
+        if (progressFill) progressFill.style.width = `${pct}%`;
+        if (progressLabel) {
+            progressLabel.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Đang chấm (${i + 1}/${fileList.length}): <span class="font-mono">${file.name}</span>`;
+        }
+
+        // Nhường 1 nhịp UI để thanh tiến trình và danh sách cập nhật mượt mà
+        await new Promise(r => setTimeout(r, 15));
 
         try {
-            await processSingleSheet(file);
+            const sub = await processSingleSheet(file, { isUploadedFile: true });
             successCount++;
+            if (logContainer && sub) {
+                const row = document.createElement('div');
+                row.className = 'py-2 flex items-center justify-between gap-2';
+                row.innerHTML = `
+                    <div class="flex items-center gap-2 min-w-0">
+                        <span class="w-5 h-5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-600 flex items-center justify-center text-[10px] font-bold shrink-0"><i class="fa-solid fa-check"></i></span>
+                        <span class="font-semibold text-slate-700 dark:text-slate-200 truncate">${file.name}</span>
+                        <span class="text-slate-400 font-mono text-[11px] shrink-0">SBD: ${sub.student_no || '---'} · Mã: ${sub.code || '---'}</span>
+                    </div>
+                    <div class="flex items-center gap-2 shrink-0">
+                        <span class="font-black text-emerald-600 dark:text-emerald-400 font-mono">${Number(sub.score).toFixed(2)}đ</span>
+                        <button type="button" onclick="window.viewSubmissionDetail('${sub.id}')" class="px-2 py-0.5 rounded bg-slate-200/80 dark:bg-slate-700 text-[11px] font-bold text-slate-700 dark:text-slate-200 hover:bg-emerald-600 hover:text-white transition-colors cursor-pointer">Xem</button>
+                    </div>
+                `;
+                logContainer.prepend(row);
+            }
         } catch(err) {
             console.error("Lỗi chấm bài:", file.name, err);
             failCount++;
+            lastErrorMsg = err?.message || 'Không tìm thấy đủ 4 mốc đen ở 4 góc phiếu';
+            if (logContainer) {
+                const row = document.createElement('div');
+                row.className = 'py-2 flex items-center justify-between gap-2 text-rose-600 dark:text-rose-400';
+                row.innerHTML = `
+                    <div class="flex items-center gap-2 min-w-0">
+                        <span class="w-5 h-5 rounded-full bg-rose-100 dark:bg-rose-950 text-rose-600 flex items-center justify-center text-[10px] font-bold shrink-0"><i class="fa-solid fa-xmark"></i></span>
+                        <span class="font-semibold truncate">${file.name}</span>
+                    </div>
+                    <span class="text-[11px] font-medium shrink-0">Lỗi: Thiếu góc định vị / Ảnh mờ</span>
+                `;
+                logContainer.prepend(row);
+            }
         }
     }
 
-    if (fileList.length > 1) {
-        setTimeout(() => progressCard.classList.add('hidden'), 1200);
-        Swal.fire({
-            icon: 'success',
-            title: 'Hoàn tất quét bài thi!',
-            text: `Đã chấm thành công ${successCount} bài thi${failCount > 0 ? `, thất bại ${failCount} bài do mờ/lỗi góc` : ''}.`,
-            timer: 2500
-        });
+    if (progressLabel) {
+        progressLabel.innerHTML = `<i class="fa-solid fa-circle-check text-emerald-600"></i> Hoàn tất: <b>${successCount} thành công</b>${failCount > 0 ? ` · <span class="text-rose-500">${failCount} lỗi</span>` : ''}`;
     }
 
     updateOverviewStats();
     window.renderResultsTable();
+
+    if (fileList.length === 1) {
+        if (successCount === 1) {
+            Swal.fire({
+                toast: true,
+                position: 'top-end',
+                icon: 'success',
+                title: `Đã chấm xong: ${Number(state.lastSubmission?.score || 0).toFixed(2)} điểm (SBD: ${state.lastSubmission?.student_no || '---'})`,
+                showConfirmButton: false,
+                timer: 2800
+            });
+            document.getElementById('lastResultCard')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        } else {
+            Swal.fire({
+                icon: 'warning',
+                title: 'Không nhận diện được 4 góc phiếu',
+                text: `Ảnh "${fileList[0].name}" chưa rõ 4 ô vuông đen ở 4 góc hoặc bị cắt mất góc. Vui lòng chọn ảnh chụp rõ toàn bộ mặt phiếu A4!`
+            });
+        }
+    } else {
+        Swal.fire({
+            icon: successCount > 0 ? 'success' : 'warning',
+            title: 'Hoàn tất chấm hàng loạt!',
+            text: `Đã chấm thành công ${successCount}/${fileList.length} phiếu thi${failCount > 0 ? ` (${failCount} ảnh bị mờ hoặc mất góc đen)` : ''}.`,
+            timer: 3200
+        });
+    }
 };
 
-async function processSingleSheet(fileOrBlob) {
-    const rawResult = await recognizeSheetWithOMR(fileOrBlob);
+async function processSingleSheet(source, options = {}) {
+    const rawResult = await recognizeSheetWithOMR(source, options);
     if (!rawResult) throw new Error("Không tìm đủ 4 mốc đen góc phiếu!");
 
-    // Crop candidate handwriting name
+    // Crop candidate handwriting name (synchronously from rectifiedCanvas if available)
     let nameImg = null;
-    if (rawResult.rectifiedImage) {
-        nameImg = await cropCandidateHandwrittenName(rawResult.rectifiedImage);
+    if (rawResult.rectifiedCanvas || rawResult.rectifiedImage) {
+        nameImg = await cropCandidateHandwrittenName(rawResult.rectifiedCanvas || rawResult.rectifiedImage);
     }
 
     // Match student name from SBD
@@ -748,93 +942,147 @@ async function processSingleSheet(fileOrBlob) {
     state.lastSubmission = submission;
     state.lastRawResult = rawResult;
 
+    // Play pleasant scan sound immediately upon grading
+    playBeepSound();
+
     // Display in Last Result Inspector
     displayLastResultInspector(submission, rawResult);
 
-    // Auto save if enabled (check both main toggle and camera HUD toggle)
+    // Auto save if enabled (non-blocking cloud sync so UI responds instantaneously)
     const autoSave = document.getElementById('cameraAutoSave')?.checked ?? (document.getElementById('autoSaveToggle')?.checked ?? true);
     if (autoSave) {
-        await saveSubmissionToStore(submission);
+        saveSubmissionToStore(submission).catch(e => console.warn("Background save error:", e));
     }
 
-    // Play pleasant scan sound
-    playBeepSound();
     return submission;
 }
 
-function recognizeSheetWithOMR(fileOrBlob) {
+function recognizeSheetFromGray(gray, options = {}) {
+    const tplKey = state.exam?.sheet_template || 'qmcv1239';
+    const tpl = (window.MAU && window.MAU[tplKey]) ? window.MAU[tplKey] : window.MAU.qmcv1239;
+    const guideHints = options.guideHints || null;
+
+    let result = null;
+    if (options.preFound && options.preFound.refined) {
+        const { refined } = options.preFound;
+        result = window.OMR.docPhieu(gray, refined.H, tpl, refined.den);
+        result.H = refined.H;
+        result.soMoc = refined.soMoc;
+    } else if (['qm40', 'bgd2025original', 'phutho', 'tnmaker40', 'qmcv1239'].includes(tplKey) && window.readQMSheet) {
+        result = window.readQMSheet(gray, tpl, guideHints);
+    } else {
+        result = window.OMR.docAnh(gray, tpl, window.OMR.thuNho(gray, 900));
+    }
+
+    if (!result) throw new Error("Không nhận diện được đủ 4 mốc đen góc phiếu!");
+
+    // Fast perspective rectification (960px base width -> 2.6x faster than 1552px, scaled cleanly in stamp header)
+    const rectW = options.fastRectify !== false ? 960 : 1552;
+    const outH = getSheetHeight(tplKey, tpl, rectW);
+    const target = getSheetTransform(tplKey, tpl, outH, rectW);
+    const outCanvas = document.createElement('canvas');
+    outCanvas.width = rectW;
+    outCanvas.height = outH;
+    const outCtx = outCanvas.getContext('2d');
+    const outData = outCtx.createImageData(rectW, outH);
+    const dst = outData.data;
+    const gw = gray.w, gh = gray.h, gd = gray.d;
+
+    for (let y = 0; y < outH; y++) {
+        const rowOff = y * rectW * 4;
+        for (let x = 0; x < rectW; x++) {
+            const cm = window.OMR.ap(target, x, y);
+            const p = window.OMR.ap(result.H, cm[0], cm[1]);
+            const xx = (p[0] + 0.5) | 0;
+            const yy = (p[1] + 0.5) | 0;
+            const val = (xx >= 0 && yy >= 0 && xx < gw && yy < gh) ? gd[yy * gw + xx] : 255;
+            const idx = rowOff + (x << 2);
+            dst[idx] = val;
+            dst[idx + 1] = val;
+            dst[idx + 2] = val;
+            dst[idx + 3] = 255;
+        }
+    }
+    outCtx.putImageData(outData, 0, 0);
+
+    const p2Count = state.exam?.part2_count || 4;
+    const formattedP2 = Array.from({ length: p2Count }, (_, i) => {
+        const chunk = (result.p2 || '').slice(i * 4, i * 4 + 4);
+        return chunk.replace(/D/g, 'Đ').replace(/\*/g, '?');
+    });
+
+    return {
+        student_no: (result.sbd || '').replace(/\D/g, ''),
+        code: (result.made || '').replace(/\D/g, ''),
+        part1: (result.p1 || '').replace(/\*/g, '?'),
+        part2: formattedP2,
+        part3: [],
+        part3Text: result.p3 || [],
+        calibrated: true,
+        rectifiedCanvas: outCanvas,
+        rectifiedImage: outCanvas.toDataURL('image/jpeg', 0.88),
+        uncertain: result.nghi || [],
+        H: result.H,
+        template: tpl,
+        p1m: result.p1m,
+        p2m: result.p2m,
+        p3m: result.p3m,
+        raw: result
+    };
+}
+
+function recognizeSheetWithOMR(source, options = {}) {
+    // Fast synchronous path if source is already a pre-computed gray image or HTMLCanvasElement
+    if (source && source.gray && source.gray.d) {
+        return Promise.resolve().then(() => recognizeSheetFromGray(source.gray, {
+            ...options,
+            guideHints: source.guideHints || options.guideHints,
+            preFound: source.found || options.preFound
+        }));
+    }
+    if (source instanceof HTMLCanvasElement) {
+        return Promise.resolve().then(() => {
+            const ctx = source.getContext('2d', { willReadFrequently: true });
+            const gray = window.OMR.xam(ctx.getImageData(0, 0, source.width, source.height));
+            return recognizeSheetFromGray(gray, options);
+        });
+    }
+
+    // File / Blob upload path (with multi-scale + center-crop fallback for phone photos)
     return new Promise((resolve, reject) => {
         const img = new Image();
-        const url = URL.createObjectURL(fileOrBlob);
+        const url = URL.createObjectURL(source);
         img.onload = () => {
             try {
-                const canvas = document.createElement('canvas');
-                canvas.width = img.naturalWidth;
-                canvas.height = img.naturalHeight;
-                const ctx = canvas.getContext('2d', { willReadFrequently: true });
-                ctx.drawImage(img, 0, 0);
+                const nw = img.naturalWidth || 1000;
+                const nh = img.naturalHeight || 1400;
+                const attempts = [
+                    { sx: 0, sy: 0, sw: nw, sh: nh, maxDim: 980 },
+                    { sx: nw * 0.06, sy: nh * 0.05, sw: nw * 0.88, sh: nh * 0.90, maxDim: 980 },
+                    { sx: 0, sy: 0, sw: nw, sh: nh, maxDim: 1400 }
+                ];
 
-                const gray = window.OMR.xam(ctx.getImageData(0, 0, canvas.width, canvas.height));
-                const tplKey = state.exam?.sheet_template || 'qmcv1239';
-                const tpl = (window.MAU && window.MAU[tplKey]) ? window.MAU[tplKey] : window.MAU.qmcv1239;
+                let lastErr = null;
+                for (const att of attempts) {
+                    try {
+                        const scale = Math.min(1, att.maxDim / Math.max(att.sw || 1, att.sh || 1));
+                        const canvas = document.createElement('canvas');
+                        canvas.width = Math.max(1, Math.round(att.sw * scale));
+                        canvas.height = Math.max(1, Math.round(att.sh * scale));
+                        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+                        ctx.drawImage(img, att.sx, att.sy, att.sw, att.sh, 0, 0, canvas.width, canvas.height);
 
-                let result = null;
-                if (['qm40', 'bgd2025original', 'phutho', 'tnmaker40', 'qmcv1239'].includes(tplKey) && window.readQMSheet) {
-                    result = window.readQMSheet(gray, tpl);
-                } else {
-                    result = window.OMR.docAnh(gray, tpl, window.OMR.thuNho(gray, 700));
-                }
-
-                if (!result) throw new Error("Không nhận diện được đủ 4 mốc đen góc phiếu!");
-
-                // Rectify perspective to standard canvas (1552 px width)
-                const outH = getSheetHeight(tplKey, tpl);
-                const target = getSheetTransform(tplKey, tpl, outH);
-                const outCanvas = document.createElement('canvas');
-                outCanvas.width = 1552;
-                outCanvas.height = outH;
-                const outCtx = outCanvas.getContext('2d');
-                const outData = outCtx.createImageData(outCanvas.width, outCanvas.height);
-
-                for (let y = 0; y < outH; y++) {
-                    for (let x = 0; x < outCanvas.width; x++) {
-                        const cm = window.OMR.ap(target, x, y);
-                        const p = window.OMR.ap(result.H, cm[0], cm[1]);
-                        const xx = Math.round(p[0]);
-                        const yy = Math.round(p[1]);
-                        const val = (xx >= 0 && yy >= 0 && xx < gray.w && yy < gray.h) ? gray.d[yy * gray.w + xx] : 255;
-                        const idx = (y * outCanvas.width + x) * 4;
-                        outData.data[idx] = val;
-                        outData.data[idx + 1] = val;
-                        outData.data[idx + 2] = val;
-                        outData.data[idx + 3] = 255;
+                        const gray = window.OMR.xam(ctx.getImageData(0, 0, canvas.width, canvas.height));
+                        const res = recognizeSheetFromGray(gray, options);
+                        if (res) {
+                            resolve(res);
+                            return;
+                        }
+                    } catch (err) {
+                        lastErr = err;
                     }
                 }
-                outCtx.putImageData(outData, 0, 0);
-
-                const p2Count = state.exam?.part2_count || 4;
-                const formattedP2 = Array.from({ length: p2Count }, (_, i) => {
-                    const chunk = (result.p2 || '').slice(i * 4, i * 4 + 4);
-                    return chunk.replace(/D/g, 'Đ').replace(/\*/g, '?');
-                });
-
-                resolve({
-                    student_no: (result.sbd || '').replace(/\D/g, ''),
-                    code: (result.made || '').replace(/\D/g, ''),
-                    part1: (result.p1 || '').replace(/\*/g, '?'),
-                    part2: formattedP2,
-                    part3: [],
-                    part3Text: result.p3 || [],
-                    calibrated: true,
-                    rectifiedImage: outCanvas.toDataURL('image/jpeg', 0.92),
-                    uncertain: result.nghi || [],
-                    H: result.H,
-                    template: tpl,
-                    p1m: result.p1m,
-                    p2m: result.p2m,
-                    p3m: result.p3m,
-                    raw: result
-                });
+                reject(lastErr || new Error("Không nhận diện được đủ 4 mốc đen góc phiếu!"));
             } catch(e) {
                 reject(e);
             } finally {
@@ -849,30 +1097,43 @@ function recognizeSheetWithOMR(fileOrBlob) {
     });
 }
 
-function getSheetHeight(tplKey, tpl) {
-    if (tplKey === 'tnmaker40') return Math.round(1552 * 1746 / 2479);
-    if (tplKey === 'qm40') return Math.round(1552 * 919 / 1735);
+function getSheetHeight(tplKey, tpl, baseW = 1552) {
+    if (tplKey === 'tnmaker40') return Math.round(baseW * 1746 / 2479);
+    if (tplKey === 'qm40') return Math.round(baseW * 919 / 1735);
     if (['bgd2025original', 'phutho', 'qmcv1239'].includes(tplKey) && tpl?.khung) {
-        return Math.round(1552 * tpl.khung[3] / tpl.khung[2]);
+        return Math.round(baseW * tpl.khung[3] / tpl.khung[2]);
     }
-    return 2254;
+    return Math.round(baseW * 2254 / 1552);
 }
 
-function getSheetTransform(tplKey, tpl, outH) {
+function getSheetTransform(tplKey, tpl, outH, outW = 1552) {
     if (['bgd2025original', 'phutho', 'qmcv1239', 'tnmaker40', 'qm40'].includes(tplKey) && tpl?.khung) {
         const k = tpl.khung;
-        return window.OMR.phepChieu([[0, 0], [1552, 0], [1552, outH], [0, outH]], [[k[0], k[1]], [k[2], k[1]], [k[2], k[3]], [k[0], k[3]]]);
+        return window.OMR.phepChieu([[0, 0], [outW, 0], [outW, outH], [0, outH]], [[k[0], k[1]], [k[2], k[1]], [k[2], k[3]], [k[0], k[3]]]);
     }
-    return window.OMR.phepChieu([[50, 50], [1500, 50], [1500, 2200], [50, 2200]], tpl.moc.slice(0, 4).map(m => [m.x, m.y]));
+    const pad = Math.round(50 * outW / 1552);
+    return window.OMR.phepChieu([[pad, pad], [outW - pad, pad], [outW - pad, outH - pad], [pad, outH - pad]], tpl.moc.slice(0, 4).map(m => [m.x, m.y]));
 }
 
-function cropCandidateHandwrittenName(rectifiedDataUrl) {
+function cropCandidateHandwrittenName(rectifiedSource) {
     const tplKey = state.exam?.sheet_template || 'qmcv1239';
     let rect = [670/1653, 480/2339, 385/1653, 54/2339]; // default qmcv1239
     if (tplKey === 'bgd2025original') rect = [708/1638, 419/2339, 363/1638, 82/2339];
     else if (tplKey === 'phutho') rect = [676/1654, 391/2339, 420/1654, 65/2339];
     else if (tplKey === 'tnmaker40') rect = [1028/2479, 446/1746, 561/2479, 126/1746];
     else if (tplKey === 'qm40') rect = [1132/1735, 82/919, 357/1735, 101/919];
+
+    if (rectifiedSource instanceof HTMLCanvasElement) {
+        const canvas = document.createElement('canvas');
+        const sx = rectifiedSource.width * rect[0];
+        const sy = rectifiedSource.height * rect[1];
+        const sw = rectifiedSource.width * rect[2];
+        const sh = rectifiedSource.height * rect[3];
+        canvas.width = Math.max(1, Math.round(sw));
+        canvas.height = Math.max(1, Math.round(sh));
+        canvas.getContext('2d').drawImage(rectifiedSource, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+        return Promise.resolve(canvas.toDataURL('image/jpeg', 0.85));
+    }
 
     return new Promise(resolve => {
         const img = new Image();
@@ -885,10 +1146,10 @@ function cropCandidateHandwrittenName(rectifiedDataUrl) {
             canvas.width = Math.max(1, Math.round(sw));
             canvas.height = Math.max(1, Math.round(sh));
             canvas.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
-            resolve(canvas.toDataURL('image/png'));
+            resolve(canvas.toDataURL('image/jpeg', 0.85));
         };
         img.onerror = () => resolve(null);
-        img.src = rectifiedDataUrl;
+        img.src = rectifiedSource;
     });
 }
 
@@ -1037,21 +1298,23 @@ function displayLastResultInspector(sub, rawResult) {
 // 4B. TẠO ẢNH PHIẾU NẮN PHẲNG & ĐÓNG DẤU ĐIỂM SỐ CHÍNH THỨC KÈM LOGO
 // ========================================================
 async function generateStampedGradedSheet(sub, rawResult) {
-    if (!rawResult || !rawResult.rectifiedImage) return null;
+    if (!rawResult || (!rawResult.rectifiedCanvas && !rawResult.rectifiedImage)) return null;
     const tplKey = state.exam?.sheet_template || 'qmcv1239';
     const tpl = rawResult.template || (window.MAU && window.MAU[tplKey]) || window.MAU.qmcv1239;
     if (!tpl) return rawResult.rectifiedImage;
 
-    // Tải ảnh phiếu đã nắn phẳng
-    const rectImg = await new Promise((resolve, reject) => {
+    // Dùng trực tiếp rectifiedCanvas trong bộ nhớ để bỏ qua độ trễ giải mã ảnh base64
+    const rectImg = rawResult.rectifiedCanvas || await new Promise((resolve, reject) => {
         const img = new Image();
         img.onload = () => resolve(img);
         img.onerror = () => reject(new Error("Lỗi nạp ảnh nắn phẳng"));
         img.src = rawResult.rectifiedImage;
     });
 
-    const sheetW = rectImg.naturalWidth || 1552;
-    const sheetH = rectImg.naturalHeight || 2200;
+    const rawW = rectImg.width || rectImg.naturalWidth || 1552;
+    const rawH = rectImg.height || rectImg.naturalHeight || 2200;
+    const sheetW = 1552;
+    const sheetH = Math.round(sheetW * rawH / rawW);
     const headerH = 260; // Khung thông tin & con dấu trang nhã phía trên
 
     const canvas = document.createElement('canvas');
@@ -1610,12 +1873,18 @@ async function saveSubmissionToStore(sub) {
         state.submissions.push(sub);
     }
 
-    // Save to Firestore omr_submissions
+    // Save to localStorage & update UI stats immediately (zero latency)
+    try {
+        localStorage.setItem(`omr_submissions_${sub.examId}`, JSON.stringify(state.submissions));
+    } catch(e) {}
+    updateOverviewStats();
+
+    // Save to Firestore omr_submissions & LMS results
     if (state.teacherUid) {
         try {
             await setDoc(doc(db, "omr_submissions", sub.id), sub);
         } catch(e) {
-            console.warn("Lưu Firestore omr_submissions thất bại, lưu localStorage:", e);
+            console.warn("Lưu Firestore omr_submissions thất bại, đã lưu localStorage:", e);
         }
 
         // Tự động đồng bộ sang bảng "results" của Lớp học LMS để giáo viên & PHHS xem trực tuyến
@@ -1625,9 +1894,6 @@ async function saveSubmissionToStore(sub) {
             console.warn("Đồng bộ sang LMS results:", syncErr);
         }
     }
-    // Save to localStorage
-    localStorage.setItem(`omr_submissions_${sub.examId}`, JSON.stringify(state.submissions));
-    updateOverviewStats();
 }
 
 function buildLmsAnswersObjectFromOmr(sub) {
@@ -1712,17 +1978,36 @@ async function syncSubmissionToLmsResultsCollection(sub) {
 
 function playBeepSound() {
     try {
-        const ctx = new (window.AudioContext || window.webkitAudioContext)();
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(880, ctx.currentTime); // 880Hz pleasant ping
-        gain.gain.setValueAtTime(0.12, ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.18);
-        osc.start();
-        osc.stop(ctx.currentTime + 0.18);
+        if (navigator.vibrate) {
+            try { navigator.vibrate([70, 45, 110]); } catch(e) {}
+        }
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx) return;
+        const ctx = new AudioCtx();
+
+        // Note 1: A5 (880 Hz)
+        const osc1 = ctx.createOscillator();
+        const gain1 = ctx.createGain();
+        osc1.connect(gain1);
+        gain1.connect(ctx.destination);
+        osc1.type = 'triangle';
+        osc1.frequency.setValueAtTime(880, ctx.currentTime);
+        gain1.gain.setValueAtTime(0.25, ctx.currentTime);
+        gain1.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.12);
+        osc1.start(ctx.currentTime);
+        osc1.stop(ctx.currentTime + 0.12);
+
+        // Note 2: E6 (1318.5 Hz) — Cheerful "Ting-Tinh!" completion chime
+        const osc2 = ctx.createOscillator();
+        const gain2 = ctx.createGain();
+        osc2.connect(gain2);
+        gain2.connect(ctx.destination);
+        osc2.type = 'sine';
+        osc2.frequency.setValueAtTime(1318.5, ctx.currentTime + 0.11);
+        gain2.gain.setValueAtTime(0.28, ctx.currentTime + 0.11);
+        gain2.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.36);
+        osc2.start(ctx.currentTime + 0.11);
+        osc2.stop(ctx.currentTime + 0.36);
     } catch(e) {}
 }
 
@@ -1848,14 +2133,82 @@ window.setStrictFiducials = (val) => {
     localStorage.setItem('omr_strict_fiducials', String(state.strictFiducials));
 };
 
+// Tính toán chính xác vùng hiển thị thực tế (object-cover) trên màn hình và tọa độ 4 ô vuông định vị góc
+function getVideoViewportInfo(video, guide) {
+    const vw = video.videoWidth || 1280;
+    const vh = video.videoHeight || 960;
+    const vr = video.getBoundingClientRect();
+    if (!vr.width || !vr.height) {
+        return { sx: 0, sy: 0, sw: vw, sh: vh, guideHints: null, guideCrop: null };
+    }
+    const objFit = window.getComputedStyle(video).objectFit || 'cover';
+    const scale = objFit === 'cover'
+        ? Math.max(vr.width / vw, vr.height / vh)
+        : Math.min(vr.width / vw, vr.height / vh);
+    const drawW = vw * scale;
+    const drawH = vh * scale;
+    const offsetX = (vr.width - drawW) / 2;
+    const offsetY = (vr.height - drawH) / 2;
+
+    // Vùng khung hình hiển thị trên màn hình (loại bỏ phần rìa bàn/ghế bị khuất bởi object-cover)
+    const vx = Math.max(0, -offsetX / scale);
+    const vy = Math.max(0, -offsetY / scale);
+    const vsw = Math.max(1, Math.min(vw - vx, vr.width / scale));
+    const vsh = Math.max(1, Math.min(vh - vy, vr.height / scale));
+
+    let guideHints = null;
+    let guideCrop = null;
+    if (guide) {
+        const gr = guide.getBoundingClientRect();
+        if (gr.width > 0 && gr.height > 0) {
+            const gx0 = (gr.left - vr.left) / vr.width;
+            const gy0 = (gr.top - vr.top) / vr.height;
+            const gx1 = (gr.right - vr.left) / vr.width;
+            const gy1 = (gr.bottom - vr.top) / vr.height;
+            const insetX = Math.min(0.14, 34 / gr.width);
+            const insetY = Math.min(0.11, 34 / gr.height);
+            guideHints = [
+                [gx0 + insetX * (gx1 - gx0), gy0 + insetY * (gy1 - gy0)],
+                [gx1 - insetX * (gx1 - gx0), gy0 + insetY * (gy1 - gy0)],
+                [gx1 - insetX * (gx1 - gx0), gy1 - insetY * (gy1 - gy0)],
+                [gx0 + insetX * (gx1 - gx0), gy1 - insetY * (gy1 - gy0)]
+            ];
+
+            let gsx = (gr.left - vr.left - offsetX) / scale;
+            let gsy = (gr.top - vr.top - offsetY) / scale;
+            let gsw = gr.width / scale;
+            let gsh = gr.height / scale;
+            const padX = gsw * 0.14;
+            const padY = gsh * 0.14;
+            gsx = Math.max(0, gsx - padX);
+            gsy = Math.max(0, gsy - padY);
+            gsw = Math.max(1, Math.min(vw - gsx, gsw + padX * 2));
+            gsh = Math.max(1, Math.min(vh - gsy, gsh + padY * 2));
+            guideCrop = { sx: gsx, sy: gsy, sw: gsw, sh: gsh };
+        }
+    }
+    return { sx: vx, sy: vy, sw: vsw, sh: vsh, guideHints, guideCrop };
+}
+
+function drawVideoRegionToCanvas(video, sx, sy, sw, sh, maxDim = 980) {
+    const scale = Math.min(1, maxDim / Math.max(sw || 1, sh || 1));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(sw * scale));
+    canvas.height = Math.max(1, Math.round(sh * scale));
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+    return canvas;
+}
+
 function startAutoScanLoop() {
     stopAutoScanLoop();
     if (!state.autoScanEnabled) return;
 
-    const intervalMs = state.autoScanSpeed === 'fast' ? 450 : (state.autoScanSpeed === 'slow' ? 1050 : 680);
+    const intervalMs = state.autoScanSpeed === 'fast' ? 320 : (state.autoScanSpeed === 'slow' ? 750 : 460);
 
     autoScanInterval = setInterval(async () => {
         const video = document.getElementById('cameraVideo');
+        const guide = document.getElementById('cameraA4Guide');
         const sheetArea = document.getElementById('scanCameraArea');
         const resSheet = document.getElementById('cameraResultSheet');
 
@@ -1863,34 +2216,30 @@ function startAutoScanLoop() {
         if (!video || !state.currentCameraStream || sheetArea?.classList.contains('hidden')) return;
         if (state.isAutoScanning || video.readyState < 2 || video.videoWidth <= 0 || video.videoHeight <= 0) return;
 
-        // Nghỉ giữa các lần quét khi kết quả đang hiển thị
-        if (resSheet && !resSheet.classList.contains('hidden') && Date.now() - lastAutoScanTime < state.autoScanCooldown) {
+        // Nghỉ giữa các lần quét để giáo viên kịp lấy phiếu cũ ra và đưa phiếu mới vào
+        if (Date.now() - lastAutoScanTime < state.autoScanCooldown) {
             return;
         }
 
         try {
             state.isAutoScanning = true;
 
-            // Lấy toàn bộ khung hình cảm biến ở độ phân giải vừa phải (650px) để tìm 4 mốc đen chính xác tuyệt đối
-            const testCanvas = document.createElement('canvas');
-            const targetW = 650;
-            const targetH = Math.round(targetW * (video.videoHeight / video.videoWidth));
-            testCanvas.width = targetW;
-            testCanvas.height = targetH;
+            // Cắt đúng vùng khung ngắm đang hiển thị trên màn hình (maxDim 880px <= 1000px để không bị thuNho chia đôi)
+            const info = getVideoViewportInfo(video, guide);
+            const testCanvas = drawVideoRegionToCanvas(video, info.sx, info.sy, info.sw, info.sh, 880);
             const tCtx = testCanvas.getContext('2d', { willReadFrequently: true });
-            tCtx.drawImage(video, 0, 0, targetW, targetH);
+            const gray = window.OMR.xam(tCtx.getImageData(0, 0, testCanvas.width, testCanvas.height));
 
-            const gray = window.OMR.xam(tCtx.getImageData(0, 0, targetW, targetH));
             const tplKey = state.exam?.sheet_template || 'qmcv1239';
             const tpl = (window.MAU && window.MAU[tplKey]) ? window.MAU[tplKey] : window.MAU.qmcv1239;
 
-            // Sử dụng thuật toán tìm 4 góc hình bình hành chống nhiễu bàn phím / mép bàn
-            let detectedCorners = null;
+            // Tìm 4 mốc đen góc phiếu ưu tiên sát 4 ô vuông định vị
+            let found = null;
             if (window.findQMCorners) {
-                detectedCorners = window.findQMCorners(gray, tpl);
+                found = window.findQMCorners(gray, tpl, info.guideHints);
             }
 
-            if (detectedCorners && detectedCorners.length === 4) {
+            if (found && found.corners && found.corners.length === 4) {
                 state.consecutiveCornerDetections = (state.consecutiveCornerDetections || 0) + 1;
 
                 // Làm sáng 4 ô vuông định vị màu xanh ngọc
@@ -1903,12 +2252,19 @@ function startAutoScanLoop() {
                     statusText.innerHTML = '<span class="text-emerald-400 font-extrabold">✓ Đã nhận diện đủ 4 ô định vị góc! Đang tự động chấm...</span>';
                 }
 
-                // Tốc độ Nhanh/Vừa: chụp ngay khi xác nhận 4 mốc + >=45% mốc con của phiếu; Chậm: đợi 2 nhịp ổn định
+                // Tốc độ Nhanh/Vừa: chấm ngay lập tức từ khung hình đã khóa 4 góc; Chậm: đợi 2 nhịp ổn định
                 const reqFrames = state.autoScanSpeed === 'slow' ? 2 : 1;
                 if (state.consecutiveCornerDetections >= reqFrames) {
                     state.consecutiveCornerDetections = 0;
                     lastAutoScanTime = Date.now();
-                    await window.captureCameraFrame();
+                    await window.captureCameraFrame({
+                        preCaptured: {
+                            canvas: testCanvas,
+                            gray,
+                            found,
+                            guideHints: info.guideHints
+                        }
+                    });
                 }
             } else {
                 state.consecutiveCornerDetections = 0;
@@ -2255,6 +2611,29 @@ window.toggleCameraTorch = async () => {
     }
 };
 
+function triggerCameraGradedCelebration(sub) {
+    const splash = document.getElementById('cameraSuccessSplash');
+    const scoreEl = document.getElementById('cameraSuccessScore');
+    const metaEl = document.getElementById('cameraSuccessMeta');
+    const countBadge = document.getElementById('cameraSuccessCountBadge');
+
+    const totalNum = state.submissions.length || 1;
+    const scoreStr = (typeof sub.score === 'number' ? sub.score.toFixed(2) : sub.score) + ' đ';
+    const studentLabel = sub.student_name || (sub.student_no ? `SBD ${sub.student_no}` : 'Thí sinh');
+
+    if (countBadge) countBadge.textContent = `✓ ĐÃ CHẤM XONG BÀI #${totalNum}!`;
+    if (scoreEl) scoreEl.textContent = scoreStr;
+    if (metaEl) metaEl.textContent = `${studentLabel} · Mã đề: ${sub.code || '---'}`;
+
+    if (splash) {
+        clearTimeout(splash._hideTimer);
+        splash.classList.remove('hidden');
+        splash._hideTimer = setTimeout(() => {
+            splash.classList.add('hidden');
+        }, 1500);
+    }
+}
+
 function showCameraResultSheet(sub) {
     const sheet = document.getElementById('cameraResultSheet');
     if (!sheet) return;
@@ -2264,6 +2643,8 @@ function showCameraResultSheet(sub) {
     const codeEl = document.getElementById('camResCode');
     const scoreEl = document.getElementById('camResScore');
     const breakdownEl = document.getElementById('camResPartBreakdown');
+    const counterEl = document.getElementById('camSessionCounter');
+    const promptEl = document.getElementById('camNextSheetPrompt');
 
     if (nameEl) nameEl.textContent = sub.student_name || 'Thí sinh (Tự động)';
     if (sbdEl) sbdEl.textContent = 'SBD: ' + (sub.student_no || '---');
@@ -2271,6 +2652,18 @@ function showCameraResultSheet(sub) {
     if (scoreEl) scoreEl.textContent = (typeof sub.score === 'number' ? sub.score.toFixed(2) : sub.score);
     if (breakdownEl) {
         breakdownEl.textContent = `P.I: ${sub.part1_score ?? 0}đ | P.II: ${sub.part2_score ?? 0}đ | P.III: ${sub.part3_score ?? 0}đ`;
+    }
+    if (counterEl) {
+        counterEl.textContent = `Bài #${state.submissions.length || 1}`;
+    }
+    if (promptEl) {
+        clearTimeout(promptEl._readyTimer);
+        promptEl.innerHTML = `<i class="fa-solid fa-circle-check text-emerald-400"></i> Đã lưu kết quả! Hãy rút phiếu ra và đưa phiếu mới vào...`;
+        promptEl._readyTimer = setTimeout(() => {
+            if (promptEl) {
+                promptEl.innerHTML = `<i class="fa-solid fa-bolt text-amber-300 animate-pulse"></i> Sẵn sàng! Đưa 4 góc phiếu tiếp theo vào khung ngắm`;
+            }
+        }, Math.max(1200, (state.autoScanCooldown || 3500) - 400));
     }
 
     // Candidate Handwritten Name Crop Preview
@@ -2294,6 +2687,7 @@ function showCameraResultSheet(sub) {
 window.dismissCameraResultSheet = () => {
     const sheet = document.getElementById('cameraResultSheet');
     if (!sheet) return;
+    lastAutoScanTime = 0; // Cho phép quét ngay bài mới khi bấm "Chấm tờ tiếp"
     sheet.classList.add('translate-y-full');
     setTimeout(() => {
         sheet.classList.add('hidden');
@@ -2309,10 +2703,49 @@ window.viewDetailedLastResult = () => {
     }
 };
 
-window.captureCameraFrame = async () => {
+window.captureCameraFrame = async (opts = {}) => {
     const video = document.getElementById('cameraVideo');
     const guide = document.getElementById('cameraA4Guide');
     if (!video || !state.currentCameraStream) return;
+
+    // 1. CHỤP ĐỒNG BỘ TỨC THỜI TẠI t = 0ms (trước khi người dùng hạ điện thoại xuống)
+    const info = getVideoViewportInfo(video, guide);
+    const candidates = [];
+
+    if (opts && opts.preCaptured && opts.preCaptured.gray) {
+        candidates.push({
+            label: 'auto-locked',
+            source: opts.preCaptured,
+            options: { guideHints: opts.preCaptured.guideHints, preFound: opts.preCaptured.found }
+        });
+    }
+
+    // Ưu tiên 1: Vùng khung ngắm hiển thị trên màn hình (960px <= 1000px để giữ nguyên độ nét 1:1)
+    const viewportCanvas = drawVideoRegionToCanvas(video, info.sx, info.sy, info.sw, info.sh, 960);
+    candidates.push({
+        label: 'viewport',
+        source: viewportCanvas,
+        options: { guideHints: info.guideHints }
+    });
+
+    // Ưu tiên 2: Vùng cắt sát khung 4 ô định vị (#cameraA4Guide + 14% lề)
+    if (info.guideCrop) {
+        const gc = info.guideCrop;
+        const guideCanvas = drawVideoRegionToCanvas(video, gc.sx, gc.sy, gc.sw, gc.sh, 960);
+        candidates.push({
+            label: 'guide-crop',
+            source: guideCanvas,
+            options: {}
+        });
+    }
+
+    // Ưu tiên 3: Toàn khung cảm biến camera
+    const fullCanvas = drawVideoRegionToCanvas(video, 0, 0, video.videoWidth || 1280, video.videoHeight || 960, 980);
+    candidates.push({
+        label: 'full-sensor',
+        source: fullCanvas,
+        options: {}
+    });
 
     // Haptic feedback
     if (navigator.vibrate) {
@@ -2330,104 +2763,64 @@ window.captureCameraFrame = async () => {
         setTimeout(() => {
             flash.classList.remove('opacity-80');
             flash.classList.add('opacity-0');
-        }, 120);
+        }, 110);
     }
-
-    // Chụp toàn khung hình cảm biến camera trước (vì thuật toán findQMCorners đã tự lọc nền bàn phím/vật thể ngoài phiếu)
-    const fullCanvas = document.createElement('canvas');
-    fullCanvas.width = video.videoWidth || 1920;
-    fullCanvas.height = video.videoHeight || 1440;
-    const fCtx = fullCanvas.getContext('2d');
-    fCtx.drawImage(video, 0, 0, fullCanvas.width, fullCanvas.height);
 
     const statusBadge = document.getElementById('cameraScanStatus');
     const statusText = document.getElementById('cameraStatusText');
     if (statusBadge) {
-        statusBadge.innerHTML = '<i class="fa-solid fa-spinner fa-spin text-emerald-400"></i> Đang nhận diện...';
-        statusBadge.classList.remove('hidden');
+        statusBadge.innerHTML = '<i class="fa-solid fa-bolt text-emerald-400"></i> Đang chấm tốc độ cao...';
+        statusBadge.classList.remove('hidden', 'opacity-0');
     }
     if (statusText) {
-        statusText.innerHTML = '<span class="text-emerald-300 font-bold"><i class="fa-solid fa-spinner fa-spin"></i> Đang phân tích phiếu thi...</span>';
+        statusText.innerHTML = '<span class="text-emerald-300 font-bold"><i class="fa-solid fa-bolt"></i> Đang chấm phiếu...</span>';
     }
 
-    fullCanvas.toBlob(async (fullBlob) => {
-        if (!fullBlob) return;
-        try {
-            let sub = null;
+    try {
+        let sub = null;
+        let lastErr = null;
+        for (const cand of candidates) {
             try {
-                // Ưu tiên 1: Quét toàn khung cảm biến với bộ tìm 4 góc thông minh findQMCorners
-                sub = await processSingleSheet(fullBlob);
-            } catch(fullErr) {
-                console.warn("Quét toàn khung chưa khớp, thử vùng crop khung ngắm:", fullErr);
-                // Ưu tiên 2: Thử vùng crop theo khung ngắm
-                const vr = video.getBoundingClientRect();
-                const gr = guide ? guide.getBoundingClientRect() : null;
-                if (gr && vr.width > 0 && vr.height > 0 && video.videoWidth > 0 && video.videoHeight > 0) {
-                    const objFit = window.getComputedStyle(video).objectFit || 'cover';
-                    const scale = objFit === 'cover'
-                        ? Math.max(vr.width / video.videoWidth, vr.height / video.videoHeight)
-                        : Math.min(vr.width / video.videoWidth, vr.height / video.videoHeight);
-                    const drawW = video.videoWidth * scale;
-                    const drawH = video.videoHeight * scale;
-                    const offsetX = (vr.width - drawW) / 2;
-                    const offsetY = (vr.height - drawH) / 2;
-
-                    let sx = (gr.left - vr.left - offsetX) / scale;
-                    let sy = (gr.top - vr.top - offsetY) / scale;
-                    let sw = gr.width / scale;
-                    let sh = gr.height / scale;
-
-                    const padX = sw * 0.16;
-                    const padY = sh * 0.16;
-                    sx = Math.max(0, sx - padX);
-                    sy = Math.max(0, sy - padY);
-                    sw = Math.min(video.videoWidth - sx, sw + padX * 2);
-                    sh = Math.min(video.videoHeight - sy, sh + padY * 2);
-
-                    const cropCanvas = document.createElement('canvas');
-                    cropCanvas.width = Math.round(sw);
-                    cropCanvas.height = Math.round(sh);
-                    cropCanvas.getContext('2d').drawImage(video, sx, sy, sw, sh, 0, 0, cropCanvas.width, cropCanvas.height);
-                    const cropBlob = await new Promise(r => cropCanvas.toBlob(r, 'image/jpeg', 0.95));
-                    if (cropBlob) {
-                        sub = await processSingleSheet(cropBlob);
-                    } else {
-                        throw fullErr;
-                    }
-                } else {
-                    throw fullErr;
-                }
-            }
-
-            document.querySelectorAll('.camera-corner-bracket').forEach(b => b.classList.add('detected'));
-
-            if (statusBadge) {
-                statusBadge.innerHTML = '<i class="fa-solid fa-check text-emerald-400"></i> Đã nhận diện!';
-                setTimeout(() => statusBadge.classList.add('hidden'), 2000);
-            }
-            if (statusText) {
-                statusText.innerHTML = `<span class="text-emerald-300 font-bold">✓ Đã chấm xong: ${(typeof sub.score === 'number' ? sub.score.toFixed(2) : sub.score)} điểm · ${sub.student_name || ('SBD ' + sub.student_no)}</span>`;
-                setTimeout(() => {
-                    if (statusText) statusText.textContent = 'Canh 4 ô đen góc phiếu vào 4 góc khung ngắm để tự động chấm.';
-                }, 3200);
-            }
-            showCameraResultSheet(sub);
-        } catch(err) {
-            console.warn("Scan frame error:", err);
-            document.querySelectorAll('.camera-corner-bracket').forEach(b => b.classList.remove('detected'));
-            if (statusBadge) {
-                statusBadge.innerHTML = '<i class="fa-solid fa-triangle-exclamation text-amber-400"></i> Căn 4 góc đen chưa rõ, thử lại';
-                statusBadge.classList.remove('hidden');
-                setTimeout(() => statusBadge.classList.add('hidden'), 3500);
-            }
-            if (statusText) {
-                statusText.innerHTML = '<span class="text-amber-300 font-bold">⚠️ Chưa nhận diện đủ 4 mốc đen. Hãy đưa 4 góc phiếu vào 4 ô vuông!</span>';
-                setTimeout(() => {
-                    if (statusText) statusText.textContent = 'Canh 4 ô đen góc phiếu vào 4 góc khung ngắm để tự động chấm.';
-                }, 3200);
+                sub = await processSingleSheet(cand.source, cand.options);
+                if (sub) break;
+            } catch (err) {
+                lastErr = err;
             }
         }
-    }, 'image/jpeg', 0.95);
+        if (!sub) {
+            throw lastErr || new Error("Không tìm đủ 4 mốc đen góc phiếu!");
+        }
+
+        lastAutoScanTime = Date.now();
+        document.querySelectorAll('.camera-corner-bracket').forEach(b => b.classList.add('detected'));
+
+        if (statusBadge) {
+            statusBadge.innerHTML = '<i class="fa-solid fa-check text-emerald-400"></i> Đã chấm xong!';
+            setTimeout(() => statusBadge.classList.add('hidden'), 1800);
+        }
+        if (statusText) {
+            statusText.innerHTML = `<span class="text-emerald-300 font-bold">✓ Đã chấm xong: ${(typeof sub.score === 'number' ? sub.score.toFixed(2) : sub.score)} điểm · Mời đưa phiếu tiếp theo vào!</span>`;
+            setTimeout(() => {
+                if (statusText) statusText.textContent = 'Canh 4 ô đen góc phiếu vào 4 góc khung ngắm để tự động chấm.';
+            }, 3500);
+        }
+        triggerCameraGradedCelebration(sub);
+        showCameraResultSheet(sub);
+    } catch(err) {
+        console.warn("Scan frame error:", err);
+        document.querySelectorAll('.camera-corner-bracket').forEach(b => b.classList.remove('detected'));
+        if (statusBadge) {
+            statusBadge.innerHTML = '<i class="fa-solid fa-triangle-exclamation text-amber-400"></i> Căn 4 góc đen chưa rõ, thử lại';
+            statusBadge.classList.remove('hidden', 'opacity-0');
+            setTimeout(() => statusBadge.classList.add('hidden'), 3000);
+        }
+        if (statusText) {
+            statusText.innerHTML = '<span class="text-amber-300 font-bold">⚠️ Chưa nhận diện đủ 4 mốc đen. Hãy đưa 4 góc phiếu vào 4 ô vuông!</span>';
+            setTimeout(() => {
+                if (statusText) statusText.textContent = 'Canh 4 ô đen góc phiếu vào 4 góc khung ngắm để tự động chấm.';
+            }, 3000);
+        }
+    }
 };
 
 // ========================================================
