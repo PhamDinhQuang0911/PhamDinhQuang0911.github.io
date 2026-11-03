@@ -229,8 +229,14 @@ const TAB_SUBTITLES = {
     downloads: 'Mẫu Phiếu In A4 (PDF)'
 };
 
-window.switchTab = (tabName) => {
+window.switchTab = (tabName, pushHistory = true) => {
     state.activeTab = tabName;
+    if (pushHistory && tabName !== 'scan') {
+        if (!window.history.state || window.history.state.tab !== tabName) {
+            try { window.history.pushState({ tab: tabName }, ''); } catch (_) {}
+        }
+    }
+
     ['overview', 'scan', 'results', 'keys', 'students', 'downloads', 'exams'].forEach(t => {
         const v = document.getElementById(`view-${t}`);
         const btn = document.getElementById(`tab-${t}`);
@@ -260,6 +266,46 @@ window.switchTab = (tabName) => {
     if (tabName === 'downloads') window.renderDownloadsTab();
     if (tabName === 'exams') window.renderExamsListTab();
 };
+
+// ========================================================
+// MOBILE NAVIGATION & GESTURE BACK (Vuốt viền / nút Back không thoát ra Dashboard)
+// ========================================================
+if (!window.history.state) {
+    try { window.history.replaceState({ tab: 'scan' }, ''); } catch (_) {}
+}
+
+window.addEventListener('popstate', (e) => {
+    // 1. Nếu đang mở modal nào đó thì chỉ đóng modal đó
+    const openModals = Array.from(document.querySelectorAll('.fixed:not(.hidden)'))
+        .filter(el => el.id && (el.id.endsWith('Modal') || el.id === 'lmsExamPickerModal'));
+    if (openModals.length > 0) {
+        openModals.forEach(m => {
+            m.classList.add('hidden');
+            if (m.id === 'scanKeyQrModal' && window.stopQrScanner) window.stopQrScanner();
+        });
+        return;
+    }
+
+    // 2. Nếu đang mở camera scanner
+    const cameraOverlay = document.getElementById('cameraScannerOverlay');
+    if (cameraOverlay && !cameraOverlay.classList.contains('hidden')) {
+        window.closeCameraScanner();
+        return;
+    }
+
+    // 3. Nếu đang xem chi tiết 1 bài chấm (#lastResultCard đang mở)
+    const lastCard = document.getElementById('lastResultCard');
+    if (lastCard && !lastCard.classList.contains('hidden')) {
+        window.closeSubmissionDetail(true);
+        return;
+    }
+
+    // 4. Nếu đang ở tab khác 'scan', quay lại tab 'scan'
+    if (state.activeTab && state.activeTab !== 'scan') {
+        window.switchTab('scan', false);
+        return;
+    }
+});
 
 // ========================================================
 // 3. EXAMS & DATA MANAGEMENT (Firestore + LocalStorage + LMS Integration)
@@ -835,6 +881,68 @@ async function loadExamStudents(examId) {
     state.students = list;
 }
 
+// ========================================================
+// PERSISTENT INDEXEDDB IMAGE STORAGE (Hàng trăm MB, không bao giờ mất ảnh)
+// ========================================================
+const OMR_DB_NAME = 'QMath_OMR_Storage';
+const OMR_DB_VERSION = 1;
+const OMR_STORE_IMAGES = 'sheet_images';
+
+function openOmrIndexedDb() {
+    return new Promise((resolve) => {
+        if (!window.indexedDB) return resolve(null);
+        try {
+            const req = indexedDB.open(OMR_DB_NAME, OMR_DB_VERSION);
+            req.onupgradeneeded = (e) => {
+                const db = e.target.result;
+                if (!db.objectStoreNames.contains(OMR_STORE_IMAGES)) {
+                    db.createObjectStore(OMR_STORE_IMAGES);
+                }
+            };
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => resolve(null);
+        } catch (_) {
+            resolve(null);
+        }
+    });
+}
+
+async function saveOmrImageToDb(key, dataUrl) {
+    if (!key || !dataUrl) return;
+    try {
+        const db = await openOmrIndexedDb();
+        if (!db) return;
+        const tx = db.transaction(OMR_STORE_IMAGES, 'readwrite');
+        tx.objectStore(OMR_STORE_IMAGES).put(dataUrl, String(key));
+    } catch (_) {}
+}
+
+async function getOmrImageFromDb(key) {
+    if (!key) return null;
+    try {
+        const db = await openOmrIndexedDb();
+        if (!db) return null;
+        return new Promise((resolve) => {
+            const tx = db.transaction(OMR_STORE_IMAGES, 'readonly');
+            const req = tx.objectStore(OMR_STORE_IMAGES).get(String(key));
+            req.onsuccess = () => resolve(req.result || null);
+            req.onerror = () => resolve(null);
+        });
+    } catch (_) {
+        return null;
+    }
+}
+
+async function deleteOmrImageFromDb(key) {
+    if (!key) return;
+    try {
+        const db = await openOmrIndexedDb();
+        if (!db) return;
+        const tx = db.transaction(OMR_STORE_IMAGES, 'readwrite');
+        tx.objectStore(OMR_STORE_IMAGES).delete(String(key));
+    } catch (_) {}
+}
+
 async function loadExamSubmissions(examId) {
     let list = [];
     try {
@@ -911,13 +1019,22 @@ async function loadExamSubmissions(examId) {
         console.warn("Khôi phục bài chấm từ bảng results:", e);
     }
 
-    // Khôi phục ảnh độ phân giải cao trong bộ nhớ phiên làm việc nếu có
-    list.forEach(s => {
+    // Khôi phục ảnh độ phân giải cao từ bộ nhớ phiên và IndexedDB vĩnh viễn trên máy
+    for (let s of list) {
         if (state.memoryImages && state.memoryImages[s.id]) {
             s.image_data = state.memoryImages[s.id];
             s.stamped_image = state.memoryImages[s.id];
+        } else if (!s.image_data) {
+            try {
+                const cachedImg = await getOmrImageFromDb(s.id);
+                if (cachedImg) {
+                    s.image_data = cachedImg;
+                    s.stamped_image = cachedImg;
+                    if (state.memoryImages) state.memoryImages[s.id] = cachedImg;
+                }
+            } catch (_) {}
         }
-    });
+    }
 
     state.submissions = list;
     if (state.gradedCountsByExam) {
@@ -2048,26 +2165,26 @@ function calculateExamScore(code, studentP1, studentP2, studentP3) {
     };
 }
 
-function displayLastResultInspector(sub, rawResult) {
+async function displayLastResultInspector(sub, rawResult) {
     const card = document.getElementById('lastResultCard');
     if (!card) return;
     card.classList.remove('hidden');
 
     document.getElementById('resStudentTitle').textContent = sub.student_name ? `Thí sinh: ${sub.student_name}` : `Thí sinh: SBD ${sub.student_no || '---'}`;
-    document.getElementById('resScoreBadge').textContent = `${sub.score.toFixed(2)} đ`;
+    document.getElementById('resScoreBadge').textContent = `${(sub.score ?? 0).toFixed(2)} đ`;
     document.getElementById('resSbdVal').textContent = sub.student_no || '---';
     document.getElementById('resCodeVal').textContent = sub.code || '---';
-    document.getElementById('resTimeVal').textContent = new Date(sub.createdAt).toLocaleTimeString('vi-VN');
+    document.getElementById('resTimeVal').textContent = sub.createdAt ? new Date(sub.createdAt).toLocaleTimeString('vi-VN') : 'Vừa xong';
 
-    document.getElementById('resP1Score').textContent = sub.part1_score.toFixed(2);
-    document.getElementById('resP2Score').textContent = sub.part2_score.toFixed(2);
-    document.getElementById('resP3Score').textContent = sub.part3_score.toFixed(2);
-    document.getElementById('resTotalScore').textContent = sub.score.toFixed(2);
+    document.getElementById('resP1Score').textContent = (sub.part1_score ?? 0).toFixed(2);
+    document.getElementById('resP2Score').textContent = (sub.part2_score ?? 0).toFixed(2);
+    document.getElementById('resP3Score').textContent = (sub.part3_score ?? 0).toFixed(2);
+    document.getElementById('resTotalScore').textContent = (sub.score ?? 0).toFixed(2);
 
     // Edit fields
-    document.getElementById('editSbdInput').value = sub.student_no;
-    document.getElementById('editCodeInput').value = sub.code;
-    document.getElementById('editStudentNameInput').value = sub.student_name;
+    document.getElementById('editSbdInput').value = sub.student_no || '';
+    document.getElementById('editCodeInput').value = sub.code || '';
+    document.getElementById('editStudentNameInput').value = sub.student_name || '';
 
     // Handwriting Image
     const hwImg = document.getElementById('resHandwrittenImg');
@@ -2083,8 +2200,83 @@ function displayLastResultInspector(sub, rawResult) {
 
     // Rectified Sheet Image & SVG Overlay
     const sheetImg = document.getElementById('resRectifiedImg');
-    sheetImg.src = sub.image_data;
-    renderSvgOverlay(rawResult, sub.code);
+    const svgOverlay = document.getElementById('resSvgOverlay');
+    const visualContainer = document.getElementById('visualSheetContainer');
+
+    // Lấy ảnh: RAM -> IndexedDB -> Supabase/Firestore fallback
+    let imgSrc = sub.stamped_image || sub.image_data;
+    if (!imgSrc && sub.id) {
+        imgSrc = await getOmrImageFromDb(sub.id);
+        if (imgSrc) {
+            sub.image_data = imgSrc;
+            sub.stamped_image = imgSrc;
+            if (state.memoryImages) state.memoryImages[sub.id] = imgSrc;
+        }
+    }
+    if (!imgSrc && sub.lmsResultId) {
+        try {
+            const rSnap = await getDoc(doc(db, "results", sub.lmsResultId));
+            if (rSnap.exists() && rSnap.data().stampedImage) {
+                imgSrc = rSnap.data().stampedImage;
+                sub.image_data = imgSrc;
+                sub.stamped_image = imgSrc;
+                saveOmrImageToDb(sub.id, imgSrc);
+            }
+        } catch (_) {}
+    }
+
+    let errPlaceholder = document.getElementById('sheetImgPlaceholderBox');
+
+    if (imgSrc) {
+        sheetImg.onload = () => {
+            sheetImg.classList.remove('hidden');
+            if (errPlaceholder) errPlaceholder.classList.add('hidden');
+        };
+        sheetImg.onerror = () => {
+            sheetImg.classList.add('hidden');
+            if (!errPlaceholder && visualContainer) {
+                errPlaceholder = document.createElement('div');
+                errPlaceholder.id = 'sheetImgPlaceholderBox';
+                errPlaceholder.className = 'py-12 px-6 text-center space-y-2';
+                visualContainer.appendChild(errPlaceholder);
+            }
+            if (errPlaceholder) {
+                errPlaceholder.innerHTML = `
+                    <div class="w-12 h-12 mx-auto rounded-2xl bg-slate-800 text-slate-400 flex items-center justify-center text-xl">
+                        <i class="fa-solid fa-file-invoice"></i>
+                    </div>
+                    <p class="text-xs font-bold text-slate-300">Bài thi đã lưu đầy đủ điểm số (${(sub.score ?? 0).toFixed(2)}đ)</p>
+                    <p class="text-[11px] text-slate-500">Ảnh phiếu nắn phẳng không khả dụng trên thiết bị này.</p>
+                `;
+                errPlaceholder.classList.remove('hidden');
+            }
+        };
+        sheetImg.src = imgSrc;
+        sheetImg.classList.remove('hidden');
+        if (errPlaceholder) errPlaceholder.classList.add('hidden');
+
+        // Khi hiển thị ảnh đã đóng dấu hoàn chỉnh, xóa SVG overlay để không bị lệch/trùng
+        if (svgOverlay) svgOverlay.innerHTML = '';
+    } else {
+        sheetImg.classList.add('hidden');
+        if (!errPlaceholder && visualContainer) {
+            errPlaceholder = document.createElement('div');
+            errPlaceholder.id = 'sheetImgPlaceholderBox';
+            errPlaceholder.className = 'py-12 px-6 text-center space-y-2';
+            visualContainer.appendChild(errPlaceholder);
+        }
+        if (errPlaceholder) {
+            errPlaceholder.innerHTML = `
+                <div class="w-12 h-12 mx-auto rounded-2xl bg-slate-800 text-emerald-400 flex items-center justify-center text-xl">
+                    <i class="fa-solid fa-file-invoice"></i>
+                </div>
+                <p class="text-xs font-bold text-slate-200">Bài thi đã lưu đầy đủ điểm số (${(sub.score ?? 0).toFixed(2)}đ)</p>
+                <p class="text-[11px] text-slate-400">Ảnh phiếu gốc đã giải phóng để tiết kiệm bộ nhớ điện thoại.</p>
+            `;
+            errPlaceholder.classList.remove('hidden');
+        }
+        if (svgOverlay) svgOverlay.innerHTML = '';
+    }
 
     card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
@@ -2671,6 +2863,7 @@ async function ensureSubmissionStampedHeaderUpgraded(sub) {
                 sub.image_data = upgraded;
                 sub.stamped_image = upgraded;
                 sub._headerV25Upgraded = true;
+                saveOmrImageToDb(sub.id, upgraded);
                 const imgEl = document.getElementById('resRectifiedImg');
                 if (imgEl && state.lastSubmission?.id === sub.id) {
                     imgEl.src = upgraded;
@@ -2762,8 +2955,10 @@ function saveSubmissionsToLocalSafe(examId, subs) {
 }
 
 async function saveSubmissionToStore(sub) {
-    if (state.memoryImages && (sub.stamped_image || sub.image_data)) {
-        state.memoryImages[sub.id] = sub.stamped_image || sub.image_data;
+    const rawImg = sub.stamped_image || sub.image_data;
+    if (rawImg) {
+        if (state.memoryImages) state.memoryImages[sub.id] = rawImg;
+        saveOmrImageToDb(sub.id, rawImg);
     }
 
     // Check if duplicate SBD exists for this exam, replace it
@@ -3842,13 +4037,42 @@ window.viewSubmissionDetail = async (subId) => {
     if (!sub) return;
     state.lastSubmission = sub;
     await ensureSubmissionStampedHeaderUpgraded(sub);
-    window.switchTab('scan');
-    // Display in inspector
-    displayLastResultInspector(sub, {
+    window.switchTab('scan', false);
+
+    // Ẩn upload area và danh sách các bài khác để giao diện cực kỳ gọn gàng
+    const uploadArea = document.getElementById('scanUploadArea');
+    const inlineCard = document.getElementById('scanInlineSubmissionsCard');
+    if (uploadArea) uploadArea.classList.add('hidden');
+    if (inlineCard) inlineCard.classList.add('hidden');
+
+    // Đẩy lịch sử browser để vuốt cạnh viền / nút back trên điện thoại quay lại danh sách
+    if (!window.history.state || window.history.state.view !== 'submission_detail') {
+        window.history.pushState({ view: 'submission_detail', subId }, '');
+    }
+
+    // Hiển thị chi tiết bài chấm
+    await displayLastResultInspector(sub, {
         template: (window.MAU && window.MAU[state.exam.sheet_template]) || window.MAU.qmcv1239,
         part1: sub.answers,
         code: sub.code
     });
+};
+
+window.closeSubmissionDetail = (fromHistory = false) => {
+    const lastCard = document.getElementById('lastResultCard');
+    const uploadArea = document.getElementById('scanUploadArea');
+    const inlineCard = document.getElementById('scanInlineSubmissionsCard');
+
+    if (lastCard) lastCard.classList.add('hidden');
+    if (uploadArea) uploadArea.classList.remove('hidden');
+    if (inlineCard) {
+        inlineCard.classList.remove('hidden');
+        inlineCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    if (!fromHistory && window.history.state && window.history.state.view === 'submission_detail') {
+        window.history.back();
+    }
 };
 
 window.deleteSubmission = async (subId) => {
@@ -3862,6 +4086,7 @@ window.deleteSubmission = async (subId) => {
     });
     if (!res.isConfirmed) return;
 
+    deleteOmrImageFromDb(subId);
     const targetSub = state.submissions.find(s => s.id === subId);
     state.submissions = state.submissions.filter(s => s.id !== subId);
     if (state.gradedCountsByExam && state.exam?.id) {
