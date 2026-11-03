@@ -889,6 +889,9 @@ async function selectExam(examId) {
         loadExamSubmissions(exam.id)
     ]);
 
+    // Đối chiếu và điền tên thí sinh, lớp học theo SBD từ danh bạ lớp OMR
+    enrichSubmissionsFromClassRoster();
+
     // Nếu là đề LMS có câu hỏi, tự động trích xuất đáp án chuẩn từ đề LMS
     if (exam.isLmsExam && ((exam.questions && exam.questions.length > 0) || exam.mixedExams)) {
         autoFillKeysFromLmsQuestions(exam, false);
@@ -988,8 +991,29 @@ async function loadExamStudents(examId) {
     } catch(e) {}
     if (list.length === 0) {
         const local = JSON.parse(localStorage.getItem(`omr_students_${examId}`) || '[]');
-        if (local.length > 0) list = local;
-        else list = createSampleStudents(examId);
+        if (local.length > 0) {
+            list = local;
+        } else {
+            // Kiểm tra lớp OMR được gán cho đề thi hoặc lớp OMR đang active
+            const linkedClassId = state.exam?.classId;
+            const allClasses = Array.isArray(state.omrClasses) ? state.omrClasses : [];
+            const linkedCls = allClasses.find(c => c.id === linkedClassId) || (typeof getActiveOmrClass === 'function' ? getActiveOmrClass() : null);
+            if (linkedCls && Array.isArray(linkedCls.students) && linkedCls.students.length > 0) {
+                list = linkedCls.students.map(st => ({
+                    id: `st_${examId}_${st.student_no}`,
+                    examId: examId,
+                    teacherId: state.teacherUid,
+                    student_no: st.student_no,
+                    name: st.name,
+                    phone: st.phone || '',
+                    note: st.note || '',
+                    class_id: linkedCls.id,
+                    class_name: linkedCls.name
+                }));
+            } else {
+                list = createSampleStudents(examId);
+            }
+        }
     }
     state.students = list;
 }
@@ -1549,36 +1573,216 @@ function getSubmissionDuplicateStatus(sub, allSubmissions = state.submissions) {
     return cachedDupeMap.get(sub.id) || null;
 }
 
+// ========================================================
+// HỆ THỐNG TRA CỨU HỌC SINH ĐA TẦNG TOÀN DIỆN THEO SỐ BÁO DANH (UNIVERSAL SBD RESOLVER)
+// ========================================================
+function findStudentBySbd(sbdInput, examId = state.exam?.id, classId = state.exam?.classId) {
+    if (!sbdInput && sbdInput !== 0) return null;
+    const clean = String(sbdInput).trim().replace(/\D/g, '');
+    const num = clean ? String(parseInt(clean, 10)) : '';
+    if (!clean && !num) return null;
+
+    const isMatch = (st) => {
+        if (!st) return false;
+        const stClean = String(st.student_no || st.sbd || st.id || '').trim().replace(/\D/g, '');
+        const stNum = stClean ? String(parseInt(stClean, 10)) : '';
+        return (clean && stClean && clean === stClean) || (num && stNum && num === stNum);
+    };
+
+    // 1. Kiểm tra state.students (danh sách học sinh gán cho đề thi hiện tại)
+    if (Array.isArray(state.students) && state.students.length > 0) {
+        const m = state.students.find(isMatch);
+        if (m && (m.name || m.student_name)) {
+            return {
+                name: m.name || m.student_name,
+                student_no: m.student_no || clean,
+                class_name: m.class_name || state.exam?.className || '',
+                class_id: m.class_id || state.exam?.classId || '',
+                student_uid: m.student_uid || '',
+                student_email: m.student_email || '',
+                phone: m.phone || ''
+            };
+        }
+    }
+
+    // 2. Kiểm tra lớp OMR đang chọn (active OMR class)
+    const activeCls = (typeof getActiveOmrClass === 'function') ? getActiveOmrClass() : null;
+    if (activeCls && Array.isArray(activeCls.students)) {
+        const m = activeCls.students.find(isMatch);
+        if (m && (m.name || m.student_name)) {
+            return {
+                name: m.name || m.student_name,
+                student_no: m.student_no || clean,
+                class_name: m.class_name || activeCls.name || '',
+                class_id: m.class_id || activeCls.id || '',
+                student_uid: m.student_uid || '',
+                student_email: m.student_email || '',
+                phone: m.phone || ''
+            };
+        }
+    }
+
+    // 3. Kiểm tra lớp được gắn cho bài thi (state.exam?.classId)
+    const targetClassId = classId || state.exam?.classId;
+    const allClasses = [
+        ...(Array.isArray(state.omrClasses) ? state.omrClasses : []),
+        ...(Array.isArray(state.classes) ? state.classes : [])
+    ];
+    if (targetClassId) {
+        const examCls = allClasses.find(c => c.id === targetClassId);
+        if (examCls && Array.isArray(examCls.students)) {
+            const m = examCls.students.find(isMatch);
+            if (m && (m.name || m.student_name)) {
+                return {
+                    name: m.name || m.student_name,
+                    student_no: m.student_no || clean,
+                    class_name: m.class_name || examCls.name || '',
+                    class_id: m.class_id || examCls.id || '',
+                    student_uid: m.student_uid || '',
+                    student_email: m.student_email || '',
+                    phone: m.phone || ''
+                };
+            }
+        }
+    }
+
+    // 4. Quét qua tất cả các lớp trong state.omrClasses / state.classes
+    for (const cls of allClasses) {
+        if (Array.isArray(cls.students)) {
+            const m = cls.students.find(isMatch);
+            if (m && (m.name || m.student_name)) {
+                return {
+                    name: m.name || m.student_name,
+                    student_no: m.student_no || clean,
+                    class_name: m.class_name || cls.name || '',
+                    class_id: m.class_id || cls.id || '',
+                    student_uid: m.student_uid || '',
+                    student_email: m.student_email || '',
+                    phone: m.phone || ''
+                };
+            }
+        }
+    }
+
+    // 5. Kiểm tra localStorage `omr_local_classes` phòng trường hợp state.omrClasses chưa nạp kịp
+    try {
+        const rawLocalClasses = localStorage.getItem('omr_local_classes');
+        if (rawLocalClasses) {
+            const localClsList = JSON.parse(rawLocalClasses);
+            if (Array.isArray(localClsList)) {
+                for (const cls of localClsList) {
+                    if (Array.isArray(cls.students)) {
+                        const m = cls.students.find(isMatch);
+                        if (m && (m.name || m.student_name)) {
+                            return {
+                                name: m.name || m.student_name,
+                                student_no: m.student_no || clean,
+                                class_name: m.class_name || cls.name || '',
+                                class_id: m.class_id || cls.id || '',
+                                student_uid: m.student_uid || '',
+                                student_email: m.student_email || '',
+                                phone: m.phone || ''
+                            };
+                        }
+                    }
+                }
+            }
+        }
+    } catch (_) {}
+
+    // 6. Kiểm tra localStorage `omr_students_${examId}`
+    if (examId) {
+        try {
+            const rawExStudents = localStorage.getItem(`omr_students_${examId}`);
+            if (rawExStudents) {
+                const exStudents = JSON.parse(rawExStudents);
+                if (Array.isArray(exStudents)) {
+                    const m = exStudents.find(isMatch);
+                    if (m && (m.name || m.student_name)) {
+                        return {
+                            name: m.name || m.student_name,
+                            student_no: m.student_no || clean,
+                            class_name: m.class_name || state.exam?.className || '',
+                            class_id: m.class_id || state.exam?.classId || '',
+                            student_uid: m.student_uid || '',
+                            student_email: m.student_email || '',
+                            phone: m.phone || ''
+                        };
+                    }
+                }
+            }
+        } catch (_) {}
+    }
+
+    return null;
+}
+
+function getAllAvailableStudents() {
+    const list = [];
+    const seen = new Set();
+    const addSt = (st, defaultClsName = '') => {
+        if (!st) return;
+        const key = `${st.student_no || ''}_${st.name || ''}`;
+        if (!seen.has(key)) {
+            seen.add(key);
+            list.push({
+                ...st,
+                name: st.name || st.student_name || '',
+                class_name: st.class_name || defaultClsName
+            });
+        }
+    };
+    if (Array.isArray(state.students)) {
+        state.students.forEach(st => addSt(st));
+    }
+    const activeCls = (typeof getActiveOmrClass === 'function') ? getActiveOmrClass() : null;
+    if (activeCls && Array.isArray(activeCls.students)) {
+        activeCls.students.forEach(st => addSt(st, activeCls.name));
+    }
+    if (Array.isArray(state.omrClasses)) {
+        state.omrClasses.forEach(cls => {
+            if (Array.isArray(cls.students)) cls.students.forEach(st => addSt(st, cls.name));
+        });
+    }
+    return list;
+}
+
 function enrichSubmissionsFromClassRoster() {
     if (!Array.isArray(state.submissions) || state.submissions.length === 0) return;
-    const roster = Array.isArray(state.students) ? state.students : [];
-    if (roster.length === 0) return;
     const defaultClass = state.exam?.className || (Array.isArray(state.exam?.classes) && state.exam.classes[0]) || '';
-
-    // Tạo Map tra cứu nhanh O(1) theo SBD
-    const rosterBySbd = new Map();
-    roster.forEach(st => {
-        if (st.student_no) {
-            const raw = String(st.student_no).trim();
-            rosterBySbd.set(raw, st);
-            const num = parseInt(raw, 10);
-            if (!isNaN(num)) rosterBySbd.set(String(num), st);
-        }
-    });
+    let hasChanges = false;
 
     state.submissions.forEach(s => {
         if (s.student_no) {
-            const rawNo = String(s.student_no).trim();
-            const matched = rosterBySbd.get(rawNo) || (!isNaN(parseInt(rawNo, 10)) ? rosterBySbd.get(String(parseInt(rawNo, 10))) : null);
-            if (matched) {
-                if (!s.student_name && matched.name) s.student_name = matched.name;
-                if (!s.class_name && matched.class_name) s.class_name = matched.class_name;
+            const currentName = (s.student_name || '').trim();
+            const isPlaceholder = !currentName || currentName.startsWith('Học sinh #') || currentName.startsWith('Phiếu ') || currentName.startsWith('Học sinh SBD');
+            const matched = findStudentBySbd(s.student_no, s.examId || state.exam?.id, s.class_id || state.exam?.classId);
+            if (matched && matched.name) {
+                if (isPlaceholder || s.student_name !== matched.name) {
+                    s.student_name = matched.name;
+                    s._needsRestamp = true;
+                    hasChanges = true;
+                }
+                if (!s.class_name && matched.class_name) {
+                    s.class_name = matched.class_name;
+                    s._needsRestamp = true;
+                    hasChanges = true;
+                }
+                if (!s.class_id && matched.class_id) s.class_id = matched.class_id;
+                if (!s.student_uid && matched.student_uid) s.student_uid = matched.student_uid;
+                if (!s.student_email && matched.student_email) s.student_email = matched.student_email;
             }
         }
         if (!s.class_name && defaultClass) {
             s.class_name = defaultClass;
         }
     });
+
+    if (hasChanges && state.exam?.id) {
+        try {
+            localStorage.setItem(`omr_submissions_${state.exam.id}`, JSON.stringify(state.submissions));
+        } catch (_) {}
+    }
 }
 
 function getVietnameseGivenNameSortKey(fullName) {
@@ -2491,14 +2695,10 @@ async function processSingleSheet(source, options = {}) {
         nameImg = await cropCandidateHandwrittenName(rawResult.rectifiedCanvas || rawResult.rectifiedImage, rawResult.templateKey);
     }
 
-    // Match student name from SBD
+    // Match student name from SBD using universal resolver
     const sbd = (rawResult.student_no || '').replace(/\D/g, '');
-    const sbdNum = sbd ? String(Number(sbd)) : '';
-    let matchedStudent = state.students.find(s =>
-        s.student_no === sbd ||
-        (sbdNum && String(Number((s.student_no || '').replace(/\D/g, ''))) === sbdNum)
-    );
-    const studentName = matchedStudent ? matchedStudent.name : '';
+    let matchedStudent = findStudentBySbd(sbd, state.exam?.id, state.exam?.classId);
+    const studentName = matchedStudent ? (matchedStudent.name || matchedStudent.student_name || '') : '';
     const className = matchedStudent ? (matchedStudent.class_name || state.exam?.className || '') : (state.exam?.className || '');
     const classId = matchedStudent?.class_id || state.exam?.classId || '';
     const studentUid = matchedStudent?.student_uid || '';
@@ -3327,23 +3527,21 @@ async function generateStampedGradedSheet(sub, rawResult) {
     ctx.fillText('Chuẩn BGD 2025 (CV 1239)', brandCenterX, brandCardY + 310);
     ctx.textAlign = 'left';
 
-    // Đối chiếu tên thí sinh từ danh sách lớp (theo số báo danh) nếu có danh sách
+    // Đối chiếu tên thí sinh từ danh sách lớp (theo số báo danh) qua hàm universal resolver
     let resolvedStudentName = (sub.student_name || '').trim();
-    const hasExistingRealName = resolvedStudentName && !resolvedStudentName.startsWith('Học sinh #') && !resolvedStudentName.startsWith('Phiếu ');
-    if (!hasExistingRealName && Array.isArray(state.students) && state.students.length > 0 && sub.student_no) {
-        const cleanSbd = String(sub.student_no).replace(/\D/g, '');
-        const numSbd = cleanSbd ? String(Number(cleanSbd)) : '';
-        const matched = state.students.find(st => {
-            const stSbd = String(st.student_no || st.sbd || '').replace(/\D/g, '');
-            const stNum = stSbd ? String(Number(stSbd)) : '';
-            return (cleanSbd && stSbd && cleanSbd === stSbd) || (numSbd && stNum && numSbd === stNum);
-        });
-        if (matched && (matched.name || matched.student_name || matched.studentName)) {
-            resolvedStudentName = matched.name || matched.student_name || matched.studentName;
-            sub.student_name = resolvedStudentName;
-        }
+    const hasExistingRealName = resolvedStudentName && !resolvedStudentName.startsWith('Học sinh #') && !resolvedStudentName.startsWith('Phiếu ') && !resolvedStudentName.startsWith('Học sinh SBD');
+    let matchedStudentInfo = null;
+    if (sub.student_no) {
+        matchedStudentInfo = findStudentBySbd(sub.student_no, sub.examId || state.exam?.id, sub.class_id || state.exam?.classId);
+    }
+    if (matchedStudentInfo && (matchedStudentInfo.name || matchedStudentInfo.student_name)) {
+        resolvedStudentName = matchedStudentInfo.name || matchedStudentInfo.student_name;
+        sub.student_name = resolvedStudentName;
+        if (!sub.class_name && matchedStudentInfo.class_name) sub.class_name = matchedStudentInfo.class_name;
+        if (!sub.class_id && matchedStudentInfo.class_id) sub.class_id = matchedStudentInfo.class_id;
     }
     if (!resolvedStudentName) resolvedStudentName = sub.student_no ? `Học sinh #${sub.student_no}` : 'Theo SBD trên phiếu';
+    sub._stampedStudentName = resolvedStudentName;
 
     // 3. KHUNG THÔNG TIN THÍ SINH & ĐỀ THI CỠ LỚN (GIỮA: X: 438 -> 948)
     const cardX = 438, cardY = 24, cardW = 510, cardH = 334;
@@ -3407,7 +3605,10 @@ async function generateStampedGradedSheet(sub, rawResult) {
     ctx.fillText('Lớp:', cardX + 22, cardY + 244);
     ctx.fillStyle = '#0f172a';
     ctx.font = 'bold 22px "Segoe UI", Arial, sans-serif';
-    ctx.fillText(sub.class_name || state.exam?.className || (state.exam?.classes?.[0] || '---'), cardX + 85, cardY + 244);
+    const activeCls = (typeof getActiveOmrClass === 'function') ? getActiveOmrClass() : null;
+    const resolvedClassName = sub.class_name || matchedStudentInfo?.class_name || activeCls?.name || state.exam?.className || (state.exam?.classes?.[0] || '---');
+    sub._stampedClassName = resolvedClassName;
+    ctx.fillText(resolvedClassName, cardX + 85, cardY + 244);
 
     // Dòng 5: Giờ chấm & Ghi chú đính chính
     ctx.fillStyle = '#475569';
@@ -3926,8 +4127,62 @@ function renderSvgOverlay(rawResult, code) {
     svg.innerHTML = marks;
 }
 
-async function ensureSubmissionStampedHeaderUpgraded(sub) {
-    if (!sub || !sub.image_data || sub._headerV25Upgraded) return sub?.image_data;
+async function ensureSubmissionStampedHeaderUpgraded(sub, forceRestamp = false) {
+    if (!sub) return null;
+
+    // Luôn đối chiếu lại tên và lớp từ danh bạ học sinh theo SBD
+    if (sub.student_no) {
+        const matched = findStudentBySbd(sub.student_no, sub.examId || state.exam?.id, sub.class_id || state.exam?.classId);
+        if (matched && matched.name) {
+            const curName = (sub.student_name || '').trim();
+            const isPlaceholder = !curName || curName.startsWith('Học sinh #') || curName.startsWith('Phiếu ') || curName.startsWith('Học sinh SBD');
+            if (isPlaceholder || curName !== matched.name) {
+                sub.student_name = matched.name;
+                forceRestamp = true;
+            }
+            if (!sub.class_name && matched.class_name) {
+                sub.class_name = matched.class_name;
+                forceRestamp = true;
+            }
+            if (!sub.class_id && matched.class_id) sub.class_id = matched.class_id;
+        }
+    }
+
+    // Kiểm tra xem header hiện tại có khớp tên học sinh thực tế hay không
+    if (sub.student_name && !sub.student_name.startsWith('Học sinh #')) {
+        if (sub._stampedStudentName && sub._stampedStudentName !== sub.student_name) {
+            forceRestamp = true;
+        } else if (!sub._stampedStudentName) {
+            // Phiếu cũ chưa được ghi nhận _stampedStudentName -> re-stamp 1 lần để cập nhật tên thật lên ảnh
+            forceRestamp = true;
+        }
+    }
+
+    if (!forceRestamp && !sub._needsRestamp && sub._headerV25Upgraded && (sub.stamped_image || sub.image_data)) {
+        return sub.stamped_image || sub.image_data;
+    }
+
+    // Nếu cần force restamp (do tên học sinh hoặc lớp được cập nhật)
+    if (forceRestamp || sub._needsRestamp) {
+        sub._needsRestamp = false;
+        sub._headerV25Upgraded = true;
+        const restamped = await reStampSubmission(sub);
+        if (restamped) {
+            const imgEl = document.getElementById('resRectifiedImg');
+            if (imgEl && state.lastSubmission?.id === sub.id) {
+                imgEl.src = restamped;
+            }
+            if (state.exam?.id) {
+                try {
+                    localStorage.setItem(`omr_submissions_${state.exam.id}`, JSON.stringify(state.submissions));
+                } catch (_) {}
+            }
+            return restamped;
+        }
+    }
+
+    // Dự phòng nâng cấp header phiếu phiên bản cũ (260px lên 380px)
+    if (!sub.image_data) return sub.stamped_image || null;
     try {
         const img = await new Promise((resolve, reject) => {
             const i = new Image();
@@ -3935,7 +4190,6 @@ async function ensureSubmissionStampedHeaderUpgraded(sub) {
             i.onerror = () => reject(new Error('Image load error'));
             i.src = sub.image_data;
         });
-        // Nếu là ảnh phiếu cũ có header 260px (chiều cao ~ 2450px) hoặc chưa đóng dấu header 380px
         if (img.naturalWidth === 1552 && img.naturalHeight > 2250 && img.naturalHeight < 2520) {
             const oldHeaderH = 260;
             const bodyH = img.naturalHeight - oldHeaderH;
@@ -5185,7 +5439,15 @@ window.renderResultsTable = () => {
     }
 
     tbody.innerHTML = sorted.map((s, idx) => {
-        const hasRealName = s.student_name && !s.student_name.startsWith('Học sinh ');
+        let hasRealName = s.student_name && !s.student_name.startsWith('Học sinh #') && !s.student_name.startsWith('Phiếu ') && !s.student_name.startsWith('Học sinh SBD');
+        if (!hasRealName && s.student_no) {
+            const matched = findStudentBySbd(s.student_no, s.examId || state.exam?.id, s.class_id || state.exam?.classId);
+            if (matched && matched.name) {
+                s.student_name = matched.name;
+                if (!s.class_name && matched.class_name) s.class_name = matched.class_name;
+                hasRealName = true;
+            }
+        }
         const displayName = hasRealName ? s.student_name : (s.student_no ? `Học sinh #${s.student_no}` : `Phiếu chưa tên #${idx + 1}`);
         const dupeStatus = getSubmissionDuplicateStatus(s, sorted);
         const rowClass = dupeStatus
@@ -5246,7 +5508,28 @@ window.viewSubmissionDetail = async (subId) => {
     const sub = state.submissions.find(s => s.id === subId);
     if (!sub) return;
     state.lastSubmission = sub;
-    await ensureSubmissionStampedHeaderUpgraded(sub);
+
+    // Tự động đối chiếu lại tên học sinh & lớp từ danh sách lớp nếu SBD khớp
+    if (sub.student_no) {
+        const matched = findStudentBySbd(sub.student_no, sub.examId || state.exam?.id, sub.class_id || state.exam?.classId);
+        if (matched && matched.name) {
+            const curName = (sub.student_name || '').trim();
+            const isPlaceholder = !curName || curName.startsWith('Học sinh #') || curName.startsWith('Phiếu ') || curName.startsWith('Học sinh SBD');
+            if (isPlaceholder || curName !== matched.name) {
+                sub.student_name = matched.name;
+                sub._needsRestamp = true;
+            }
+            if (!sub.class_name && matched.class_name) {
+                sub.class_name = matched.class_name;
+                sub._needsRestamp = true;
+            }
+            if (!sub.class_id && matched.class_id) sub.class_id = matched.class_id;
+            if (!sub.student_uid && matched.student_uid) sub.student_uid = matched.student_uid;
+            if (!sub.student_email && matched.student_email) sub.student_email = matched.student_email;
+        }
+    }
+
+    await ensureSubmissionStampedHeaderUpgraded(sub, sub._needsRestamp);
     window.switchTab('scan', false);
 
     // Ẩn upload area và danh sách các bài khác để giao diện cực kỳ gọn gàng
@@ -5858,6 +6141,9 @@ function saveLocalOmrClasses(classes) {
     try {
         localStorage.setItem('omr_local_classes', JSON.stringify(state.omrClasses));
     } catch(e) {}
+    try {
+        enrichSubmissionsFromClassRoster();
+    } catch (_) {}
     if (state.teacherUid) {
         for (const cls of state.omrClasses) {
             try {
@@ -6301,6 +6587,9 @@ window.assignSelectedClassToActiveExam = async () => {
 
     updateActiveExamBanner();
     updateOverviewStats();
+    enrichSubmissionsFromClassRoster();
+    renderInlineSubmissionsList();
+    if (state.activeTab === 'results') window.renderResultsTable();
     window.renderStudentsTab();
 
     Swal.fire({
@@ -8056,8 +8345,9 @@ async function reStampSubmission(sub) {
             i.src = baseImgSrc;
         });
 
+        const isClean = !!(sub.clean_image && baseImgSrc === sub.clean_image);
         let bodyCanvas;
-        if (sub.clean_image && baseImgSrc === sub.clean_image) {
+        if (isClean) {
             bodyCanvas = img;
         } else {
             const headerH = img.naturalHeight > 2520 ? 380 : (img.naturalHeight > 2300 ? 260 : 0);
@@ -8074,7 +8364,8 @@ async function reStampSubmission(sub) {
         const newStamped = await generateStampedGradedSheet(sub, {
             rectifiedCanvas: bodyCanvas,
             template: tpl,
-            templateKey: tplKey
+            templateKey: tplKey,
+            onlyHeaderUpgrade: !isClean
         });
 
         if (newStamped) {
@@ -9320,17 +9611,15 @@ window.syncAllResultsToLmsClass = async () => {
         let okCount = 0;
         for (const sub of state.submissions) {
             // Ghép lại thông tin học sinh từ danh sách lớp nếu vừa đồng bộ lớp mới
-            const sbdNum = sub.student_no ? String(Number(sub.student_no)) : '';
-            const matched = state.students.find(st =>
-                st.student_no === sub.student_no ||
-                (sbdNum && String(Number((st.student_no || '').replace(/\D/g, ''))) === sbdNum)
-            );
+            const matched = findStudentBySbd(sub.student_no, state.exam?.id, state.exam?.classId);
             if (matched) {
-                sub.student_name = sub.student_name || matched.name;
+                const curName = (sub.student_name || '').trim();
+                const isPlaceholder = !curName || curName.startsWith('Học sinh #') || curName.startsWith('Phiếu ') || curName.startsWith('Học sinh SBD');
+                if (isPlaceholder || !sub.student_name) sub.student_name = matched.name;
                 sub.student_uid = matched.student_uid || sub.student_uid || '';
                 sub.student_email = matched.student_email || sub.student_email || '';
-                sub.class_id = matched.class_id || state.exam.classId || '';
-                sub.class_name = matched.class_name || state.exam.className || '';
+                sub.class_id = matched.class_id || sub.class_id || state.exam.classId || '';
+                sub.class_name = matched.class_name || sub.class_name || state.exam.className || '';
             } else {
                 sub.class_id = sub.class_id || state.exam.classId || '';
                 sub.class_name = sub.class_name || state.exam.className || '';
@@ -9401,7 +9690,7 @@ window.openSendParentModal = async (subId) => {
     let parentWatchUrl = `${window.location.origin}/parent-watch.html`;
     if (urlInput) urlInput.value = 'Đang tạo đường link theo dõi cho Phụ huynh...';
 
-    const matchedStu = state.students.find(st => st.student_no === sub.student_no);
+    const matchedStu = findStudentBySbd(sub.student_no, sub.examId || state.exam?.id, sub.class_id || state.exam?.classId);
     const studentUid = sub.student_uid || matchedStu?.student_uid || '';
     if (studentUid && typeof getOrCreateParentWatchToken === 'function') {
         try {
