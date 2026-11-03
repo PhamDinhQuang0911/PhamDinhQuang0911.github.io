@@ -494,7 +494,7 @@ state.telegramConfig = {
     botTokens: []
 };
 try {
-    const rawTg = localStorage.getItem('omr_telegram_storage_config');
+    const rawTg = localStorage.getItem('omr_telegram_storage_config') || localStorage.getItem('qmath_telegram_config');
     if (rawTg) {
         state.telegramConfig = { ...state.telegramConfig, ...JSON.parse(rawTg) };
     }
@@ -797,26 +797,43 @@ async function selectExam(examId) {
     state.exam = exam;
     localStorage.setItem('omr_last_exam_id_' + state.teacherUid, exam.id);
 
-    // Load Exam Keys
-    await loadExamKeys(exam.id);
+    // Nạp NGAY LẬP TỨC 0ms danh sách bài chấm từ localStorage để UI hiển thị tức thì, không giật lag
+    try {
+        const cachedSubs = JSON.parse(localStorage.getItem(`omr_submissions_${exam.id}`) || '[]');
+        if (Array.isArray(cachedSubs) && cachedSubs.length > 0) {
+            state.submissions = cachedSubs;
+            if (state.gradedCountsByExam) state.gradedCountsByExam[exam.id] = cachedSubs.length;
+        } else {
+            state.submissions = [];
+        }
+    } catch(_) {
+        state.submissions = [];
+    }
+
+    // Hiển thị banner và vẽ danh sách bài chấm tức thì
+    updateActiveExamBanner();
+    syncSubmissionClassFilterOptions();
+    renderInlineSubmissionsList();
+    if (state.activeTab === 'results') window.renderResultsTable();
+    updateOverviewStats();
+
+    // Tải song song Keys, Students và Submissions Cloud ngầm (không chờ tuần tự từng mạng)
+    await Promise.allSettled([
+        loadExamKeys(exam.id),
+        loadExamStudents(exam.id),
+        loadExamSubmissions(exam.id)
+    ]);
 
     // Nếu là đề LMS có câu hỏi, tự động trích xuất đáp án chuẩn từ đề LMS
     if (exam.isLmsExam && ((exam.questions && exam.questions.length > 0) || exam.mixedExams)) {
         autoFillKeysFromLmsQuestions(exam, false);
     }
 
-    // Update banner & template selector
-    updateActiveExamBanner();
-
-    // Load Exam Students
-    await loadExamStudents(exam.id);
-    // Load Exam Submissions
-    await loadExamSubmissions(exam.id);
-
     updateOverviewStats();
     if (state.activeTab === 'keys') window.renderKeysTab();
     if (state.activeTab === 'students') window.renderStudentsTab();
     if (state.activeTab === 'results') window.renderResultsTable();
+    renderInlineSubmissionsList();
 }
 
 function updateActiveExamBanner() {
@@ -1065,6 +1082,7 @@ window.saveTelegramConfig = function() {
 
     try {
         localStorage.setItem('omr_telegram_storage_config', JSON.stringify(state.telegramConfig));
+        localStorage.setItem('qmath_telegram_config', JSON.stringify(state.telegramConfig));
     } catch (e) {
         console.warn("Không thể lưu cấu hình Telegram vào localStorage:", e);
     }
@@ -1281,7 +1299,7 @@ window.toggleSheetViewMode = function() {
 async function loadExamSubmissions(examId) {
     let list = [];
 
-    // 1. Nạp từ localStorage trước (dữ liệu tại máy luôn tươi mới nhất, bảo toàn 100% tất cả các bài chấm)
+    // 1. Nạp từ localStorage trước (0ms latency, bảo toàn 100% tất cả các bài chấm)
     try {
         const localList = JSON.parse(localStorage.getItem(`omr_submissions_${examId}`) || '[]');
         if (Array.isArray(localList)) {
@@ -1289,148 +1307,204 @@ async function loadExamSubmissions(examId) {
         }
     } catch(e) {}
 
-    // 2. Đồng bộ thêm từ Firestore omr_submissions nếu trên máy bị thiếu bài
+    // Nếu trên máy đã có dữ liệu, cập nhật state và vẽ NGAY LẬP TỨC (zero latency)
+    if (list.length > 0) {
+        state.submissions = list;
+        if (state.gradedCountsByExam) state.gradedCountsByExam[examId] = list.length;
+        renderInlineSubmissionsList();
+        if (state.activeTab === 'results' && window.renderResultsTable) window.renderResultsTable();
+        updateOverviewStats();
+
+        // Đồng bộ ngầm trong nền với đám mây để không làm nghẽn giao diện
+        syncCloudSubmissionsInBackground(examId, list);
+        return;
+    }
+
+    // Nếu máy chưa có dữ liệu (lần đầu mở trên thiết bị mới), nạp từ đám mây có hiệu ứng xoay nhẹ
+    const inlineListEl = document.getElementById('scanInlineSubmissionsList');
+    if (inlineListEl && (!state.submissions || state.submissions.length === 0)) {
+        inlineListEl.innerHTML = `
+            <div class="py-10 text-center text-xs text-slate-400 space-y-2">
+                <i class="fa-solid fa-spinner fa-spin text-2xl text-emerald-500"></i>
+                <p class="font-bold text-slate-600 dark:text-slate-300">Đang đồng bộ bài chấm từ đám mây...</p>
+            </div>`;
+    }
+
+    await fetchSubmissionsFromCloud(examId, list);
+    state.submissions = list;
+    if (state.gradedCountsByExam) state.gradedCountsByExam[examId] = list.length;
+    saveSubmissionsToLocalSafe(examId, list);
+    renderInlineSubmissionsList();
+    if (state.activeTab === 'results' && window.renderResultsTable) window.renderResultsTable();
+    updateOverviewStats();
+}
+
+async function fetchSubmissionsFromCloud(examId, list) {
+    if (!state.teacherUid || typeof db === 'undefined') return;
+
+    // 1. Đồng bộ thêm từ Firestore omr_submissions nếu trên máy bị thiếu bài
     try {
-        if (state.teacherUid && typeof db !== 'undefined') {
-            const qSnap = await getDocs(query(collection(db, "omr_submissions"), where("examId", "==", examId)));
-            qSnap.docs.forEach(d => {
-                const cloudSub = { id: d.id, ...d.data() };
-                const existing = list.find(x => x.id === cloudSub.id);
-                if (!existing) {
-                    list.push(cloudSub);
-                }
-            });
-        }
+        const qSnap = await getDocs(query(collection(db, "omr_submissions"), where("examId", "==", examId)));
+        qSnap.docs.forEach(d => {
+            const cloudSub = { id: d.id, ...d.data() };
+            const existing = list.find(x => x.id === cloudSub.id);
+            if (!existing) {
+                list.push(cloudSub);
+            }
+        });
     } catch(e) {}
 
-    // 3. Khôi phục thêm từ bảng results trên Supabase (Bảo toàn cả các bài trùng SBD, không lọc bỏ)
+    // 2. Khôi phục thêm từ bảng results trên Supabase (Bảo toàn cả các bài trùng SBD, không lọc bỏ)
     try {
-        if (state.teacherUid && typeof db !== 'undefined') {
-            const resSnap = await getDocs(query(collection(db, "results"), where("examId", "==", examId)));
-            resSnap.docs.forEach(docSnap => {
-                const r = { id: docSnap.id, ...docSnap.data() };
-                if (r.gradingSource !== 'omr' && !String(r.id || '').startsWith('omr_')) return;
+        const resSnap = await getDocs(query(collection(db, "results"), where("examId", "==", examId)));
+        resSnap.docs.forEach(docSnap => {
+            const r = { id: docSnap.id, ...docSnap.data() };
+            if (r.gradingSource !== 'omr' && !String(r.id || '').startsWith('omr_')) return;
 
-                const rawSubId = String(r.id).replace(`omr_${examId}_`, '') || r.id;
-                const existing = list.find(x => x.id === rawSubId || x.lmsResultId === r.id);
+            const rawSubId = String(r.id).replace(`omr_${examId}_`, '') || r.id;
+            const existing = list.find(x => x.id === rawSubId || x.lmsResultId === r.id);
 
-                if (!existing) {
-                    const cleanName = (r.studentName && !r.studentName.startsWith('Thí sinh OMR') && !r.studentName.startsWith('Học sinh SBD '))
-                        ? r.studentName
-                        : '';
-                    list.push({
-                        id: rawSubId,
-                        lmsResultId: r.id,
-                        examId: examId,
-                        teacherId: r.teacherId || state.teacherUid,
-                        student_no: r.studentNo || '',
-                        student_name: cleanName,
-                        student_uid: (r.studentId && !String(r.studentId).startsWith('omr_')) ? r.studentId : '',
-                        student_email: r.studentEmail || '',
-                        class_id: r.classId || '',
-                        class_name: r.className || '',
-                        code: r.examCode || '101',
-                        score: Number(r.score) || 0,
-                        part1_score: Number(r.part1Score) || 0,
-                        part2_score: Number(r.part2Score) || 0,
-                        part3_score: Number(r.part3Score) || 0,
-                        answers: r.omrPart1 || '',
-                        part2: Array.isArray(r.omrPart2) ? r.omrPart2 : [],
-                        part3: Array.isArray(r.omrPart3) ? r.omrPart3 : [],
-                        image_data: r.stampedImage || '',
-                        stamped_image: r.stampedImage || '',
-                        telegram_photo_url: r.telegramPhotoUrl || '',
-                        createdAt: r.submittedAt || r.gradedAt || r.updatedAt || new Date().toISOString()
-                    });
-                } else {
-                    existing.lmsResultId = existing.lmsResultId || r.id;
-                    if (!existing.image_data && r.stampedImage) {
-                        existing.image_data = r.stampedImage;
-                        existing.stamped_image = r.stampedImage;
-                    }
-                    if (!existing.telegram_photo_url && r.telegramPhotoUrl) {
-                        existing.telegram_photo_url = r.telegramPhotoUrl;
-                    }
+            if (!existing) {
+                const cleanName = (r.studentName && !r.studentName.startsWith('Thí sinh OMR') && !r.studentName.startsWith('Học sinh SBD '))
+                    ? r.studentName
+                    : '';
+                list.push({
+                    id: rawSubId,
+                    lmsResultId: r.id,
+                    examId: examId,
+                    teacherId: r.teacherId || state.teacherUid,
+                    student_no: r.studentNo || '',
+                    student_name: cleanName,
+                    student_uid: (r.studentId && !String(r.studentId).startsWith('omr_')) ? r.studentId : '',
+                    student_email: r.studentEmail || '',
+                    class_id: r.classId || '',
+                    class_name: r.className || '',
+                    code: r.examCode || '101',
+                    score: Number(r.score) || 0,
+                    part1_score: Number(r.part1Score) || 0,
+                    part2_score: Number(r.part2Score) || 0,
+                    part3_score: Number(r.part3Score) || 0,
+                    answers: r.omrPart1 || '',
+                    part2: Array.isArray(r.omrPart2) ? r.omrPart2 : [],
+                    part3: Array.isArray(r.omrPart3) ? r.omrPart3 : [],
+                    image_data: r.stampedImage || '',
+                    stamped_image: r.stampedImage || '',
+                    telegram_photo_url: r.telegramPhotoUrl || '',
+                    createdAt: r.submittedAt || r.gradedAt || r.updatedAt || new Date().toISOString()
+                });
+            } else {
+                existing.lmsResultId = existing.lmsResultId || r.id;
+                if (!existing.image_data && r.stampedImage) {
+                    existing.image_data = r.stampedImage;
+                    existing.stamped_image = r.stampedImage;
                 }
-            });
-        }
+                if (!existing.telegram_photo_url && r.telegramPhotoUrl) {
+                    existing.telegram_photo_url = r.telegramPhotoUrl;
+                }
+            }
+        });
     } catch(e) {
         console.warn("Khôi phục bài chấm từ bảng results:", e);
     }
+}
 
-    // Khôi phục ảnh độ phân giải cao từ bộ nhớ phiên và IndexedDB: preload tối đa 5 bài gần nhất để tiết kiệm RAM và mở đề tức thì
-    const preloadLimit = Math.min(5, list.length);
-    for (let i = 0; i < preloadLimit; i++) {
-        const s = list[i];
-        if (state.memoryImages && state.memoryImages[s.id]) {
-            s.image_data = state.memoryImages[s.id];
-            s.stamped_image = state.memoryImages[s.id];
-        } else if (!s.image_data) {
-            try {
-                const cachedImg = await getOmrImageFromDb(s.id);
-                if (cachedImg) {
-                    s.image_data = cachedImg;
-                    s.stamped_image = cachedImg;
-                    if (state.memoryImages) state.memoryImages[s.id] = cachedImg;
-                }
-            } catch (_) {}
-        }
-    }
-
-    state.submissions = list;
-    if (state.gradedCountsByExam) {
-        state.gradedCountsByExam[examId] = list.length;
-    }
+function syncCloudSubmissionsInBackground(examId, currentList) {
+    if (!state.teacherUid || typeof db === 'undefined') return;
+    setTimeout(async () => {
+        try {
+            const listCopy = [...currentList];
+            const prevLen = listCopy.length;
+            await fetchSubmissionsFromCloud(examId, listCopy);
+            if (listCopy.length !== prevLen) {
+                state.submissions = listCopy;
+                if (state.gradedCountsByExam) state.gradedCountsByExam[examId] = listCopy.length;
+                saveSubmissionsToLocalSafe(examId, listCopy);
+                renderInlineSubmissionsList();
+                if (state.activeTab === 'results' && window.renderResultsTable) window.renderResultsTable();
+                updateOverviewStats();
+            }
+        } catch(_) {}
+    }, 100);
 }
 
 // ========================================================
-// HỆ THỐNG ĐỐI CHIẾU TRÙNG SỐ BÁO DANH & MÃ ĐỀ (DUPLICATE DETECTION ENGINE)
+// HỆ THỐNG ĐỐI CHIẾU TRÙNG SỐ BÁO DANH & MÃ ĐỀ (DUPLICATE DETECTION ENGINE - O(1) MAP)
 // ========================================================
+let cachedDupeMap = null;
+let lastDupeSubmissionsRef = null;
+
 function getSubmissionDuplicateStatus(sub, allSubmissions = state.submissions) {
     if (!sub) return null;
     const sbd = String(sub.student_no || '').trim();
     if (!sbd) return null; // Không tính trùng nếu thí sinh chưa tô SBD
 
-    const dupes = (allSubmissions || []).filter(s => s.id !== sub.id && String(s.student_no || '').trim() === sbd);
-    if (dupes.length === 0) return null;
-
-    const subCode = String(sub.code || '').trim();
-    const hasSameCode = dupes.some(s => String(s.code || '').trim() === subCode);
-
-    if (hasSameCode) {
-        return {
-            type: 'both',
-            label: 'Trùng cả SBD & Mã',
-            badgeBg: 'bg-rose-100 text-rose-700 dark:bg-rose-900/60 dark:text-rose-200 border-rose-300 dark:border-rose-700',
-            rowBg: 'bg-rose-50/70 dark:bg-rose-950/30 hover:bg-rose-100/80 dark:hover:bg-rose-900/40 border-l-4 border-l-rose-500',
-            dupeCount: dupes.length + 1
-        };
-    } else {
-        return {
-            type: 'sbd_only',
-            label: 'Trùng SBD',
-            badgeBg: 'bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-200 border-amber-300 dark:border-amber-700',
-            rowBg: 'bg-amber-50/60 dark:bg-amber-950/20 hover:bg-amber-100/70 dark:hover:bg-amber-900/30 border-l-4 border-l-amber-500',
-            dupeCount: dupes.length + 1
-        };
+    // Tận dụng Map tính trước O(1) thay vì lặp O(N^2)
+    if (cachedDupeMap && lastDupeSubmissionsRef === allSubmissions) {
+        return cachedDupeMap.get(sub.id) || null;
     }
+
+    cachedDupeMap = new Map();
+    lastDupeSubmissionsRef = allSubmissions;
+
+    const sbdGroups = new Map();
+    (allSubmissions || []).forEach(s => {
+        const sClean = String(s.student_no || '').trim();
+        if (sClean) {
+            if (!sbdGroups.has(sClean)) sbdGroups.set(sClean, []);
+            sbdGroups.get(sClean).push(s);
+        }
+    });
+
+    sbdGroups.forEach((group) => {
+        if (group.length > 1) {
+            group.forEach(s => {
+                const myCode = String(s.code || '').trim();
+                const sameCodeCount = group.filter(other => other.id !== s.id && String(other.code || '').trim() === myCode).length;
+                if (sameCodeCount > 0) {
+                    cachedDupeMap.set(s.id, {
+                        type: 'both',
+                        label: 'Trùng cả SBD & Mã',
+                        badgeBg: 'bg-rose-100 text-rose-700 dark:bg-rose-900/60 dark:text-rose-200 border-rose-300 dark:border-rose-700',
+                        rowBg: 'bg-rose-50/70 dark:bg-rose-950/30 hover:bg-rose-100/80 dark:hover:bg-rose-900/40 border-l-4 border-l-rose-500',
+                        dupeCount: group.length
+                    });
+                } else {
+                    cachedDupeMap.set(s.id, {
+                        type: 'sbd_only',
+                        label: 'Trùng SBD',
+                        badgeBg: 'bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-200 border-amber-300 dark:border-amber-700',
+                        rowBg: 'bg-amber-50/60 dark:bg-amber-950/20 hover:bg-amber-100/70 dark:hover:bg-amber-900/30 border-l-4 border-l-amber-500',
+                        dupeCount: group.length
+                    });
+                }
+            });
+        }
+    });
+
+    return cachedDupeMap.get(sub.id) || null;
 }
 
 function enrichSubmissionsFromClassRoster() {
     if (!Array.isArray(state.submissions) || state.submissions.length === 0) return;
     const roster = Array.isArray(state.students) ? state.students : [];
+    if (roster.length === 0) return;
     const defaultClass = state.exam?.className || (Array.isArray(state.exam?.classes) && state.exam.classes[0]) || '';
 
+    // Tạo Map tra cứu nhanh O(1) theo SBD
+    const rosterBySbd = new Map();
+    roster.forEach(st => {
+        if (st.student_no) {
+            const raw = String(st.student_no).trim();
+            rosterBySbd.set(raw, st);
+            const num = parseInt(raw, 10);
+            if (!isNaN(num)) rosterBySbd.set(String(num), st);
+        }
+    });
+
     state.submissions.forEach(s => {
-        if (s.student_no && roster.length > 0) {
+        if (s.student_no) {
             const rawNo = String(s.student_no).trim();
-            const numNo = parseInt(rawNo, 10);
-            const matched = roster.find(st => {
-                if (!st.student_no) return false;
-                if (String(st.student_no).trim() === rawNo) return true;
-                if (!isNaN(numNo) && parseInt(String(st.student_no).trim(), 10) === numNo) return true;
-                return false;
-            });
+            const matched = rosterBySbd.get(rawNo) || (!isNaN(parseInt(rawNo, 10)) ? rosterBySbd.get(String(parseInt(rawNo, 10))) : null);
             if (matched) {
                 if (!s.student_name && matched.name) s.student_name = matched.name;
                 if (!s.class_name && matched.class_name) s.class_name = matched.class_name;
