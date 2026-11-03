@@ -17,6 +17,8 @@ window.omrState = {
     exam: null,
     keys: {},
     students: [],
+    omrClasses: [],
+    activeOmrClassId: null,
     submissions: [],
     activeTab: 'scan',
     currentCameraStream: null,
@@ -27,6 +29,11 @@ window.omrState = {
 };
 
 const state = window.omrState;
+
+// Preload local OMR classes from storage immediately
+try {
+    loadLocalOmrClasses();
+} catch(e) {}
 
 // ========================================================
 // 1. AUTHENTICATION & LMS USER INTEGRATION
@@ -4103,35 +4110,1224 @@ window.saveAllKeys = async () => {
 };
 
 // ========================================================
-// 8. STUDENTS & ROSTER SYNC FROM LMS
+// 8. QUẢN LÝ LỚP OMR ĐỘC LẬP & NHẬP HỌC SINH KÈM SBD (OFFLINE)
 // ========================================================
-window.renderStudentsTab = () => {
-    const tbody = document.getElementById('studentsTableBody');
-    if (!tbody) return;
 
-    if (state.students.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="5" class="p-8 text-center text-slate-400 italic">Chưa có danh sách học sinh. Bấm "Đồng bộ từ Lớp học LMS" để nạp ngay!</td></tr>`;
+function getDefaultOmrClasses() {
+    return [
+        {
+            id: 'omr_cls_demo_12a1',
+            name: '12A1',
+            academicYear: '2024-2025',
+            description: 'Lớp OMR độc lập mẫu',
+            students: [
+                { id: 'st_demo_001', student_no: '001', name: 'Nguyễn Văn An', phone: '0912345678', note: 'Tổ 1' },
+                { id: 'st_demo_002', student_no: '002', name: 'Trần Thị Bình', phone: '0987654321', note: 'Tổ 1' },
+                { id: 'st_demo_003', student_no: '003', name: 'Lê Hoàng Cường', phone: '0905123456', note: 'Tổ 2' },
+                { id: 'st_demo_004', student_no: '004', name: 'Phạm Minh Đức', phone: '0934567890', note: 'Tổ 2' },
+                { id: 'st_demo_005', student_no: '005', name: 'Hoàng Mai Hương', phone: '0978901234', note: 'Tổ 3' }
+            ],
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+        }
+    ];
+}
+
+function loadLocalOmrClasses() {
+    try {
+        const raw = localStorage.getItem('omr_local_classes');
+        let classes = [];
+        if (raw) {
+            classes = JSON.parse(raw);
+        }
+        if (!Array.isArray(classes) || classes.length === 0) {
+            classes = getDefaultOmrClasses();
+            localStorage.setItem('omr_local_classes', JSON.stringify(classes));
+        }
+        state.omrClasses = classes;
+        const savedActiveId = localStorage.getItem('omr_active_class_id');
+        const found = classes.find(c => c.id === savedActiveId);
+        state.activeOmrClassId = found ? found.id : (classes[0]?.id || null);
+    } catch(e) {
+        console.warn("Lỗi tải danh sách lớp OMR local:", e);
+        state.omrClasses = getDefaultOmrClasses();
+        state.activeOmrClassId = state.omrClasses[0]?.id || null;
+    }
+    return state.omrClasses;
+}
+
+function saveLocalOmrClasses(classes) {
+    state.omrClasses = classes || [];
+    try {
+        localStorage.setItem('omr_local_classes', JSON.stringify(state.omrClasses));
+    } catch(e) {}
+    if (state.teacherUid) {
+        for (const cls of state.omrClasses) {
+            try {
+                setDoc(doc(db, "omr_local_classes", cls.id), {
+                    ...cls,
+                    teacherId: state.teacherUid,
+                    updatedAt: new Date().toISOString()
+                });
+            } catch(e) {}
+        }
+    }
+}
+
+function getActiveOmrClass() {
+    if (!state.activeOmrClassId && Array.isArray(state.omrClasses) && state.omrClasses.length > 0) {
+        state.activeOmrClassId = state.omrClasses[0].id;
+    }
+    return (state.omrClasses || []).find(c => c.id === state.activeOmrClassId) || null;
+}
+
+window.renderStudentsTab = () => {
+    if (!state.omrClasses || state.omrClasses.length === 0) {
+        loadLocalOmrClasses();
+    }
+    window.renderOmrClassesList();
+    window.renderActiveOmrClassStudents();
+};
+
+window.renderOmrClassesList = () => {
+    const container = document.getElementById('omrClassesChipsContainer');
+    const examClassSelect = document.getElementById('newExamOmrClassId');
+    if (!container) return;
+
+    const classes = state.omrClasses || [];
+    if (classes.length === 0) {
+        container.innerHTML = `<div class="text-xs text-slate-400 py-2">Chưa có lớp OMR nào. Bấm "+ Tạo lớp mới" để bắt đầu!</div>`;
         return;
     }
 
-    tbody.innerHTML = state.students.map((s, idx) => {
-        const sub = state.submissions.find(sub => sub.student_no === s.student_no);
-        const statusBadge = sub 
-            ? `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">Đã chấm (${sub.score.toFixed(2)}đ)</span>`
-            : `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-500 dark:bg-slate-700">Chưa chấm</span>`;
+    container.innerHTML = classes.map(cls => {
+        const isActive = cls.id === state.activeOmrClassId;
+        const studentCount = Array.isArray(cls.students) ? cls.students.length : 0;
+        const activeClassStr = isActive
+            ? 'btn-season-primary shadow-sm font-bold border-2 border-emerald-400/80 scale-[1.02]'
+            : 'bg-gray-100 hover:bg-gray-200 dark:bg-[#1E1B29] dark:hover:bg-[#2D2A3D] text-slate-700 dark:text-slate-300 border border-gray-200 dark:border-[#38344D] font-semibold';
 
         return `
-            <tr class="hover:bg-slate-50 dark:hover:bg-slate-750">
+            <button type="button" onclick="window.selectOmrClass('${cls.id}')" class="px-3 py-2 rounded-xl text-xs flex items-center gap-2 shrink-0 transition-all cursor-pointer ${activeClassStr}">
+                <i class="fa-solid fa-graduation-cap ${isActive ? 'text-white' : 'text-emerald-500'}"></i>
+                <span class="truncate max-w-[140px]">${cls.name || 'Lớp OMR'}</span>
+                <span class="px-1.5 py-0.5 rounded-full text-[10px] ${isActive ? 'bg-black/25 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'} font-bold tabular-nums">
+                    ${studentCount} HS
+                </span>
+            </button>
+        `;
+    }).join('') + `
+        <button type="button" onclick="window.openCreateOmrClassModal()" class="px-3 py-2 rounded-xl text-xs font-bold bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 flex items-center gap-1.5 shrink-0 transition-colors cursor-pointer" title="Tạo thêm lớp OMR độc lập">
+            <i class="fa-solid fa-plus"></i>
+            <span>Thêm lớp</span>
+        </button>
+    `;
+
+    // Populate #newExamOmrClassId in #createExamModal
+    if (examClassSelect) {
+        const prevVal = examClassSelect.value;
+        examClassSelect.innerHTML = `<option value="">-- Không chọn (Bài thi tự do) --</option>` +
+            classes.map(c => `<option value="${c.id}">${c.name} (${(c.students || []).length} học sinh)</option>`).join('');
+        if (prevVal) examClassSelect.value = prevVal;
+    }
+};
+
+window.selectOmrClass = (classId) => {
+    state.activeOmrClassId = classId;
+    localStorage.setItem('omr_active_class_id', classId);
+    window.renderOmrClassesList();
+    window.renderActiveOmrClassStudents();
+};
+
+window.openCreateOmrClassModal = () => {
+    const modal = document.getElementById('createOmrClassModal');
+    if (!modal) return;
+    const nameInput = document.getElementById('newOmrClassName');
+    const descInput = document.getElementById('newOmrClassDesc');
+    if (nameInput) nameInput.value = '';
+    if (descInput) descInput.value = '';
+    modal.classList.remove('hidden');
+    if (nameInput) setTimeout(() => nameInput.focus(), 100);
+};
+
+window.confirmCreateOmrClass = () => {
+    const name = document.getElementById('newOmrClassName')?.value.trim();
+    if (!name) {
+        Swal.fire('Lưu ý', 'Vui lòng nhập tên lớp học!', 'warning');
+        return;
+    }
+    const year = document.getElementById('newOmrClassYear')?.value.trim() || '2024-2025';
+    const desc = document.getElementById('newOmrClassDesc')?.value.trim() || '';
+
+    const newClass = {
+        id: 'omr_cls_' + Date.now(),
+        name,
+        academicYear: year,
+        description: desc,
+        students: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+    };
+
+    state.omrClasses.push(newClass);
+    state.activeOmrClassId = newClass.id;
+    saveLocalOmrClasses(state.omrClasses);
+
+    document.getElementById('createOmrClassModal').classList.add('hidden');
+    window.renderStudentsTab();
+    Swal.fire({
+        icon: 'success',
+        title: 'Tạo lớp thành công!',
+        text: `Đã tạo lớp "${name}". Bạn có thể nạp danh sách học sinh kèm SBD hoặc bấm "Tạo đề cho lớp này".`,
+        timer: 2000
+    });
+};
+
+window.renameActiveOmrClass = async () => {
+    const cls = getActiveOmrClass();
+    if (!cls) return;
+
+    const { value: newName } = await Swal.fire({
+        title: 'Đổi tên lớp OMR',
+        input: 'text',
+        inputValue: cls.name,
+        inputPlaceholder: 'Nhập tên lớp mới...',
+        showCancelButton: true,
+        confirmButtonText: 'Lưu thay đổi',
+        cancelButtonText: 'Hủy'
+    });
+
+    if (newName && newName.trim() && newName.trim() !== cls.name) {
+        cls.name = newName.trim();
+        cls.updatedAt = new Date().toISOString();
+        saveLocalOmrClasses(state.omrClasses);
+        window.renderStudentsTab();
+        Swal.fire('Đã cập nhật', `Tên lớp đã đổi thành: ${cls.name}`, 'success');
+    }
+};
+
+window.deleteActiveOmrClass = async () => {
+    const cls = getActiveOmrClass();
+    if (!cls) return;
+
+    const res = await Swal.fire({
+        title: `Xóa lớp "${cls.name}"?`,
+        text: `Lớp này hiện có ${(cls.students || []).length} học sinh. Thao tác này không thể hoàn tác.`,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'Xóa lớp',
+        cancelButtonText: 'Hủy',
+        confirmButtonColor: '#ef4444'
+    });
+
+    if (res.isConfirmed) {
+        state.omrClasses = state.omrClasses.filter(c => c.id !== cls.id);
+        state.activeOmrClassId = state.omrClasses[0]?.id || null;
+        saveLocalOmrClasses(state.omrClasses);
+        window.renderStudentsTab();
+        Swal.fire('Đã xóa', 'Lớp học đã được xóa thành công.', 'success');
+    }
+};
+
+window.createExamForSelectedOmrClass = () => {
+    const cls = getActiveOmrClass();
+    if (!cls) {
+        Swal.fire('Lưu ý', 'Vui lòng chọn hoặc tạo một lớp OMR trước!', 'warning');
+        return;
+    }
+    window.openCreateExamModal();
+    const nameInp = document.getElementById('newExamName');
+    const classSel = document.getElementById('newExamOmrClassId');
+    if (classSel) classSel.value = cls.id;
+    if (nameInp) {
+        const todayStr = new Date().toLocaleDateString('vi-VN');
+        nameInp.value = `Đề kiểm tra ${cls.name} (${todayStr})`;
+    }
+};
+
+window.renderActiveOmrClassStudents = () => {
+    const tbody = document.getElementById('studentsTableBody');
+    const countBadge = document.getElementById('activeClassStudentCountBadge');
+    const sidebarCountBadge = document.getElementById('studentsCountBadge');
+    if (!tbody) return;
+
+    const cls = getActiveOmrClass();
+    if (!cls) {
+        tbody.innerHTML = `<tr><td colspan="7" class="p-8 text-center text-slate-400 italic">Chưa chọn lớp OMR nào.</td></tr>`;
+        if (countBadge) countBadge.textContent = '0 học sinh';
+        return;
+    }
+
+    const queryStr = (document.getElementById('classStudentSearchInput')?.value || '').trim().toLowerCase();
+    let roster = Array.isArray(cls.students) ? cls.students : [];
+
+    if (queryStr) {
+        roster = roster.filter(s =>
+            (s.name || '').toLowerCase().includes(queryStr) ||
+            (s.student_no || '').toLowerCase().includes(queryStr) ||
+            (s.phone || '').includes(queryStr) ||
+            (s.note || '').toLowerCase().includes(queryStr)
+        );
+    }
+
+    if (countBadge) countBadge.textContent = `${(cls.students || []).length} học sinh`;
+    if (sidebarCountBadge) sidebarCountBadge.textContent = (cls.students || []).length;
+
+    if (roster.length === 0) {
+        const emptyMsg = queryStr
+            ? 'Không tìm thấy học sinh nào khớp với từ khóa tìm kiếm.'
+            : `Lớp "${cls.name}" hiện chưa có học sinh nào. Bấm <b>"Nạp Excel / Dán SBD"</b> hoặc <b>"+ Thêm học sinh"</b> để nạp ngay!`;
+        tbody.innerHTML = `<tr><td colspan="7" class="p-8 text-center text-slate-400 italic">${emptyMsg}</td></tr>`;
+        return;
+    }
+
+    tbody.innerHTML = roster.map((s, idx) => {
+        // Match with current exam submissions
+        const sub = (state.submissions || []).find(sub =>
+            sub.student_no === s.student_no ||
+            (s.student_no && String(Number(sub.student_no || 0)) === String(Number(s.student_no)))
+        );
+
+        const statusBadge = sub
+            ? `<span class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 inline-flex items-center gap-1"><i class="fa-solid fa-circle-check"></i> Đã chấm: ${sub.score.toFixed(2)}đ</span>`
+            : `<span class="px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400">Chưa có bài</span>`;
+
+        const phoneDisplay = s.phone
+            ? `<a href="https://zalo.me/${s.phone.replace(/\D/g, '')}" target="_blank" class="text-blue-600 dark:text-blue-400 font-mono hover:underline inline-flex items-center gap-1" title="Mở chat Zalo"><i class="fa-solid fa-comment-dots text-[10px]"></i> ${s.phone}</a>`
+            : `<span class="text-slate-400">---</span>`;
+
+        return `
+            <tr class="hover:bg-slate-50 dark:hover:bg-[#1E1B29] transition-colors">
                 <td class="p-3 text-center text-slate-400 font-bold">${idx + 1}</td>
-                <td class="p-3 font-mono font-bold text-slate-800 dark:text-slate-100">${s.student_no}</td>
-                <td class="p-3 font-bold text-slate-900 dark:text-white">${s.name}</td>
-                <td class="p-3 text-slate-500">${s.class_name || '---'}</td>
+                <td class="p-3 font-mono font-bold text-slate-800 dark:text-slate-100">${s.student_no || '---'}</td>
+                <td class="p-3 font-bold text-slate-900 dark:text-white">${s.name || 'Học sinh'}</td>
+                <td class="p-3">${phoneDisplay}</td>
+                <td class="p-3 text-slate-500 dark:text-slate-400">${s.note || '---'}</td>
                 <td class="p-3 text-center">${statusBadge}</td>
+                <td class="p-3 text-center">
+                    <div class="flex items-center justify-center gap-1">
+                        <button type="button" onclick="window.openAddSingleStudentModal(${idx})" class="w-7 h-7 rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-[#1E1B29] dark:hover:bg-[#2D2A3D] text-slate-600 dark:text-slate-300 flex items-center justify-center text-xs transition-colors cursor-pointer" title="Sửa học sinh">
+                            <i class="fa-solid fa-pen"></i>
+                        </button>
+                        <button type="button" onclick="window.deleteSingleStudent(${idx})" class="w-7 h-7 rounded-lg bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 text-rose-600 flex items-center justify-center text-xs transition-colors cursor-pointer" title="Xóa học sinh">
+                            <i class="fa-solid fa-trash-can"></i>
+                        </button>
+                    </div>
+                </td>
             </tr>
         `;
     }).join('');
 };
 
+window.filterActiveOmrClassStudents = () => {
+    window.renderActiveOmrClassStudents();
+};
+
+window.openAddSingleStudentModal = (editIdx = -1) => {
+    const cls = getActiveOmrClass();
+    if (!cls) {
+        Swal.fire('Lưu ý', 'Vui lòng chọn hoặc tạo lớp OMR trước!', 'warning');
+        return;
+    }
+    const modal = document.getElementById('addSingleStudentModal');
+    const titleEl = document.getElementById('singleStudentModalTitle');
+    const idxInput = document.getElementById('singleStudentEditIndex');
+    const sbdInput = document.getElementById('singleStudentSbd');
+    const nameInput = document.getElementById('singleStudentName');
+    const phoneInput = document.getElementById('singleStudentPhone');
+    const noteInput = document.getElementById('singleStudentNote');
+
+    idxInput.value = editIdx;
+    if (editIdx >= 0 && cls.students && cls.students[editIdx]) {
+        const st = cls.students[editIdx];
+        if (titleEl) titleEl.innerHTML = `<i class="fa-solid fa-pen-to-square"></i> Sửa Thông Tin Học Sinh`;
+        if (sbdInput) sbdInput.value = st.student_no || '';
+        if (nameInput) nameInput.value = st.name || '';
+        if (phoneInput) phoneInput.value = st.phone || '';
+        if (noteInput) noteInput.value = st.note || '';
+    } else {
+        if (titleEl) titleEl.innerHTML = `<i class="fa-solid fa-user-plus"></i> Thêm Học Sinh Vào Lớp "${cls.name}"`;
+        const nextNum = (cls.students || []).length + 1;
+        if (sbdInput) sbdInput.value = String(nextNum).padStart(3, '0');
+        if (nameInput) nameInput.value = '';
+        if (phoneInput) phoneInput.value = '';
+        if (noteInput) noteInput.value = '';
+    }
+
+    modal.classList.remove('hidden');
+    if (sbdInput) setTimeout(() => sbdInput.focus(), 100);
+};
+
+window.confirmSaveSingleStudent = () => {
+    const cls = getActiveOmrClass();
+    if (!cls) return;
+
+    const editIdx = parseInt(document.getElementById('singleStudentEditIndex')?.value || '-1');
+    const sbd = document.getElementById('singleStudentSbd')?.value.trim();
+    const name = document.getElementById('singleStudentName')?.value.trim();
+    const phone = document.getElementById('singleStudentPhone')?.value.trim();
+    const note = document.getElementById('singleStudentNote')?.value.trim();
+
+    if (!sbd || !name) {
+        Swal.fire('Thiếu thông tin', 'Vui lòng nhập cả Số báo danh (SBD) và Họ tên học sinh!', 'warning');
+        return;
+    }
+
+    if (!Array.isArray(cls.students)) cls.students = [];
+
+    const studentObj = {
+        id: (editIdx >= 0 && cls.students[editIdx]?.id) || ('st_' + Date.now() + '_' + sbd),
+        student_no: sbd,
+        name,
+        phone,
+        note
+    };
+
+    if (editIdx >= 0 && editIdx < cls.students.length) {
+        cls.students[editIdx] = studentObj;
+    } else {
+        cls.students.push(studentObj);
+    }
+
+    cls.updatedAt = new Date().toISOString();
+    saveLocalOmrClasses(state.omrClasses);
+
+    document.getElementById('addSingleStudentModal').classList.add('hidden');
+    window.renderStudentsTab();
+    Swal.fire({
+        icon: 'success',
+        title: editIdx >= 0 ? 'Đã sửa học sinh!' : 'Đã thêm học sinh!',
+        timer: 1500
+    });
+};
+
+window.deleteSingleStudent = async (idx) => {
+    const cls = getActiveOmrClass();
+    if (!cls || !cls.students || !cls.students[idx]) return;
+
+    const st = cls.students[idx];
+    const res = await Swal.fire({
+        title: `Xóa học sinh "${st.name}"?`,
+        text: `Số báo danh: ${st.student_no}`,
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: 'Xóa',
+        confirmButtonColor: '#ef4444'
+    });
+
+    if (res.isConfirmed) {
+        cls.students.splice(idx, 1);
+        cls.updatedAt = new Date().toISOString();
+        saveLocalOmrClasses(state.omrClasses);
+        window.renderStudentsTab();
+    }
+};
+
+window.clearActiveOmrClassStudents = async () => {
+    const cls = getActiveOmrClass();
+    if (!cls || !cls.students || cls.students.length === 0) return;
+
+    const res = await Swal.fire({
+        title: `Xóa tất cả học sinh của lớp "${cls.name}"?`,
+        text: `Tổng cộng ${cls.students.length} học sinh sẽ bị xóa khỏi lớp này.`,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'Xóa toàn bộ',
+        confirmButtonColor: '#ef4444'
+    });
+
+    if (res.isConfirmed) {
+        cls.students = [];
+        cls.updatedAt = new Date().toISOString();
+        saveLocalOmrClasses(state.omrClasses);
+        window.renderStudentsTab();
+        Swal.fire('Đã xóa', 'Danh sách học sinh của lớp đã được làm trống.', 'success');
+    }
+};
+
+window.assignSelectedClassToActiveExam = async () => {
+    const cls = getActiveOmrClass();
+    if (!cls) {
+        Swal.fire('Lưu ý', 'Vui lòng chọn một lớp OMR trước!', 'warning');
+        return;
+    }
+    if (!state.exam) {
+        Swal.fire('Lưu ý', 'Chưa có bài thi nào đang mở để gán!', 'warning');
+        return;
+    }
+
+    const students = Array.isArray(cls.students) ? cls.students : [];
+    if (students.length === 0) {
+        Swal.fire('Lớp trống', `Lớp "${cls.name}" chưa có học sinh nào. Hãy nhập học sinh vào lớp trước.`, 'info');
+        return;
+    }
+
+    const examStudents = students.map(st => ({
+        id: `st_${state.exam.id}_${st.student_no}`,
+        examId: state.exam.id,
+        teacherId: state.teacherUid,
+        student_no: st.student_no,
+        name: st.name,
+        phone: st.phone,
+        note: st.note,
+        class_id: cls.id,
+        class_name: cls.name
+    }));
+
+    state.students = examStudents;
+    state.exam.classId = cls.id;
+    state.exam.className = cls.name;
+
+    localStorage.setItem(`omr_students_${state.exam.id}`, JSON.stringify(examStudents));
+    localStorage.setItem(`omr_exam_class_${state.exam.id}`, JSON.stringify({ classId: cls.id, className: cls.name }));
+
+    if (state.teacherUid) {
+        for (const s of examStudents) {
+            try { await setDoc(doc(db, "omr_students", s.id), s); } catch(e) {}
+        }
+    }
+
+    updateActiveExamBanner();
+    updateOverviewStats();
+    window.renderStudentsTab();
+
+    Swal.fire({
+        icon: 'success',
+        title: 'Đã đưa vào đề đang chấm!',
+        text: `Đã liên kết lớp "${cls.name}" và nạp ${examStudents.length} học sinh kèm SBD vào bài thi hiện tại.`,
+        timer: 2500
+    });
+};
+
+// ========================================================
+// EXCEL IMPORT & EXCEL TEMPLATE FOR LOCAL OMR CLASSES
+// ========================================================
+window.openImportStudentsToClassModal = () => {
+    const cls = getActiveOmrClass();
+    if (!cls) {
+        Swal.fire('Lưu ý', 'Vui lòng chọn hoặc tạo lớp OMR trước!', 'warning');
+        return;
+    }
+
+    const targetLabel = document.getElementById('importTargetClassNameLabel');
+    if (targetLabel) targetLabel.textContent = `Đang nạp vào lớp: ${cls.name}`;
+
+    const fileInp = document.getElementById('studentExcelFileInput');
+    const pasteArea = document.getElementById('pasteStudentTextarea');
+    const previewCont = document.getElementById('importStudentsPreviewContainer');
+    if (fileInp) fileInp.value = '';
+    if (pasteArea) pasteArea.value = '';
+    if (previewCont) previewCont.classList.add('hidden');
+
+    window._parsedImportStudents = [];
+    document.getElementById('importStudentsToClassModal').classList.remove('hidden');
+};
+
+window.handleStudentExcelFile = async (file) => {
+    if (!file) return;
+    if (!window.XLSX) {
+        Swal.fire('Thiếu thư viện', 'Thư viện SheetJS chưa được tải. Vui lòng thử lại!', 'error');
+        return;
+    }
+
+    try {
+        Swal.showLoading();
+        const buffer = await file.arrayBuffer();
+        const wb = window.XLSX.read(buffer, { type: 'array' });
+        const firstSheetName = wb.SheetNames[0];
+        const ws = wb.Sheets[firstSheetName];
+        const rows = window.XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+
+        if (!rows || rows.length === 0) {
+            Swal.fire('File trống', 'Không tìm thấy dữ liệu trong file Excel!', 'warning');
+            return;
+        }
+
+        let headerIdx = -1;
+        let sbdCol = -1, nameCol = -1, phoneCol = -1, noteCol = -1;
+
+        for (let r = 0; r < Math.min(rows.length, 10); r++) {
+            const rowStr = rows[r].map(c => String(c).toLowerCase());
+            for (let c = 0; c < rowStr.length; c++) {
+                const val = rowStr[c];
+                if (val.includes('sbd') || val.includes('số báo danh') || val.includes('báo danh') || val.includes('mã hs')) sbdCol = c;
+                if (val.includes('họ') || val.includes('tên') || val.includes('họ và tên') || val.includes('thí sinh')) nameCol = c;
+                if (val.includes('sđt') || val.includes('điện thoại') || val.includes('phone') || val.includes('phụ huynh')) phoneCol = c;
+                if (val.includes('ghi chú') || val.includes('tổ') || val.includes('nhóm') || val.includes('lớp')) noteCol = c;
+            }
+            if (sbdCol !== -1 || nameCol !== -1) {
+                headerIdx = r;
+                break;
+            }
+        }
+
+        if (sbdCol === -1 && nameCol === -1) {
+            headerIdx = 0;
+            sbdCol = 0;
+            nameCol = 1;
+            phoneCol = 2;
+            noteCol = 3;
+        } else {
+            if (sbdCol === -1) sbdCol = 0;
+            if (nameCol === -1) nameCol = 1;
+        }
+
+        const parsed = [];
+        for (let r = headerIdx + 1; r < rows.length; r++) {
+            const row = rows[r];
+            if (!row || row.length === 0) continue;
+            let sbd = String(row[sbdCol] || '').trim();
+            let name = String(row[nameCol] || '').trim();
+            let phone = phoneCol !== -1 ? String(row[phoneCol] || '').trim() : '';
+            let note = noteCol !== -1 ? String(row[noteCol] || '').trim() : '';
+
+            sbd = sbd.replace(/^['"]/, '');
+            phone = phone.replace(/^['"]/, '');
+
+            if (!sbd && !name) continue;
+            if (!sbd) sbd = String(parsed.length + 1).padStart(3, '0');
+            if (!name) name = `Học sinh ${sbd}`;
+
+            parsed.push({ student_no: sbd, name, phone, note });
+        }
+
+        Swal.close();
+        displayImportStudentsPreview(parsed);
+    } catch(err) {
+        Swal.fire('Lỗi đọc file Excel', err.message, 'error');
+    }
+};
+
+window.previewPastedStudents = (text) => {
+    if (!text || !text.trim()) {
+        const previewCont = document.getElementById('importStudentsPreviewContainer');
+        if (previewCont) previewCont.classList.add('hidden');
+        window._parsedImportStudents = [];
+        return;
+    }
+
+    const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+    const parsed = [];
+
+    lines.forEach((line, idx) => {
+        const parts = line.split(/[,;\t]/).map(p => p.trim());
+        let sbd = parts[0] || String(idx + 1).padStart(3, '0');
+        let name = parts[1] || `Học sinh ${sbd}`;
+        let phone = parts[2] || '';
+        let note = parts[3] || '';
+
+        if (/^\d{1,2}$/.test(parts[0]) && parts[1] && /^\d{3,8}$/.test(parts[1])) {
+            sbd = parts[1];
+            name = parts[2] || `Học sinh ${sbd}`;
+            phone = parts[3] || '';
+            note = parts[4] || '';
+        }
+
+        parsed.push({ student_no: sbd, name, phone, note });
+    });
+
+    displayImportStudentsPreview(parsed);
+};
+
+function displayImportStudentsPreview(students) {
+    window._parsedImportStudents = students || [];
+    const previewCont = document.getElementById('importStudentsPreviewContainer');
+    const countLabel = document.getElementById('importStudentsPreviewCount');
+    const tbody = document.getElementById('importStudentsPreviewTbody');
+
+    if (!previewCont || !tbody) return;
+
+    if (!students || students.length === 0) {
+        previewCont.classList.add('hidden');
+        return;
+    }
+
+    previewCont.classList.remove('hidden');
+    if (countLabel) countLabel.textContent = `Đã nhận diện: ${students.length} học sinh`;
+
+    tbody.innerHTML = students.slice(0, 50).map(s => `
+        <tr class="hover:bg-gray-50 dark:hover:bg-[#1E1B29]">
+            <td class="p-2 font-mono font-bold text-center text-slate-800 dark:text-slate-100">${s.student_no}</td>
+            <td class="p-2 font-semibold text-slate-900 dark:text-white">${s.name}</td>
+            <td class="p-2 text-slate-500 font-mono">${s.phone || '---'}</td>
+            <td class="p-2 text-slate-400">${s.note || '---'}</td>
+        </tr>
+    `).join('') + (students.length > 50 ? `<tr><td colspan="4" class="p-2 text-center text-slate-400 italic">...và ${students.length - 50} học sinh khác</td></tr>` : '');
+}
+
+window.confirmApplyImportedStudents = () => {
+    const cls = getActiveOmrClass();
+    if (!cls) return;
+
+    const list = window._parsedImportStudents || [];
+    if (list.length === 0) {
+        Swal.fire('Chưa có dữ liệu', 'Vui lòng chọn file Excel hoặc dán danh sách học sinh trước!', 'warning');
+        return;
+    }
+
+    const mode = document.querySelector('input[name="importStudentMode"]:checked')?.value || 'replace';
+
+    const formatted = list.map(s => ({
+        id: 'st_' + Date.now() + '_' + s.student_no,
+        student_no: s.student_no,
+        name: s.name,
+        phone: s.phone,
+        note: s.note
+    }));
+
+    if (mode === 'replace') {
+        cls.students = formatted;
+    } else {
+        if (!Array.isArray(cls.students)) cls.students = [];
+        cls.students.push(...formatted);
+    }
+
+    cls.updatedAt = new Date().toISOString();
+    saveLocalOmrClasses(state.omrClasses);
+
+    document.getElementById('importStudentsToClassModal').classList.add('hidden');
+    window.renderStudentsTab();
+
+    Swal.fire({
+        icon: 'success',
+        title: 'Nạp danh sách thành công!',
+        text: `Đã nạp ${formatted.length} học sinh vào lớp "${cls.name}". Tổng sĩ số: ${cls.students.length} học sinh.`,
+        timer: 2500
+    });
+};
+
+window.downloadStudentTemplateExcel = () => {
+    if (!window.XLSX) {
+        Swal.fire('Lỗi', 'Thư viện SheetJS chưa sẵn sàng!', 'error');
+        return;
+    }
+
+    const headers = [
+        ['DANH SÁCH HỌC SINH VÀ SỐ BÁO DANH (OMR GRADER)'],
+        ['Ghi chú: Cột SBD điền 3 hoặc 6 chữ số theo định dạng phiếu in (VD: 001, 002...)'],
+        [],
+        ['STT', 'Số Báo Danh (SBD)', 'Họ và Tên Học Sinh', 'Số Điện Thoại PHHS', 'Ghi Chú / Tổ'],
+        [1, '001', 'Nguyễn Văn An', '0912345678', 'Tổ 1'],
+        [2, '002', 'Trần Thị Bình', '0987654321', 'Tổ 1'],
+        [3, '003', 'Lê Hoàng Cường', '0905123456', 'Tổ 2'],
+        [4, '004', 'Phạm Minh Đức', '0934567890', 'Tổ 2'],
+        [5, '005', 'Hoàng Mai Hương', '0978901234', 'Tổ 3']
+    ];
+
+    const wb = window.XLSX.utils.book_new();
+    const ws = window.XLSX.utils.aoa_to_sheet(headers);
+
+    ws['!cols'] = [
+        { wch: 6 },
+        { wch: 18 },
+        { wch: 28 },
+        { wch: 20 },
+        { wch: 20 }
+    ];
+
+    window.XLSX.utils.book_append_sheet(wb, ws, "DanhSachHocSinh");
+    window.XLSX.writeFile(wb, "Mau_Danh_Sach_Hoc_Sinh_OMR.xlsx");
+};
+
+// ========================================================
+// 8.1 NẠP ĐÁP ÁN BẰNG FILE EXCEL & QUÉT MÃ QR
+// ========================================================
+
+window.downloadKeyTemplateExcel = () => {
+    if (!window.XLSX) {
+        Swal.fire('Lỗi', 'Thư viện SheetJS chưa sẵn sàng!', 'error');
+        return;
+    }
+
+    const qCount1 = state.exam?.question_count || 12;
+    const qCount2 = state.exam?.part2_count || 4;
+    const qCount3 = state.exam?.part3_count || 6;
+
+    const matrixRows = [
+        ['MA TRẬN ĐÁP ÁN ĐỀ THI OMR (NHIỀU MÃ ĐỀ)'],
+        ['Hỗ trợ cả Phần I (A,B,C,D), Phần II (Đúng/Sai dạng Đ S Đ S), Phần III (Số -4.5, 12)'],
+        [],
+        ['Câu', 'Mã 101', 'Mã 102', 'Mã 103', 'Mã 104', 'Phần / Ghi chú']
+    ];
+
+    const sampleP1 = ['A', 'B', 'C', 'D', 'A', 'B', 'C', 'D', 'A', 'B', 'C', 'D'];
+    for (let i = 1; i <= qCount1; i++) {
+        const s1 = sampleP1[(i - 1) % 4];
+        const s2 = sampleP1[(i) % 4];
+        const s3 = sampleP1[(i + 1) % 4];
+        const s4 = sampleP1[(i + 2) % 4];
+        matrixRows.push([i, s1, s2, s3, s4, 'Phần I (Trắc nghiệm)']);
+    }
+
+    const sampleP2 = ['ĐSĐS', 'ĐĐSS', 'SĐSĐ', 'SSSS'];
+    for (let i = 1; i <= qCount2; i++) {
+        const s = sampleP2[(i - 1) % sampleP2.length];
+        matrixRows.push([`P2_Câu ${i}`, s, s, s, s, 'Phần II (Đúng/Sai 4 ý: a,b,c,d)']);
+    }
+
+    const sampleP3 = ['12', '-4.5', '0.25', '100', '3.14', '-1'];
+    for (let i = 1; i <= qCount3; i++) {
+        const s = sampleP3[(i - 1) % sampleP3.length];
+        matrixRows.push([`P3_Câu ${i}`, s, s, s, s, 'Phần III (Trả lời ngắn)']);
+    }
+
+    const instructionsRows = [
+        ['HƯỚNG DẪN NẠP ĐÁP ÁN EXCEL CHO MÁY CHẤM OMR'],
+        [],
+        ['1. Hàng tiêu đề gồm cột "Câu" và các cột tiếp theo là từng Mã đề (VD: 101, 102, 103, 104...).'],
+        ['2. Có thể tạo thêm bao nhiêu mã đề tùy ý bằng cách thêm cột mới (VD: cột 105, 106...).'],
+        ['3. Phần I: Điền chữ cái A, B, C hoặc D.'],
+        ['4. Phần II: Điền chuỗi 4 ký tự Đúng/Sai, ví dụ "ĐSĐS", "ĐĐSS" (tương ứng câu a, b, c, d).'],
+        ['5. Phần III: Điền số nguyên hoặc số thập phân (dấu phẩy hoặc dấu chấm, VD: 12 hoặc -4,5).'],
+        ['6. Sau khi điền xong, lưu file và nạp vào OMR Grader qua nút "Nạp từ Excel".']
+    ];
+
+    const wb = window.XLSX.utils.book_new();
+    const wsMatrix = window.XLSX.utils.aoa_to_sheet(matrixRows);
+    const wsGuide = window.XLSX.utils.aoa_to_sheet(instructionsRows);
+
+    wsMatrix['!cols'] = [{ wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 26 }];
+    wsGuide['!cols'] = [{ wch: 90 }];
+
+    window.XLSX.utils.book_append_sheet(wb, wsMatrix, "MaTranDapAn");
+    window.XLSX.utils.book_append_sheet(wb, wsGuide, "HuongDan");
+
+    window.XLSX.writeFile(wb, "Mau_Dap_An_OMR.xlsx");
+};
+
+window.openImportKeysExcelModal = () => {
+    const modal = document.getElementById('importKeysExcelModal');
+    if (!modal) return;
+    const fileInp = document.getElementById('keyExcelFileInput');
+    const pasteArea = document.getElementById('pasteKeyTextarea');
+    const previewCont = document.getElementById('importKeysPreviewContainer');
+    if (fileInp) fileInp.value = '';
+    if (pasteArea) pasteArea.value = '';
+    if (previewCont) previewCont.classList.add('hidden');
+    window._parsedImportKeys = {};
+    modal.classList.remove('hidden');
+};
+
+function parseKeysMatrixFromRows(rows) {
+    if (!rows || rows.length === 0) return {};
+
+    let headerIdx = -1;
+    let codeCols = [];
+
+    for (let r = 0; r < Math.min(rows.length, 10); r++) {
+        const row = rows[r];
+        const codesInRow = [];
+        for (let c = 0; c < row.length; c++) {
+            const cellVal = String(row[c] || '').trim();
+            const m = cellVal.match(/(?:mã|md|mã đề)?\s*(\d{3,4})/i);
+            if (m) {
+                codesInRow.push({ colIdx: c, code: m[1] });
+            }
+        }
+        if (codesInRow.length > 0) {
+            headerIdx = r;
+            codeCols = codesInRow;
+            break;
+        }
+    }
+
+    if (codeCols.length === 0) {
+        throw new Error("Không tìm thấy dòng tiêu đề chứa Mã đề (VD: 101, 102, 103...).");
+    }
+
+    const qCount1 = state.exam?.question_count || 12;
+    const resultKeys = {};
+    codeCols.forEach(cc => {
+        resultKeys[cc.code] = {
+            code: cc.code,
+            answers: '',
+            part2: [],
+            part3: []
+        };
+    });
+
+    let currentP1Idx = 0;
+    let currentP2Idx = 0;
+    let currentP3Idx = 0;
+
+    for (let r = headerIdx + 1; r < rows.length; r++) {
+        const row = rows[r];
+        if (!row || row.length === 0) continue;
+
+        const firstCell = String(row[0] || '').trim().toLowerCase();
+        const isPart2 = firstCell.includes('p2') || firstCell.includes('phần ii') || firstCell.includes('đúng sai') || firstCell.includes('đ/s');
+        const isPart3 = firstCell.includes('p3') || firstCell.includes('phần iii') || firstCell.includes('ngắn') || firstCell.includes('tln');
+
+        codeCols.forEach(cc => {
+            const rawVal = String(row[cc.colIdx] || '').trim();
+            if (!rawVal) return;
+
+            if (isPart2 || (/^[đsds]{4}$/i.test(rawVal.replace(/[^đsds]/gi, '')))) {
+                const chunk = rawVal.toUpperCase().replace(/D/g, 'Đ').replace(/[^ĐS]/g, '').padEnd(4, '-').slice(0, 4);
+                resultKeys[cc.code].part2.push(chunk);
+            } else if (isPart3 || (/^[-+]?\d+([.,]\d+)?$/.test(rawVal) && currentP1Idx >= qCount1)) {
+                resultKeys[cc.code].part3.push(rawVal);
+            } else {
+                const cleanChar = rawVal.toUpperCase().replace(/[^ABCD]/g, '');
+                if (cleanChar) {
+                    resultKeys[cc.code].answers += cleanChar[0];
+                }
+            }
+        });
+
+        if (isPart2) currentP2Idx++;
+        else if (isPart3) currentP3Idx++;
+        else currentP1Idx++;
+    }
+
+    return resultKeys;
+}
+
+window.handleKeysExcelFile = async (file) => {
+    if (!file) return;
+    if (!window.XLSX) {
+        Swal.fire('Lỗi', 'Thư viện SheetJS chưa sẵn sàng!', 'error');
+        return;
+    }
+
+    try {
+        Swal.showLoading();
+        const buffer = await file.arrayBuffer();
+        const wb = window.XLSX.read(buffer, { type: 'array' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const rows = window.XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+
+        const parsedKeys = parseKeysMatrixFromRows(rows);
+        Swal.close();
+        displayImportKeysPreview(parsedKeys);
+    } catch(err) {
+        Swal.fire('Lỗi phân tích file Excel', err.message, 'error');
+    }
+};
+
+window.previewPastedKeys = (text) => {
+    if (!text || !text.trim()) {
+        const previewCont = document.getElementById('importKeysPreviewContainer');
+        if (previewCont) previewCont.classList.add('hidden');
+        window._parsedImportKeys = {};
+        return;
+    }
+
+    try {
+        const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+        const rows = lines.map(line => line.split(/[\t;,]/).map(c => c.trim()));
+        const parsedKeys = parseKeysMatrixFromRows(rows);
+        displayImportKeysPreview(parsedKeys);
+    } catch(err) {}
+};
+
+function displayImportKeysPreview(keysMap) {
+    window._parsedImportKeys = keysMap || {};
+    const previewCont = document.getElementById('importKeysPreviewContainer');
+    const summaryLabel = document.getElementById('importKeysPreviewSummary');
+    const previewList = document.getElementById('importKeysPreviewList');
+
+    if (!previewCont || !previewList) return;
+
+    const codes = Object.keys(keysMap);
+    if (codes.length === 0) {
+        previewCont.classList.add('hidden');
+        return;
+    }
+
+    previewCont.classList.remove('hidden');
+    if (summaryLabel) summaryLabel.textContent = `Tìm thấy: ${codes.length} mã đề (${codes.join(', ')})`;
+
+    previewList.innerHTML = codes.map(code => {
+        const k = keysMap[code];
+        const p1Len = (k.answers || '').length;
+        const p2Len = (k.part2 || []).length;
+        const p3Len = (k.part3 || []).length;
+
+        return `
+            <div class="p-2.5 rounded-xl bg-gray-50 dark:bg-[#1E1B29] border border-gray-200 dark:border-[#38344D] text-xs space-y-1">
+                <div class="flex items-center justify-between font-bold">
+                    <span class="font-mono text-emerald-600 dark:text-emerald-400">Mã: ${code}</span>
+                    <span class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 font-bold">Hợp lệ</span>
+                </div>
+                <div class="text-[11px] text-slate-500 dark:text-slate-400">
+                    <div>P1: <b>${p1Len}</b> câu (${(k.answers || '').slice(0, 8)}...)</div>
+                    <div>P2: <b>${p2Len}</b> câu · P3: <b>${p3Len}</b> câu</div>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+window.confirmApplyImportedKeys = async () => {
+    const keysMap = window._parsedImportKeys || {};
+    const codes = Object.keys(keysMap);
+
+    if (codes.length === 0) {
+        Swal.fire('Chưa có đáp án', 'Vui lòng chọn file Excel hoặc dán ma trận đáp án!', 'warning');
+        return;
+    }
+
+    if (!state.exam) {
+        Swal.fire('Lưu ý', 'Chưa chọn bài thi để áp dụng đáp án!', 'warning');
+        return;
+    }
+
+    for (const code of codes) {
+        const k = keysMap[code];
+        const keyObj = {
+            id: `key_${state.exam.id}_${code}`,
+            examId: state.exam.id,
+            teacherId: state.teacherUid,
+            code: String(code),
+            answers: k.answers || '',
+            part2: k.part2 || [],
+            part3: k.part3 || [],
+            updatedAt: new Date().toISOString()
+        };
+
+        state.keys[code] = keyObj;
+
+        if (state.teacherUid) {
+            try { await setDoc(doc(db, "omr_keys", keyObj.id), keyObj); } catch(e) {}
+        }
+    }
+
+    localStorage.setItem(`omr_keys_${state.exam.id}`, JSON.stringify(Object.values(state.keys)));
+
+    const selector = document.getElementById('keyCodeSelector');
+    if (selector) {
+        const existingCodes = new Set(Array.from(selector.options).map(o => o.value));
+        codes.forEach(c => existingCodes.add(c));
+        selector.innerHTML = Array.from(existingCodes).sort().map(c => `<option value="${c}">${c}</option>`).join('');
+        selector.value = codes[0];
+    }
+
+    document.getElementById('importKeysExcelModal').classList.add('hidden');
+    window.renderKeysTab();
+
+    Swal.fire({
+        icon: 'success',
+        title: 'Nạp đáp án thành công!',
+        text: `Đã lưu đáp án cho ${codes.length} mã đề (${codes.join(', ')}) vào bài thi hiện tại.`,
+        timer: 2500
+    });
+};
+
+// ========================================================
+// 8.2 QR CODE SCANNER FOR ANSWER KEYS (CAMERA & IMAGE UPLOAD)
+// ========================================================
+let qrScanStream = null;
+let qrScanAnimId = null;
+
+window.openScanKeyQrModal = async () => {
+    const modal = document.getElementById('scanKeyQrModal');
+    if (!modal) return;
+
+    modal.classList.remove('hidden');
+    document.getElementById('qrDecodedResultBox')?.classList.add('hidden');
+    window._lastDecodedQrPayload = null;
+
+    startKeyQrCamera();
+};
+
+async function startKeyQrCamera() {
+    const video = document.getElementById('qrScannerVideo');
+    const overlay = document.getElementById('qrScannerStatusOverlay');
+    if (!video) return;
+
+    try {
+        if (overlay) overlay.innerHTML = `<i class="fa-solid fa-spinner fa-spin mr-1"></i> Đang mở camera...`;
+        qrScanStream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+        });
+        video.srcObject = qrScanStream;
+        await video.play();
+        if (overlay) overlay.innerHTML = `<i class="fa-solid fa-camera mr-1"></i> Đưa mã QR đáp án vào giữa khung quét`;
+        scanQrLoop();
+    } catch(err) {
+        console.warn("Không mở được camera quét QR:", err);
+        if (overlay) overlay.innerHTML = `<span class="text-amber-400">Không mở được camera. Hãy bấm "Tải ảnh chụp mã QR từ máy"!</span>`;
+    }
+}
+
+function scanQrLoop() {
+    const video = document.getElementById('qrScannerVideo');
+    const canvas = document.getElementById('qrScannerCanvas');
+    if (!video || !canvas || video.readyState !== video.HAVE_ENOUGH_DATA) {
+        qrScanAnimId = requestAnimationFrame(scanQrLoop);
+        return;
+    }
+
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    if (window.jsQR) {
+        const qr = window.jsQR(imgData.data, canvas.width, canvas.height, {
+            inversionAttempts: "dontInvert"
+        });
+        if (qr && qr.data) {
+            window.handleDecodedQrText(qr.data);
+            return;
+        }
+    }
+
+    qrScanAnimId = requestAnimationFrame(scanQrLoop);
+}
+
+window.closeScanKeyQrModal = () => {
+    if (qrScanAnimId) {
+        cancelAnimationFrame(qrScanAnimId);
+        qrScanAnimId = null;
+    }
+    if (qrScanStream) {
+        qrScanStream.getTracks().forEach(t => t.stop());
+        qrScanStream = null;
+    }
+    document.getElementById('scanKeyQrModal')?.classList.add('hidden');
+};
+
+window.handleQrImageUpload = (file) => {
+    if (!file) return;
+    if (!window.jsQR) {
+        Swal.fire('Lỗi', 'Thư viện giải mã QR chưa sẵn sàng!', 'error');
+        return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.naturalWidth || img.width;
+            canvas.height = img.naturalHeight || img.height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+            const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const qr = window.jsQR(imgData.data, canvas.width, canvas.height);
+            if (qr && qr.data) {
+                window.handleDecodedQrText(qr.data);
+            } else {
+                Swal.fire('Không tìm thấy QR', 'Không nhận diện được mã QR trong bức ảnh này. Vui lòng thử ảnh chụp rõ nét hơn!', 'warning');
+            }
+        };
+        img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+};
+
+window.handleDecodedQrText = (rawText) => {
+    if (!rawText) return;
+
+    let examCode = '101';
+    let p1Answers = '';
+    let p2Chunks = [];
+    let p3Answers = [];
+
+    if (rawText.trim().startsWith('{')) {
+        try {
+            const data = JSON.parse(rawText);
+            examCode = String(data.code || data.examCode || '101');
+            p1Answers = String(data.answers || data.p1 || '');
+            p2Chunks = Array.isArray(data.part2 || data.p2) ? (data.part2 || data.p2) : [];
+            p3Answers = Array.isArray(data.part3 || data.p3) ? (data.part3 || data.p3) : [];
+        } catch(e) {}
+    } else if (rawText.includes('OMRKEY:')) {
+        const parts = rawText.replace('OMRKEY:', '').split(';');
+        parts.forEach(p => {
+            const [k, v] = p.split('=').map(s => (s || '').trim());
+            if (k === 'code') examCode = v;
+            if (k === 'p1') p1Answers = v;
+            if (k === 'p2') p2Chunks = v ? v.split(',') : [];
+            if (k === 'p3') p3Answers = v ? v.split(',') : [];
+        });
+    } else if (rawText.includes(':')) {
+        const [c, ans] = rawText.split(':');
+        examCode = c.trim();
+        p1Answers = (ans || '').trim().toUpperCase();
+    } else {
+        p1Answers = rawText.trim().toUpperCase().replace(/[^ABCD]/g, '');
+    }
+
+    window._lastDecodedQrPayload = {
+        code: examCode,
+        answers: p1Answers,
+        part2: p2Chunks,
+        part3: p3Answers
+    };
+
+    const resultBox = document.getElementById('qrDecodedResultBox');
+    const codeBadge = document.getElementById('qrDecodedExamCode');
+    const summaryText = document.getElementById('qrDecodedSummaryText');
+
+    if (resultBox) resultBox.classList.remove('hidden');
+    if (codeBadge) codeBadge.textContent = `Mã đề: ${examCode}`;
+    if (summaryText) {
+        summaryText.textContent = `Phần I: ${p1Answers.length} câu (${p1Answers.slice(0, 12)}...) · Phần II: ${p2Chunks.length} câu · Phần III: ${p3Answers.length} câu`;
+    }
+
+    try {
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = audioCtx.createOscillator();
+        osc.frequency.setValueAtTime(800, audioCtx.currentTime);
+        osc.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.12);
+    } catch(e) {}
+};
+
+window.confirmApplyQrKey = async () => {
+    const payload = window._lastDecodedQrPayload;
+    if (!payload) return;
+
+    if (!state.exam) {
+        Swal.fire('Lưu ý', 'Chưa chọn bài thi để áp dụng đáp án!', 'warning');
+        return;
+    }
+
+    const keyObj = {
+        id: `key_${state.exam.id}_${payload.code}`,
+        examId: state.exam.id,
+        teacherId: state.teacherUid,
+        code: String(payload.code),
+        answers: payload.answers || '',
+        part2: payload.part2 || [],
+        part3: payload.part3 || [],
+        updatedAt: new Date().toISOString()
+    };
+
+    state.keys[payload.code] = keyObj;
+
+    if (state.teacherUid) {
+        try { await setDoc(doc(db, "omr_keys", keyObj.id), keyObj); } catch(e) {}
+    }
+    localStorage.setItem(`omr_keys_${state.exam.id}`, JSON.stringify(Object.values(state.keys)));
+
+    const selector = document.getElementById('keyCodeSelector');
+    if (selector) {
+        const existingCodes = new Set(Array.from(selector.options).map(o => o.value));
+        existingCodes.add(payload.code);
+        selector.innerHTML = Array.from(existingCodes).sort().map(c => `<option value="${c}">${c}</option>`).join('');
+        selector.value = payload.code;
+    }
+
+    window.closeScanKeyQrModal();
+    window.renderKeysTab();
+
+    Swal.fire({
+        icon: 'success',
+        title: 'Đã nạp đáp án QR!',
+        text: `Đã nạp thành công đáp án cho Mã đề ${payload.code}.`,
+        timer: 2000
+    });
+};
+
+// ========================================================
+// 8.3 TIỆN ÍCH ĐỒNG BỘ TỪ LỚP HỌC LMS (NẾU CÓ DÙNG LMS)
+// ========================================================
 async function fetchTeacherLmsClasses() {
     if (Array.isArray(state.lmsClasses) && state.lmsClasses.length > 0) return state.lmsClasses;
     let classes = [];
@@ -4162,7 +5358,6 @@ async function syncStudentsFromClassIdToExam(classId, examObj, silent = false) {
     const classData = classDoc.data();
     const className = classData.name || 'Lớp LMS';
 
-    // Lưu liên kết lớp học vào bài thi hiện tại
     examObj.classId = classId;
     examObj.className = className;
     localStorage.setItem(`omr_exam_class_${examObj.id}`, JSON.stringify({ classId, className }));
@@ -4252,65 +5447,15 @@ window.confirmSyncFromLmsClass = async () => {
 };
 
 window.openImportStudentsCsvModal = () => {
-    document.getElementById('importStudentsCsvModal').classList.remove('hidden');
+    window.openImportStudentsToClassModal();
 };
 
 window.confirmImportStudentsCsv = async () => {
-    const text = document.getElementById('importStudentsText')?.value || '';
-    if (!text.trim()) return;
-
-    const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
-    const imported = [];
-
-    lines.forEach((line, idx) => {
-        const parts = line.split(/[,;\t]/).map(p => p.trim());
-        const sbd = parts[0] || String(idx + 1).padStart(3, '0');
-        const name = parts[1] || `Học sinh ${sbd}`;
-        const className = parts[2] || '';
-        imported.push({
-            id: `st_${state.exam.id}_${sbd}`,
-            examId: state.exam.id,
-            teacherId: state.teacherUid,
-            student_no: sbd,
-            name,
-            class_name: className
-        });
-    });
-
-    state.students = imported;
-    if (state.teacherUid) {
-        for (const s of imported) {
-            try { await setDoc(doc(db, "omr_students", s.id), s); } catch(e) {}
-        }
-    }
-    localStorage.setItem(`omr_students_${state.exam.id}`, JSON.stringify(imported));
-
-    document.getElementById('importStudentsCsvModal').classList.add('hidden');
-    window.renderStudentsTab();
-    updateOverviewStats();
-    Swal.fire('Thành công', `Đã nạp ${imported.length} học sinh vào danh sách!`, 'success');
+    window.confirmApplyImportedStudents();
 };
 
 window.clearCurrentExamStudents = async () => {
-    if (state.students.length === 0) return;
-    const res = await Swal.fire({
-        title: 'Xóa danh sách học sinh bài thi này?',
-        icon: 'warning',
-        showCancelButton: true,
-        confirmButtonText: 'Xóa',
-        confirmButtonColor: '#ef4444'
-    });
-    if (!res.isConfirmed) return;
-
-    for (const s of state.students) {
-        if (state.teacherUid) {
-            try { await deleteDoc(doc(db, "omr_students", s.id)); } catch(e) {}
-        }
-    }
-    state.students = [];
-    localStorage.removeItem(`omr_students_${state.exam.id}`);
-    window.renderStudentsTab();
-    updateOverviewStats();
+    window.clearActiveOmrClassStudents();
 };
 
 // ========================================================
@@ -4468,6 +5613,12 @@ window.confirmCreateExam = async () => {
     const p1Count = parseInt(document.getElementById('newExamCountP1')?.value) || 12;
     const p2Count = parseInt(document.getElementById('newExamCountP2')?.value) || 4;
     const p3Count = parseInt(document.getElementById('newExamCountP3')?.value) || 6;
+    const omrClassId = document.getElementById('newExamOmrClassId')?.value || '';
+
+    let attachedClass = null;
+    if (omrClassId && Array.isArray(state.omrClasses)) {
+        attachedClass = state.omrClasses.find(c => c.id === omrClassId);
+    }
 
     const newExam = {
         id: 'exam_' + (state.teacherUid || 'demo') + '_' + Date.now(),
@@ -4482,6 +5633,8 @@ window.confirmCreateExam = async () => {
         part2_points: [0.1, 0.25, 0.5, 1.0],
         part3_point: 0.5,
         codes,
+        classId: attachedClass ? attachedClass.id : null,
+        className: attachedClass ? attachedClass.name : null,
         createdAt: new Date().toISOString()
     };
 
@@ -4491,10 +5644,36 @@ window.confirmCreateExam = async () => {
         try { await setDoc(doc(db, "omr_exams", newExam.id), newExam); } catch(e) {}
     }
 
+    // Auto-populate students for this exam if an OMR class was attached
+    if (attachedClass && Array.isArray(attachedClass.students) && attachedClass.students.length > 0) {
+        const examStudents = attachedClass.students.map(st => ({
+            id: `st_${newExam.id}_${st.student_no}`,
+            examId: newExam.id,
+            teacherId: state.teacherUid,
+            student_no: st.student_no,
+            name: st.name,
+            phone: st.phone,
+            note: st.note,
+            class_id: attachedClass.id,
+            class_name: attachedClass.name
+        }));
+        state.students = examStudents;
+        localStorage.setItem(`omr_students_${newExam.id}`, JSON.stringify(examStudents));
+        localStorage.setItem(`omr_exam_class_${newExam.id}`, JSON.stringify({ classId: attachedClass.id, className: attachedClass.name }));
+        if (state.teacherUid) {
+            for (const s of examStudents) {
+                try { await setDoc(doc(db, "omr_students", s.id), s); } catch(e) {}
+            }
+        }
+    }
+
     window.closeCreateExamModal();
     await selectExam(newExam.id);
     window.switchTab('keys');
-    Swal.fire('Thành công', 'Đã tạo bài thi mới! Hãy thiết lập đáp án cho các mã đề.', 'success');
+    const successMsg = attachedClass
+        ? `Đã tạo bài thi "${name}" cho lớp "${attachedClass.name}" kèm ${attachedClass.students.length} học sinh!`
+        : 'Đã tạo bài thi mới! Hãy thiết lập đáp án cho các mã đề.';
+    Swal.fire('Thành công', successMsg, 'success');
 };
 
 // Sync autoSave checkboxes between Main View and Camera HUD
