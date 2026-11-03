@@ -4347,21 +4347,21 @@ window.loadCodeKeyInputs = (code) => {
             const currentAns = (key.answers || '')[i] || '-';
             const isBonus = !!(bonusP1[i] || bonusP1[String(i)]);
             return `
-                <div class="p-2.5 bg-slate-50 dark:bg-slate-900 rounded-xl border ${isBonus ? 'border-amber-400 bg-amber-50/40 dark:bg-amber-950/20' : 'border-slate-200 dark:border-slate-700'} flex items-center justify-between gap-1">
-                    <span class="font-bold text-slate-500 text-xs shrink-0">Câu ${i + 1}:</span>
-                    <div class="flex items-center gap-1.5">
-                        <select data-p1="${i}" class="px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 font-bold text-emerald-600 outline-none text-xs">
+                <div class="p-2 bg-slate-50 dark:bg-slate-900 rounded-xl border ${isBonus ? 'border-amber-400 bg-amber-50/40 dark:bg-amber-950/20' : 'border-slate-200 dark:border-slate-700'} space-y-1">
+                    <div class="flex items-center justify-between gap-1">
+                        <span class="font-bold text-slate-500 text-[11px] shrink-0">Câu ${i + 1}</span>
+                        <select data-p1="${i}" class="px-1.5 py-0.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 font-bold text-emerald-600 outline-none text-xs w-12 text-center">
                             <option value="-" ${currentAns==='-'?'selected':''}>-</option>
                             <option value="A" ${currentAns==='A'?'selected':''}>A</option>
                             <option value="B" ${currentAns==='B'?'selected':''}>B</option>
                             <option value="C" ${currentAns==='C'?'selected':''}>C</option>
                             <option value="D" ${currentAns==='D'?'selected':''}>D</option>
                         </select>
-                        <label class="inline-flex items-center gap-1 cursor-pointer select-none text-[11px] font-bold ${isBonus ? 'text-amber-600 dark:text-amber-400' : 'text-slate-400 hover:text-amber-600'}" title="Tất cả học sinh đều được tính trọn điểm câu này (phòng khi đề sai)">
-                            <input type="checkbox" data-bonus-p1="${i}" ${isBonus ? 'checked' : ''} onchange="this.closest('.p-2.5').classList.toggle('border-amber-400', this.checked); this.closest('.p-2.5').classList.toggle('bg-amber-50/40', this.checked)" class="rounded text-amber-500 w-3.5 h-3.5 border-slate-300 focus:ring-0">
-                            <span class="text-[10px] hidden sm:inline">Cho điểm</span>
-                        </label>
                     </div>
+                    <label class="flex items-center gap-1 cursor-pointer select-none" title="Cho điểm tất cả HS câu này">
+                        <input type="checkbox" data-bonus-p1="${i}" ${isBonus ? 'checked' : ''} onchange="this.closest('[class*=p-2]').classList.toggle('border-amber-400', this.checked); this.closest('[class*=p-2]').classList.toggle('bg-amber-50/40', this.checked)" class="rounded text-amber-500 w-3 h-3 border-slate-300 focus:ring-0">
+                        <span class="text-[10px] font-bold ${isBonus ? 'text-amber-600' : 'text-slate-400'}">🎁 Cho điểm</span>
+                    </label>
                 </div>
             `;
         }).join('');
@@ -4420,6 +4420,28 @@ window.loadCodeKeyInputs = (code) => {
                 </div>
             `;
         }).join('');
+    }
+};
+
+
+window.applyBulkKey = () => {
+    const text = document.getElementById('bulkKeyInput')?.value || '';
+    if (!text) return;
+    try {
+        const qCount = state.exam?.question_count || 12;
+        const res = window.parseQuickAnswers ? window.parseQuickAnswers(text, qCount) : { answers: text.toUpperCase().replace(/[^ABCD]/g, '') };
+        const ansStr = res.answers || '';
+        document.querySelectorAll('[data-p1]').forEach((sel, i) => {
+            if (ansStr[i]) sel.value = ansStr[i];
+        });
+        Swal.fire({
+            icon: 'success',
+            title: 'Đã áp dụng chuỗi đáp án!',
+            text: `Đã điền đáp án cho ${Math.min(ansStr.length, qCount)} câu Phần I.`,
+            timer: 1800
+        });
+    } catch(err) {
+        Swal.fire('Lỗi định dạng', err.message, 'warning');
     }
 };
 
@@ -5315,6 +5337,26 @@ window.openImportKeysExcelModal = () => {
 function parseKeysMatrixFromRows(rows) {
     if (!rows || rows.length === 0) return {};
 
+    // ── DETECT FORMAT ──
+    const firstCell = String(rows[0]?.[0] || '').trim().toLowerCase().replace(/[\s="]/g, '');
+    
+    // YoungMix format: first cell contains "đề" + columns are question numbers (1,2,3...)
+    // Each row is an exam code with answers across columns
+    const isYoungMix = /^(đề|de)[\\/]?(câu|cau)?/.test(firstCell) || 
+                       (/^(đề|de)/.test(firstCell) && rows[0]?.length > 10 && /^\d+$/.test(String(rows[0]?.[1] || '').trim()));
+
+    if (isYoungMix) {
+        return parseYoungMixFormat(rows);
+    }
+    
+    // SmartTest format: first cell contains "câu" and columns are exam codes
+    const isSmartTest = /^(câu|cau)[\\/]?(mã|ma)?/.test(firstCell);
+
+    if (isSmartTest) {
+        return parseSmartTestFormat(rows);
+    }
+
+    // ── GENERIC FORMAT (original logic) ──
     let headerIdx = -1;
     let codeCols = [];
 
@@ -5382,6 +5424,180 @@ function parseKeysMatrixFromRows(rows) {
         if (isPart2) currentP2Idx++;
         else if (isPart3) currentP3Idx++;
         else currentP1Idx++;
+    }
+
+    return resultKeys;
+}
+
+/**
+ * YoungMix format parser
+ * Row 0: "Đề\câu", 1, 2, 3, ... 40, 1a, 1b, 1c, 1d, ..., 1, 2, 3, ...
+ * Row 1+: ="1618", A, D, D, ... (each row = 1 exam code, answers across columns)
+ * Columns: P1 answers (1-40), then P2 sub-items (1a,1b,...,8d), then P3 values (1-8)
+ */
+function parseYoungMixFormat(rows) {
+    const header = rows[0] || [];
+    const resultKeys = {};
+
+    // Parse column structure from header row
+    // Find P1 columns (pure numbers: 1,2,...,26,27,...,40)
+    // Find P2 columns (letters: 1a,1b,1c,1d,...,8a,8b,8c,8d)
+    // Find P3 columns (numbers after P2 section)
+    const p1Cols = [];
+    const p2Cols = [];
+    const p3Cols = [];
+
+    let foundP2 = false;
+    let foundP3 = false;
+    const seenP1Numbers = new Set();
+    
+    for (let c = 1; c < header.length; c++) {
+        const h = String(header[c] || '').trim().toLowerCase();
+        if (!h) continue;
+        
+        if (/^\d+[abcd]$/.test(h)) {
+            // P2 sub-item: 1a, 1b, 1c, 1d, 2a, ...
+            foundP2 = true;
+            p2Cols.push(c);
+        } else if (/^\d+$/.test(h)) {
+            const num = parseInt(h);
+            if (foundP2) {
+                // After P2 section: this is P3
+                foundP3 = true;
+                p3Cols.push(c);
+            } else {
+                // Before P2 section: this is P1
+                p1Cols.push(c);
+                seenP1Numbers.add(num);
+            }
+        }
+    }
+
+    // Parse data rows
+    for (let r = 1; r < rows.length; r++) {
+        const row = rows[r];
+        if (!row || row.length < 2) continue;
+        
+        // Extract exam code (remove ="..." wrapping)
+        const rawCode = String(row[0] || '').trim().replace(/^="?|"$/g, '').replace(/^=/, '').trim();
+        const codeMatch = rawCode.match(/(\d{3,4})/);
+        if (!codeMatch) continue;
+        const code = codeMatch[1];
+
+        // P1 answers
+        let answers = '';
+        for (const ci of p1Cols) {
+            const v = String(row[ci] || '').trim().toUpperCase();
+            if (/^[ABCD]$/.test(v)) answers += v;
+            else answers += '-';
+        }
+        // Trim trailing dashes
+        answers = answers.replace(/-+$/, '');
+
+        // P2 answers (group by 4: a,b,c,d)
+        const p2 = [];
+        for (let j = 0; j < p2Cols.length; j += 4) {
+            let chunk = '';
+            for (let k = 0; k < 4 && (j + k) < p2Cols.length; k++) {
+                const v = String(row[p2Cols[j + k]] || '').trim().toUpperCase();
+                if (v === 'Đ' || v === 'D' || v === 'ĐÚNG' || v === 'TRUE') chunk += 'Đ';
+                else if (v === 'S' || v === 'SAI' || v === 'FALSE') chunk += 'S';
+                else chunk += '-';
+            }
+            if (chunk.replace(/-/g, '')) p2.push(chunk);
+        }
+
+        // P3 answers
+        const p3 = [];
+        for (const ci of p3Cols) {
+            const v = String(row[ci] || '').trim();
+            if (v) p3.push(v);
+        }
+
+        resultKeys[code] = { code, answers, part2: p2, part3: p3 };
+    }
+
+    if (Object.keys(resultKeys).length === 0) {
+        throw new Error("Không tìm thấy dữ liệu đáp án hợp lệ trong file YoungMix.");
+    }
+
+    return resultKeys;
+}
+
+/**
+ * SmartTest format parser
+ * Row 0: "Câu\Mã đề", ="1618", ="1901", ...  (column headers are exam codes)
+ * Rows 1-26: question number, A, D, A, ...     (P1 answers by row)
+ * Rows 27-40: empty (or unused P1 slots)
+ * Then: row number restarts at 1,2,... with ĐSĐS values (P2)
+ * Then: empty rows
+ * Then: row number restarts at 1,2,... with numeric values (P3)
+ */
+function parseSmartTestFormat(rows) {
+    const header = rows[0] || [];
+    const resultKeys = {};
+
+    // Extract exam codes from header (skip first column)
+    const codeCols = [];
+    for (let c = 1; c < header.length; c++) {
+        const rawCode = String(header[c] || '').trim().replace(/^="?|"$/g, '').replace(/^=/, '').trim();
+        const m = rawCode.match(/(\d{3,4})/);
+        if (m) {
+            codeCols.push({ colIdx: c, code: m[1] });
+            resultKeys[m[1]] = { code: m[1], answers: '', part2: [], part3: [] };
+        }
+    }
+
+    if (codeCols.length === 0) {
+        throw new Error("Không tìm thấy mã đề trong tiêu đề file SmartTest.");
+    }
+
+    // Parse data rows - detect sections by content patterns
+    // Section 1 (P1): cells are A/B/C/D
+    // Section 2 (P2): cells are ĐSĐS/ĐĐSS etc (4 chars of Đ/S)
+    // Section 3 (P3): cells are numeric values (14,4 or 3768 etc)
+    let currentSection = 'p1'; // p1, p2, p3
+    let consecutiveEmpty = 0;
+
+    for (let r = 1; r < rows.length; r++) {
+        const row = rows[r];
+        if (!row || row.length < 2) {
+            consecutiveEmpty++;
+            continue;
+        }
+
+        // Check what kind of data is in the first data column
+        const sampleVal = String(row[codeCols[0]?.colIdx] || '').trim();
+        
+        if (!sampleVal && consecutiveEmpty > 0) {
+            continue;
+        }
+        consecutiveEmpty = 0;
+
+        // Detect section transition
+        if (/^[ĐSDS]{3,8}$/i.test(sampleVal.replace(/[^ĐSDS]/gi, ''))) {
+            currentSection = 'p2';
+        } else if (/^[-+]?\d+([.,]\d+)?$/.test(sampleVal) && currentSection !== 'p1') {
+            currentSection = 'p3';
+        } else if (/^[ABCD]$/i.test(sampleVal.toUpperCase())) {
+            if (currentSection !== 'p1') currentSection = 'p1'; // stay in p1
+        }
+
+        codeCols.forEach(cc => {
+            const rawVal = String(row[cc.colIdx] || '').trim();
+            if (!rawVal) return;
+
+            if (currentSection === 'p1') {
+                const ch = rawVal.toUpperCase().replace(/[^ABCD]/g, '');
+                if (ch) resultKeys[cc.code].answers += ch[0];
+            } else if (currentSection === 'p2') {
+                const chunk = rawVal.toUpperCase().replace(/D(?=[SĐ])/g, 'Đ');
+                const cleaned = chunk.replace(/[^ĐS]/g, '').padEnd(4, '-').slice(0, 4);
+                resultKeys[cc.code].part2.push(cleaned);
+            } else if (currentSection === 'p3') {
+                resultKeys[cc.code].part3.push(rawVal);
+            }
+        });
     }
 
     return resultKeys;
@@ -5626,21 +5842,98 @@ window.handleQrImageUpload = (file) => {
 window.handleDecodedQrText = (rawText) => {
     if (!rawText) return;
 
+    const allParsedKeys = []; // For multi-code QR (QM / TNmaker)
     let examCode = '101';
     let p1Answers = '';
     let p2Chunks = [];
     let p3Answers = [];
 
-    if (rawText.trim().startsWith('{')) {
+    const trimmed = rawText.trim();
+
+    // === TNmaker format: {"code":"ANSWERS#DS_DS#TLN_TLN",...,"success":true,"type":6} ===
+    if (trimmed.startsWith('{') && trimmed.includes('"success"')) {
         try {
-            const data = JSON.parse(rawText);
+            const data = JSON.parse(trimmed);
+            const codeKeys = Object.keys(data).filter(k => k !== 'success' && k !== 'type');
+            for (const code of codeKeys) {
+                const val = String(data[code] || '');
+                const parts = val.split('#');
+                const tnP1 = (parts[0] || '').toUpperCase().replace(/[^ABCD]/g, '');
+                let tnP2 = [];
+                if (parts[1]) {
+                    // "ĐSĐS_SĐĐĐ" → ["ĐSĐS","SĐĐĐ"]
+                    tnP2 = parts[1].split('_').filter(Boolean).map(s => s.replace(/D/g, 'Đ').replace(/S/g, 'S'));
+                }
+                let tnP3 = [];
+                if (parts[2]) {
+                    // "14,4_4_3768_600_0,75_108" → ["14,4","4","3768","600","0,75","108"]
+                    tnP3 = parts[2].split('_').filter(Boolean);
+                }
+                allParsedKeys.push({ code: String(code), answers: tnP1, part2: tnP2, part3: tnP3 });
+            }
+            if (allParsedKeys.length > 0) {
+                examCode = allParsedKeys[0].code;
+                p1Answers = allParsedKeys[0].answers;
+                p2Chunks = allParsedKeys[0].part2;
+                p3Answers = allParsedKeys[0].part3;
+            }
+        } catch(e) {
+            console.warn('[QR TNmaker parse error]', e);
+        }
+    }
+    // === QM format: [["3277","B","A",...,"S","D",...,0.75,4,...], [...]] ===
+    else if (trimmed.startsWith('[') && trimmed.startsWith('[[')) {
+        try {
+            const arr = JSON.parse(trimmed);
+            if (Array.isArray(arr) && arr.length > 0 && Array.isArray(arr[0])) {
+                for (const row of arr) {
+                    const code = String(row[0] || '');
+                    let qmP1 = '';
+                    let qmP2Flat = '';
+                    let qmP3 = [];
+                    // Elements 1..N: A/B/C/D = TN answers, then Đ/S or D/S = DS answers, then numbers = TLN
+                    for (let i = 1; i < row.length; i++) {
+                        const v = String(row[i] || '').trim();
+                        const vUp = v.toUpperCase();
+                        if (/^[ABCD]$/.test(vUp)) {
+                            qmP1 += vUp;
+                        } else if (/^[ĐSDS]$/.test(v.replace(/Đ/g, 'Đ'))) {
+                            // D here means Đúng in QM context for DS section
+                            qmP2Flat += v.toUpperCase() === 'D' ? 'Đ' : v.toUpperCase();
+                        } else if (v !== '') {
+                            // Numeric / TLN answer
+                            qmP3.push(v.replace('.', ','));
+                        }
+                    }
+                    // Group P2 flat into chunks of 4 (a,b,c,d per question)
+                    const qmP2 = [];
+                    for (let j = 0; j < qmP2Flat.length; j += 4) {
+                        qmP2.push(qmP2Flat.slice(j, j + 4));
+                    }
+                    allParsedKeys.push({ code, answers: qmP1, part2: qmP2, part3: qmP3 });
+                }
+                if (allParsedKeys.length > 0) {
+                    examCode = allParsedKeys[0].code;
+                    p1Answers = allParsedKeys[0].answers;
+                    p2Chunks = allParsedKeys[0].part2;
+                    p3Answers = allParsedKeys[0].part3;
+                }
+            }
+        } catch(e) {
+            console.warn('[QR QM parse error]', e);
+        }
+    }
+    // === Standard JSON: {code, answers, part2, part3} ===
+    else if (trimmed.startsWith('{')) {
+        try {
+            const data = JSON.parse(trimmed);
             examCode = String(data.code || data.examCode || '101');
             p1Answers = String(data.answers || data.p1 || '');
             p2Chunks = Array.isArray(data.part2 || data.p2) ? (data.part2 || data.p2) : [];
             p3Answers = Array.isArray(data.part3 || data.p3) ? (data.part3 || data.p3) : [];
         } catch(e) {}
-    } else if (rawText.includes('OMRKEY:')) {
-        const parts = rawText.replace('OMRKEY:', '').split(';');
+    } else if (trimmed.includes('OMRKEY:')) {
+        const parts = trimmed.replace('OMRKEY:', '').split(';');
         parts.forEach(p => {
             const [k, v] = p.split('=').map(s => (s || '').trim());
             if (k === 'code') examCode = v;
@@ -5648,19 +5941,21 @@ window.handleDecodedQrText = (rawText) => {
             if (k === 'p2') p2Chunks = v ? v.split(',') : [];
             if (k === 'p3') p3Answers = v ? v.split(',') : [];
         });
-    } else if (rawText.includes(':')) {
-        const [c, ans] = rawText.split(':');
+    } else if (trimmed.includes(':')) {
+        const [c, ans] = trimmed.split(':');
         examCode = c.trim();
         p1Answers = (ans || '').trim().toUpperCase();
     } else {
-        p1Answers = rawText.trim().toUpperCase().replace(/[^ABCD]/g, '');
+        p1Answers = trimmed.toUpperCase().replace(/[^ABCD]/g, '');
     }
 
+    // Store multi-code results if available
     window._lastDecodedQrPayload = {
         code: examCode,
         answers: p1Answers,
         part2: p2Chunks,
-        part3: p3Answers
+        part3: p3Answers,
+        allKeys: allParsedKeys.length > 1 ? allParsedKeys : null
     };
 
     const resultBox = document.getElementById('qrDecodedResultBox');
@@ -5668,9 +5963,18 @@ window.handleDecodedQrText = (rawText) => {
     const summaryText = document.getElementById('qrDecodedSummaryText');
 
     if (resultBox) resultBox.classList.remove('hidden');
-    if (codeBadge) codeBadge.textContent = `Mã đề: ${examCode}`;
-    if (summaryText) {
-        summaryText.textContent = `Phần I: ${p1Answers.length} câu (${p1Answers.slice(0, 12)}...) · Phần II: ${p2Chunks.length} câu · Phần III: ${p3Answers.length} câu`;
+
+    if (allParsedKeys.length > 1) {
+        if (codeBadge) codeBadge.textContent = `${allParsedKeys.length} mã đề: ${allParsedKeys.map(k => k.code).join(', ')}`;
+        if (summaryText) {
+            const first = allParsedKeys[0];
+            summaryText.textContent = `Phần I: ${first.answers.length} câu · Phần II: ${first.part2.length} câu · Phần III: ${first.part3.length} câu (mỗi đề)`;
+        }
+    } else {
+        if (codeBadge) codeBadge.textContent = `Mã đề: ${examCode}`;
+        if (summaryText) {
+            summaryText.textContent = `Phần I: ${p1Answers.length} câu (${p1Answers.slice(0, 12)}...) · Phần II: ${p2Chunks.length} câu · Phần III: ${p3Answers.length} câu`;
+        }
     }
 
     try {
@@ -5692,30 +5996,39 @@ window.confirmApplyQrKey = async () => {
         return;
     }
 
-    const keyObj = {
-        id: `key_${state.exam.id}_${payload.code}`,
-        examId: state.exam.id,
-        teacherId: state.teacherUid,
-        code: String(payload.code),
-        answers: payload.answers || '',
-        part2: payload.part2 || [],
-        part3: payload.part3 || [],
-        updatedAt: new Date().toISOString()
-    };
+    // Handle multi-code QR (QM / TNmaker with multiple exam codes)
+    const keysToApply = payload.allKeys || [payload];
+    const appliedCodes = [];
 
-    state.keys[payload.code] = keyObj;
+    for (const k of keysToApply) {
+        const code = String(k.code);
+        const keyObj = {
+            id: `key_${state.exam.id}_${code}`,
+            examId: state.exam.id,
+            teacherId: state.teacherUid,
+            code: code,
+            answers: k.answers || '',
+            part2: k.part2 || [],
+            part3: k.part3 || [],
+            updatedAt: new Date().toISOString()
+        };
 
-    if (state.teacherUid) {
-        try { await setDoc(doc(db, "omr_keys", keyObj.id), keyObj); } catch(e) {}
+        state.keys[code] = keyObj;
+
+        if (state.teacherUid) {
+            try { await setDoc(doc(db, "omr_keys", keyObj.id), keyObj); } catch(e) {}
+        }
+        appliedCodes.push(code);
     }
+
     localStorage.setItem(`omr_keys_${state.exam.id}`, JSON.stringify(Object.values(state.keys)));
 
     const selector = document.getElementById('keyCodeSelector');
     if (selector) {
         const existingCodes = new Set(Array.from(selector.options).map(o => o.value));
-        existingCodes.add(payload.code);
+        appliedCodes.forEach(c => existingCodes.add(c));
         selector.innerHTML = Array.from(existingCodes).sort().map(c => `<option value="${c}">${c}</option>`).join('');
-        selector.value = payload.code;
+        selector.value = appliedCodes[0];
     }
 
     window.closeScanKeyQrModal();
@@ -5724,8 +6037,8 @@ window.confirmApplyQrKey = async () => {
     Swal.fire({
         icon: 'success',
         title: 'Đã nạp đáp án QR!',
-        text: `Đã nạp thành công đáp án cho Mã đề ${payload.code}.`,
-        timer: 2000
+        text: `Đã nạp thành công đáp án cho ${appliedCodes.length} mã đề (${appliedCodes.join(', ')}).`,
+        timer: 2500
     });
 };
 

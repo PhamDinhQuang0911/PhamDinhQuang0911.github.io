@@ -14,7 +14,7 @@
  * (network-first) nhưng nên tăng khi đổi styles.css/utils.js để chắc chắn.
  */
 
-const VERSION = 'qmath-v90-omr-manual-override-bonus';
+const VERSION = 'qmath-v91-qr-excel-import-bonus-fix';
 const STATIC_CACHE = `${VERSION}-static`;
 const PAGE_CACHE = `${VERSION}-pages`;
 const CDN_CACHE = `${VERSION}-cdn`;

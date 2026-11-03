@@ -3193,9 +3193,34 @@ ${inputs}
             if (window.showToast) window.showToast(`Trộn thành công ${maDeList.length} mã đề thi! Đang tải file ZIP...`, 'success');
             else if (window.showNotification) window.showNotification(`Trộn thành công ${maDeList.length} mã đề thi!`, 'success');
 
+            // Lưu kết quả trộn để tạo bài chấm offline
+            window._lastMixResult = {
+                matrixData: result.matrixData,
+                maDeList: maDeList,
+                title: document.getElementById('mixerTitleInput')?.value || 'Đề thi',
+                p1Count: result.matrixData.filter(d => !d.isGoc)[0]?.p1?.length || 0,
+                p2Count: result.matrixData.filter(d => !d.isGoc)[0]?.p2?.length || 0,
+                p3Count: result.matrixData.filter(d => !d.isGoc)[0]?.p3_raw?.length || 0
+            };
+
+            // Hiện nút tạo bài chấm offline
+            const footer = document.querySelector('#examMixerModal .flex.items-center.justify-end');
+            if (footer) {
+                const existingBtn = document.getElementById('btnCreateOfflineGrading');
+                if (!existingBtn) {
+                    const offlineBtn = document.createElement('button');
+                    offlineBtn.id = 'btnCreateOfflineGrading';
+                    offlineBtn.type = 'button';
+                    offlineBtn.className = 'px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition shadow-md flex items-center gap-1.5 cursor-pointer animate-pulse';
+                    offlineBtn.innerHTML = '<i class="fa-solid fa-check-double"></i> Tạo bài chấm Offline';
+                    offlineBtn.onclick = () => window.createOfflineGradingFromMix();
+                    footer.insertBefore(offlineBtn, footer.firstChild);
+                }
+            }
+
             setTimeout(() => {
                 window.closeExamMixerModal();
-            }, 1200);
+            }, 5000);
 
         } catch (err) {
             console.error("[ExamMixer] Lỗi:", err);
@@ -3203,6 +3228,112 @@ ${inputs}
         } finally {
             btn.disabled = false;
             btn.innerHTML = '<i class="fa-solid fa-shuffle"></i> Bắt đầu Trộn &amp; Tải ZIP';
+        }
+    };
+
+    // === TẠO BÀI CHẤM OFFLINE TỪ KẾT QUẢ TRỘN ĐỀ ===
+    window.createOfflineGradingFromMix = async () => {
+        const mix = window._lastMixResult;
+        if (!mix || !mix.matrixData || mix.matrixData.length === 0) {
+            if (typeof Swal !== 'undefined') {
+                Swal.fire('Chưa có dữ liệu', 'Vui lòng trộn đề trước khi tạo bài chấm offline!', 'warning');
+            }
+            return;
+        }
+
+        let examName = mix.title || 'Đề thi';
+        if (typeof Swal !== 'undefined') {
+            const result = await Swal.fire({
+                title: 'Tạo bài chấm Offline',
+                html: `
+                    <div class="text-left space-y-3 text-sm">
+                        <div>
+                            <label class="font-bold block mb-1">Tên bài chấm:</label>
+                            <input id="swal-exam-name" class="swal2-input" value="${examName}" placeholder="Nhập tên bài chấm" style="width:100%">
+                        </div>
+                        <div class="bg-emerald-50 p-3 rounded-xl text-xs space-y-1 border border-emerald-200">
+                            <div><b>📋 Thông tin từ đề trộn:</b></div>
+                            <div>• Số mã đề: <b>${mix.maDeList.length}</b> (${mix.maDeList.join(', ')})</div>
+                            <div>• Phần I (TN): <b>${mix.p1Count}</b> câu</div>
+                            <div>• Phần II (Đ/S): <b>${mix.p2Count}</b> câu</div>
+                            <div>• Phần III (TLN): <b>${mix.p3Count}</b> câu</div>
+                        </div>
+                    </div>
+                `,
+                showCancelButton: true,
+                confirmButtonText: '🚀 Tạo bài chấm',
+                cancelButtonText: 'Hủy',
+                confirmButtonColor: '#059669',
+                preConfirm: () => {
+                    return document.getElementById('swal-exam-name')?.value || examName;
+                }
+            });
+            if (!result.isConfirmed) return;
+            examName = result.value || examName;
+        }
+
+        const examId = 'exam_mix_' + Date.now();
+        const newExam = {
+            id: examId,
+            name: examName,
+            codes: mix.maDeList.map(String),
+            question_count: mix.p1Count || 0,
+            part2_count: mix.p2Count || 0,
+            part3_count: mix.p3Count || 0,
+            template: 'auto',
+            createdAt: new Date().toISOString(),
+            source: 'exam-mixer'
+        };
+
+        const keys = {};
+        for (const d of mix.matrixData) {
+            if (d.isGoc) continue;
+            const code = String(d.made);
+            const p2WithD = (d.p2 || []).map(s => s.replace(/D/g, 'Đ'));
+            const p3Raw = (d.p3_raw || d.p3 || []).map(v => String(v).trim());
+            keys[code] = {
+                id: `key_${examId}_${code}`,
+                examId: examId,
+                teacherId: '',
+                code: code,
+                answers: (d.p1 || []).join(''),
+                part2: p2WithD,
+                part3: p3Raw,
+                updatedAt: new Date().toISOString()
+            };
+        }
+
+        const existingExams = JSON.parse(localStorage.getItem('omr_exams') || '[]');
+        existingExams.push(newExam);
+        localStorage.setItem('omr_exams', JSON.stringify(existingExams));
+        localStorage.setItem(`omr_keys_${examId}`, JSON.stringify(Object.values(keys)));
+
+        const isOnOmrPage = window.location.pathname.includes('omr-grader') || document.getElementById('view-keys');
+        if (isOnOmrPage && typeof window.loadExam === 'function') {
+            window.loadExam(examId);
+        }
+
+        window.closeExamMixerModal();
+
+        if (typeof Swal !== 'undefined') {
+            const navResult = await Swal.fire({
+                icon: 'success',
+                title: 'Đã tạo bài chấm offline!',
+                html: `
+                    <div class="text-sm space-y-2">
+                        <p>Bài chấm <b>"${examName}"</b> đã được tạo với ${mix.maDeList.length} mã đề và đáp án đầy đủ.</p>
+                        <p class="text-xs text-gray-500">Phần I: ${mix.p1Count} câu · Phần II: ${mix.p2Count} câu · Phần III: ${mix.p3Count} câu</p>
+                    </div>
+                `,
+                showCancelButton: !isOnOmrPage,
+                confirmButtonText: isOnOmrPage ? 'OK' : '📸 Mở trang chấm thi',
+                cancelButtonText: 'Đóng',
+                confirmButtonColor: '#059669'
+            });
+
+            if (!isOnOmrPage && navResult.isConfirmed) {
+                window.open('omr-grader.html', '_blank');
+            }
         }
     };
 
