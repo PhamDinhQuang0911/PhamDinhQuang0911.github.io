@@ -955,10 +955,46 @@ state.isTorchOn = false;
 state.backCameras = [];
 state.activeCameraIndex = 0;
 state.currentCameraDeviceId = null;
+state.ultraWideCamera = null;
+state.mainCamera = null;
+state.guideOrientation = 'portrait';
 state.autoScanEnabled = true;
 state.isAutoScanning = false;
 let autoScanInterval = null;
 let lastAutoScanTime = 0;
+
+function showCameraHUDMessage(htmlMsg, durationMs = 2200) {
+    const badge = document.getElementById('cameraScanStatus');
+    const textEl = document.getElementById('cameraScanStatusText');
+    if (!badge) return;
+    if (textEl) textEl.innerHTML = htmlMsg;
+    else badge.innerHTML = htmlMsg;
+    badge.classList.remove('hidden', 'opacity-0');
+    badge.classList.add('opacity-100');
+    clearTimeout(badge._hideTimer);
+    badge._hideTimer = setTimeout(() => {
+        badge.classList.add('opacity-0');
+        setTimeout(() => badge.classList.add('hidden'), 200);
+    }, durationMs);
+}
+
+window.toggleGuideOrientation = () => {
+    const guide = document.getElementById('cameraA4Guide');
+    const lbl = document.getElementById('guideOrientationLabel');
+    if (!guide) return;
+    state.guideOrientation = state.guideOrientation === 'portrait' ? 'landscape' : 'portrait';
+    if (state.guideOrientation === 'landscape') {
+        guide.classList.remove('aspect-[1552/2254]', 'landscape:aspect-[1552/2254]');
+        guide.classList.add('aspect-[2254/1552]');
+        if (lbl) lbl.textContent = 'Khung ngang';
+        showCameraHUDMessage('📐 Khung ngang (Phiếu 40 câu / Quét ngang)');
+    } else {
+        guide.classList.remove('aspect-[2254/1552]');
+        guide.classList.add('aspect-[1552/2254]');
+        if (lbl) lbl.textContent = 'Khung dọc';
+        showCameraHUDMessage('📐 Khung dọc (Chuẩn A4 BGD)');
+    }
+};
 
 window.toggleAutoScan = () => {
     state.autoScanEnabled = !state.autoScanEnabled;
@@ -1007,7 +1043,11 @@ function startAutoScanLoop() {
                 return;
             }
 
-            const scale = Math.min(vr.width / video.videoWidth, vr.height / video.videoHeight);
+            const objFit = window.getComputedStyle(video).objectFit || 'cover';
+            const scale = objFit === 'cover'
+                ? Math.max(vr.width / video.videoWidth, vr.height / video.videoHeight)
+                : Math.min(vr.width / video.videoWidth, vr.height / video.videoHeight);
+
             const drawW = video.videoWidth * scale;
             const drawH = video.videoHeight * scale;
             const offsetX = (vr.width - drawW) / 2;
@@ -1018,8 +1058,8 @@ function startAutoScanLoop() {
             let computedSw = gr.width / scale;
             let computedSh = gr.height / scale;
 
-            const padX = computedSw * 0.05;
-            const padY = computedSh * 0.05;
+            const padX = computedSw * 0.08;
+            const padY = computedSh * 0.08;
             computedSx = Math.max(0, computedSx - padX);
             computedSy = Math.max(0, computedSy - padY);
             computedSw = Math.min(video.videoWidth - computedSx, computedSw + padX * 2);
@@ -1050,6 +1090,15 @@ function startAutoScanLoop() {
                 const uniqueCorners = new Set(corners);
                 if (uniqueCorners.size === 4) {
                     lastAutoScanTime = Date.now();
+                    // Glow effect on 4 target boxes
+                    document.querySelectorAll('.camera-target-corner').forEach(b => {
+                        b.classList.add('bg-emerald-500/50', 'border-emerald-300', 'shadow-[0_0_20px_rgba(16,185,129,0.9)]');
+                    });
+                    setTimeout(() => {
+                        document.querySelectorAll('.camera-target-corner').forEach(b => {
+                            b.classList.remove('bg-emerald-500/50', 'border-emerald-300', 'shadow-[0_0_20px_rgba(16,185,129,0.9)]');
+                        });
+                    }, 500);
                     await window.captureCameraFrame();
                 }
             }
@@ -1075,14 +1124,48 @@ async function getAvailableCameras() {
         const devices = await navigator.mediaDevices.enumerateDevices();
         const videoInputs = devices.filter(d => d.kind === 'videoinput');
         
-        // Filter back cameras
+        console.log("Danh sách toàn bộ camera:", videoInputs);
+
+        // Filter rear cameras (exclude front / selfie / user)
         const rear = videoInputs.filter(d => {
             const lbl = (d.label || '').toLowerCase();
-            return lbl.includes('back') || lbl.includes('rear') || lbl.includes('sau') || lbl.includes('environment') || lbl.includes('camera2 0') || lbl.includes('camera2 2') || lbl.includes('camera2 3');
+            if (lbl.includes('front') || lbl.includes('trước') || lbl.includes('user') || lbl.includes('selfie') || /camera\s*2?\s*1\b/.test(lbl)) {
+                return false;
+            }
+            return true;
         });
-        
+
         state.backCameras = rear.length > 0 ? rear : videoInputs;
-        console.log("Danh sách camera quét:", state.backCameras);
+
+        // Classify Ultra-wide (0.5x) and Main (1x)
+        // 1. Explicit keyword match
+        let ultraWide = state.backCameras.find(d => {
+            const lbl = (d.label || '').toLowerCase();
+            return lbl.includes('ultra') || lbl.includes('0.5') || lbl.includes('0.6') || lbl.includes('super') || lbl.includes('wide-angle') || lbl.includes('góc rộng');
+        });
+
+        // 2. Android Camera2 ID 2 (typical auxiliary Ultra-Wide sensor on Xiaomi, Samsung, Oppo!)
+        if (!ultraWide) {
+            ultraWide = state.backCameras.find(d => /camera\s*2?\s*2\b/i.test(d.label) || /\b2,\s*facing\s*back/i.test(d.label));
+        }
+
+        // 3. Positional fallback: if 2+ rear cameras exist, 2nd is almost universally Ultra-Wide
+        if (!ultraWide && state.backCameras.length > 1) {
+            ultraWide = state.backCameras[1];
+        }
+
+        state.ultraWideCamera = ultraWide || null;
+
+        // Main camera (1x): camera2 0 or 1st rear camera
+        let main = state.backCameras.find(d => {
+            const lbl = (d.label || '').toLowerCase();
+            return lbl.includes('camera2 0') || lbl.includes('0, facing back') || lbl.includes('main') || lbl.includes('primary');
+        });
+        state.mainCamera = main || state.backCameras[0] || null;
+
+        console.log("Camera chính (1x):", state.mainCamera?.label);
+        console.log("Camera góc rộng (0.5x):", state.ultraWideCamera?.label);
+
         return state.backCameras;
     } catch(e) {
         console.warn("Không liệt kê được danh sách camera:", e);
@@ -1095,14 +1178,20 @@ function updateZoomUI(zoomVal, caps) {
     if (badge) {
         badge.textContent = (typeof zoomVal === 'number' ? zoomVal.toFixed(1) : zoomVal) + 'x';
     }
-    document.querySelectorAll('.zoom-btn').forEach(btn => {
-        const bVal = parseFloat(btn.textContent);
-        if (Math.abs(bVal - zoomVal) < 0.25) {
-            btn.className = 'zoom-btn px-2.5 py-1 rounded-lg bg-emerald-600 text-white text-xs font-bold border border-emerald-400 transition-all active:scale-90 shadow-md';
-        } else {
-            btn.className = 'zoom-btn px-2.5 py-1 rounded-lg bg-black/70 hover:bg-black/90 text-white text-xs font-bold border border-white/20 transition-all active:scale-90 shadow-sm';
-        }
-    });
+    const btn05 = document.getElementById('btnZoom05');
+    const btn10 = document.getElementById('btnZoom10');
+    const btn20 = document.getElementById('btnZoom20');
+
+    const is05 = Math.abs(zoomVal - 0.5) < 0.25;
+    const is10 = Math.abs(zoomVal - 1.0) < 0.25;
+    const is20 = Math.abs(zoomVal - 2.0) < 0.25;
+
+    const activeClass = 'zoom-btn px-2.5 py-1 rounded-lg bg-emerald-600 text-white text-xs font-bold border border-emerald-400 transition-all active:scale-90 shadow-md';
+    const inactiveClass = 'zoom-btn px-2.5 py-1 rounded-lg bg-black/70 hover:bg-black/90 text-white text-xs font-bold border border-white/20 transition-all active:scale-90 shadow-sm';
+
+    if (btn05) btn05.className = is05 ? activeClass : inactiveClass;
+    if (btn10) btn10.className = is10 ? activeClass : inactiveClass;
+    if (btn20) btn20.className = is20 ? activeClass : inactiveClass;
 }
 
 window.startCameraStream = async () => {
@@ -1112,14 +1201,12 @@ window.startCameraStream = async () => {
     window.stopCameraStream();
 
     try {
-        // High resolution constraints WITHOUT forced aspect ratio crop (preserves full native camera sensor view)
+        // High resolution constraints for uncropped wide sensor FOV (TNMaker style)
         const videoConstraints = {
             facingMode: state.currentCameraDeviceId ? undefined : { ideal: 'environment' },
             deviceId: state.currentCameraDeviceId ? { exact: state.currentCameraDeviceId } : undefined,
-            width: { ideal: 1920 },
-            height: { ideal: 1440 },
-            aspectRatio: { ideal: 4/3 },
-            resizeMode: { ideal: 'none' }
+            width: { ideal: 1920, min: 1280 },
+            height: { ideal: 1080, min: 720 }
         };
 
         const stream = await navigator.mediaDevices.getUserMedia({
@@ -1134,41 +1221,43 @@ window.startCameraStream = async () => {
         // Enumerate devices once permission is granted
         await getAvailableCameras();
 
-        // Check if multiple rear cameras exist to show/hide cycle lens button
-        const cycleBtn = document.getElementById('btnCycleCamera');
-        if (cycleBtn) {
-            cycleBtn.classList.toggle('hidden', state.backCameras.length <= 1);
-        }
-
-        // Inspect track capabilities (Zoom, Torch, Focus)
         const [track] = stream.getVideoTracks();
-        if (track && track.getCapabilities) {
-            const caps = track.getCapabilities();
-            state.cameraCapabilities = caps;
-
-            // 1. Zoom control setup - ALWAYS DEFAULT TO MINIMUM ZOOM (widest possible field of view)
-            const zoomControls = document.getElementById('cameraZoomControls');
-            if (caps.zoom && typeof caps.zoom.min === 'number') {
-                const minZoom = caps.zoom.min;
-                try {
-                    await track.applyConstraints({ advanced: [{ zoom: minZoom }] });
-                    state.cameraZoom = minZoom;
-                } catch(e) {
-                    console.warn("Không set được zoom min:", e);
-                }
-                updateZoomUI(minZoom, caps);
-                if (zoomControls) zoomControls.classList.remove('hidden');
-            } else {
-                if (zoomControls) zoomControls.classList.remove('hidden');
-                updateZoomUI(1.0, {});
+        if (track) {
+            const settings = track.getSettings ? track.getSettings() : {};
+            if (settings.deviceId) {
+                state.currentCameraDeviceId = settings.deviceId;
+                const idx = state.backCameras.findIndex(c => c.deviceId === settings.deviceId);
+                if (idx !== -1) state.activeCameraIndex = idx;
             }
 
-            // 2. Torch control setup
-            const torchBtn = document.getElementById('btnCameraTorch');
-            if (torchBtn) {
-                torchBtn.classList.toggle('hidden', !caps.torch);
+            if (track.getCapabilities) {
+                const caps = track.getCapabilities();
+                state.cameraCapabilities = caps;
+
+                // Zoom control setup
+                const zoomControls = document.getElementById('cameraZoomControls');
+                if (caps.zoom && typeof caps.zoom.min === 'number') {
+                    // If native zoom < 0.75, set min zoom (widest view)
+                    if (caps.zoom.min <= 0.75) {
+                        try {
+                            await track.applyConstraints({ advanced: [{ zoom: caps.zoom.min }] });
+                            state.cameraZoom = caps.zoom.min;
+                        } catch(e) {}
+                    }
+                }
+                if (zoomControls) zoomControls.classList.remove('hidden');
+
+                // Torch control setup
+                const torchBtn = document.getElementById('btnCameraTorch');
+                if (torchBtn) {
+                    torchBtn.classList.toggle('hidden', !caps.torch);
+                }
             }
         }
+
+        // Determine active zoom UI based on active lens
+        const isUltraWideActive = state.ultraWideCamera && state.currentCameraDeviceId === state.ultraWideCamera.deviceId;
+        updateZoomUI(isUltraWideActive ? 0.5 : 1.0, state.cameraCapabilities || {});
 
         // Start Continuous Auto-Scan loop
         if (state.autoScanEnabled) {
@@ -1215,18 +1304,21 @@ window.cycleBackCamera = async () => {
         const target = state.backCameras[state.activeCameraIndex];
         state.currentCameraDeviceId = target.deviceId;
         
-        // Show notification on HUD
-        const statusBadge = document.getElementById('cameraScanStatus');
-        if (statusBadge) {
-            statusBadge.innerHTML = `<i class="fa-solid fa-camera-rotate text-emerald-400"></i> ${target.label ? target.label.slice(0, 18) : ('Cam ' + (state.activeCameraIndex + 1))}`;
-            statusBadge.classList.remove('hidden');
-            setTimeout(() => statusBadge.classList.add('hidden'), 2000);
-        }
+        const isUltraWide = target === state.ultraWideCamera || /ultra|wide|0\.5|camera\s*2?\s*2/i.test(target.label);
+        const labelText = isUltraWide ? 'Camera 0.5x (Góc siêu rộng)' : (target.label ? target.label.slice(0, 20) : ('Ống kính ' + (state.activeCameraIndex + 1)));
+        showCameraHUDMessage(`<i class="fa-solid fa-camera-rotate text-emerald-400"></i> ${labelText}`);
+        
         await window.startCameraStream();
+        if (isUltraWide) {
+            updateZoomUI(0.5, {});
+        } else {
+            updateZoomUI(1.0, {});
+        }
     } else {
         // Fallback toggle environment / user
         state.currentFacingMode = state.currentFacingMode === 'environment' ? 'user' : 'environment';
         state.currentCameraDeviceId = null;
+        showCameraHUDMessage(`<i class="fa-solid fa-camera-rotate text-emerald-400"></i> Đổi camera trước/sau`);
         await window.startCameraStream();
     }
 };
@@ -1236,31 +1328,77 @@ window.switchCameraLens = window.cycleBackCamera;
 window.setCameraZoom = async (val) => {
     if (!state.currentCameraStream) return;
     const [track] = state.currentCameraStream.getVideoTracks();
-    if (!track || !track.applyConstraints) return;
+    if (!track) return;
+    const caps = state.cameraCapabilities || (track.getCapabilities ? track.getCapabilities() : {});
 
-    try {
-        const caps = state.cameraCapabilities || (track.getCapabilities ? track.getCapabilities() : {});
-        if (caps.zoom) {
-            const minZ = caps.zoom.min || 1.0;
-            const maxZ = caps.zoom.max || 5.0;
-            const targetZoom = Math.max(minZ, Math.min(maxZ, val));
-            await track.applyConstraints({ advanced: [{ zoom: targetZoom }] });
-            state.cameraZoom = targetZoom;
-            updateZoomUI(targetZoom, caps);
-        } else {
-            // If device has ultra-wide back camera, 0.5x can switch camera!
-            if (val <= 0.8 && state.backCameras.length > 1) {
-                const wideCam = state.backCameras.find(c => c.label.toLowerCase().includes('ultra') || c.label.toLowerCase().includes('wide') || c.label.toLowerCase().includes('0.5') || c.label.toLowerCase().includes('0'));
-                if (wideCam && wideCam.deviceId !== state.currentCameraDeviceId) {
-                    state.currentCameraDeviceId = wideCam.deviceId;
-                    await window.startCameraStream();
-                    return;
-                }
-            }
-            updateZoomUI(val, {});
+    // CASE 0.5x (RỘNG - ULTRA-WIDE)
+    if (val <= 0.8) {
+        // 1. Try native optical/digital track zoom if track supports min <= 0.75
+        if (caps.zoom && typeof caps.zoom.min === 'number' && caps.zoom.min <= 0.75) {
+            try {
+                await track.applyConstraints({ advanced: [{ zoom: caps.zoom.min }] });
+                state.cameraZoom = caps.zoom.min;
+                updateZoomUI(0.5, caps);
+                showCameraHUDMessage('📷 0.5x Góc siêu rộng (Native)');
+                return;
+            } catch(e) {}
         }
-    } catch(e) {
-        console.warn("Lỗi chỉnh zoom camera:", e);
+
+        // 2. Switch physical camera device to Ultra-Wide
+        if (state.backCameras.length > 1) {
+            let targetCam = state.ultraWideCamera;
+            if (!targetCam || targetCam.deviceId === state.currentCameraDeviceId) {
+                targetCam = state.backCameras.find(c => c.deviceId !== state.currentCameraDeviceId);
+            }
+
+            if (targetCam) {
+                showCameraHUDMessage('📷 Đang chuyển sang Camera 0.5x (Góc siêu rộng)...');
+                state.currentCameraDeviceId = targetCam.deviceId;
+                state.activeCameraIndex = state.backCameras.findIndex(c => c.deviceId === targetCam.deviceId);
+                await window.startCameraStream();
+                updateZoomUI(0.5, {});
+                showCameraHUDMessage('📷 Đã bật Camera 0.5x (Góc siêu rộng)');
+                return;
+            }
+        }
+
+        // If only 1 camera exists on device
+        updateZoomUI(0.5, {});
+        showCameraHUDMessage('📷 Thiết bị chỉ có 1 camera sau - Đang dùng góc rộng nhất!');
+        return;
+    }
+
+    // CASE 1x (GÓC CHUẨN)
+    if (val >= 0.9 && val <= 1.2) {
+        if (state.mainCamera && state.currentCameraDeviceId !== state.mainCamera.deviceId) {
+            showCameraHUDMessage('📷 Đang chuyển sang Camera 1x (Chính)...');
+            state.currentCameraDeviceId = state.mainCamera.deviceId;
+            state.activeCameraIndex = state.backCameras.findIndex(c => c.deviceId === state.mainCamera.deviceId);
+            await window.startCameraStream();
+        }
+        if (caps.zoom) {
+            try {
+                await track.applyConstraints({ advanced: [{ zoom: 1.0 }] });
+                state.cameraZoom = 1.0;
+            } catch(e) {}
+        }
+        updateZoomUI(1.0, caps);
+        showCameraHUDMessage('📷 Camera 1x (Gốc chuẩn)');
+        return;
+    }
+
+    // CASE 2x (THU PHÓNG)
+    if (val >= 1.8) {
+        if (caps.zoom) {
+            try {
+                const targetZ = Math.min(caps.zoom.max || 5.0, val);
+                await track.applyConstraints({ advanced: [{ zoom: targetZ }] });
+                state.cameraZoom = targetZ;
+            } catch(e) {}
+        }
+        updateZoomUI(val, caps);
+        showCameraHUDMessage(`📷 Thu phóng ${val}x`);
+        return;
     }
 };
 
@@ -1373,7 +1511,10 @@ window.captureCameraFrame = async () => {
     let sx = 0, sy = 0, sw = video.videoWidth || 1920, sh = video.videoHeight || 1440;
 
     if (gr && vr.width > 0 && vr.height > 0 && video.videoWidth > 0 && video.videoHeight > 0) {
-        const scale = Math.min(vr.width / video.videoWidth, vr.height / video.videoHeight);
+        const objFit = window.getComputedStyle(video).objectFit || 'cover';
+        const scale = objFit === 'cover'
+            ? Math.max(vr.width / video.videoWidth, vr.height / video.videoHeight)
+            : Math.min(vr.width / video.videoWidth, vr.height / video.videoHeight);
         const drawW = video.videoWidth * scale;
         const drawH = video.videoHeight * scale;
         const offsetX = (vr.width - drawW) / 2;
@@ -1384,9 +1525,9 @@ window.captureCameraFrame = async () => {
         let computedSw = gr.width / scale;
         let computedSh = gr.height / scale;
 
-        // 4% padding margin so outer corner markers are not clipped
-        const padX = computedSw * 0.04;
-        const padY = computedSh * 0.04;
+        // 12% generous padding margin so outer corner markers are never clipped
+        const padX = computedSw * 0.12;
+        const padY = computedSh * 0.12;
         computedSx = Math.max(0, computedSx - padX);
         computedSy = Math.max(0, computedSy - padY);
         computedSw = Math.min(video.videoWidth - computedSx, computedSw + padX * 2);
