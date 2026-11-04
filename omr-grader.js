@@ -3408,6 +3408,24 @@ function recognizeSheetFromGray(gray, options = {}) {
             }
 
             if (result && (result.soMoc >= 4 || result.H)) {
+                // Tính toán sai số tỉ lệ khung hình (Aspect Ratio Error) từ 4 góc phiếu
+                let ratioErr = 1.0;
+                if (result.H && tpl.moc && tpl.moc.length >= 4) {
+                    const c = tpl.moc.slice(0, 4).map(pt => window.OMR.ap(result.H, pt.x, pt.y));
+                    const w1 = Math.hypot(c[1][0] - c[0][0], c[1][1] - c[0][1]);
+                    const w2 = Math.hypot(c[2][0] - c[3][0], c[2][1] - c[3][1]);
+                    const h1 = Math.hypot(c[3][0] - c[0][0], c[3][1] - c[0][1]);
+                    const h2 = Math.hypot(c[2][0] - c[1][0], c[2][1] - c[1][1]);
+                    const avgW = (w1 + w2) / 2;
+                    const avgH = (h1 + h2) / 2;
+                    const detR = avgH / Math.max(1, avgW);
+                    const m = tpl.moc;
+                    const tplW = Math.hypot(m[1].x - m[0].x, m[1].y - m[0].y);
+                    const tplH = Math.hypot(m[3].x - m[0].x, m[3].y - m[0].y);
+                    const expR = tplH / tplW;
+                    ratioErr = Math.abs(detR - expR) / expR;
+                }
+
                 const totalMoc = (tpl.moc && tpl.moc.length) ? tpl.moc.length : 12;
                 const soMoc = result.soMoc || 0;
                 const mocRatio = soMoc / totalMoc;
@@ -3415,13 +3433,20 @@ function recognizeSheetFromGray(gray, options = {}) {
                 const codeDigits = (result.made || '').replace(/\D/g, '').length;
                 const ansCount = (result.p1 || '').replace(/[\*\?]/g, '').length;
 
-                // Tính điểm độ khớp chính xác: Có đủ 4 mốc định vị góc là đã đạt điểm nền tảng vững chắc (>= 60)
+                // Tính điểm độ khớp chính xác
                 let score = 55 + Math.min(soMoc, 12) * 8;
                 if (mocRatio >= 0.60) score += 40;
                 if (codeDigits >= 2) score += 30;
                 if (sbdDigits >= 2) score += 25;
                 if (ansCount >= 2) score += 25;
-                if (tplKey === activeTpl) score += 35; // Ưu tiên mạnh mẫu đang chọn của bài thi
+                if (tplKey === activeTpl) score += 20;
+
+                // TRỪNG PHẠT NẶNG NẾU LỆCH TỈ LỆ KHUNG HÌNH (khắc phục hoàn toàn nhận nhầm khổ đứng/ngang)
+                if (ratioErr > 0.14) {
+                    score -= 220;
+                } else if (ratioErr <= 0.06) {
+                    score += 60; // Thưởng điểm cho mẫu có tỉ lệ khung hình khớp tuyệt đối
+                }
 
                 if (score > bestScore) {
                     bestScore = score;
@@ -3429,11 +3454,15 @@ function recognizeSheetFromGray(gray, options = {}) {
                     matchedTplKey = tplKey;
                 }
 
-                // DỪNG SỚM CHÍNH XÁC & BẢO ĐẢM TỐC ĐỘ (<20s / 100 bài):
-                // Chỉ dừng sớm nếu mẫu active thật sự khớp rất cao (nhiều mốc nội bộ, đọc được mã đề/SBD/đáp án)
+                // DỪNG SỚM CHỈ KHI:
+                // 1. Tỉ lệ khung hình khớp chuẩn (ratioErr <= 0.08)
+                // 2. Mẫu active có nhiều mốc nội bộ (>= 14 mốc với qmcv1239, hoặc >= 7 với tpl ít mốc)
+                // 3. mocRatio >= 0.50
+                // 4. Đọc được mã đề hoặc SBD
                 const isHighConfidenceActive = (tplKey === activeTpl) &&
+                    (ratioErr <= 0.08) &&
                     ((soMoc >= 14) || (totalMoc <= 12 && soMoc >= 7)) &&
-                    mocRatio >= 0.45 &&
+                    mocRatio >= 0.50 &&
                     (codeDigits >= 2 || sbdDigits >= 2) &&
                     score >= 180;
 
@@ -3441,8 +3470,8 @@ function recognizeSheetFromGray(gray, options = {}) {
                     break;
                 }
 
-                // Nếu bất kỳ mẫu nào đạt điểm tuyệt đối xuất sắc (soMoc cao + đọc đầy đủ mã đề + sbd + đáp án)
-                if (bestScore >= 240 && soMoc >= 8 && (codeDigits >= 2 || sbdDigits >= 2 || ansCount >= 4)) {
+                // Nếu bất kỳ mẫu nào đạt điểm tuyệt đối xuất sắc (ratio chuẩn + soMoc cao + đọc đầy đủ)
+                if (bestScore >= 240 && ratioErr <= 0.08 && soMoc >= 8 && (codeDigits >= 2 || sbdDigits >= 2 || ansCount >= 4)) {
                     break;
                 }
             }
@@ -9189,6 +9218,7 @@ window.switchExamSettingsTab = (tab) => {
 };
 
 window.openEditExamSettingsModal = () => {
+    state._keysModifiedInModal = false;
     if (!state.exam) return;
     const modal = document.getElementById('editExamSettingsModal');
     if (!modal) return;
@@ -9366,6 +9396,7 @@ window.applyModalBulkKey = () => {
 };
 
 window.saveCurrentEditModalKey = (code) => {
+    state._keysModifiedInModal = true;
     if (!code || !state.exam) return;
     const qCount1 = parseInt(document.getElementById('editExamCountP1')?.value) || 12;
     const qCount2 = parseInt(document.getElementById('editExamCountP2')?.value) || 4;
@@ -9436,6 +9467,13 @@ window.saveCurrentEditModalKey = (code) => {
 
 window.confirmSaveExamSettings = async () => {
     if (!state.exam) return;
+    const oldP1Count = state.exam.question_count;
+    const oldP1Pt = state.exam.part1_point;
+    const oldP2Count = state.exam.part2_count;
+    const oldP3Count = state.exam.part3_count;
+    const oldP3Pt = state.exam.part3_point;
+    const oldCodes = (state.exam.codes || []).join(',');
+
     const name = document.getElementById('editExamName')?.value.trim();
     if (!name) {
         Swal.fire('Lưu ý', 'Tên bài thi không được để trống!', 'warning');
@@ -9485,23 +9523,27 @@ window.confirmSaveExamSettings = async () => {
     window.renderExamsListTab();
     window.renderExamPickerList();
 
-    if (state.submissions && state.submissions.length > 0) {
-        const reCalc = await Swal.fire({
-            title: 'Cập nhật lại điểm đã chấm & đóng dấu lại?',
-            text: `Bài thi đã có ${state.submissions.length} bài chấm. Hệ thống sẽ tự động tính lại điểm (re-score) và đóng dấu lại toàn bộ ảnh cho ${state.submissions.length} bài.`,
-            icon: 'question',
-            showCancelButton: true,
-            confirmButtonText: 'Có, cập nhật ngay',
-            cancelButtonText: 'Không, giữ nguyên',
-            confirmButtonColor: '#059669'
-        });
-        if (reCalc.isConfirmed) {
-            await window.recalculateAllSubmissionsScore();
-        } else {
-            Swal.fire('Thành công', 'Đã lưu cấu hình bài thi và đáp án!', 'success');
-        }
+    const newP1Count = state.exam.question_count;
+    const newP1Pt = state.exam.part1_point;
+    const newP2Count = state.exam.part2_count;
+    const newP3Count = state.exam.part3_count;
+    const newP3Pt = state.exam.part3_point;
+    const newCodes = (state.exam.codes || []).join(',');
+
+    const baremChanged = (oldP1Count !== newP1Count) || (oldP1Pt !== newP1Pt) ||
+                         (oldP2Count !== newP2Count) || (oldP3Count !== newP3Count) || (oldP3Pt !== newP3Pt) ||
+                         (oldCodes !== newCodes) || (state._keysModifiedInModal === true);
+    state._keysModifiedInModal = false;
+
+    if (baremChanged && state.submissions && state.submissions.length > 0) {
+        await window.recalculateAllSubmissionsScore();
     } else {
-        Swal.fire('Thành công', 'Đã lưu cấu hình bài thi và đáp án!', 'success');
+        Swal.fire({
+            icon: 'success',
+            title: 'Đã lưu cấu hình bài thi!',
+            timer: 1500,
+            showConfirmButton: false
+        });
     }
 };
 
@@ -9515,48 +9557,40 @@ function renderSubmissionsUI() {
     }
 }
 window.renderSubmissionsUI = renderSubmissionsUI;
+
 window.recalculateAllSubmissionsScore = async () => {
     if (!state.exam || !state.submissions || state.submissions.length === 0) return;
-    Swal.fire({
-        title: 'Đang cập nhật lại điểm...',
-        text: `Đang tính lại điểm và đóng dấu lại ảnh cho ${state.submissions.length} bài thi...`,
-        allowOutsideClick: false,
-        didOpen: () => Swal.showLoading()
-    });
 
     try {
+        // 1. TÍNH LẠI TOÀN BỘ ĐIỂM SỐ SIÊU TỐC TRONG BỘ NHỚ (< 10ms CHO HÀNG TRĂM BÀI)
         for (const sub of state.submissions) {
             const scoreData = calculateExamScore(sub.code, sub.answers, sub.part2, sub.part3);
             sub.score = scoreData.totalScore;
             sub.part1_score = scoreData.part1Score;
             sub.part2_score = scoreData.part2Score;
             sub.part3_score = scoreData.part3Score;
-
-            try {
-                await reStampSubmission(sub);
-            } catch (_) {}
-
-            // Đồng bộ lại điểm mới sang Supabase results nếu có
-            if (typeof syncSubmissionToLmsResultsCollection === 'function') {
-                try {
-                    await syncSubmissionToLmsResultsCollection(sub);
-                } catch (_) {}
-            }
+            sub._needsRestamp = true;
+            sub._headerV25Upgraded = false;
         }
 
+        // 2. Lưu ngay kết quả điểm mới vào storage & cập nhật ngay lập tức giao diện
         if (typeof storage !== 'undefined' && storage.saveSubmissions) {
             await storage.saveSubmissions(state.exam.id, state.submissions);
         } else {
             saveSubmissionsToLocalSafe(state.exam.id, state.submissions);
         }
 
+        // 3. Tái đóng dấu bài thi đang mở xem hiện tại (nếu có)
         if (state.lastSubmission) {
             const updatedLast = state.submissions.find(s => s.id === state.lastSubmission.id);
             if (updatedLast) {
                 state.lastSubmission = updatedLast;
-                if (typeof displayLastResultInspector === 'function') {
-                    try { await displayLastResultInspector(updatedLast, null); } catch (_) {}
-                }
+                try {
+                    await reStampSubmission(updatedLast);
+                    if (typeof displayLastResultInspector === 'function') {
+                        await displayLastResultInspector(updatedLast, null);
+                    }
+                } catch (_) {}
             }
         }
 
@@ -9567,15 +9601,25 @@ window.recalculateAllSubmissionsScore = async () => {
             updateOverviewStats();
         }
 
+        // 4. Đồng bộ nền Supabase (Batch background sync, không nghẽn UI)
+        setTimeout(async () => {
+            if (typeof syncSubmissionToLmsResultsCollection === 'function') {
+                for (const sub of state.submissions) {
+                    try { await syncSubmissionToLmsResultsCollection(sub); } catch (_) {}
+                }
+            }
+        }, 100);
+
         Swal.fire({
             icon: 'success',
-            title: 'Đã hoàn tất!',
-            text: `Đã tính lại điểm và đóng dấu lại cho toàn bộ ${state.submissions.length} bài chấm!`,
-            timer: 2500
+            title: 'Đã cập nhật điểm thành công!',
+            text: `Đã tính lại điểm chính xác cho ${state.submissions.length} bài thi!`,
+            timer: 1600,
+            showConfirmButton: false
         });
-    } catch (err) {
+    } catch(err) {
         console.error('[recalculateAllSubmissionsScore Error]:', err);
-        Swal.fire('Lỗi', 'Đã xảy ra lỗi khi tính lại điểm: ' + (err.message || err.toString()), 'error');
+        Swal.fire('Lỗi', 'Không thể tính lại điểm: ' + (err.message || err), 'error');
     }
 };
 
