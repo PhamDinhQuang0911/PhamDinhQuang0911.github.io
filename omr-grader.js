@@ -3,7 +3,7 @@ import {
     getFirestore, doc, getDoc, setDoc, updateDoc, collection, query, where, getDocs, addDoc, deleteDoc,
     limit, orderBy, includeQuestions, getOrCreateParentWatchToken,
     enableMultiTabIndexedDbPersistence
-} from "./supabase-db-compat.js?v=20261105_v127";
+} from "./supabase-db-compat.js?v=20261105_v128";
 
 if (typeof window !== 'undefined') {
     window.showToast = window.showToast || function(msg, icon) {
@@ -4780,6 +4780,31 @@ async function generateStampedGradedSheet(sub, rawResult) {
         ctx.restore();
     };
 
+        // 7.0. ĐÁNH DẤU VÙNG MÃ ĐỀ (KHOANH VÒNG VÀNG/ĐỎ NỔI BẬT NẾU TÔ SAI MÃ ĐỀ)
+    if (tpl.made && Array.isArray(tpl.made)) {
+        const studentCodeStr = String(sub.code || '').trim();
+        const hasValidKey = !!(studentCodeStr && (state.keys[studentCodeStr] || state.keys[studentCodeStr.replace(/^0+/, '')] || state.keys[studentCodeStr.padStart(4, '0')]));
+        for (let col = 0; col < tpl.made.length; col++) {
+            let digit = -1;
+            if (rawResult?.madem && rawResult.madem[col] !== undefined && rawResult.madem[col] >= 0) {
+                digit = rawResult.madem[col];
+            } else if (col < studentCodeStr.length) {
+                const parsed = parseInt(studentCodeStr[col], 10);
+                if (!isNaN(parsed) && parsed >= 0 && parsed <= 9) digit = parsed;
+            }
+            if (digit >= 0 && digit <= 9 && tpl.made[col]?.[digit]) {
+                const ptMade = tpl.made[col][digit];
+                if (!hasValidKey) {
+                    // Tô sai mã đề: Khoanh vòng vàng dày nổi bật kèm viền đỏ thể hiện ô mã đề đã tô sai
+                    drawRingOnCanvas(ptMade, '#f59e0b', 5.5, 16.5);
+                    drawRingOnCanvas(ptMade, '#ef4444', 2.5, 12);
+                } else {
+                    drawRingOnCanvas(ptMade, '#10b981', 3.5, 15);
+                }
+            }
+        }
+    }
+
     // Đánh dấu Phần I (Trắc nghiệm 4 lựa chọn)
     if (tpl.p1) {
         const qCount1 = Math.min(tpl.p1.length, state.exam?.question_count || 12);
@@ -4809,7 +4834,8 @@ async function generateStampedGradedSheet(sub, rawResult) {
                     drawRingOnCanvas(pt, '#10b981', 4.5, 15.5); // Xanh lá: Đúng
                 } else if (isStudentMark && !isKeyMark) {
                     drawRingOnCanvas(pt, '#ef4444', 4.5, 15.5); // Đỏ: Tô sai
-                } else if (!isStudentMark && isKeyMark && studentAns && studentAns !== '-') {
+                } else if (!isStudentMark && isKeyMark) {
+                    // Vàng nét đứt: Vị trí đáp án đúng (cho cả câu tô sai lẫn câu bỏ trống)
                     drawRingOnCanvas(pt, '#f59e0b', 3.5, 14.5, true); // Vàng nét đứt: Vị trí đáp án đúng
                 }
             });
@@ -5251,6 +5277,13 @@ window.recalcAndSaveEdit = async () => {
 
     displayLastResultInspector(state.lastSubmission, state.lastRawResult);
     await saveSubmissionToStore(state.lastSubmission);
+
+    // Cập nhật ngay ảnh đóng dấu mới lên Telegram thay thế ảnh cũ
+    if (state.telegramConfig?.enabled && (state.lastSubmission.stamped_image || state.lastSubmission.image_data)) {
+        delete state.lastSubmission.telegram_photo_url;
+        delete state.lastSubmission.telegram_file_id;
+        dispatchChunkToTelegram([{ sub: state.lastSubmission, imgDataUrl: state.lastSubmission.stamped_image || state.lastSubmission.image_data }]);
+    }
     Swal.fire('Thành công', 'Đã cập nhật lại kết quả bài thi!', 'success');
 };
 
@@ -10013,6 +10046,20 @@ window.recalculateAllSubmissionsScore = async () => {
 
         renderSubmissionsUI();
 
+        // Tự động đẩy toàn bộ ảnh đóng dấu mới lên Telegram để cập nhật kho bài thi
+        if (state.telegramConfig?.enabled) {
+            const itemsToQueue = [];
+            for (const s of state.submissions) {
+                delete s.telegram_photo_url;
+                delete s.telegram_file_id;
+                const imgSrc = s.stamped_image || s.image_data;
+                if (imgSrc) itemsToQueue.push({ sub: s, imgDataUrl: imgSrc });
+            }
+            if (itemsToQueue.length > 0) {
+                dispatchChunkToTelegram(itemsToQueue);
+            }
+        }
+
         // Đồng bộ nền lên Firestore kết quả mới
         if (state.teacherUid && typeof db !== 'undefined') {
             (async () => {
@@ -10697,6 +10744,13 @@ window.confirmSaveSubmissionEdit = async () => {
     }
     if (state.teacherUid && typeof db !== 'undefined') {
         try { await setDoc(doc(db, "omr_submissions", sub.id), sub, { merge: true }); } catch (_) {}
+    }
+
+    // Cập nhật ngay ảnh đóng dấu mới lên Telegram thay thế ảnh cũ
+    if (state.telegramConfig?.enabled && (sub.stamped_image || sub.image_data)) {
+        delete sub.telegram_photo_url;
+        delete sub.telegram_file_id;
+        dispatchChunkToTelegram([{ sub, imgDataUrl: sub.stamped_image || sub.image_data }]);
     }
 
     window.closeEditSubmissionAnswersModal();
