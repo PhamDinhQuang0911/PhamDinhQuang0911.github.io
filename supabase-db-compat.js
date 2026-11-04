@@ -1193,6 +1193,14 @@ function unwrapRecord(r) {
     if (r.className !== undefined) res.className = r.className;
     if (r.studentEmail !== undefined) res.studentEmail = r.studentEmail;
 
+    // Khôi phục studentNo từ student_id dạng omr_sbd_xxxx
+    if (!res.studentNo && r.student_id && String(r.student_id).startsWith('omr_sbd_')) {
+        res.studentNo = String(r.student_id).replace(/^omr_sbd_/, '');
+    }
+    if (!res.examCode) {
+        res.examCode = '101';
+    }
+
     // BẢO VỆ DỮ LIỆU HỌC SINH LỚP HỌC (CLASSES):
     // Khôi phục mảng học sinh từ raw_data nếu r.students bị null hoặc không phải mảng
     if ((r.students === null || r.students === undefined || !Array.isArray(r.students) || r.students.length === 0) && Array.isArray(raw.students) && raw.students.length > 0) {
@@ -1887,7 +1895,7 @@ export async function getDocs(queryOrColRef) {
             selectCols = 'id,title,folder_id,teacher_id,duration,pass_score,status,access_type,allowed_class_ids,purpose,subject,grade,question_count,password,proctoring,attempts,start_time,end_time,n8n_webhooks,created_at,updated_at';
         }
         if (table === 'results') {
-            selectCols = 'id,exam_id,student_id,student_name,class_id,score,correct_count,total_questions,submit_count,submitted_at,duration,is_passed,answers,brief_notes,cheat_count,pass_score_snapshot,teacher_feedback,omrPart1:raw_data->>omrPart1,omrPart2:raw_data->omrPart2,omrPart3:raw_data->omrPart3,studentNo:raw_data->>studentNo,examCode:raw_data->>examCode,telegramPhotoUrl:raw_data->>telegramPhotoUrl,part1Score:raw_data->>part1Score,part2Score:raw_data->>part2Score,part3Score:raw_data->>part3Score,className:raw_data->>className,studentEmail:raw_data->>studentEmail';
+            selectCols = 'id,exam_id,student_id,student_name,class_id,score,correct_count,total_questions,submit_count,submitted_at,duration,is_passed,answers,brief_notes,cheat_count,pass_score_snapshot,teacher_feedback';
         }
         let queryBuilder = supabase.from(table).select(selectCols);
 

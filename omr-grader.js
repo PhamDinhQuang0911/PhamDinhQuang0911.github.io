@@ -3,8 +3,16 @@ import {
     getFirestore, doc, getDoc, setDoc, updateDoc, collection, query, where, getDocs, addDoc, deleteDoc,
     limit, orderBy, includeQuestions, getOrCreateParentWatchToken,
     enableMultiTabIndexedDbPersistence
-} from "./supabase-db-compat.js?v=27";
+} from "./supabase-db-compat.js?v=20261105_v125";
 
+if (typeof window !== 'undefined') {
+    window.showToast = window.showToast || function(msg, icon) {
+        icon = icon || 'info';
+        if (typeof Swal !== 'undefined') {
+            Swal.fire({ toast: true, position: 'top-end', icon: icon, title: msg, showConfirmButton: false, timer: 2200 });
+        } else { console.log('[Toast ' + icon + ']: ' + msg); }
+    };
+}
 const app = initializeApp({});
 const auth = getAuth(app);
 const db = getFirestore(app);
@@ -1480,6 +1488,7 @@ function applyTelegramUploadResult(sub, res, token) {
 let _tgPendingQueue = [];
 let _isTgBatchProcessing = false;
 let roundRobinBotIndex = 0;
+if (typeof window !== 'undefined') { window._roundRobinBotIndex = window._roundRobinBotIndex || 0; }
 
 function updateTelegramUploadPill(isFinished = false) {
     let pill = document.getElementById('tgUploadPill');
@@ -1571,7 +1580,7 @@ async function triggerProcessTelegramBatches() {
                         if (attempt < 3) {
                             await new Promise(r => setTimeout(r, waitMs));
                             // Đổi sang bot khác ngay lập tức
-                            token = tokens[(roundRobinBotIndex + idxInBatch + attempt) % tokens.length];
+                            token = tokens[(curBaseIdx + idxInBatch + attempt) % tokens.length];
                         }
                     }
                 }
@@ -1583,7 +1592,9 @@ async function triggerProcessTelegramBatches() {
             });
 
             // Tịnh tiến chỉ số luân phiên bot cho batch tiếp theo
-            roundRobinBotIndex = (roundRobinBotIndex + batch.length) % tokens.length;
+            const nextBotIdx = (curBaseIdx + batch.length) % tokens.length;
+            roundRobinBotIndex = nextBotIdx;
+            if (typeof window !== 'undefined') window._roundRobinBotIndex = nextBotIdx;
 
             // Chờ toàn bộ batch 10 ảnh gửi xong qua các bot song song
             await Promise.allSettled(uploadPromises);
@@ -1988,7 +1999,7 @@ async function fetchSubmissionsFromCloud(examId, list) {
                     lmsResultId: r.id,
                     examId: examId,
                     teacherId: r.teacherId || state.teacherUid,
-                    student_no: r.studentNo || '',
+                    student_no: r.studentNo || (String(r.studentId || r.student_id || '').startsWith('omr_sbd_') ? String(r.studentId || r.student_id).replace(/^omr_sbd_/, '') : ''),
                     student_name: cleanName,
                     student_uid: (r.studentId && !String(r.studentId).startsWith('omr_')) ? r.studentId : '',
                     student_email: r.studentEmail || '',
