@@ -1187,6 +1187,9 @@ function unwrapRecord(r) {
     if (r.studentNo !== undefined) res.studentNo = r.studentNo;
     if (r.examCode !== undefined) res.examCode = r.examCode;
     if (r.telegramPhotoUrl !== undefined) res.telegramPhotoUrl = r.telegramPhotoUrl;
+    if (r.telegramFileId !== undefined) res.telegramFileId = r.telegramFileId;
+    if (r.telegram_file_id !== undefined) res.telegramFileId = r.telegram_file_id;
+    if (r.telegram_photo_url !== undefined) res.telegramPhotoUrl = r.telegram_photo_url;
     if (r.part1Score !== undefined) res.part1Score = r.part1Score;
     if (r.part2Score !== undefined) res.part2Score = r.part2Score;
     if (r.part3Score !== undefined) res.part3Score = r.part3Score;
@@ -1895,7 +1898,7 @@ export async function getDocs(queryOrColRef) {
             selectCols = 'id,title,folder_id,teacher_id,duration,pass_score,status,access_type,allowed_class_ids,purpose,subject,grade,question_count,password,proctoring,attempts,start_time,end_time,n8n_webhooks,created_at,updated_at';
         }
         if (table === 'results') {
-            selectCols = 'id,exam_id,student_id,student_name,class_id,score,correct_count,total_questions,submit_count,submitted_at,duration,is_passed,answers,brief_notes,cheat_count,pass_score_snapshot,teacher_feedback';
+            selectCols = 'id,exam_id,student_id,student_name,class_id,score,correct_count,total_questions,submit_count,submitted_at,duration,is_passed,answers,brief_notes,cheat_count,pass_score_snapshot,teacher_feedback,telegramFileId:raw_data->>telegramFileId,telegramPhotoUrl:raw_data->>telegramPhotoUrl';
         }
         let queryBuilder = supabase.from(table).select(selectCols);
 
