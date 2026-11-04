@@ -280,7 +280,7 @@ var OMR = (function () {
         if (i < 4) soGoc++;
       }
     }
-    if (cap.length < 7 || soGoc < 3) return null;
+    if (cap.length < 4 || soGoc < 3) return null;
     var H2 = phepChieu(cap.map(function (c) { return c[0]; }), cap.map(function (c) { return c[1]; }));
     if (!H2) return null;
     return { H: H2, soMoc: cap.length, den: den / nden };

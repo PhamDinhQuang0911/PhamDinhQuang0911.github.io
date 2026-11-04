@@ -2703,6 +2703,9 @@ window.setScanMode = (mode) => {
         if (cameraArea) {
             cameraArea.classList.remove('hidden');
             document.body.style.overflow = 'hidden';
+            if (typeof setupCameraControlsTouchListeners === 'function') {
+                setupCameraControlsTouchListeners();
+            }
         }
         window.startCameraStream();
     }
@@ -3373,16 +3376,26 @@ function recognizeSheetFromGray(gray, options = {}) {
                 const origCorners = options.preFound.origCorners;
                 const H = window.OMR.phepChieu(tpl.moc.slice(0, 4).map(m => [m.x, m.y]), origCorners);
                 if (H) {
-                    const refined = window.OMR.tinhChinh(gray, H, tpl);
-                    if (refined && refined.soMoc >= Math.max(4, Math.floor((tpl.moc.length || 10) * 0.35))) {
-                        result = window.OMR.docPhieu(gray, refined.H, tpl, refined.den);
-                        result.H = refined.H;
-                        result.soMoc = refined.soMoc;
+                    let finalH = H;
+                    let finalDen = 40;
+                    let finalSoMoc = 4;
+                    const refined = window.OMR.tinhChinh ? window.OMR.tinhChinh(gray, H, tpl) : null;
+                    if (refined && refined.H && refined.soMoc >= 4) {
+                        finalH = refined.H;
+                        finalDen = refined.den || 40;
+                        finalSoMoc = refined.soMoc;
+                    }
+                    result = window.OMR.docPhieu(gray, finalH, tpl, finalDen);
+                    if (result) {
+                        result.H = finalH;
+                        result.soMoc = finalSoMoc;
+                        result.den = finalDen;
                     }
                 }
-            } else if (['qm40', 'bgd2025original', 'phutho', 'tnmaker40', 'qmcv1239'].includes(tplKey) && window.readQMSheet) {
+            }
+            if (!result && ['qm40', 'bgd2025original', 'phutho', 'tnmaker40', 'qmcv1239'].includes(tplKey) && window.readQMSheet) {
                 result = window.readQMSheet(gray, tpl, guideHints);
-            } else if (window.OMR && window.OMR.docAnh) {
+            } else if (!result && window.OMR && window.OMR.docAnh) {
                 result = window.OMR.docAnh(gray, tpl, window.OMR.thuNho(gray, 900));
             }
 
@@ -5421,10 +5434,15 @@ function startAutoScanLoop() {
             let found = null;
             if (window.findQMCorners) {
                 found = window.findQMCorners(gray, tpl, info.guideHints);
-                // Nếu chưa tìm thấy theo mẫu đang chọn, tự động thử các mẫu phiếu phổ biến khác (TNMaker, BGD...)
+                // Nếu chưa tìm thấy theo mẫu đang chọn, tự động thử các mẫu phiếu phổ biến khác (qmcv1239, TNMaker, BGD...)
                 if (!found && window.MAU) {
-                    if (window.MAU.tnmaker40) found = window.findQMCorners(gray, window.MAU.tnmaker40, info.guideHints);
-                    if (!found && window.MAU.bgd2025original) found = window.findQMCorners(gray, window.MAU.bgd2025original, info.guideHints);
+                    const fallbackKeys = ['qmcv1239', 'bgd2025original', 'tnmaker40', 'phutho'].filter(k => k !== tplKey);
+                    for (const fbKey of fallbackKeys) {
+                        if (window.MAU[fbKey]) {
+                            found = window.findQMCorners(gray, window.MAU[fbKey], info.guideHints);
+                            if (found) break;
+                        }
+                    }
                 }
             }
 
@@ -5562,13 +5580,15 @@ window.startCameraStream = async () => {
     try {
         // FULL-SENSOR 4:3 constraints (like the native Photo app).
         // Requesting 16:9 makes the browser crop the top/bottom of the 4:3 sensor => narrower FOV ("zoomed in").
+        const facing = state.currentFacingMode || 'environment';
         const base = state.currentCameraDeviceId
             ? { deviceId: { exact: state.currentCameraDeviceId } }
-            : { facingMode: { ideal: 'environment' } };
+            : { facingMode: { ideal: facing } };
         const attempts = [
-            { ...base, width: { ideal: 4032 }, height: { ideal: 3024 }, aspectRatio: { exact: 4/3 }, resizeMode: { ideal: 'none' } },
+            { ...base, width: { ideal: 4032 }, height: { ideal: 3024 }, aspectRatio: { ideal: 4/3 }, resizeMode: { ideal: 'none' } },
             { ...base, width: { ideal: 2560 }, height: { ideal: 1920 }, aspectRatio: { ideal: 4/3 }, resizeMode: { ideal: 'none' } },
             { ...base, width: { ideal: 1920 }, height: { ideal: 1440 }, aspectRatio: { ideal: 4/3 } },
+            { ...base, width: { ideal: 1280 }, height: { ideal: 960 } },
             { ...base }
         ];
 
@@ -5584,6 +5604,9 @@ window.startCameraStream = async () => {
         state.currentCameraStream = stream;
         video.srcObject = stream;
         await video.play();
+
+        // Bind immediate touch & pointerdown response for mobile buttons
+        setupCameraControlsTouchListeners();
 
         // Enumerate devices once permission is granted
         await getAvailableCameras();
@@ -5673,28 +5696,69 @@ window.closeCameraScanner = () => {
     if (uploadArea) uploadArea.classList.remove('hidden');
 };
 
+function setupCameraControlsTouchListeners() {
+    const shutter = document.getElementById('btnShutter');
+    const cycle = document.getElementById('btnCycleCamera');
+    
+    if (shutter && !shutter._touchBound) {
+        shutter._touchBound = true;
+        let lastShutterTap = 0;
+        const triggerShutter = (e) => {
+            const now = Date.now();
+            if (now - lastShutterTap < 380) return;
+            lastShutterTap = now;
+            if (e && e.cancelable && e.type !== 'click') e.preventDefault();
+            window.captureCameraFrame();
+        };
+        shutter.addEventListener('pointerdown', triggerShutter, { passive: false });
+    }
+
+    if (cycle && !cycle._touchBound) {
+        cycle._touchBound = true;
+        let lastCycleTap = 0;
+        const triggerCycle = (e) => {
+            const now = Date.now();
+            if (now - lastCycleTap < 380) return;
+            lastCycleTap = now;
+            if (e && e.cancelable && e.type !== 'click') e.preventDefault();
+            window.cycleBackCamera();
+        };
+        cycle.addEventListener('pointerdown', triggerCycle, { passive: false });
+    }
+}
+
 window.cycleBackCamera = async () => {
-    if (state.backCameras.length > 1) {
-        state.activeCameraIndex = (state.activeCameraIndex + 1) % state.backCameras.length;
-        const target = state.backCameras[state.activeCameraIndex];
-        state.currentCameraDeviceId = target.deviceId;
-        
-        const isUltraWide = target === state.ultraWideCamera || /ultra|wide|0\.5|camera\s*2?\s*2/i.test(target.label);
-        const labelText = isUltraWide ? 'Camera 0.5x (Góc siêu rộng)' : (target.label ? target.label.slice(0, 20) : ('Ống kính ' + (state.activeCameraIndex + 1)));
-        showCameraHUDMessage(`<i class="fa-solid fa-camera-rotate text-emerald-400"></i> ${labelText}`);
-        
-        await window.startCameraStream();
-        if (isUltraWide) {
-            updateZoomUI(0.5, {});
+    if (state.isCyclingCamera) return;
+    state.isCyclingCamera = true;
+    try {
+        if (state.backCameras && state.backCameras.length > 1) {
+            state.activeCameraIndex = (state.activeCameraIndex + 1) % state.backCameras.length;
+            const target = state.backCameras[state.activeCameraIndex];
+            state.currentCameraDeviceId = target.deviceId;
+            
+            const isUltraWide = target === state.ultraWideCamera || /ultra|wide|0\.5|camera\s*2?\s*2/i.test(target.label);
+            const labelText = isUltraWide ? 'Camera 0.5x (Góc siêu rộng)' : (target.label ? target.label.slice(0, 20) : ('Ống kính ' + (state.activeCameraIndex + 1)));
+            showCameraHUDMessage(`<i class="fa-solid fa-camera-rotate text-emerald-400"></i> ${labelText}`);
+            
+            await window.startCameraStream();
+            if (isUltraWide) {
+                updateZoomUI(0.5, {});
+            } else {
+                updateZoomUI(1.0, {});
+            }
         } else {
-            updateZoomUI(1.0, {});
+            // Fallback toggle environment / user
+            state.currentFacingMode = state.currentFacingMode === 'user' ? 'environment' : 'user';
+            state.currentCameraDeviceId = null;
+            const lbl = state.currentFacingMode === 'user' ? 'Camera trước' : 'Camera sau';
+            showCameraHUDMessage(`<i class="fa-solid fa-camera-rotate text-emerald-400"></i> Đang đổi: ${lbl}`);
+            await window.startCameraStream();
         }
-    } else {
-        // Fallback toggle environment / user
-        state.currentFacingMode = state.currentFacingMode === 'environment' ? 'user' : 'environment';
-        state.currentCameraDeviceId = null;
-        showCameraHUDMessage(`<i class="fa-solid fa-camera-rotate text-emerald-400"></i> Đổi camera trước/sau`);
-        await window.startCameraStream();
+    } catch(err) {
+        console.warn("Cycle camera error:", err);
+        showCameraHUDMessage(`<i class="fa-solid fa-triangle-exclamation text-amber-400"></i> Không thể chuyển camera`);
+    } finally {
+        state.isCyclingCamera = false;
     }
 };
 
@@ -5893,79 +5957,81 @@ window.viewDetailedLastResult = () => {
 };
 
 window.captureCameraFrame = async (opts = {}) => {
-    const video = document.getElementById('cameraVideo');
-    const guide = document.getElementById('cameraA4Guide');
-    if (!video || !state.currentCameraStream) return;
+    if (state.isCapturingCamera) return;
+    state.isCapturingCamera = true;
+    try {
+        const video = document.getElementById('cameraVideo');
+        const guide = document.getElementById('cameraA4Guide');
+        if (!video || !state.currentCameraStream) return;
 
-    // 1. CHỤP ĐỒNG BỘ TỨC THỜI TẠI t = 0ms (trước khi người dùng hạ điện thoại xuống)
-    const info = getVideoViewportInfo(video, guide);
-    const candidates = [];
+        // 1. CHỤP ĐỒNG BỘ TỨC THỜI TẠI t = 0ms (trước khi người dùng hạ điện thoại xuống)
+        const info = getVideoViewportInfo(video, guide);
+        const candidates = [];
 
-    if (opts && opts.preCaptured && opts.preCaptured.gray) {
+        if (opts && opts.preCaptured && opts.preCaptured.gray) {
+            candidates.push({
+                label: 'auto-locked',
+                source: opts.preCaptured,
+                options: { guideHints: opts.preCaptured.guideHints, preFound: opts.preCaptured.found }
+            });
+        }
+
+        // Ưu tiên 1: Vùng khung ngắm hiển thị trên màn hình (960px <= 1000px để giữ nguyên độ nét 1:1)
+        const viewportCanvas = drawVideoRegionToCanvas(video, info.sx, info.sy, info.sw, info.sh, 960);
         candidates.push({
-            label: 'auto-locked',
-            source: opts.preCaptured,
-            options: { guideHints: opts.preCaptured.guideHints, preFound: opts.preCaptured.found }
+            label: 'viewport',
+            source: viewportCanvas,
+            options: { guideHints: info.guideHints }
         });
-    }
 
-    // Ưu tiên 1: Vùng khung ngắm hiển thị trên màn hình (960px <= 1000px để giữ nguyên độ nét 1:1)
-    const viewportCanvas = drawVideoRegionToCanvas(video, info.sx, info.sy, info.sw, info.sh, 960);
-    candidates.push({
-        label: 'viewport',
-        source: viewportCanvas,
-        options: { guideHints: info.guideHints }
-    });
+        // Ưu tiên 2: Vùng cắt sát khung 4 ô định vị (#cameraA4Guide + 14% lề)
+        if (info.guideCrop) {
+            const gc = info.guideCrop;
+            const guideCanvas = drawVideoRegionToCanvas(video, gc.sx, gc.sy, gc.sw, gc.sh, 960);
+            candidates.push({
+                label: 'guide-crop',
+                source: guideCanvas,
+                options: {}
+            });
+        }
 
-    // Ưu tiên 2: Vùng cắt sát khung 4 ô định vị (#cameraA4Guide + 14% lề)
-    if (info.guideCrop) {
-        const gc = info.guideCrop;
-        const guideCanvas = drawVideoRegionToCanvas(video, gc.sx, gc.sy, gc.sw, gc.sh, 960);
+        // Ưu tiên 3: Toàn khung cảm biến camera
+        const fullCanvas = drawVideoRegionToCanvas(video, 0, 0, video.videoWidth || 1280, video.videoHeight || 960, 980);
         candidates.push({
-            label: 'guide-crop',
-            source: guideCanvas,
+            label: 'full-sensor',
+            source: fullCanvas,
             options: {}
         });
-    }
 
-    // Ưu tiên 3: Toàn khung cảm biến camera
-    const fullCanvas = drawVideoRegionToCanvas(video, 0, 0, video.videoWidth || 1280, video.videoHeight || 960, 980);
-    candidates.push({
-        label: 'full-sensor',
-        source: fullCanvas,
-        options: {}
-    });
+        // Haptic feedback
+        if (navigator.vibrate) {
+            try { navigator.vibrate(35); } catch(e) {}
+        }
 
-    // Haptic feedback
-    if (navigator.vibrate) {
-        try { navigator.vibrate(35); } catch(e) {}
-    }
+        // Dismiss any previously open bottom sheet
+        window.dismissCameraResultSheet();
 
-    // Dismiss any previously open bottom sheet
-    window.dismissCameraResultSheet();
+        // Flash animation on viewfinder
+        const flash = document.getElementById('cameraFlashOverlay');
+        if (flash) {
+            flash.classList.remove('opacity-0');
+            flash.classList.add('opacity-80');
+            setTimeout(() => {
+                flash.classList.remove('opacity-80');
+                flash.classList.add('opacity-0');
+            }, 110);
+        }
 
-    // Flash animation on viewfinder
-    const flash = document.getElementById('cameraFlashOverlay');
-    if (flash) {
-        flash.classList.remove('opacity-0');
-        flash.classList.add('opacity-80');
-        setTimeout(() => {
-            flash.classList.remove('opacity-80');
-            flash.classList.add('opacity-0');
-        }, 110);
-    }
+        const statusBadge = document.getElementById('cameraScanStatus');
+        const statusText = document.getElementById('cameraStatusText');
+        if (statusBadge) {
+            statusBadge.innerHTML = '<i class="fa-solid fa-bolt text-emerald-400"></i> Đang chấm tốc độ cao...';
+            statusBadge.classList.remove('hidden', 'opacity-0');
+        }
+        if (statusText) {
+            statusText.innerHTML = '<span class="text-emerald-300 font-bold"><i class="fa-solid fa-bolt"></i> Đang chấm phiếu...</span>';
+        }
 
-    const statusBadge = document.getElementById('cameraScanStatus');
-    const statusText = document.getElementById('cameraStatusText');
-    if (statusBadge) {
-        statusBadge.innerHTML = '<i class="fa-solid fa-bolt text-emerald-400"></i> Đang chấm tốc độ cao...';
-        statusBadge.classList.remove('hidden', 'opacity-0');
-    }
-    if (statusText) {
-        statusText.innerHTML = '<span class="text-emerald-300 font-bold"><i class="fa-solid fa-bolt"></i> Đang chấm phiếu...</span>';
-    }
-
-    try {
         let sub = null;
         let lastErr = null;
         for (const cand of candidates) {
@@ -5998,6 +6064,8 @@ window.captureCameraFrame = async (opts = {}) => {
     } catch(err) {
         console.warn("Scan frame error:", err);
         document.querySelectorAll('.camera-corner-bracket').forEach(b => b.classList.remove('detected'));
+        const statusBadge = document.getElementById('cameraScanStatus');
+        const statusText = document.getElementById('cameraStatusText');
         if (statusBadge) {
             statusBadge.innerHTML = '<i class="fa-solid fa-triangle-exclamation text-amber-400"></i> Căn 4 góc đen chưa rõ, thử lại';
             statusBadge.classList.remove('hidden', 'opacity-0');
@@ -6009,6 +6077,8 @@ window.captureCameraFrame = async (opts = {}) => {
                 if (statusText) statusText.textContent = 'Canh 4 ô đen góc phiếu vào 4 góc khung ngắm để tự động chấm.';
             }, 3000);
         }
+    } finally {
+        state.isCapturingCamera = false;
     }
 };
 
