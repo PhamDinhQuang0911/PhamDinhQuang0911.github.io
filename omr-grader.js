@@ -3229,7 +3229,7 @@ async function processSingleSheet(source, options = {}) {
     // Crop candidate handwriting name (synchronously from rectifiedCanvas if available)
     let nameImg = null;
     if (rawResult.rectifiedCanvas || rawResult.rectifiedImage) {
-        nameImg = await cropCandidateHandwrittenName(rawResult.rectifiedCanvas || rawResult.rectifiedImage, rawResult.templateKey);
+        nameImg = await cropCandidateHandwrittenName(rawResult.rectifiedCanvas || rawResult.rectifiedImage, rawResult.templateKey, false);
     }
 
     // Match student name from SBD using universal resolver
@@ -3276,7 +3276,13 @@ async function processSingleSheet(source, options = {}) {
 
     // Lưu ảnh nắn phẳng sạch vào IndexedDB để tái đóng dấu chính xác khi cập nhật đáp án
     if (rawResult.rectifiedImage) {
-        saveOmrImageToDb(submission.id + '_clean', rawResult.rectifiedImage);
+        if (options.deferSave) {
+            setTimeout(() => {
+                saveOmrImageToDb(submission.id + '_clean', rawResult.rectifiedImage);
+            }, 60);
+        } else {
+            saveOmrImageToDb(submission.id + '_clean', rawResult.rectifiedImage);
+        }
     }
 
     // Tự động làm phẳng phiếu và đóng dấu điểm số trang nhã kèm Logo QMath LMS
@@ -3292,9 +3298,11 @@ async function processSingleSheet(source, options = {}) {
 
     // Tự động lưu ảnh bài chấm lên Kênh Telegram trong nền (8 Bot Round-Robin)
     if (state.telegramConfig?.enabled && (state.telegramConfig?.botTokens || []).length > 0 && state.telegramConfig?.chatId) {
-        uploadGradedSheetToTelegram(submission, submission.stamped_image || rawResult.rectifiedImage).catch(tgErr => {
-            console.warn("Lỗi tải ảnh lên Telegram:", tgErr);
-        });
+        setTimeout(() => {
+            uploadGradedSheetToTelegram(submission, submission.stamped_image || rawResult.rectifiedImage).catch(tgErr => {
+                console.warn("Lỗi tải ảnh lên Telegram:", tgErr);
+            });
+        }, 120);
     }
 
     // Giải phóng ngay rectifiedCanvas sau khi đóng dấu xong để không giữ hàng gigabyte bộ nhớ GPU
@@ -3421,6 +3429,16 @@ function recognizeSheetFromGray(gray, options = {}) {
                     bestResult = result;
                     matchedTplKey = tplKey;
                 }
+
+                // TỐI ƯU HIỆU NĂNG ĐỘT PHÁ:
+                // Nếu mẫu phiếu hiện tại (được ưu tiên đầu danh sách) đã khớp chuẩn, dừng ngay lập tức!
+                // Tránh việc lặp qua 6 mẫu khác một cách lãng phí làm chậm gấp 7 lần.
+                if (tplKey === activeTpl && score >= 90) {
+                    break;
+                }
+                if (bestScore >= 200) {
+                    break;
+                }
             }
         } catch(err) {
             lastErr = err;
@@ -3446,13 +3464,28 @@ function recognizeSheetFromGray(gray, options = {}) {
     const dst = outData.data;
     const gw = gray.w, gh = gray.h, gd = gray.d;
 
+    // Nhân ma trận composite M = H * target một lần duy nhất ngoài vòng lặp
+    // Triệt tiêu hoàn toàn 2.66 triệu lần gọi hàm ap() và phép cấp phát mảng [x, y]
+    const H = bestResult.H;
+    const m0 = H[0]*target[0] + H[1]*target[3] + H[2]*target[6];
+    const m1 = H[0]*target[1] + H[1]*target[4] + H[2]*target[7];
+    const m2 = H[0]*target[2] + H[1]*target[5] + H[2]*target[8];
+    const m3 = H[3]*target[0] + H[4]*target[3] + H[5]*target[6];
+    const m4 = H[3]*target[1] + H[4]*target[4] + H[5]*target[7];
+    const m5 = H[3]*target[2] + H[4]*target[5] + H[5]*target[8];
+    const m6 = H[6]*target[0] + H[7]*target[3] + H[8]*target[6];
+    const m7 = H[6]*target[1] + H[7]*target[4] + H[8]*target[7];
+    const m8 = H[6]*target[2] + H[7]*target[5] + H[8]*target[8];
+
     for (let y = 0; y < outH; y++) {
         const rowOff = y * rectW * 4;
+        const x0 = m1 * y + m2;
+        const y0 = m4 * y + m5;
+        const w0 = m7 * y + m8;
         for (let x = 0; x < rectW; x++) {
-            const cm = window.OMR.ap(target, x, y);
-            const p = window.OMR.ap(bestResult.H, cm[0], cm[1]);
-            const xx = (p[0] + 0.5) | 0;
-            const yy = (p[1] + 0.5) | 0;
+            const invW = 1.0 / (m6 * x + w0);
+            const xx = ((m0 * x + x0) * invW + 0.5) | 0;
+            const yy = ((m3 * x + y0) * invW + 0.5) | 0;
             const val = (xx >= 0 && yy >= 0 && xx < gw && yy < gh) ? gd[yy * gw + xx] : 255;
             const idx = rowOff + (x << 2);
             dst[idx] = val;
@@ -3612,6 +3645,15 @@ function detectExistingHeadersOffset(canvasOrImg) {
     let totalHeaderOffset = 0;
     let curY = 0;
 
+    // Lấy toàn bộ mảng pixel 1 LẦN DUY NHẤT để tránh hàng nghìn lệnh getImageData(1,1) làm nghẽn GPU
+    let imgData = null;
+    try {
+        imgData = ctx.getImageData(0, 0, sampleW, sampleH).data;
+    } catch (_) {
+        c.width = 1; c.height = 1;
+        return 0;
+    }
+
     // Quét xuống tối đa 45% chiều cao ảnh để phát hiện toàn bộ các dải header xanh ngọc
     while (curY < sampleH * 0.45) {
         let foundGreenY = -1;
@@ -3621,9 +3663,12 @@ function detectExistingHeadersOffset(canvasOrImg) {
             let greenHits = 0;
             for (const xr of [0.25, 0.4, 0.5, 0.6, 0.75]) {
                 const px = Math.round(sampleW * xr);
-                const p = ctx.getImageData(px, y, 1, 1).data;
+                const idx = (y * sampleW + px) * 4;
+                const r = imgData[idx];
+                const g = imgData[idx + 1];
+                const b = imgData[idx + 2];
                 // Dải xanh ngọc thương hiệu QMath: R < 55, G trong 115..175, B trong 85..155
-                if (p[0] < 55 && p[1] > 115 && p[1] < 175 && p[2] > 85 && p[2] < 155) {
+                if (r < 55 && g > 115 && g < 175 && b > 85 && b < 155) {
                     greenHits++;
                 }
             }
@@ -3643,6 +3688,8 @@ function detectExistingHeadersOffset(canvasOrImg) {
         }
     }
 
+    c.width = 1;
+    c.height = 1;
     return totalHeaderOffset;
 }
 
@@ -3660,8 +3707,8 @@ function cropCandidateHandwrittenName(rectifiedSource, tplKey = null, isStamped 
         const processSource = (source) => {
             const srcW = source.width || source.naturalWidth || 1552;
             const srcH = source.height || source.naturalHeight || 2200;
-            // Tự động nhận diện và bóc tách mọi header đã đóng dấu để định vị chuẩn mực dòng họ tên trên thân phiếu
-            const headerOffset = detectExistingHeadersOffset(source);
+            // Chỉ dò header nếu ảnh đã từng đóng dấu; nếu là phiếu nắn phẳng thô mới thì offset = 0
+            const headerOffset = isStamped ? detectExistingHeadersOffset(source) : 0;
             const sheetH = Math.max(1, srcH - headerOffset);
 
             const canvas = document.createElement('canvas');
