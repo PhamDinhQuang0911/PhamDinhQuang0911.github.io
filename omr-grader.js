@@ -2421,7 +2421,7 @@ function renderInlineSubmissionsList() {
                         <!-- Trường hợp 1: Có tên trong danh sách lớp -> Hiển thị tên to, đậm, rõ nét -->
                         <div class="flex items-center gap-1.5 min-w-0">
                             <span class="font-extrabold text-xs sm:text-sm text-slate-900 dark:text-white truncate">${s.student_name}</span>
-                            ${s.class_name ? `<span class="px-1.5 py-0.2 rounded bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold border border-emerald-200/70 dark:border-emerald-800/60 shrink-0">${s.class_name}</span>` : ''}
+                            ${s.class_name ? `<span class="px-1.5 py-0.2 rounded bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold border border-emerald-200/70 dark:border-emerald-800/60 shrink-0">${s.class_name}</span>${s.room ? `<span class="px-1.5 py-0.2 rounded bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 text-[10px] font-bold border border-indigo-200/70 dark:border-indigo-800/60 shrink-0 inline-flex items-center gap-0.5"><i class="fa-solid fa-door-open text-[8px]"></i>${s.room}</span>` : ''}` : ''}
                         </div>
                         <div class="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400 font-mono mt-0.5 flex-wrap">
                             <span>SBD: <b class="text-slate-800 dark:text-slate-200 font-bold">${s.student_no || '--'}</b></span>
@@ -6456,8 +6456,13 @@ window.renderResultsTable = () => {
             if (matched && matched.name) {
                 s.student_name = matched.name;
                 if (!s.class_name && matched.class_name) s.class_name = matched.class_name;
+                if (!s.room && matched.room) s.room = matched.room;
                 hasRealName = true;
             }
+        }
+        if (!s.room && s.student_no) {
+            const matched = findStudentBySbd(s.student_no, s.examId || state.exam?.id, s.class_id || state.exam?.classId);
+            if (matched && matched.room) s.room = matched.room;
         }
         const displayName = hasRealName ? s.student_name : (s.student_no ? `Học sinh #${s.student_no}` : `Phiếu chưa tên #${idx + 1}`);
         const dupeStatus = getSubmissionDuplicateStatus(s, sorted);
@@ -6478,6 +6483,7 @@ window.renderResultsTable = () => {
                 <div class="font-bold text-slate-900 dark:text-white flex items-center gap-2 flex-wrap">
                     <span>${displayName}</span>
                     ${s.class_name ? `<span class="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 text-[10px] font-bold border border-emerald-200/70 dark:border-emerald-800/60">${s.class_name}</span>` : ''}
+                    ${s.room ? `<span class="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 text-[10px] font-bold border border-indigo-200/70 dark:border-indigo-800/60 inline-flex items-center gap-1" title="Phòng thi"><i class="fa-solid fa-door-open text-[9px]"></i>${s.room}</span>` : ''}
                     ${s.name_image ? `<img src="${s.name_image}" class="h-5 max-w-[90px] object-contain border border-slate-200 dark:border-slate-700 rounded bg-white" title="Chữ viết tay gốc">` : ''}
                 </div>
             </td>
@@ -7607,7 +7613,7 @@ window.renderActiveOmrClassStudents = () => {
 
     const cls = getActiveOmrClass();
     if (!cls) {
-        tbody.innerHTML = `<tr><td colspan="7" class="p-8 text-center text-slate-400 italic">Chưa chọn lớp OMR nào.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="8" class="p-8 text-center text-slate-400 italic">Chưa chọn lớp OMR nào.</td></tr>`;
         if (countBadge) countBadge.textContent = '0 học sinh';
         return;
     }
@@ -7620,7 +7626,10 @@ window.renderActiveOmrClassStudents = () => {
             (s.name || '').toLowerCase().includes(queryStr) ||
             (s.student_no || '').toLowerCase().includes(queryStr) ||
             (s.phone || '').includes(queryStr) ||
-            (s.note || '').toLowerCase().includes(queryStr)
+            (s.note || '').toLowerCase().includes(queryStr) ||
+            (s.room || '').toLowerCase().includes(queryStr) ||
+            (s.class_name || '').toLowerCase().includes(queryStr) ||
+            (s.grade || '').toLowerCase().includes(queryStr)
         );
     }
 
@@ -7631,11 +7640,23 @@ window.renderActiveOmrClassStudents = () => {
         const emptyMsg = queryStr
             ? 'Không tìm thấy học sinh nào khớp với từ khóa tìm kiếm.'
             : `Lớp "${cls.name}" hiện chưa có học sinh nào. Bấm <b>"Nạp Excel / Dán SBD"</b> hoặc <b>"+ Thêm học sinh"</b> để nạp ngay!`;
-        tbody.innerHTML = `<tr><td colspan="7" class="p-8 text-center text-slate-400 italic">${emptyMsg}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="8" class="p-8 text-center text-slate-400 italic">${emptyMsg}</td></tr>`;
         return;
     }
 
     tbody.innerHTML = roster.map((s, idx) => {
+        // Tự động phân tích bổ sung room / class_name từ note nếu dữ liệu cũ chưa có trường riêng
+        let roomVal = s.room || '';
+        let classVal = s.class_name || '';
+        if (!roomVal && s.note) {
+            const rMatch = s.note.match(/Ph[òo]ng\s*([0-9A-Za-z_-]+)/i);
+            if (rMatch) roomVal = `Phòng ${rMatch[1]}`;
+        }
+        if (!classVal && s.note) {
+            const cMatch = s.note.match(/L[ớo]p\s*([0-9]{1,2}[A-Za-z0-9_-]*)/i) || s.note.match(/\b([0-9]{1,2}[A-Za-z0-9_-]+)\b/);
+            if (cMatch) classVal = cMatch[1].toUpperCase();
+        }
+
         // Match with current exam submissions
         const sub = (state.submissions || []).find(sub =>
             sub.student_no === s.student_no ||
@@ -7643,20 +7664,35 @@ window.renderActiveOmrClassStudents = () => {
         );
 
         const statusBadge = sub
-            ? `<span class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 inline-flex items-center gap-1"><i class="fa-solid fa-circle-check"></i> Đã chấm: ${sub.score.toFixed(2)}đ</span>`
+            ? `<span class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 inline-flex items-center gap-1 shadow-2xs"><i class="fa-solid fa-circle-check"></i> Đã chấm: ${(Number(sub.score) || 0).toFixed(2)}đ</span>`
             : `<span class="px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400">Chưa có bài</span>`;
 
-        const phoneDisplay = s.phone
-            ? `<a href="https://zalo.me/${s.phone.replace(/\D/g, '')}" target="_blank" class="text-blue-600 dark:text-blue-400 font-mono hover:underline inline-flex items-center gap-1" title="Mở chat Zalo"><i class="fa-solid fa-comment-dots text-[10px]"></i> ${s.phone}</a>`
-            : `<span class="text-slate-400">---</span>`;
+        const roomBadge = roomVal
+            ? `<span class="px-2.5 py-1 rounded-xl bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 font-bold text-xs border border-indigo-200/70 dark:border-indigo-800/60 inline-flex items-center gap-1 shadow-2xs"><i class="fa-solid fa-door-open text-[10px] text-indigo-500"></i> ${roomVal}</span>`
+            : `<span class="text-slate-400 italic text-[11px]">---</span>`;
+
+        const classBadge = classVal
+            ? `<span class="px-2.5 py-1 rounded-xl bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 font-bold text-xs border border-emerald-200/70 dark:border-emerald-800/60 inline-flex items-center gap-1 shadow-2xs"><i class="fa-solid fa-graduation-cap text-[10px] text-emerald-500"></i> ${classVal}</span>`
+            : (s.grade ? `<span class="px-2 py-0.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 font-semibold text-xs">${s.grade}</span>` : `<span class="text-slate-400">---</span>`);
+
+        const subInfo = [s.dob, s.gender].filter(Boolean).join(' · ');
+
+        let noteText = s.note || '';
+        if (s.phone) {
+            noteText = noteText ? `${noteText} (SĐT: ${s.phone})` : `SĐT: ${s.phone}`;
+        }
 
         return `
             <tr class="hover:bg-slate-50 dark:hover:bg-[#1E1B29] transition-colors">
                 <td class="p-3 text-center text-slate-400 font-bold">${idx + 1}</td>
                 <td class="p-3 font-mono font-bold text-slate-800 dark:text-slate-100">${s.student_no || '---'}</td>
-                <td class="p-3 font-bold text-slate-900 dark:text-white">${s.name || 'Học sinh'}</td>
-                <td class="p-3">${phoneDisplay}</td>
-                <td class="p-3 text-slate-500 dark:text-slate-400">${s.note || '---'}</td>
+                <td class="p-3">
+                    <div class="font-bold text-slate-900 dark:text-white">${s.name || 'Học sinh'}</div>
+                    ${subInfo ? `<div class="text-[11px] text-slate-500 dark:text-slate-400 font-normal flex items-center gap-1.5 mt-0.5"><i class="fa-regular fa-id-badge text-[10px] text-slate-400"></i>${subInfo}</div>` : ''}
+                </td>
+                <td class="p-3 text-center">${roomBadge}</td>
+                <td class="p-3 text-center">${classBadge}</td>
+                <td class="p-3 text-slate-500 dark:text-slate-400 text-[11px]">${noteText || '---'}</td>
                 <td class="p-3 text-center">${statusBadge}</td>
                 <td class="p-3 text-center">
                     <div class="flex items-center justify-center gap-1">
@@ -7688,22 +7724,34 @@ window.openAddSingleStudentModal = (editIdx = -1) => {
     const idxInput = document.getElementById('singleStudentEditIndex');
     const sbdInput = document.getElementById('singleStudentSbd');
     const nameInput = document.getElementById('singleStudentName');
+    const roomInput = document.getElementById('singleStudentRoom');
+    const classInput = document.getElementById('singleStudentClass');
+    const dobInput = document.getElementById('singleStudentDob');
+    const genderInput = document.getElementById('singleStudentGender');
     const phoneInput = document.getElementById('singleStudentPhone');
     const noteInput = document.getElementById('singleStudentNote');
 
     idxInput.value = editIdx;
     if (editIdx >= 0 && cls.students && cls.students[editIdx]) {
         const st = cls.students[editIdx];
-        if (titleEl) titleEl.innerHTML = `<i class="fa-solid fa-pen-to-square"></i> Sửa Thông Tin Học Sinh`;
+        if (titleEl) titleEl.innerHTML = `<i class="fa-solid fa-pen-to-square"></i> Sửa Thông Tin Thí Sinh`;
         if (sbdInput) sbdInput.value = st.student_no || '';
         if (nameInput) nameInput.value = st.name || '';
+        if (roomInput) roomInput.value = st.room || '';
+        if (classInput) classInput.value = st.class_name || '';
+        if (dobInput) dobInput.value = st.dob || '';
+        if (genderInput) genderInput.value = st.gender || '';
         if (phoneInput) phoneInput.value = st.phone || '';
         if (noteInput) noteInput.value = st.note || '';
     } else {
-        if (titleEl) titleEl.innerHTML = `<i class="fa-solid fa-user-plus"></i> Thêm Học Sinh Vào Lớp "${cls.name}"`;
+        if (titleEl) titleEl.innerHTML = `<i class="fa-solid fa-user-plus"></i> Thêm Thí Sinh Vào Lớp "${cls.name}"`;
         const nextNum = (cls.students || []).length + 1;
         if (sbdInput) sbdInput.value = String(nextNum).padStart(3, '0');
         if (nameInput) nameInput.value = '';
+        if (roomInput) roomInput.value = '';
+        if (classInput) classInput.value = '';
+        if (dobInput) dobInput.value = '';
+        if (genderInput) genderInput.value = '';
         if (phoneInput) phoneInput.value = '';
         if (noteInput) noteInput.value = '';
     }
@@ -7719,12 +7767,20 @@ window.confirmSaveSingleStudent = () => {
     const editIdx = parseInt(document.getElementById('singleStudentEditIndex')?.value || '-1');
     const sbd = document.getElementById('singleStudentSbd')?.value.trim();
     const name = document.getElementById('singleStudentName')?.value.trim();
+    let room = document.getElementById('singleStudentRoom')?.value.trim() || '';
+    const className = document.getElementById('singleStudentClass')?.value.trim() || '';
+    const dob = document.getElementById('singleStudentDob')?.value.trim() || '';
+    const gender = document.getElementById('singleStudentGender')?.value.trim() || '';
     const phone = document.getElementById('singleStudentPhone')?.value.trim();
     const note = document.getElementById('singleStudentNote')?.value.trim();
 
     if (!sbd || !name) {
-        Swal.fire('Thiếu thông tin', 'Vui lòng nhập cả Số báo danh (SBD) và Họ tên học sinh!', 'warning');
+        Swal.fire('Thiếu thông tin', 'Vui lòng nhập cả Số báo danh (SBD) và Họ tên thí sinh!', 'warning');
         return;
+    }
+
+    if (room && !room.toLowerCase().startsWith('phòng')) {
+        room = `Phòng ${room}`;
     }
 
     if (!Array.isArray(cls.students)) cls.students = [];
@@ -7733,12 +7789,16 @@ window.confirmSaveSingleStudent = () => {
         id: (editIdx >= 0 && cls.students[editIdx]?.id) || ('st_' + Date.now() + '_' + sbd),
         student_no: sbd,
         name,
+        room,
+        class_name: className,
+        dob,
+        gender,
         phone,
         note
     };
 
     if (editIdx >= 0 && editIdx < cls.students.length) {
-        cls.students[editIdx] = studentObj;
+        cls.students[editIdx] = { ...cls.students[editIdx], ...studentObj };
     } else {
         cls.students.push(studentObj);
     }
@@ -7746,11 +7806,15 @@ window.confirmSaveSingleStudent = () => {
     cls.updatedAt = new Date().toISOString();
     saveLocalOmrClasses(state.omrClasses);
 
+    // Đồng bộ lại dữ liệu cho các bài chấm nếu có
+    enrichSubmissionsFromClassRoster();
+    window.renderResultsTable();
+
     document.getElementById('addSingleStudentModal').classList.add('hidden');
     window.renderStudentsTab();
     Swal.fire({
         icon: 'success',
-        title: editIdx >= 0 ? 'Đã sửa học sinh!' : 'Đã thêm học sinh!',
+        title: editIdx >= 0 ? 'Đã sửa thông tin thí sinh!' : 'Đã thêm thí sinh!',
         timer: 1500
     });
 };
