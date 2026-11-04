@@ -1181,6 +1181,17 @@ function unwrapRecord(r) {
     const raw = (r.raw_data && typeof r.raw_data === 'object') ? r.raw_data : {};
     const pk = r.id || r.key;
     const res = { ...raw, ...r, id: pk };
+    if (r.omrPart1 !== undefined) res.omrPart1 = r.omrPart1;
+    if (r.omrPart2 !== undefined) res.omrPart2 = r.omrPart2;
+    if (r.omrPart3 !== undefined) res.omrPart3 = r.omrPart3;
+    if (r.studentNo !== undefined) res.studentNo = r.studentNo;
+    if (r.examCode !== undefined) res.examCode = r.examCode;
+    if (r.telegramPhotoUrl !== undefined) res.telegramPhotoUrl = r.telegramPhotoUrl;
+    if (r.part1Score !== undefined) res.part1Score = r.part1Score;
+    if (r.part2Score !== undefined) res.part2Score = r.part2Score;
+    if (r.part3Score !== undefined) res.part3Score = r.part3Score;
+    if (r.className !== undefined) res.className = r.className;
+    if (r.studentEmail !== undefined) res.studentEmail = r.studentEmail;
 
     // BẢO VỆ DỮ LIỆU HỌC SINH LỚP HỌC (CLASSES):
     // Khôi phục mảng học sinh từ raw_data nếu r.students bị null hoặc không phải mảng
@@ -1874,6 +1885,9 @@ export async function getDocs(queryOrColRef) {
             (queryOrColRef.constraints && queryOrColRef.constraints.some(c => c && (c.type === 'includeQuestions' || c.includeQuestions || c.field === 'questions')));
         if (table === 'exams' && !wantsQuestions) {
             selectCols = 'id,title,folder_id,teacher_id,duration,pass_score,status,access_type,allowed_class_ids,purpose,subject,grade,question_count,password,proctoring,attempts,start_time,end_time,n8n_webhooks,created_at,updated_at';
+        }
+        if (table === 'results') {
+            selectCols = 'id,exam_id,student_id,student_name,class_id,score,correct_count,total_questions,submit_count,submitted_at,duration,is_passed,answers,brief_notes,cheat_count,pass_score_snapshot,teacher_feedback,omrPart1:raw_data->>omrPart1,omrPart2:raw_data->omrPart2,omrPart3:raw_data->omrPart3,studentNo:raw_data->>studentNo,examCode:raw_data->>examCode,telegramPhotoUrl:raw_data->>telegramPhotoUrl,part1Score:raw_data->>part1Score,part2Score:raw_data->>part2Score,part3Score:raw_data->>part3Score,className:raw_data->>className,studentEmail:raw_data->>studentEmail';
         }
         let queryBuilder = supabase.from(table).select(selectCols);
 

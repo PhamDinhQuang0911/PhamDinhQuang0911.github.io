@@ -3,7 +3,7 @@ import {
     getFirestore, doc, getDoc, setDoc, updateDoc, collection, query, where, getDocs, addDoc, deleteDoc,
     limit, orderBy, includeQuestions, getOrCreateParentWatchToken,
     enableMultiTabIndexedDbPersistence
-} from "./supabase-db-compat.js?v=26";
+} from "./supabase-db-compat.js?v=27";
 
 const app = initializeApp({});
 const auth = getAuth(app);
@@ -222,6 +222,23 @@ window.closeOmrSidebar = () => {
     }
     if (ov) ov.classList.add('hidden');
 };
+
+
+function showToast(msg, icon = 'success') {
+    if (typeof Swal !== 'undefined') {
+        Swal.fire({
+            toast: true,
+            position: 'top-end',
+            icon: icon,
+            title: msg,
+            showConfirmButton: false,
+            timer: 2200
+        });
+    } else {
+        console.log(`[Toast ${icon}]: ${msg}`);
+    }
+}
+window.showToast = showToast;
 
 const TAB_SUBTITLES = {
     scan: 'Chấm bài (Cam / Ảnh)',
@@ -1462,6 +1479,7 @@ function applyTelegramUploadResult(sub, res, token) {
 // Mỗi đợt 10 ảnh được chia đều cho danh sách bot (1-3 ảnh/bot), gửi song song an toàn, tuyệt đối không miss ảnh
 let _tgPendingQueue = [];
 let _isTgBatchProcessing = false;
+let roundRobinBotIndex = 0;
 
 function updateTelegramUploadPill(isFinished = false) {
     let pill = document.getElementById('tgUploadPill');
