@@ -3415,14 +3415,13 @@ function recognizeSheetFromGray(gray, options = {}) {
                 const codeDigits = (result.made || '').replace(/\D/g, '').length;
                 const ansCount = (result.p1 || '').replace(/[\*\?]/g, '').length;
 
-                // Tính điểm độ khớp chính xác
-                let score = mocRatio * 150;
-                if (mocRatio >= 0.70) score += 60;
-                if (mocRatio < 0.35) score -= 80;
-                if (codeDigits >= 3) score += 35;
-                if (sbdDigits >= 3) score += 25;
-                if (ansCount >= 3) score += 20;
-                if (tplKey === activeTpl) score += 15; // Ưu tiên nhẹ mẫu đang chọn nếu 2 mẫu ngang điểm
+                // Tính điểm độ khớp chính xác: Có đủ 4 mốc định vị góc là đã đạt điểm nền tảng vững chắc (>= 60)
+                let score = 55 + Math.min(soMoc, 12) * 8;
+                if (mocRatio >= 0.60) score += 40;
+                if (codeDigits >= 2) score += 30;
+                if (sbdDigits >= 2) score += 25;
+                if (ansCount >= 2) score += 25;
+                if (tplKey === activeTpl) score += 35; // Ưu tiên mạnh mẫu đang chọn của bài thi
 
                 if (score > bestScore) {
                     bestScore = score;
@@ -5409,13 +5408,11 @@ function getVideoViewportInfo(video, guide) {
             const gy0 = (gr.top - vr.top) / vr.height;
             const gx1 = (gr.right - vr.left) / vr.width;
             const gy1 = (gr.bottom - vr.top) / vr.height;
-            const insetX = Math.min(0.14, 34 / gr.width);
-            const insetY = Math.min(0.11, 34 / gr.height);
             guideHints = [
-                [gx0 + insetX * (gx1 - gx0), gy0 + insetY * (gy1 - gy0)],
-                [gx1 - insetX * (gx1 - gx0), gy0 + insetY * (gy1 - gy0)],
-                [gx1 - insetX * (gx1 - gx0), gy1 - insetY * (gy1 - gy0)],
-                [gx0 + insetX * (gx1 - gx0), gy1 - insetY * (gy1 - gy0)]
+                [gx0, gy0],
+                [gx1, gy0],
+                [gx1, gy1],
+                [gx0, gy1]
             ];
 
             let gsx = (gr.left - vr.left - offsetX) / scale;
@@ -5626,18 +5623,24 @@ window.startCameraStream = async () => {
 
     try {
         // FULL-SENSOR 4:3 constraints (like the native Photo app).
-        // Requesting 16:9 makes the browser crop the top/bottom of the 4:3 sensor => narrower FOV ("zoomed in").
         const facing = state.currentFacingMode || 'environment';
-        const base = state.currentCameraDeviceId
-            ? { deviceId: { exact: state.currentCameraDeviceId } }
-            : { facingMode: { ideal: facing } };
-        const attempts = [
-            { ...base, width: { ideal: 4032 }, height: { ideal: 3024 }, aspectRatio: { ideal: 4/3 }, resizeMode: { ideal: 'none' } },
-            { ...base, width: { ideal: 2560 }, height: { ideal: 1920 }, aspectRatio: { ideal: 4/3 }, resizeMode: { ideal: 'none' } },
-            { ...base, width: { ideal: 1920 }, height: { ideal: 1440 }, aspectRatio: { ideal: 4/3 } },
-            { ...base, width: { ideal: 1280 }, height: { ideal: 960 } },
-            { ...base }
-        ];
+        const devConstraint = state.currentCameraDeviceId ? { deviceId: { ideal: state.currentCameraDeviceId } } : null;
+        const attempts = [];
+        if (devConstraint) {
+            attempts.push(
+                { ...devConstraint, width: { ideal: 2560 }, height: { ideal: 1920 }, aspectRatio: { ideal: 4/3 } },
+                { ...devConstraint, width: { ideal: 1920 }, height: { ideal: 1440 }, aspectRatio: { ideal: 4/3 } },
+                { ...devConstraint, width: { ideal: 1280 }, height: { ideal: 960 } },
+                { ...devConstraint }
+            );
+        }
+        attempts.push(
+            { facingMode: { ideal: facing }, width: { ideal: 2560 }, height: { ideal: 1920 }, aspectRatio: { ideal: 4/3 } },
+            { facingMode: { ideal: facing }, width: { ideal: 1920 }, height: { ideal: 1440 }, aspectRatio: { ideal: 4/3 } },
+            { facingMode: { ideal: facing }, width: { ideal: 1280 }, height: { ideal: 960 } },
+            { facingMode: { ideal: facing } },
+            true
+        );
 
         let stream = null, lastErr = null;
         for (const c of attempts) {
@@ -5749,28 +5752,18 @@ function setupCameraControlsTouchListeners() {
     
     if (shutter && !shutter._touchBound) {
         shutter._touchBound = true;
-        let lastShutterTap = 0;
-        const triggerShutter = (e) => {
-            const now = Date.now();
-            if (now - lastShutterTap < 380) return;
-            lastShutterTap = now;
-            if (e && e.cancelable && e.type !== 'click') e.preventDefault();
+        shutter.onclick = (e) => {
+            if (e) e.stopPropagation();
             window.captureCameraFrame();
         };
-        shutter.addEventListener('pointerdown', triggerShutter, { passive: false });
     }
 
     if (cycle && !cycle._touchBound) {
         cycle._touchBound = true;
-        let lastCycleTap = 0;
-        const triggerCycle = (e) => {
-            const now = Date.now();
-            if (now - lastCycleTap < 380) return;
-            lastCycleTap = now;
-            if (e && e.cancelable && e.type !== 'click') e.preventDefault();
+        cycle.onclick = (e) => {
+            if (e) e.stopPropagation();
             window.cycleBackCamera();
         };
-        cycle.addEventListener('pointerdown', triggerCycle, { passive: false });
     }
 }
 
