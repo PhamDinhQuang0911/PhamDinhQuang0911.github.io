@@ -1267,7 +1267,7 @@ function updateTelegramUploadPill(isFinished = false) {
         pill.className = 'fixed bottom-5 right-5 z-40 bg-sky-600/95 text-white px-4 py-2.5 rounded-2xl shadow-2xl flex items-center gap-2.5 backdrop-blur-md text-xs font-bold border border-sky-400/40 transition-all cursor-pointer select-none';
         pill.innerHTML = `
             <i id="tgUploadPillIcon" class="fa-brands fa-telegram text-base animate-bounce"></i>
-            <span id="tgUploadPillText">Đang lưu Telegram: 0/0 bài...</span>
+            <span id="tgUploadPillText">Đang lưu vào kho bài thi: 0/0 bài...</span>
         `;
         document.body.appendChild(pill);
     }
@@ -1282,7 +1282,7 @@ function updateTelegramUploadPill(isFinished = false) {
     if (isFinished) {
         pill.className = 'fixed bottom-5 right-5 z-40 bg-emerald-600/95 text-white px-4 py-2.5 rounded-2xl shadow-2xl flex items-center gap-2.5 backdrop-blur-md text-xs font-bold border border-emerald-400/40 transition-all select-none';
         if (iconEl) iconEl.className = 'fa-solid fa-circle-check text-emerald-300 text-base';
-        if (textEl) textEl.textContent = `Đã lưu xong toàn bộ ${tgUploadStats.done}/${tgUploadStats.total} bài lên Kênh Telegram!`;
+        if (textEl) textEl.textContent = `Đã lưu ${tgUploadStats.done}/${tgUploadStats.total} ảnh vào kho bài thi!`;
         tgPillHideTimeout = setTimeout(() => {
             pill.classList.add('hidden');
             tgUploadStats.total = 0;
@@ -1297,7 +1297,7 @@ function updateTelegramUploadPill(isFinished = false) {
     if (iconEl) iconEl.className = 'fa-brands fa-telegram text-base animate-bounce';
     const activeBotCount = (state.telegramConfig?.botTokens || []).length || 1;
     if (textEl) {
-        textEl.textContent = `Đang lưu Telegram: ${tgUploadStats.done}/${tgUploadStats.total} bài (${activeBotCount} bot song song)...`;
+        textEl.textContent = `Đang lưu vào kho bài thi: ${tgUploadStats.done}/${tgUploadStats.total} bài (${activeBotCount} bot song song)...`;
     }
 }
 
@@ -1504,6 +1504,42 @@ async function uploadGradedSheetToTelegram(sub, imgDataUrl) {
         runTgUploadWorker();
     }
     return true;
+}
+
+// BỘ ĐIỀU PHỐI GỬI THEO TỪNG ĐỢT 10 BÀI QUA TỔNG SỐ BOT (MULTI-BOT CHUNK-10 DISPATCHER)
+async function dispatchChunkToTelegram(items) {
+    if (!state.telegramConfig?.enabled) return;
+    const tokens = (state.telegramConfig?.botTokens || []).map(t => String(t || '').trim()).filter(Boolean);
+    const chatId = state.telegramConfig?.chatId;
+    if (tokens.length === 0 || !chatId || !items || items.length === 0) return;
+
+    tgUploadStats.total += items.length;
+    updateTelegramUploadPill(false);
+
+    // Phân bổ song song qua tổng số bot đang có để đạt tốc độ tối đa
+    const sendPromises = items.map(async (item, idx) => {
+        const token = tokens[idx % tokens.length];
+        try {
+            const compressed = await compressSheetForTelegram(item.imgDataUrl, 1080, 0.72);
+            const res = await sendSinglePhotoToTelegram(token, chatId, item.sub, compressed);
+            applyTelegramUploadResult(item.sub, res, token);
+            tgUploadStats.done++;
+        } catch (err) {
+            console.warn("Lỗi gửi bài qua bot Telegram:", err);
+            tgUploadStats.failed++;
+        }
+        updateTelegramUploadPill(false);
+    });
+
+    // Chạy ngầm trong nền (non-blocking) và tự động cập nhật khi chunk này gửi xong
+    Promise.allSettled(sendPromises).then(() => {
+        if (tgUploadStats.done + tgUploadStats.failed >= tgUploadStats.total) {
+            updateTelegramUploadPill(true);
+            if (state.exam?.id) {
+                saveSubmissionsToLocalSafe(state.exam.id, state.submissions);
+            }
+        }
+    });
 }
 
 // ========================================================
@@ -1849,6 +1885,8 @@ function getSubmissionDuplicateStatus(sub, allSubmissions = state.submissions) {
                     cachedDupeMap.set(s.id, {
                         type: 'both',
                         label: 'Trùng cả SBD & Mã',
+                        isSameSbdCode: true,
+                        isSameSbd: true,
                         badgeBg: 'bg-rose-100 text-rose-700 dark:bg-rose-900/60 dark:text-rose-200 border-rose-300 dark:border-rose-700',
                         rowBg: 'bg-rose-50/70 dark:bg-rose-950/30 hover:bg-rose-100/80 dark:hover:bg-rose-900/40 border-l-4 border-l-rose-500',
                         dupeCount: group.length
@@ -1857,6 +1895,8 @@ function getSubmissionDuplicateStatus(sub, allSubmissions = state.submissions) {
                     cachedDupeMap.set(s.id, {
                         type: 'sbd_only',
                         label: 'Trùng SBD',
+                        isSameSbdCode: false,
+                        isSameSbd: true,
                         badgeBg: 'bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-200 border-amber-300 dark:border-amber-700',
                         rowBg: 'bg-amber-50/60 dark:bg-amber-950/20 hover:bg-amber-100/70 dark:hover:bg-amber-900/30 border-l-4 border-l-amber-500',
                         dupeCount: group.length
@@ -2857,6 +2897,10 @@ window.handleFilesSelected = async (files) => {
     const batchScores = [];
     const batchSubmissions = [];
 
+    // Chế độ chấm bài lớn từ 50 bài trở lên: cứ 10 bài gửi ngay 1 đợt qua tổng số bot
+    const isLargeBatch = fileList.length >= 50;
+    const chunk10Buffer = [];
+
     for (let i = 0; i < fileList.length; i++) {
         const file = fileList[i];
         const pct = Math.round(((i + 1) / fileList.length) * 100);
@@ -2874,12 +2918,25 @@ window.handleFilesSelected = async (files) => {
                 isUploadedFile: true,
                 silentInspector: true,
                 silentBeep: true,
-                deferSave: true
+                deferSave: true,
+                deferTelegram: isLargeBatch
             });
             if (sub) {
                 successCount++;
                 batchScores.push(Number(sub.score) || 0);
                 batchSubmissions.push(sub);
+
+                // Nếu từ 50 bài trở lên: gom đủ 10 bài thì gửi ngay thông qua tổng số bot
+                if (isLargeBatch) {
+                    chunk10Buffer.push({
+                        sub,
+                        imgDataUrl: sub.stamped_image || sub.image_data
+                    });
+                    if (chunk10Buffer.length === 10) {
+                        const chunkToSend = chunk10Buffer.splice(0, 10);
+                        dispatchChunkToTelegram(chunkToSend);
+                    }
+                }
             }
         } catch(err) {
             console.error("Lỗi chấm bài:", file.name, err);
@@ -2898,6 +2955,12 @@ window.handleFilesSelected = async (files) => {
                 timestamp: Date.now()
             });
         }
+    }
+
+    // Gửi nốt các bài còn lại trong chunk (nếu có)
+    if (isLargeBatch && chunk10Buffer.length > 0) {
+        const remainingChunk = chunk10Buffer.splice(0, chunk10Buffer.length);
+        dispatchChunkToTelegram(remainingChunk);
     }
 
     // Ẩn thanh tiến trình ngay khi chấm xong để giao diện gọn sạch
@@ -2953,6 +3016,7 @@ window.handleFilesSelected = async (files) => {
                         <span>•</span>
                         <span>Cao nhất: <b class="font-mono text-base">${maxBatch}đ</b></span>
                     </div>
+                    ${state.telegramConfig?.enabled ? `<div class="text-xs text-emerald-600 dark:text-emerald-400 font-semibold flex items-center justify-center gap-1.5"><i class="fa-solid fa-cloud-arrow-up"></i> Đã lưu ${successCount} bài vào kho bài thi.</div>` : ''}
                     ${failCount > 0 ? `<p class="text-rose-500 font-semibold text-xs">⚠️ Có ${failCount}/${fileList.length} ảnh không nhận diện được (đã đưa vào Hàng đợi xử lý lại bên dưới).</p>` : ''}
                     <div class="pt-2">
                         <button type="button" onclick="window.copyClassSummaryToZalo(); Swal.close();" class="w-full py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xs shadow-md flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-95">
@@ -3298,11 +3362,13 @@ async function processSingleSheet(source, options = {}) {
 
     // Tự động lưu ảnh bài chấm lên Kênh Telegram trong nền (8 Bot Round-Robin)
     if (state.telegramConfig?.enabled && (state.telegramConfig?.botTokens || []).length > 0 && state.telegramConfig?.chatId) {
-        setTimeout(() => {
-            uploadGradedSheetToTelegram(submission, submission.stamped_image || rawResult.rectifiedImage).catch(tgErr => {
-                console.warn("Lỗi tải ảnh lên Telegram:", tgErr);
-            });
-        }, 120);
+        if (!options.deferTelegram) {
+            setTimeout(() => {
+                uploadGradedSheetToTelegram(submission, submission.stamped_image || rawResult.rectifiedImage).catch(tgErr => {
+                    console.warn("Lỗi tải ảnh lên Telegram:", tgErr);
+                });
+            }, 120);
+        }
     }
 
     // Giải phóng ngay rectifiedCanvas sau khi đóng dấu xong để không giữ hàng gigabyte bộ nhớ GPU
@@ -6508,8 +6574,10 @@ window.exportResultsToExcel = () => {
     let dupSbdCodeCount = 0;
     sorted.forEach(s => {
         const d = getSubmissionDuplicateStatus(s, sorted);
-        if (d.isSameSbdCode) dupSbdCodeCount++;
-        else if (d.isSameSbd) dupSbdCount++;
+        if (d) {
+            if (d.isSameSbdCode || d.type === 'both') dupSbdCodeCount++;
+            else if (d.isSameSbd || d.type === 'sbd_only') dupSbdCount++;
+        }
     });
 
     // 4. Xây dựng nội dung file Excel (HTML Spreadsheet với đầy đủ styles, borders, màu nền và định dạng text)
@@ -6519,14 +6587,16 @@ window.exportResultsToExcel = () => {
         let textColor = '#0F172A';
         let note = '';
 
-        if (dupe.isSameSbdCode) {
-            rowBg = '#FFE4E6'; // Màu đỏ hồng nhạt cho trường hợp trùng cả SBD và Mã đề
-            textColor = '#9F1239';
-            note = 'Trùng cả SBD & Mã đề';
-        } else if (dupe.isSameSbd) {
-            rowBg = '#FEF3C7'; // Màu vàng cam nhạt cho trường hợp trùng SBD
-            textColor = '#92400E';
-            note = 'Trùng SBD';
+        if (dupe) {
+            if (dupe.isSameSbdCode || dupe.type === 'both') {
+                rowBg = '#FFE4E6'; // Màu đỏ hồng nhạt cho trường hợp trùng cả SBD và Mã đề
+                textColor = '#9F1239';
+                note = 'Trùng cả SBD & Mã đề';
+            } else if (dupe.isSameSbd || dupe.type === 'sbd_only') {
+                rowBg = '#FEF3C7'; // Màu vàng cam nhạt cho trường hợp trùng SBD
+                textColor = '#92400E';
+                note = 'Trùng SBD';
+            }
         }
 
         const studentName = s.student_name || (s.student_no ? `Học sinh #${s.student_no}` : `Phiếu #${idx + 1}`);
