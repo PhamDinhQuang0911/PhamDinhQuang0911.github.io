@@ -1319,25 +1319,26 @@ async function sendSinglePhotoToTelegram(token, chatId, sub, compressedDataUrl) 
     });
     const resData = await resp.json();
     if (!resData.ok) {
-        throw new Error(resData.description || 'sendPhoto failed');
+        const err = new Error(resData.description || 'sendPhoto failed');
+        if (resData.parameters?.retry_after) {
+            err.retryAfter = resData.parameters.retry_after;
+        }
+        if (resData.error_code === 429) {
+            err.isRateLimit = true;
+        }
+        throw err;
     }
 
     const photos = resData.result?.photo;
     const messageId = resData.result?.message_id;
-    let directUrl = '';
     let fileId = '';
     if (photos && photos.length > 0) {
         const largestPhoto = photos[photos.length - 1];
         fileId = largestPhoto.file_id;
-        try {
-            const fileResp = await fetch(`https://api.telegram.org/bot${token}/getFile?file_id=${largestPhoto.file_id}`);
-            const fileData = await fileResp.json();
-            if (fileData.ok && fileData.result?.file_path) {
-                directUrl = `https://api.telegram.org/file/bot${token}/${fileData.result.file_path}`;
-            }
-        } catch (_) {}
     }
-    return { messageId, fileId, directUrl, token };
+    // fileId là ID vĩnh viễn trên Telegram CDN. Không gọi getFile lúc upload để giảm 50% API calls và tránh 429 flood.
+    // Khi người dùng bấm xem ảnh hoặc xuất bài, resolveTelegramPhotoDirectUrl() sẽ gọi getFile lấy link tươi.
+    return { messageId, fileId, directUrl: '', token };
 }
 
 async function sendMediaGroupToTelegram(token, chatId, items) {
@@ -1417,6 +1418,18 @@ function applyTelegramUploadResult(sub, res, token) {
         state.submissions[idx].telegram_bot_token = token;
     }
 
+    // Cập nhật DOM trực tiếp để icon checkmark xanh xuất hiện tức thì theo thời gian thực
+    const statusEl = document.getElementById(`subStorageStatus_${sub.id}`);
+    if (statusEl) {
+        statusEl.innerHTML = `<span class="text-emerald-500 text-[10px] inline-flex items-center gap-0.5" title="Đã lưu an toàn vào kho bài thi"><i class="fa-solid fa-circle-check"></i></span>`;
+    }
+    const resStatusEl = document.getElementById(`resStorageStatus_${sub.id}`);
+    if (resStatusEl) {
+        resStatusEl.innerHTML = `<span class="w-8 h-8 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 flex items-center justify-center border border-emerald-200 dark:border-emerald-800/60" title="Đã lưu ảnh bài chấm an toàn"><i class="fa-solid fa-circle-check text-sm"></i></span>`;
+    }
+
+    updateStorageStatusBadges();
+
     if (state.teacherUid && typeof db !== 'undefined') {
         const subIdSafe = (sub.id || '').replace(/[^a-zA-Z0-9_-]/g, '');
         updateDoc(doc(db, "results", `omr_${sub.examId || state.exam?.id}_${subIdSafe}`), {
@@ -1430,54 +1443,48 @@ function applyTelegramUploadResult(sub, res, token) {
 async function runTgUploadWorker() {
     const tokens = (state.telegramConfig?.botTokens || []).map(t => String(t || '').trim()).filter(Boolean);
     const chatId = state.telegramConfig?.chatId;
-    const sendMode = state.telegramConfig?.sendMode || 'parallel_single';
 
     while (tgUploadQueue.length > 0 && state.telegramConfig?.enabled && tokens.length > 0 && chatId) {
-        if (sendMode === 'media_group' && tgUploadQueue.length >= 2) {
-            const batchSize = Math.min(tgUploadQueue.length, 5);
-            const batchItems = tgUploadQueue.splice(0, batchSize);
-            const token = getNextTelegramBotToken();
-            try {
-                const results = await sendMediaGroupToTelegram(token, chatId, batchItems);
-                batchItems.forEach((item, i) => {
-                    const res = results[i] || {};
-                    applyTelegramUploadResult(item.sub, res, token);
-                    tgUploadStats.done++;
-                });
-            } catch (err) {
-                console.warn("sendMediaGroup thất bại, gửi lẻ từng bài:", err);
-                for (const item of batchItems) {
-                    try {
-                        const tokenSingle = getNextTelegramBotToken();
-                        const res = await sendSinglePhotoToTelegram(tokenSingle, chatId, item.sub, item.compressedDataUrl);
-                        applyTelegramUploadResult(item.sub, res, tokenSingle);
-                        tgUploadStats.done++;
-                    } catch (_) {
-                        tgUploadStats.failed++;
-                    }
-                }
-            }
-            updateTelegramUploadPill(tgUploadQueue.length === 0);
-            continue;
-        }
-
         const item = tgUploadQueue.shift();
         if (!item) break;
-        const token = getNextTelegramBotToken();
-        try {
-            const res = await sendSinglePhotoToTelegram(token, chatId, item.sub, item.compressedDataUrl);
-            applyTelegramUploadResult(item.sub, res, token);
-            tgUploadStats.done++;
-        } catch (err) {
-            console.warn("Lỗi tải bài lên Telegram:", err);
+
+        let token = getNextTelegramBotToken();
+        let success = false;
+
+        // Cơ chế Retry tự động tới 3 lần cho mỗi bài thi (bắt lỗi 429 Rate Limit và lỗi mạng)
+        for (let attempt = 1; attempt <= 3; attempt++) {
+            try {
+                const res = await sendSinglePhotoToTelegram(token, chatId, item.sub, item.compressedDataUrl);
+                applyTelegramUploadResult(item.sub, res, token);
+                tgUploadStats.done++;
+                success = true;
+                break;
+            } catch (err) {
+                console.warn(`Lỗi tải bài ${item.sub?.student_no || item.sub?.id} lên kho bài thi (lần ${attempt}/3):`, err.message);
+                const isRateLimit = err.isRateLimit || (err.message || '').includes('Too Many Requests') || (err.message || '').includes('429');
+                const waitTime = err.retryAfter ? (err.retryAfter * 1000 + 500) : (isRateLimit ? 2500 : 1000 * attempt);
+                if (attempt < 3) {
+                    await new Promise(r => setTimeout(r, waitTime));
+                    // Đổi sang bot khác để thử lại nếu người dùng cấu hình nhiều bot
+                    token = getNextTelegramBotToken() || token;
+                }
+            }
+        }
+
+        if (!success) {
             tgUploadStats.failed++;
         }
         updateTelegramUploadPill(tgUploadQueue.length === 0);
+        updateStorageStatusBadges();
+
+        // Giãn cách nhẹ 120ms giữa 2 bài liên tiếp của worker để đảm bảo an toàn tuyệt đối cho Telegram API
+        await new Promise(r => setTimeout(r, 120));
     }
 
     tgActiveWorkers--;
     if (tgActiveWorkers <= 0 && tgUploadQueue.length === 0) {
         updateTelegramUploadPill(true);
+        updateStorageStatusBadges();
         if (state.exam?.id) {
             saveSubmissionsToLocalSafe(state.exam.id, state.submissions);
         }
@@ -1496,8 +1503,9 @@ async function uploadGradedSheetToTelegram(sub, imgDataUrl) {
     tgUploadQueue.push({ sub, compressedDataUrl: compressed });
     tgUploadStats.total++;
     updateTelegramUploadPill(false);
+    updateStorageStatusBadges();
 
-    // Kích hoạt worker pool đa luồng song song theo số lượng bot
+    // Kích hoạt worker pool song song theo số lượng bot (tối đa 2 worker/bot, chặn trần 8)
     const maxWorkers = Math.max(2, Math.min(tokens.length * 2, 8));
     while (tgActiveWorkers < maxWorkers && tgUploadQueue.length > 0) {
         tgActiveWorkers++;
@@ -1508,39 +1516,150 @@ async function uploadGradedSheetToTelegram(sub, imgDataUrl) {
 
 // BỘ ĐIỀU PHỐI GỬI THEO TỪNG ĐỢT 10 BÀI QUA TỔNG SỐ BOT (MULTI-BOT CHUNK-10 DISPATCHER)
 async function dispatchChunkToTelegram(items) {
-    if (!state.telegramConfig?.enabled) return;
+    if (!state.telegramConfig?.enabled || !items || items.length === 0) return;
     const tokens = (state.telegramConfig?.botTokens || []).map(t => String(t || '').trim()).filter(Boolean);
     const chatId = state.telegramConfig?.chatId;
-    if (tokens.length === 0 || !chatId || !items || items.length === 0) return;
+    if (tokens.length === 0 || !chatId) return;
 
     tgUploadStats.total += items.length;
     updateTelegramUploadPill(false);
+    updateStorageStatusBadges();
 
-    // Phân bổ song song qua tổng số bot đang có để đạt tốc độ tối đa
-    const sendPromises = items.map(async (item, idx) => {
-        const token = tokens[idx % tokens.length];
+    // Nén từng ảnh và đưa vào hàng đợi tập trung
+    for (const item of items) {
         try {
-            const compressed = await compressSheetForTelegram(item.imgDataUrl, 1080, 0.72);
-            const res = await sendSinglePhotoToTelegram(token, chatId, item.sub, compressed);
-            applyTelegramUploadResult(item.sub, res, token);
-            tgUploadStats.done++;
-        } catch (err) {
-            console.warn("Lỗi gửi bài qua bot Telegram:", err);
-            tgUploadStats.failed++;
-        }
-        updateTelegramUploadPill(false);
-    });
-
-    // Chạy ngầm trong nền (non-blocking) và tự động cập nhật khi chunk này gửi xong
-    Promise.allSettled(sendPromises).then(() => {
-        if (tgUploadStats.done + tgUploadStats.failed >= tgUploadStats.total) {
-            updateTelegramUploadPill(true);
-            if (state.exam?.id) {
-                saveSubmissionsToLocalSafe(state.exam.id, state.submissions);
+            const rawImg = item.imgDataUrl || item.sub?.stamped_image || item.sub?.image_data;
+            if (!rawImg) continue;
+            const compressed = await compressSheetForTelegram(rawImg, 1080, 0.72);
+            tgUploadQueue.push({ sub: item.sub, compressedDataUrl: compressed });
+        } catch (_) {
+            if (item.imgDataUrl) {
+                tgUploadQueue.push({ sub: item.sub, compressedDataUrl: item.imgDataUrl });
             }
         }
-    });
+    }
+
+    // Kích hoạt worker pool chạy ngay lập tức trong nền (vừa chấm vừa gửi)
+    const maxWorkers = Math.max(2, Math.min(tokens.length * 2, 8));
+    while (tgActiveWorkers < maxWorkers && tgUploadQueue.length > 0) {
+        tgActiveWorkers++;
+        runTgUploadWorker();
+    }
 }
+
+// CẬP NHẬT HUY HIỆU HIỂN THỊ KHO BÀI THI (SỐ BÀI ĐÃ LƯU / TỔNG SỐ BÀI)
+function updateStorageStatusBadges() {
+    const total = (state.submissions || []).length;
+    const saved = (state.submissions || []).filter(s => s.telegram_photo_url || s.telegram_file_id).length;
+    const missing = total - saved;
+
+    // 1. Badge trên Tab Chấm bài (scanInlineStorageBadge)
+    const scanBadge = document.getElementById('scanInlineStorageBadge');
+    const scanCount = document.getElementById('scanInlineStorageCount');
+    const scanBtnRetry = document.getElementById('btnRetryMissingStorage');
+
+    if (scanBadge && scanCount) {
+        if (total === 0) {
+            scanBadge.classList.add('hidden');
+            scanBadge.classList.remove('inline-flex');
+        } else {
+            scanBadge.classList.remove('hidden');
+            scanBadge.classList.add('inline-flex');
+            scanCount.textContent = `${saved}/${total}`;
+            if (missing === 0) {
+                scanBadge.className = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-bold bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60 shadow-2xs transition-all';
+                if (scanBtnRetry) scanBtnRetry.classList.add('hidden');
+            } else {
+                scanBadge.className = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-bold bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/60 shadow-2xs transition-all';
+                if (scanBtnRetry) {
+                    scanBtnRetry.classList.remove('hidden');
+                    scanBtnRetry.textContent = `Lưu bù (${missing})`;
+                }
+            }
+        }
+    }
+
+    // 2. Badge trên Tab Bảng điểm (resultsStorageBadge)
+    const resBadge = document.getElementById('resultsStorageBadge');
+    const resCount = document.getElementById('resultsStorageCount');
+    const resBtnRetry = document.getElementById('btnRetryMissingStorageTab');
+    if (resBadge && resCount) {
+        if (total === 0) {
+            resBadge.classList.add('hidden');
+            resBadge.classList.remove('inline-flex');
+        } else {
+            resBadge.classList.remove('hidden');
+            resBadge.classList.add('inline-flex');
+            resCount.textContent = `${saved}/${total}`;
+            if (missing === 0) {
+                resCount.className = 'text-emerald-600 dark:text-emerald-400 font-mono font-bold';
+                if (resBtnRetry) resBtnRetry.classList.add('hidden');
+            } else {
+                resCount.className = 'text-amber-600 dark:text-amber-400 font-mono font-bold';
+                if (resBtnRetry) {
+                    resBtnRetry.classList.remove('hidden');
+                    resBtnRetry.textContent = `Lưu bù (${missing})`;
+                }
+            }
+        }
+    }
+}
+window.updateStorageStatusBadges = updateStorageStatusBadges;
+
+// QUÉT VÀ LƯU BÙ CÁC BÀI THI CÒN THIẾU VÀO KHO BÀI THI
+window.retryUploadMissingToTelegram = async function(silent = false) {
+    if (!state.telegramConfig?.enabled) {
+        if (!silent && typeof Swal !== 'undefined') Swal.fire('Thông báo', 'Tính năng lưu vào kho bài thi (Telegram) chưa được bật trong Cài đặt lưu trữ!', 'info');
+        return;
+    }
+    const missing = (state.submissions || []).filter(s => !s.telegram_photo_url && !s.telegram_file_id);
+    if (missing.length === 0) {
+        if (!silent && typeof Swal !== 'undefined') Swal.fire('Tuyệt vời', 'Tất cả các bài thi đã được lưu an toàn trong kho bài thi!', 'success');
+        updateStorageStatusBadges();
+        return;
+    }
+
+    const doUpload = async () => {
+        if (typeof showToast === 'function') {
+            showToast(`Đang trích xuất ảnh và lưu bù ${missing.length} bài còn thiếu vào kho bài thi...`, 'info');
+        }
+        const itemsToQueue = [];
+        for (const sub of missing) {
+            let imgSrc = sub.stamped_image || sub.image_data;
+            if (!imgSrc && sub.id) {
+                try {
+                    imgSrc = await getOmrImageFromDb(sub.id);
+                    if (imgSrc) sub.stamped_image = imgSrc;
+                } catch (_) {}
+            }
+            if (imgSrc) {
+                itemsToQueue.push({ sub, imgDataUrl: imgSrc });
+            }
+        }
+        if (itemsToQueue.length > 0) {
+            dispatchChunkToTelegram(itemsToQueue);
+        } else {
+            if (!silent && typeof Swal !== 'undefined') Swal.fire('Lưu ý', 'Không tìm thấy ảnh gốc trong bộ nhớ máy để tải bù.', 'warning');
+        }
+    };
+
+    if (!silent && typeof Swal !== 'undefined') {
+        Swal.fire({
+            title: 'Lưu bài còn thiếu vào kho bài thi',
+            text: `Tìm thấy ${missing.length} bài thi chưa có trong kho bài thi. Hệ thống sẽ tự động trích xuất ảnh đã lưu trên máy để tải bù lên kênh Telegram ngay bây giờ.`,
+            icon: 'question',
+            showCancelButton: true,
+            confirmButtonText: 'Bắt đầu lưu bù ngay',
+            cancelButtonText: 'Để sau'
+        }).then((res) => {
+            if (res.isConfirmed) {
+                doUpload();
+            }
+        });
+    } else {
+        await doUpload();
+    }
+};
 
 // ========================================================
 // TRUY XUẤT ẢNH TỪ TELEGRAM CLOUD CDN VỀ WEB LMS
@@ -2227,6 +2346,7 @@ function renderInlineSubmissionsList() {
 
     const filtered = getFilteredSortedSubmissions('inline');
     if (inlineCountEl) inlineCountEl.textContent = filtered.length;
+    updateStorageStatusBadges();
 
     if (filtered.length > 0) {
         const scores = filtered.map(s => Number(s.score) || 0);
@@ -2298,7 +2418,7 @@ function renderInlineSubmissionsList() {
                             <span>SBD: <b class="text-slate-800 dark:text-slate-200 font-bold">${s.student_no || '--'}</b></span>
                             <span>·</span>
                             <span>Mã: <b class="text-slate-800 dark:text-slate-200 font-bold">${s.code || '--'}</b></span>
-                            ${(s.telegram_photo_url || s.telegram_file_id) ? `<span class="text-emerald-500 text-[10px] inline-flex items-center gap-0.5" title="Đã sao lưu an toàn"><i class="fa-solid fa-circle-check"></i></span>` : ''}
+                            <span id="subStorageStatus_${s.id}">${(s.telegram_photo_url || s.telegram_file_id) ? `<span class="text-emerald-500 text-[10px] inline-flex items-center gap-0.5" title="Đã sao lưu an toàn"><i class="fa-solid fa-circle-check"></i></span>` : ''}</span>
                             ${dupeBadge}
                         </div>
                         ` : `
@@ -2315,7 +2435,7 @@ function renderInlineSubmissionsList() {
                                     <span>SBD: <b class="text-slate-900 dark:text-white font-extrabold">${s.student_no || '--'}</b></span>
                                     <span>·</span>
                                     <span>Mã: <b class="text-slate-900 dark:text-white font-extrabold">${s.code || '--'}</b></span>
-                                    ${(s.telegram_photo_url || s.telegram_file_id) ? `<span class="text-emerald-500 text-[10px] inline-flex items-center gap-0.5" title="Đã sao lưu an toàn"><i class="fa-solid fa-circle-check"></i></span>` : ''}
+                                    <span id="subStorageStatus_${s.id}">${(s.telegram_photo_url || s.telegram_file_id) ? `<span class="text-emerald-500 text-[10px] inline-flex items-center gap-0.5" title="Đã sao lưu an toàn"><i class="fa-solid fa-circle-check"></i></span>` : ''}</span>
                                     ${dupeBadge}
                                 </div>
                                 <div class="text-[10px] font-semibold text-amber-600 dark:text-amber-400 flex items-center gap-1 mt-0.5 truncate">
@@ -3001,6 +3121,20 @@ window.handleFilesSelected = async (files) => {
 
     updateOverviewStats();
     window.renderResultsTable();
+    renderInlineSubmissionsList();
+    updateStorageStatusBadges();
+
+    // Auto-Sweep sau khi chấm xong: Đảm bảo 100% bài đều được lưu an toàn vào kho bài thi
+    if (state.telegramConfig?.enabled) {
+        setTimeout(async () => {
+            const stillMissing = (state.submissions || []).filter(s => !s.telegram_photo_url && !s.telegram_file_id);
+            if (stillMissing.length > 0) {
+                console.log(`[Auto-Sweep] Phát hiện ${stillMissing.length} bài chưa lên kho bài thi, tự động tải bù...`);
+                window.retryUploadMissingToTelegram(true);
+            }
+            updateStorageStatusBadges();
+        }, 2500);
+    }
 
     if (successCount > 0) {
         playBatchSuccessChime();
@@ -3016,7 +3150,7 @@ window.handleFilesSelected = async (files) => {
                         <span>•</span>
                         <span>Cao nhất: <b class="font-mono text-base">${maxBatch}đ</b></span>
                     </div>
-                    ${state.telegramConfig?.enabled ? `<div class="text-xs text-emerald-600 dark:text-emerald-400 font-semibold flex items-center justify-center gap-1.5"><i class="fa-solid fa-cloud-arrow-up"></i> Đã lưu ${successCount} bài vào kho bài thi.</div>` : ''}
+                    ${state.telegramConfig?.enabled ? `<div class="text-xs text-emerald-600 dark:text-emerald-400 font-semibold flex items-center justify-center gap-1.5"><i class="fa-solid fa-cloud-arrow-up"></i> Kho bài thi: Đang lưu <b>${successCount}</b> bài chấm an toàn.</div>` : ''}
                     ${failCount > 0 ? `<p class="text-rose-500 font-semibold text-xs">⚠️ Có ${failCount}/${fileList.length} ảnh không nhận diện được (đã đưa vào Hàng đợi xử lý lại bên dưới).</p>` : ''}
                     <div class="pt-2">
                         <button type="button" onclick="window.copyClassSummaryToZalo(); Swal.close();" class="w-full py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xs shadow-md flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-95">
@@ -6297,6 +6431,7 @@ window.renderResultsTable = () => {
 
     syncSubmissionClassFilterOptions();
     const sorted = getFilteredSortedSubmissions('table');
+    updateStorageStatusBadges();
 
     if (label) label.textContent = `${sorted.length} / ${state.submissions.length} kết quả`;
 
@@ -6345,10 +6480,10 @@ window.renderResultsTable = () => {
             <td class="p-3 text-center text-slate-400 text-[11px]">${new Date(s.createdAt).toLocaleTimeString('vi-VN', {hour:'2-digit', minute:'2-digit', day:'2-digit', month:'2-digit'})}</td>
             <td class="p-3 text-center">
                 <div class="flex items-center justify-center gap-1.5">
-                    ${(s.telegram_photo_url || s.telegram_file_id) ? `
+                    <span id="resStorageStatus_${s.id}">${(s.telegram_photo_url || s.telegram_file_id) ? `
                     <span class="w-8 h-8 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 flex items-center justify-center border border-emerald-200 dark:border-emerald-800/60" title="Đã lưu ảnh bài chấm an toàn">
                         <i class="fa-solid fa-circle-check text-sm"></i>
-                    </span>` : ''}
+                    </span>` : ''}</span>
                     <button type="button" onclick="window.quickAssignStudentToSubmission('${s.id}')" class="w-8 h-8 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 flex items-center justify-center transition-all active:scale-95 cursor-pointer" title="Gán tên / SBD học sinh cho phiếu này">
                         <i class="fa-solid fa-user-pen text-xs text-emerald-600 dark:text-emerald-400"></i>
                     </button>
