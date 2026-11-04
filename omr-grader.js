@@ -1515,36 +1515,153 @@ async function uploadGradedSheetToTelegram(sub, imgDataUrl) {
 }
 
 // BỘ ĐIỀU PHỐI GỬI THEO TỪNG ĐỢT 10 BÀI QUA TỔNG SỐ BOT (MULTI-BOT CHUNK-10 DISPATCHER)
+// Mỗi đợt 10 ảnh được chia đều cho danh sách bot (1-3 ảnh/bot), gửi song song an toàn, tuyệt đối không miss ảnh
+let _tgPendingQueue = [];
+let _isTgBatchProcessing = false;
+
+function updateTelegramUploadPill(isFinished = false) {
+    let pill = document.getElementById('tgUploadPill');
+    if (!pill) {
+        pill = document.createElement('div');
+        pill.id = 'tgUploadPill';
+        pill.className = 'fixed bottom-5 right-5 z-40 bg-sky-600/95 text-white px-4 py-2.5 rounded-2xl shadow-2xl flex items-center gap-2.5 backdrop-blur-md text-xs font-bold border border-sky-400/40 transition-all cursor-pointer select-none';
+        pill.innerHTML = `
+            <i id="tgUploadPillIcon" class="fa-brands fa-telegram text-base animate-bounce"></i>
+            <span id="tgUploadPillText">Đang lưu vào kho bài thi: 0/0 bài...</span>
+        `;
+        document.body.appendChild(pill);
+    }
+
+    const iconEl = document.getElementById('tgUploadPillIcon');
+    const textEl = document.getElementById('tgUploadPillText');
+    if (tgPillHideTimeout) {
+        clearTimeout(tgPillHideTimeout);
+        tgPillHideTimeout = null;
+    }
+
+    const totalSubs = (state.submissions || []).length;
+    const savedSubs = (state.submissions || []).filter(s => s.telegram_photo_url || s.telegram_file_id).length;
+
+    if (isFinished || (savedSubs >= totalSubs && totalSubs > 0 && _tgPendingQueue.length === 0)) {
+        pill.className = 'fixed bottom-5 right-5 z-40 bg-emerald-600/95 text-white px-4 py-2.5 rounded-2xl shadow-2xl flex items-center gap-2.5 backdrop-blur-md text-xs font-bold border border-emerald-400/40 transition-all select-none';
+        if (iconEl) iconEl.className = 'fa-solid fa-circle-check text-emerald-300 text-base';
+        if (textEl) textEl.textContent = `Đã lưu đủ ${savedSubs}/${totalSubs} ảnh vào kho bài thi!`;
+        tgPillHideTimeout = setTimeout(() => {
+            pill.classList.add('hidden');
+        }, 3000);
+        return;
+    }
+
+    pill.classList.remove('hidden');
+    pill.className = 'fixed bottom-5 right-5 z-40 bg-sky-600/95 text-white px-4 py-2.5 rounded-2xl shadow-2xl flex items-center gap-2.5 backdrop-blur-md text-xs font-bold border border-sky-400/40 transition-all select-none';
+    if (iconEl) iconEl.className = 'fa-brands fa-telegram text-base animate-bounce';
+    const tokens = (state.telegramConfig?.botTokens || []).map(t => String(t || '').trim()).filter(Boolean);
+    const botCount = tokens.length || 1;
+    if (textEl) {
+        textEl.textContent = `Đang lưu vào kho bài thi: ${savedSubs}/${totalSubs} bài (${botCount} bot song song)...`;
+    }
+}
+
+async function triggerProcessTelegramBatches() {
+    if (_isTgBatchProcessing) return;
+    _isTgBatchProcessing = true;
+
+    const tokens = (state.telegramConfig?.botTokens || []).map(t => String(t || '').trim()).filter(Boolean);
+    const chatId = state.telegramConfig?.chatId;
+
+    if (tokens.length === 0 || !chatId) {
+        _isTgBatchProcessing = false;
+        return;
+    }
+
+    try {
+        while (_tgPendingQueue.length > 0 && state.telegramConfig?.enabled) {
+            // Lấy tối đa 10 ảnh cho mỗi đợt gửi
+            const batch = _tgPendingQueue.splice(0, 10);
+            if (batch.length === 0) break;
+
+            updateTelegramUploadPill(false);
+            updateStorageStatusBadges();
+
+            // Chia đều mỗi ảnh trong batch 10 cho 1 bot riêng biệt
+            const uploadPromises = batch.map(async (item, idxInBatch) => {
+                let token = tokens[(roundRobinBotIndex + idxInBatch) % tokens.length];
+                let success = false;
+
+                // Nén ảnh sang ~75KB
+                let compressed = item.compressedDataUrl;
+                if (!compressed) {
+                    const raw = item.imgDataUrl || item.sub?.stamped_image || item.sub?.image_data;
+                    compressed = await compressSheetForTelegram(raw, 1080, 0.72);
+                }
+
+                // Retry tới 3 lần với các bot khác nhau nếu gặp 429 Rate Limit
+                for (let attempt = 1; attempt <= 3; attempt++) {
+                    try {
+                        const res = await sendSinglePhotoToTelegram(token, chatId, item.sub, compressed);
+                        applyTelegramUploadResult(item.sub, res, token);
+                        success = true;
+                        break;
+                    } catch (err) {
+                        const isRateLimit = err.isRateLimit || (err.message || '').includes('429');
+                        const waitMs = err.retryAfter ? (err.retryAfter * 1000 + 400) : (isRateLimit ? 2500 : 800 * attempt);
+                        console.warn(`Lỗi bot ${token.substr(0, 8)}... gửi bài ${item.sub?.student_no} (lần ${attempt}/3): ${err.message}`);
+                        if (attempt < 3) {
+                            await new Promise(r => setTimeout(r, waitMs));
+                            // Đổi sang bot khác ngay lập tức
+                            token = tokens[(roundRobinBotIndex + idxInBatch + attempt) % tokens.length];
+                        }
+                    }
+                }
+
+                if (!success) {
+                    // Nếu sau 3 lần vẫn chưa xong, đưa lại vào cuối hàng đợi để không bao giờ bị miss ảnh
+                    _tgPendingQueue.push({ sub: item.sub, compressedDataUrl: compressed });
+                }
+            });
+
+            // Tịnh tiến chỉ số luân phiên bot cho batch tiếp theo
+            roundRobinBotIndex = (roundRobinBotIndex + batch.length) % tokens.length;
+
+            // Chờ toàn bộ batch 10 ảnh gửi xong qua các bot song song
+            await Promise.allSettled(uploadPromises);
+
+            updateTelegramUploadPill(_tgPendingQueue.length === 0);
+            updateStorageStatusBadges();
+
+            // Nghỉ nhẹ 150ms giữa 2 đợt 10 bài để nhường băng thông và làm mát API
+            if (_tgPendingQueue.length > 0) {
+                await new Promise(r => setTimeout(r, 150));
+            }
+        }
+    } finally {
+        _isTgBatchProcessing = false;
+        updateTelegramUploadPill(true);
+        updateStorageStatusBadges();
+        if (state.exam?.id) {
+            saveSubmissionsToLocalSafe(state.exam.id, state.submissions);
+        }
+    }
+}
+
 async function dispatchChunkToTelegram(items) {
     if (!state.telegramConfig?.enabled || !items || items.length === 0) return;
     const tokens = (state.telegramConfig?.botTokens || []).map(t => String(t || '').trim()).filter(Boolean);
     const chatId = state.telegramConfig?.chatId;
     if (tokens.length === 0 || !chatId) return;
 
-    tgUploadStats.total += items.length;
-    updateTelegramUploadPill(false);
-    updateStorageStatusBadges();
-
-    // Nén từng ảnh và đưa vào hàng đợi tập trung
     for (const item of items) {
-        try {
-            const rawImg = item.imgDataUrl || item.sub?.stamped_image || item.sub?.image_data;
-            if (!rawImg) continue;
-            const compressed = await compressSheetForTelegram(rawImg, 1080, 0.72);
-            tgUploadQueue.push({ sub: item.sub, compressedDataUrl: compressed });
-        } catch (_) {
-            if (item.imgDataUrl) {
-                tgUploadQueue.push({ sub: item.sub, compressedDataUrl: item.imgDataUrl });
-            }
-        }
+        _tgPendingQueue.push(item);
     }
 
-    // Kích hoạt worker pool chạy ngay lập tức trong nền (vừa chấm vừa gửi)
-    const maxWorkers = Math.max(2, Math.min(tokens.length * 2, 8));
-    while (tgActiveWorkers < maxWorkers && tgUploadQueue.length > 0) {
-        tgActiveWorkers++;
-        runTgUploadWorker();
-    }
+    triggerProcessTelegramBatches();
+}
+
+async function uploadGradedSheetToTelegram(sub, imgDataUrl) {
+    if (!state.telegramConfig?.enabled || !imgDataUrl) return null;
+    _tgPendingQueue.push({ sub, imgDataUrl });
+    triggerProcessTelegramBatches();
+    return true;
 }
 
 // CẬP NHẬT HUY HIỆU HIỂN THỊ KHO BÀI THI (SỐ BÀI ĐÃ LƯU / TỔNG SỐ BÀI)
@@ -7152,7 +7269,7 @@ window.loadCodeKeyInputs = (code) => {
                 <div class="px-2 py-1.5 bg-slate-50 dark:bg-slate-900 rounded-xl border ${isBonus ? 'border-amber-400 bg-amber-50/50 dark:bg-amber-950/30' : 'border-slate-200 dark:border-slate-700'} flex items-center justify-between gap-1 transition-colors">
                     <span class="font-bold text-slate-600 dark:text-slate-300 text-xs shrink-0 whitespace-nowrap">Câu ${i + 1}</span>
                     <div class="flex items-center gap-1.5 shrink-0">
-                        <select data-p1="${i}" class="px-1.5 py-0.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 font-bold text-emerald-600 dark:text-emerald-400 outline-none text-xs w-11 text-center cursor-pointer">
+                        <select data-p1="${i}" class="w-14 px-2 py-0.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 font-extrabold text-emerald-600 dark:text-emerald-400 outline-none text-xs text-center cursor-pointer">
                             <option value="-" ${currentAns==='-'?'selected':''}>-</option>
                             <option value="A" ${currentAns==='A'?'selected':''}>A</option>
                             <option value="B" ${currentAns==='B'?'selected':''}>B</option>
@@ -7886,10 +8003,14 @@ window.assignSelectedClassToActiveExam = async () => {
         teacherId: state.teacherUid,
         student_no: st.student_no,
         name: st.name,
-        phone: st.phone,
-        note: st.note,
-        class_id: cls.id,
-        class_name: cls.name
+        room: st.room || '',
+        class_name: st.class_name || cls.name,
+        grade: st.grade || '',
+        dob: st.dob || '',
+        gender: st.gender || '',
+        phone: st.phone || '',
+        note: st.note || '',
+        class_id: cls.id
     }));
 
     state.students = examStudents;
@@ -7899,12 +8020,7 @@ window.assignSelectedClassToActiveExam = async () => {
     localStorage.setItem(`omr_students_${state.exam.id}`, JSON.stringify(examStudents));
     localStorage.setItem(`omr_exam_class_${state.exam.id}`, JSON.stringify({ classId: cls.id, className: cls.name }));
 
-    if (state.teacherUid) {
-        for (const s of examStudents) {
-            try { await setDoc(doc(db, "omr_students", s.id), s); } catch(e) {}
-        }
-    }
-
+    // CẬP NHẬT TỨC THÌ GIAO DIỆN TRONG 10MS
     updateActiveExamBanner();
     updateOverviewStats();
     enrichSubmissionsFromClassRoster();
@@ -7915,9 +8031,18 @@ window.assignSelectedClassToActiveExam = async () => {
     Swal.fire({
         icon: 'success',
         title: 'Đã đưa vào đề đang chấm!',
-        text: `Đã liên kết lớp "${cls.name}" và nạp ${examStudents.length} học sinh kèm SBD vào bài thi hiện tại.`,
-        timer: 2500
+        text: `Đã liên kết lớp "${cls.name}" và nạp ${examStudents.length} thí sinh kèm SBD, Phòng thi vào đề hiện tại.`,
+        timer: 1500
     });
+
+    // Đồng bộ ngầm lên Firestore (chạy nền, không chặn giao diện)
+    if (state.teacherUid && typeof db !== 'undefined') {
+        (async () => {
+            for (const s of examStudents) {
+                try { await setDoc(doc(db, "omr_students", s.id), s); } catch(_) {}
+            }
+        })().catch(e => console.warn("Background student sync error:", e));
+    }
 };
 
 // ========================================================
@@ -10112,6 +10237,7 @@ window.saveCurrentEditModalKey = (code) => {
 
 window.confirmSaveExamSettings = async () => {
     if (!state.exam) return;
+    const oldSheetTemplate = state.exam.sheet_template;
     const oldP1Count = state.exam.question_count;
     const oldP1Pt = state.exam.part1_point;
     const oldP2Count = state.exam.part2_count;
@@ -10145,8 +10271,9 @@ window.confirmSaveExamSettings = async () => {
         window.saveCurrentEditModalKey(codeSelect.value);
     }
 
+    const newSheetTemplate = document.getElementById('editExamTemplate')?.value || state.exam.sheet_template;
     state.exam.name = name;
-    state.exam.sheet_template = document.getElementById('editExamTemplate')?.value || state.exam.sheet_template;
+    state.exam.sheet_template = newSheetTemplate;
     state.exam.codes = (document.getElementById('editExamCodes')?.value || '101').split(',').map(s => s.trim()).filter(Boolean);
     state.exam.question_count = parseInt(document.getElementById('editExamCountP1')?.value) || 12;
     state.exam.part1_point = parseFloat(document.getElementById('editExamPointP1')?.value) || 0.25;
@@ -10175,96 +10302,44 @@ window.confirmSaveExamSettings = async () => {
     const newP3Pt = state.exam.part3_point;
     const newCodes = (state.exam.codes || []).join(',');
 
+    const templateChanged = (oldSheetTemplate !== newSheetTemplate);
     const baremChanged = (oldP1Count !== newP1Count) || (oldP1Pt !== newP1Pt) ||
                          (oldP2Count !== newP2Count) || (oldP3Count !== newP3Count) || (oldP3Pt !== newP3Pt) ||
                          (oldCodes !== newCodes) || (state._keysModifiedInModal === true);
     state._keysModifiedInModal = false;
 
-    if (baremChanged && state.submissions && state.submissions.length > 0) {
-        await window.recalculateAllSubmissionsScore();
-    } else {
-        Swal.fire({
-            icon: 'success',
-            title: 'Đã lưu cấu hình bài thi!',
-            timer: 1500,
-            showConfirmButton: false
+    // HỎI Ý KIẾN NGƯỜI DÙNG KHI THAY ĐỔI LOẠI PHIẾU HOẶC BAREM ĐIỂM
+    if ((templateChanged || baremChanged) && state.submissions && state.submissions.length > 0) {
+        const changeReason = templateChanged
+            ? `loại phiếu thi (từ "${oldSheetTemplate}" sang "${newSheetTemplate}")`
+            : `thang điểm / barem đáp án`;
+
+        const resPrompt = await Swal.fire({
+            title: 'Cập nhật lại điểm & đóng dấu ảnh?',
+            html: `
+                <div class="text-xs text-left space-y-2 text-slate-600 dark:text-slate-300">
+                    <p>Thầy/Cô vừa thay đổi <b>${changeReason}</b>.</p>
+                    <p>Hiện tại đang có <b>${state.submissions.length} bài đã chấm</b>.</p>
+                    <div class="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 text-amber-800 dark:text-amber-200">
+                        Thầy/Cô có muốn hệ thống <b>tự động tính lại điểm số và đóng dấu lại toàn bộ ảnh bài chấm</b> theo cấu hình mới này không?
+                    </div>
+                </div>
+            `,
+            icon: 'question',
+            showCancelButton: true,
+            confirmButtonText: '<i class="fa-solid fa-arrows-rotate mr-1"></i> Có, tính lại điểm & đóng dấu lại ảnh',
+            cancelButtonText: 'Không, giữ nguyên kết quả cũ',
+            confirmButtonColor: '#059669',
+            cancelButtonColor: '#64748b'
         });
-    }
-};
 
-
-function renderSubmissionsUI() {
-    if (typeof window.renderResultsTable === 'function') {
-        window.renderResultsTable();
-    }
-    if (typeof updateOverviewStats === 'function') {
-        updateOverviewStats();
-    }
-}
-window.renderSubmissionsUI = renderSubmissionsUI;
-
-window.recalculateAllSubmissionsScore = async () => {
-    if (!state.exam || !state.submissions || state.submissions.length === 0) return;
-
-    try {
-        // 1. TÍNH LẠI TOÀN BỘ ĐIỂM SỐ SIÊU TỐC TRONG BỘ NHỚ (< 10ms CHO HÀNG TRĂM BÀI)
-        for (const sub of state.submissions) {
-            const scoreData = calculateExamScore(sub.code, sub.answers, sub.part2, sub.part3);
-            sub.score = scoreData.totalScore;
-            sub.part1_score = scoreData.part1Score;
-            sub.part2_score = scoreData.part2Score;
-            sub.part3_score = scoreData.part3Score;
-            sub._needsRestamp = true;
-            sub._headerV25Upgraded = false;
-        }
-
-        // 2. Lưu ngay kết quả điểm mới vào storage & cập nhật ngay lập tức giao diện
-        if (typeof storage !== 'undefined' && storage.saveSubmissions) {
-            await storage.saveSubmissions(state.exam.id, state.submissions);
+        if (resPrompt.isConfirmed) {
+            await window.recalculateAllSubmissionsScore();
         } else {
-            saveSubmissionsToLocalSafe(state.exam.id, state.submissions);
+            showToast('Đã lưu cấu hình bài thi (giữ nguyên các bài cũ).', 'info');
         }
-
-        // 3. Tái đóng dấu bài thi đang mở xem hiện tại (nếu có)
-        if (state.lastSubmission) {
-            const updatedLast = state.submissions.find(s => s.id === state.lastSubmission.id);
-            if (updatedLast) {
-                state.lastSubmission = updatedLast;
-                try {
-                    await reStampSubmission(updatedLast);
-                    if (typeof displayLastResultInspector === 'function') {
-                        await displayLastResultInspector(updatedLast, null);
-                    }
-                } catch (_) {}
-            }
-        }
-
-        if (typeof window.renderResultsTable === 'function') {
-            window.renderResultsTable();
-        }
-        if (typeof updateOverviewStats === 'function') {
-            updateOverviewStats();
-        }
-
-        // 4. Đồng bộ nền Supabase (Batch background sync, không nghẽn UI)
-        setTimeout(async () => {
-            if (typeof syncSubmissionToLmsResultsCollection === 'function') {
-                for (const sub of state.submissions) {
-                    try { await syncSubmissionToLmsResultsCollection(sub); } catch (_) {}
-                }
-            }
-        }, 100);
-
-        Swal.fire({
-            icon: 'success',
-            title: 'Đã cập nhật điểm thành công!',
-            text: `Đã tính lại điểm chính xác cho ${state.submissions.length} bài thi!`,
-            timer: 1600,
-            showConfirmButton: false
-        });
-    } catch(err) {
-        console.error('[recalculateAllSubmissionsScore Error]:', err);
-        Swal.fire('Lỗi', 'Không thể tính lại điểm: ' + (err.message || err), 'error');
+    } else {
+        showToast('Đã lưu cài đặt bài thi thành công!', 'success');
     }
 };
 

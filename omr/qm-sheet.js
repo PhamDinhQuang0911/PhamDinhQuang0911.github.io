@@ -19,7 +19,7 @@
     const tplW=Math.hypot(m[1].x-m[0].x,m[1].y-m[0].y);
     const tplH=Math.hypot(m[3].x-m[0].x,m[3].y-m[0].y);
     const expectedRatio=tplH/tplW;
-    const minMoc=Math.min(5,Math.max(4,Math.floor((tpl.moc.length||12)*0.20)));
+    const minMoc=Math.max(6,Math.floor((tpl.moc.length||12)*0.40));
 
     const quads=[];
 
@@ -99,7 +99,7 @@
       const H=OMR.phepChieu(tpl.moc.slice(0,4).map(m=>[m.x,m.y]),corners.map(b=>[b.x*small.k,b.y*small.k]));
       if(!H)continue;
       const refined=OMR.tinhChinh(gray,H,tpl);
-      if(!refined||(refined.soMoc<minMoc&&(refined.soGoc<3||refined.soMoc<4)))continue;
+      if(!refined||refined.soMoc<minMoc)continue;
       if(!bestRefined||refined.soMoc>bestRefined.soMoc){
         bestRefined=refined;
         bestCorners=corners;
@@ -112,39 +112,14 @@
         const H=OMR.phepChieu(tpl.moc.slice(0,4).map(m=>[m.x,m.y]),fbCorners.map(b=>[b.x*small.k,b.y*small.k]));
         if(H){
           const refined=OMR.tinhChinh(gray,H,tpl);
-          if(refined&&(refined.soMoc>=minMoc||(refined.soGoc>=3&&refined.soMoc>=4))){
+          if(refined&&refined.soMoc>=minMoc){
             bestRefined=refined;
             bestCorners=fbCorners;
           }
         }
       }
     }
-    // Fallback: Nếu tinhChinh chưa bắt đủ mốc phụ do khung hình camera thu nhỏ,
-    // nhưng 4 mốc đen góc phiếu (TL, TR, BR, BL) đã khớp chuẩn vào 4 góc khung ngắm
-    if(!bestRefined&&quads.length>0){
-      for(let i=0;i<Math.min(quads.length,3);i++){
-        const cands=quads[i].corners;
-        if(!cands||cands.length!==4)continue;
-        const [tl,tr,br,bl]=cands;
-        if(tr.x>tl.x&&br.x>bl.x&&bl.y>tl.y&&br.y>tr.y){
-          const topW=Math.hypot(tr.x-tl.x,tr.y-tl.y);
-          const botW=Math.hypot(br.x-bl.x,br.y-bl.y);
-          const leftH=Math.hypot(bl.x-tl.x,bl.y-tl.y);
-          const rightH=Math.hypot(br.x-tr.x,br.y-tr.y);
-          const avgW=(topW+botW)/2;
-          const avgH=(leftH+rightH)/2;
-          const ratio=avgH/avgW;
-          if(ratio>=expectedRatio*0.65&&ratio<=expectedRatio*1.45&&avgW>minDim*0.28){
-            const H=OMR.phepChieu(tpl.moc.slice(0,4).map(m=>[m.x,m.y]),cands.map(b=>[b.x*small.k,b.y*small.k]));
-            if(H){
-              bestRefined={H:H,soMoc:4,den:40};
-              bestCorners=cands;
-              break;
-            }
-          }
-        }
-      }
-    }
+
     if(!bestRefined)return null;
     return {
       refined: bestRefined,
