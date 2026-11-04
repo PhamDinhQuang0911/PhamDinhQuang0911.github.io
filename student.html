@@ -1230,7 +1230,7 @@
                             </div>
                             <div class="space-y-1.5 pt-0.5">
                                 <div>
-                                    <span class="inline-block px-2.5 py-0.5 bg-amber-400 text-slate-950 rounded-lg text-[11px] font-black shadow-sm" id="myCardStudentSbd">SBD: ---</span>
+                                    <span class="inline-block px-2.5 py-0.5 bg-amber-400 text-slate-950 rounded-lg text-[11px] font-black shadow-sm" id="myCardStudentSbd">SBD: ---</span> <span class="inline-block px-2.5 py-0.5 bg-indigo-500 text-white rounded-lg text-[11px] font-black shadow-sm ml-1" id="myCardStudentId">ID: ---</span>
                                 </div>
                                 <div>
                                     <span class="inline-block px-2.5 py-0.5 bg-indigo-950/80 text-indigo-100 border border-indigo-400/40 rounded-lg text-[10.5px] font-bold break-words leading-relaxed max-w-full" id="myCardClassName">Lớp: Học sinh QMath</span>
@@ -1838,10 +1838,21 @@
             try {
                 const snap = await getDoc(doc(db, "users", user.uid));
                 const data = snap.exists() ? snap.data() : {};
+
+                // Tự động cấp studentCode nếu học sinh chưa có mã ID duy nhất
+                if (!data.studentCode && user.uid) {
+                    const newCode = 'HS' + Math.floor(100000 + Math.random() * 900000);
+                    data.studentCode = newCode;
+                    try {
+                        await updateDoc(doc(db, "users", user.uid), { studentCode: newCode });
+                    } catch (_) {}
+                }
+
                 window.currentUserProfile = data;
                 const name = data.displayName || user.displayName || "Bạn";
-                document.getElementById('userName').innerText = name;
-                document.getElementById('welcomeName').innerText = name;
+                const studentIdBadge = data.studentCode ? ` <span class="px-2 py-0.5 rounded-full text-xs font-mono font-black bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300 ml-1.5 shadow-2xs">ID: ${data.studentCode}</span>` : '';
+                document.getElementById('userName').innerHTML = name + studentIdBadge;
+                document.getElementById('welcomeName').innerHTML = name + studentIdBadge;
                 
                 const avatarUrl = user.photoURL || `https://ui-avatars.com/api/?name=${name}&background=0F766E&color=fff`;
                 document.getElementById('userAvatar').src = avatarUrl;
@@ -10322,6 +10333,8 @@
             document.getElementById('myCardStudentName').textContent = studentName;
             document.getElementById('myCardClassName').textContent = `Lớp: ${className}`;
             document.getElementById('myCardStudentSbd').textContent = `SBD: ${sbd}`;
+            const cardIdEl = document.getElementById('myCardStudentId');
+            if (cardIdEl) cardIdEl.textContent = `ID: ${profile.studentCode || '---'}`;
             document.getElementById('myCardStudentUser').textContent = username;
 
             const qrBox = document.getElementById('myCardQrCodeBox');
