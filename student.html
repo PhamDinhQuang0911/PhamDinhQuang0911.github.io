@@ -572,6 +572,10 @@
         window.openProfileModal = function() {
             const m = document.getElementById('profileModal');
             if (m) m.classList.remove('hidden');
+            const profCodeEl = document.getElementById('profStudentCode');
+            if (profCodeEl && window.currentUserProfile?.studentCode) {
+                profCodeEl.textContent = window.currentUserProfile.studentCode;
+            }
         };
         window.handleLogout = function() {
             try {
@@ -1304,6 +1308,24 @@
                     <p id="avatarHelpText" class="text-center text-xs text-gray-400 mt-3 italic">Chạm vào ảnh để thay đổi (Tối đa 5MB)</p>
                 </div>
 
+                <!-- Khung hiển thị Mã ID Học sinh duy nhất toàn hệ thống -->
+                <div class="bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-700 rounded-2xl p-4 text-white shadow-md relative overflow-hidden flex items-center justify-between gap-3">
+                    <div class="relative z-10 min-w-0">
+                        <span class="text-[10px] font-black uppercase tracking-widest text-indigo-200 block">Mã ID Học Sinh (Duy nhất toàn hệ thống)</span>
+                        <div class="flex items-center gap-2 mt-0.5">
+                            <span id="profStudentCode" class="text-xl sm:text-2xl font-black font-mono tracking-wider drop-shadow-sm text-yellow-300">HS------</span>
+                            <button type="button" onclick="window.copyStudentIdToClipboard()" class="px-2.5 py-1 bg-white/20 hover:bg-white/30 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 active:scale-95 cursor-pointer shadow-xs" title="Bấm để sao chép Mã ID">
+                                <i class="fa-solid fa-copy"></i>
+                                <span id="copyStudentIdText">Sao chép</span>
+                            </button>
+                        </div>
+                        <p class="text-[11px] text-indigo-100 mt-1">Cung cấp Mã ID này cho Thầy/Cô khi được yêu cầu thêm vào lớp học.</p>
+                    </div>
+                    <div class="w-12 h-12 rounded-2xl bg-white/15 backdrop-blur-xs flex items-center justify-center text-2xl text-white shrink-0 shadow-inner">
+                        <i class="fa-solid fa-id-card-clip"></i>
+                    </div>
+                </div>
+
                 <!-- Thẻ học sinh thông minh trong Hồ sơ -->
                 <div class="bg-gradient-to-r from-amber-50 to-indigo-50 border border-amber-200/80 rounded-2xl p-3.5 flex items-center justify-between shadow-2xs">
                     <div class="flex items-center gap-3 min-w-0">
@@ -1853,6 +1875,8 @@
                 const studentIdBadge = data.studentCode ? ` <span class="px-2 py-0.5 rounded-full text-xs font-mono font-black bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300 ml-1.5 shadow-2xs">ID: ${data.studentCode}</span>` : '';
                 document.getElementById('userName').innerHTML = name + studentIdBadge;
                 document.getElementById('welcomeName').innerHTML = name + studentIdBadge;
+                const profCodeEl = document.getElementById('profStudentCode');
+                if (profCodeEl) profCodeEl.textContent = data.studentCode || 'HS------';
                 
                 const avatarUrl = user.photoURL || `https://ui-avatars.com/api/?name=${name}&background=0F766E&color=fff`;
                 document.getElementById('userAvatar').src = avatarUrl;
@@ -1865,6 +1889,26 @@
         }
         // --- CẬP NHẬT THÔNG TIN CÁ NHÂN (ĐÃ FIX ĐỔI PASSWORD) ---
         // --- HÀM LƯU HỒ SƠ: UPLOAD R2 + ĐỔI PASS + UPDATE FIREBASE ---
+        
+        window.copyStudentIdToClipboard = () => {
+            const code = window.currentUserProfile?.studentCode || document.getElementById('profStudentCode')?.textContent || '';
+            if (!code || code.includes('---')) return;
+            navigator.clipboard.writeText(code).then(() => {
+                const btnText = document.getElementById('copyStudentIdText');
+                if (btnText) {
+                    btnText.textContent = 'Đã chép!';
+                    setTimeout(() => { btnText.textContent = 'Sao chép'; }, 2000);
+                }
+                if (typeof window.showNotification === 'function') {
+                    window.showNotification(`Đã sao chép Mã ID: ${code}`, 'success');
+                }
+            }).catch(() => {
+                if (typeof window.showNotification === 'function') {
+                    window.showNotification(`Mã ID của bạn: ${code}`, 'info');
+                }
+            });
+        };
+
         window.saveProfile = async () => {
             const user = auth.currentUser;
             if (!user) return;
@@ -7101,7 +7145,14 @@
             const mainArea = document.getElementById('mainScrollArea');
             if(mainArea) mainArea.scrollTo({top: 0, behavior: 'smooth'});
         };
-        window.openProfileModal = () => document.getElementById('profileModal').classList.remove('hidden');
+        window.openProfileModal = () => {
+            const m = document.getElementById('profileModal');
+            if (m) m.classList.remove('hidden');
+            const profCodeEl = document.getElementById('profStudentCode');
+            if (profCodeEl && window.currentUserProfile?.studentCode) {
+                profCodeEl.textContent = window.currentUserProfile.studentCode;
+            }
+        };
         window.handleLogout = async () => {
             try {
                 sessionStorage.clear();
