@@ -3,7 +3,7 @@ import {
     getFirestore, doc, getDoc, setDoc, updateDoc, collection, query, where, getDocs, addDoc, deleteDoc,
     limit, orderBy, includeQuestions, getOrCreateParentWatchToken,
     enableMultiTabIndexedDbPersistence
-} from "./supabase-db-compat.js?v=20261105_v125";
+} from "./supabase-db-compat.js?v=20261105_v126";
 
 if (typeof window !== 'undefined') {
     window.showToast = window.showToast || function(msg, icon) {
@@ -7242,7 +7242,7 @@ window.loadCodeKeyInputs = (code) => {
                 <div class="px-2 py-1.5 bg-slate-50 dark:bg-slate-900 rounded-xl border ${isBonus ? 'border-amber-400 bg-amber-50/50 dark:bg-amber-950/30' : 'border-slate-200 dark:border-slate-700'} flex items-center justify-between gap-1 transition-colors">
                     <span class="font-bold text-slate-600 dark:text-slate-300 text-xs shrink-0 whitespace-nowrap">Câu ${i + 1}</span>
                     <div class="flex items-center gap-1.5 shrink-0">
-                        <select data-p1="${i}" class="w-16 h-7 pl-2 pr-5 py-0.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 font-black text-emerald-600 dark:text-emerald-400 outline-none text-xs text-center cursor-pointer shadow-2xs hover:border-emerald-500 transition-all">
+                        <select data-p1="${i}" class="w-16 h-7 pl-3.5 pr-2 py-0.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 font-black text-emerald-600 dark:text-emerald-400 outline-none text-sm text-left cursor-pointer shadow-2xs hover:border-emerald-500 transition-all">
                             <option value="-" ${currentAns==='-'?'selected':''}>-</option>
                             <option value="A" ${currentAns==='A'?'selected':''}>A</option>
                             <option value="B" ${currentAns==='B'?'selected':''}>B</option>
