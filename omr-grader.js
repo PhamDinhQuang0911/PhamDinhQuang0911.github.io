@@ -795,7 +795,70 @@ function saveLocalExams(exams) {
 
 window.changeActiveExamTemplate = async (newTpl) => {
     if (!state.exam || !newTpl) return;
-    state.exam.sheet_template = newTpl;
+    const oldTpl = state.exam.sheet_template;
+    if (oldTpl === newTpl) return;
+
+    if (state.submissions && state.submissions.length > 0) {
+        const tplNameOld = (window.MAU && window.MAU[oldTpl]) ? window.MAU[oldTpl].ten : oldTpl;
+        const tplNameNew = (window.MAU && window.MAU[newTpl]) ? window.MAU[newTpl].ten : newTpl;
+        const resPrompt = await Swal.fire({
+            title: 'Đổi mẫu phiếu chấm?',
+            html: `
+                <div class="text-xs text-left space-y-2 text-slate-600 dark:text-slate-300">
+                    <p>Thầy/Cô vừa chuyển sang mẫu phiếu: <b>${tplNameNew}</b>.</p>
+                    <p>Bài thi hiện đang có <b>${state.submissions.length} bài đã chấm</b>.</p>
+                    <div class="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 text-amber-800 dark:text-amber-200">
+                        Thầy/Cô có muốn hệ thống <b>tự động tính lại điểm số và đóng dấu lại toàn bộ ảnh bài chấm</b> theo mẫu mới này không?
+                    </div>
+                </div>
+            `,
+            icon: 'question',
+            showCancelButton: true,
+            confirmButtonText: '<i class="fa-solid fa-arrows-rotate mr-1"></i> Có, tính lại điểm & đóng dấu lại',
+            cancelButtonText: 'Không, giữ nguyên kết quả cũ',
+            confirmButtonColor: '#059669',
+            cancelButtonColor: '#64748b'
+        });
+
+        state.exam.sheet_template = newTpl;
+        try {
+            localStorage.setItem(`omr_exam_class_${state.exam.id}`, JSON.stringify({
+                classId: state.exam.classId || '',
+                className: state.exam.className || '',
+                sheet_template: newTpl
+            }));
+        } catch(e) {}
+
+        if (!state.exam.isLmsExam) {
+            saveLocalExams(state.exams);
+            if (state.teacherUid) {
+                try { await setDoc(doc(db, "omr_exams", state.exam.id), state.exam, { merge: true }); } catch(e) {}
+            }
+        }
+        updateActiveExamBanner();
+
+        if (resPrompt.isConfirmed) {
+            await window.recalculateAllSubmissionsScore();
+            return;
+        }
+    } else {
+        state.exam.sheet_template = newTpl;
+        try {
+            localStorage.setItem(`omr_exam_class_${state.exam.id}`, JSON.stringify({
+                classId: state.exam.classId || '',
+                className: state.exam.className || '',
+                sheet_template: newTpl
+            }));
+        } catch(e) {}
+
+        if (!state.exam.isLmsExam) {
+            saveLocalExams(state.exams);
+            if (state.teacherUid) {
+                try { await setDoc(doc(db, "omr_exams", state.exam.id), state.exam, { merge: true }); } catch(e) {}
+            }
+        }
+        updateActiveExamBanner();
+    }
 
     // Lưu cấu hình mẫu phiếu & lớp học cho đề này
     try {
@@ -1215,9 +1278,6 @@ function dataUrlToBlob(dataUrl) {
 // ========================================================
 // HỆ THỐNG NÉN ẢNH THÔNG MINH & TẢI LÊN TELEGRAM ĐA BOT SIÊU TỐC
 // ========================================================
-const tgUploadQueue = [];
-let tgActiveWorkers = 0;
-const tgUploadStats = { total: 0, done: 0, failed: 0 };
 let tgPillHideTimeout = null;
 
 // Nén ảnh bài chấm từ ~1.5MB xuống ~75KB (giảm 95% dung lượng, giữ 100% độ sắc nét)
@@ -1257,48 +1317,6 @@ async function compressSheetForTelegram(dataUrl, maxWidth = 1080, quality = 0.72
             resolve(dataUrl);
         }
     });
-}
-
-function updateTelegramUploadPill(isFinished = false) {
-    let pill = document.getElementById('tgUploadPill');
-    if (!pill) {
-        pill = document.createElement('div');
-        pill.id = 'tgUploadPill';
-        pill.className = 'fixed bottom-5 right-5 z-40 bg-sky-600/95 text-white px-4 py-2.5 rounded-2xl shadow-2xl flex items-center gap-2.5 backdrop-blur-md text-xs font-bold border border-sky-400/40 transition-all cursor-pointer select-none';
-        pill.innerHTML = `
-            <i id="tgUploadPillIcon" class="fa-brands fa-telegram text-base animate-bounce"></i>
-            <span id="tgUploadPillText">Đang lưu vào kho bài thi: 0/0 bài...</span>
-        `;
-        document.body.appendChild(pill);
-    }
-
-    const iconEl = document.getElementById('tgUploadPillIcon');
-    const textEl = document.getElementById('tgUploadPillText');
-    if (tgPillHideTimeout) {
-        clearTimeout(tgPillHideTimeout);
-        tgPillHideTimeout = null;
-    }
-
-    if (isFinished) {
-        pill.className = 'fixed bottom-5 right-5 z-40 bg-emerald-600/95 text-white px-4 py-2.5 rounded-2xl shadow-2xl flex items-center gap-2.5 backdrop-blur-md text-xs font-bold border border-emerald-400/40 transition-all select-none';
-        if (iconEl) iconEl.className = 'fa-solid fa-circle-check text-emerald-300 text-base';
-        if (textEl) textEl.textContent = `Đã lưu ${tgUploadStats.done}/${tgUploadStats.total} ảnh vào kho bài thi!`;
-        tgPillHideTimeout = setTimeout(() => {
-            pill.classList.add('hidden');
-            tgUploadStats.total = 0;
-            tgUploadStats.done = 0;
-            tgUploadStats.failed = 0;
-        }, 3000);
-        return;
-    }
-
-    pill.classList.remove('hidden');
-    pill.className = 'fixed bottom-5 right-5 z-40 bg-sky-600/95 text-white px-4 py-2.5 rounded-2xl shadow-2xl flex items-center gap-2.5 backdrop-blur-md text-xs font-bold border border-sky-400/40 transition-all select-none';
-    if (iconEl) iconEl.className = 'fa-brands fa-telegram text-base animate-bounce';
-    const activeBotCount = (state.telegramConfig?.botTokens || []).length || 1;
-    if (textEl) {
-        textEl.textContent = `Đang lưu vào kho bài thi: ${tgUploadStats.done}/${tgUploadStats.total} bài (${activeBotCount} bot song song)...`;
-    }
 }
 
 async function sendSinglePhotoToTelegram(token, chatId, sub, compressedDataUrl) {
@@ -1438,80 +1456,6 @@ function applyTelegramUploadResult(sub, res, token) {
             telegramMsgId: messageId
         }).catch(() => {});
     }
-}
-
-async function runTgUploadWorker() {
-    const tokens = (state.telegramConfig?.botTokens || []).map(t => String(t || '').trim()).filter(Boolean);
-    const chatId = state.telegramConfig?.chatId;
-
-    while (tgUploadQueue.length > 0 && state.telegramConfig?.enabled && tokens.length > 0 && chatId) {
-        const item = tgUploadQueue.shift();
-        if (!item) break;
-
-        let token = getNextTelegramBotToken();
-        let success = false;
-
-        // Cơ chế Retry tự động tới 3 lần cho mỗi bài thi (bắt lỗi 429 Rate Limit và lỗi mạng)
-        for (let attempt = 1; attempt <= 3; attempt++) {
-            try {
-                const res = await sendSinglePhotoToTelegram(token, chatId, item.sub, item.compressedDataUrl);
-                applyTelegramUploadResult(item.sub, res, token);
-                tgUploadStats.done++;
-                success = true;
-                break;
-            } catch (err) {
-                console.warn(`Lỗi tải bài ${item.sub?.student_no || item.sub?.id} lên kho bài thi (lần ${attempt}/3):`, err.message);
-                const isRateLimit = err.isRateLimit || (err.message || '').includes('Too Many Requests') || (err.message || '').includes('429');
-                const waitTime = err.retryAfter ? (err.retryAfter * 1000 + 500) : (isRateLimit ? 2500 : 1000 * attempt);
-                if (attempt < 3) {
-                    await new Promise(r => setTimeout(r, waitTime));
-                    // Đổi sang bot khác để thử lại nếu người dùng cấu hình nhiều bot
-                    token = getNextTelegramBotToken() || token;
-                }
-            }
-        }
-
-        if (!success) {
-            tgUploadStats.failed++;
-        }
-        updateTelegramUploadPill(tgUploadQueue.length === 0);
-        updateStorageStatusBadges();
-
-        // Giãn cách nhẹ 120ms giữa 2 bài liên tiếp của worker để đảm bảo an toàn tuyệt đối cho Telegram API
-        await new Promise(r => setTimeout(r, 120));
-    }
-
-    tgActiveWorkers--;
-    if (tgActiveWorkers <= 0 && tgUploadQueue.length === 0) {
-        updateTelegramUploadPill(true);
-        updateStorageStatusBadges();
-        if (state.exam?.id) {
-            saveSubmissionsToLocalSafe(state.exam.id, state.submissions);
-        }
-    }
-}
-
-async function uploadGradedSheetToTelegram(sub, imgDataUrl) {
-    if (!state.telegramConfig?.enabled) return null;
-    const tokens = (state.telegramConfig?.botTokens || []).map(t => String(t || '').trim()).filter(Boolean);
-    if (tokens.length === 0 || !state.telegramConfig?.chatId) return null;
-    if (!imgDataUrl || !imgDataUrl.startsWith('data:image')) return null;
-
-    // Nén ảnh sang ~75KB trước khi xếp hàng
-    const compressed = await compressSheetForTelegram(imgDataUrl, 1080, 0.72);
-
-    tgUploadQueue.push({ sub, compressedDataUrl: compressed });
-    tgUploadStats.total++;
-    updateTelegramUploadPill(false);
-    updateStorageStatusBadges();
-
-    // Kích hoạt worker pool song song theo số lượng bot (tối đa 2 worker/bot, chặn trần 8)
-    const maxWorkers = Math.max(2, Math.min(tokens.length * 2, 8));
-    while (tgActiveWorkers < maxWorkers && tgUploadQueue.length > 0) {
-        tgActiveWorkers++;
-        runTgUploadWorker();
-    }
-    return true;
 }
 
 // BỘ ĐIỀU PHỐI GỬI THEO TỪNG ĐỢT 10 BÀI QUA TỔNG SỐ BOT (MULTI-BOT CHUNK-10 DISPATCHER)
@@ -7269,7 +7213,7 @@ window.loadCodeKeyInputs = (code) => {
                 <div class="px-2 py-1.5 bg-slate-50 dark:bg-slate-900 rounded-xl border ${isBonus ? 'border-amber-400 bg-amber-50/50 dark:bg-amber-950/30' : 'border-slate-200 dark:border-slate-700'} flex items-center justify-between gap-1 transition-colors">
                     <span class="font-bold text-slate-600 dark:text-slate-300 text-xs shrink-0 whitespace-nowrap">Câu ${i + 1}</span>
                     <div class="flex items-center gap-1.5 shrink-0">
-                        <select data-p1="${i}" class="w-14 px-2 py-0.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 font-extrabold text-emerald-600 dark:text-emerald-400 outline-none text-xs text-center cursor-pointer">
+                        <select data-p1="${i}" class="w-16 h-7 pl-2 pr-5 py-0.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 font-black text-emerald-600 dark:text-emerald-400 outline-none text-xs text-center cursor-pointer shadow-2xs hover:border-emerald-500 transition-all">
                             <option value="-" ${currentAns==='-'?'selected':''}>-</option>
                             <option value="A" ${currentAns==='A'?'selected':''}>A</option>
                             <option value="B" ${currentAns==='B'?'selected':''}>B</option>
@@ -9962,6 +9906,112 @@ async function reStampSubmission(sub) {
     }
 }
 
+
+function renderSubmissionsUI() {
+    if (typeof window.renderResultsTable === 'function') {
+        window.renderResultsTable();
+    }
+    if (typeof updateOverviewStats === 'function') {
+        updateOverviewStats();
+    }
+    if (typeof renderInlineSubmissionsList === 'function') {
+        renderInlineSubmissionsList();
+    }
+}
+window.renderSubmissionsUI = renderSubmissionsUI;
+
+window.recalculateAllSubmissionsScore = async () => {
+    if (!state.exam || !state.submissions || state.submissions.length === 0) {
+        Swal.fire('Thông báo', 'Chưa có bài thi nào để tính lại điểm!', 'info');
+        return;
+    }
+
+    const total = state.submissions.length;
+    let done = 0;
+
+    Swal.fire({
+        title: 'Đang cập nhật lại điểm & đóng dấu ảnh...',
+        html: `
+            <div class="space-y-3 text-center">
+                <div class="text-xs text-slate-500 font-semibold" id="recalcProgressText">Đang xử lý: 0/${total} bài...</div>
+                <div class="w-full bg-slate-200 dark:bg-slate-700 h-2.5 rounded-full overflow-hidden">
+                    <div id="recalcProgressBar" class="bg-emerald-600 h-2.5 rounded-full transition-all duration-150" style="width: 0%"></div>
+                </div>
+            </div>
+        `,
+        allowOutsideClick: false,
+        allowEscapeKey: false,
+        showConfirmButton: false,
+        didOpen: () => Swal.showLoading()
+    });
+
+    try {
+        for (const sub of state.submissions) {
+            const scoreData = calculateExamScore(sub.code, sub.answers, sub.part2, sub.part3);
+            sub.score = scoreData.totalScore;
+            sub.part1_score = scoreData.part1Score;
+            sub.part2_score = scoreData.part2Score;
+            sub.part3_score = scoreData.part3Score;
+
+            try {
+                await reStampSubmission(sub);
+            } catch (_) {}
+
+            done++;
+            const pText = document.getElementById('recalcProgressText');
+            const pBar = document.getElementById('recalcProgressBar');
+            if (pText) pText.textContent = `Đang xử lý: ${done}/${total} bài...`;
+            if (pBar) pBar.style.width = `${Math.round((done / total) * 100)}%`;
+        }
+
+        if (typeof storage !== 'undefined' && storage.saveSubmissions) {
+            await storage.saveSubmissions(state.exam.id, state.submissions);
+        } else {
+            saveSubmissionsToLocalSafe(state.exam.id, state.submissions);
+        }
+
+        if (state.lastSubmission) {
+            const updatedLast = state.submissions.find(s => s.id === state.lastSubmission.id);
+            if (updatedLast) {
+                state.lastSubmission = updatedLast;
+                if (typeof displayLastResultInspector === 'function') {
+                    try { await displayLastResultInspector(updatedLast, null); } catch (_) {}
+                }
+            }
+        }
+
+        renderSubmissionsUI();
+
+        // Đồng bộ nền lên Firestore kết quả mới
+        if (state.teacherUid && typeof db !== 'undefined') {
+            (async () => {
+                for (const s of state.submissions) {
+                    try {
+                        const subIdSafe = (s.id || '').replace(/[^a-zA-Z0-9_-]/g, '');
+                        await updateDoc(doc(db, "results", `omr_${s.examId || state.exam?.id}_${subIdSafe}`), {
+                            score: s.score,
+                            part1_score: s.part1_score,
+                            part2_score: s.part2_score,
+                            part3_score: s.part3_score,
+                            stamped_image: s.stamped_image || s.image_data || null
+                        });
+                    } catch (_) {}
+                }
+            })().catch(e => console.warn("Lỗi đồng bộ kết quả lên Firestore:", e));
+        }
+
+        Swal.fire({
+            icon: 'success',
+            title: 'Đã hoàn tất!',
+            text: `Đã tính lại điểm và đóng dấu lại cho toàn bộ ${state.submissions.length} bài chấm!`,
+            timer: 2000
+        });
+    } catch (err) {
+        console.error('[recalculateAllSubmissionsScore Error]:', err);
+        Swal.fire('Lỗi', 'Đã xảy ra lỗi khi tính lại điểm: ' + (err.message || err.toString()), 'error');
+    }
+};
+
 // ========================================================
 // CÀI ĐẶT ĐỀ THI & SỬA ĐÁP ÁN (EDIT EXAM SETTINGS & KEYS)
 // ========================================================
@@ -10058,7 +10108,7 @@ window.renderEditExamModalKeys = (code) => {
                 <div class="p-2 bg-slate-50 dark:bg-slate-900 rounded-xl border ${isBonus ? 'border-amber-400 bg-amber-50/40 dark:bg-amber-950/20' : 'border-slate-200 dark:border-slate-700'} flex items-center justify-between gap-1">
                     <span class="font-bold text-slate-600 dark:text-slate-300 text-xs shrink-0">Câu ${i + 1}:</span>
                     <div class="flex items-center gap-1.5">
-                        <select data-modal-p1="${i}" class="px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 font-bold text-emerald-600 outline-none text-xs">
+                        <select data-modal-p1="${i}" class="w-16 h-7 pl-2 pr-5 py-0.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 font-black text-emerald-600 dark:text-emerald-400 outline-none text-xs text-center cursor-pointer shadow-2xs hover:border-emerald-500 transition-all">
                             <option value="-" ${currentAns==='-'?'selected':''}>-</option>
                             <option value="A" ${currentAns==='A'?'selected':''}>A</option>
                             <option value="B" ${currentAns==='B'?'selected':''}>B</option>
