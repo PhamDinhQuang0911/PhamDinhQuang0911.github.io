@@ -2052,10 +2052,15 @@ function findStudentBySbd(sbdInput, examId = state.exam?.id, classId = state.exa
                 name: m.name || m.student_name,
                 student_no: m.student_no || clean,
                 class_name: m.class_name || state.exam?.className || '',
+                grade: m.grade || '',
+                room: m.room || '',
+                dob: m.dob || '',
+                gender: m.gender || '',
                 class_id: m.class_id || state.exam?.classId || '',
                 student_uid: m.student_uid || '',
                 student_email: m.student_email || '',
-                phone: m.phone || ''
+                phone: m.phone || '',
+                note: m.note || ''
             };
         }
     }
@@ -2226,6 +2231,10 @@ function enrichSubmissionsFromClassRoster() {
                 if (!s.class_id && matched.class_id) s.class_id = matched.class_id;
                 if (!s.student_uid && matched.student_uid) s.student_uid = matched.student_uid;
                 if (!s.student_email && matched.student_email) s.student_email = matched.student_email;
+                if (matched.room && !s.room) { s.room = matched.room; hasChanges = true; }
+                if (matched.grade && !s.grade) { s.grade = matched.grade; hasChanges = true; }
+                if (matched.dob && !s.dob) { s.dob = matched.dob; hasChanges = true; }
+                if (matched.gender && !s.gender) { s.gender = matched.gender; hasChanges = true; }
             }
         }
         if (!s.class_name && defaultClass) {
@@ -6672,86 +6681,362 @@ window.clearAllSubmissionsForCurrentExam = async () => {
     })().catch(err => console.warn("Lỗi xóa bài ngầm:", err));
 };
 
-window.exportResultsToExcel = () => {
-    if (!Array.isArray(state.submissions) || state.submissions.length === 0) {
-        Swal.fire('Thông báo', 'Chưa có kết quả nào để xuất file!', 'info');
+// ========================================================
+// HỆ THỐNG XUẤT BẢNG ĐIỂM EXCEL THÔNG MINH (MULTI-SCOPE EXPORT)
+// Hỗ trợ: Xuất tất cả, Xuất theo Lớp, Xuất theo Phòng thi, Xuất theo Khối (Đa Sheet hoặc 1 Sheet)
+// ========================================================
+let _exportAvailableOptions = { classes: [], rooms: [], grades: [] };
+
+window.openExportExcelModal = function() {
+    if ((!state.submissions || state.submissions.length === 0) && (!state.students || state.students.length === 0)) {
+        Swal.fire('Thông báo', 'Chưa có dữ liệu bài chấm hoặc danh sách thí sinh để xuất file!', 'info');
         return;
     }
 
-    const examName = state.exam?.name || 'Bài thi trắc nghiệm';
-    const teacherName = state.user?.displayName || state.user?.name || 'Giáo viên';
-    const examClass = state.exam?.className || 'Lớp OMR';
-
-    // 1. Sắp xếp theo điểm giảm dần (nếu bằng điểm nhau thì xếp theo SBD)
-    const sorted = [...state.submissions].sort((a, b) => {
-        const scoreDiff = (Number(b.score) || 0) - (Number(a.score) || 0);
-        if (scoreDiff !== 0) return scoreDiff;
-        return String(a.student_no || '').localeCompare(String(b.student_no || ''), undefined, { numeric: true });
-    });
-
-    // 2. Tính thứ hạng thi cử chuẩn (Standard competition ranking: 1, 1, 3...)
-    let currentRank = 1;
-    const ranks = [];
-    for (let i = 0; i < sorted.length; i++) {
-        if (i > 0 && (Number(sorted[i].score) || 0) < (Number(sorted[i - 1].score) || 0)) {
-            currentRank = i + 1;
-        }
-        ranks.push(currentRank);
+    const modal = document.getElementById('exportExcelModal');
+    if (!modal) {
+        // Fallback xuất trực tiếp nếu không tìm thấy modal
+        window.confirmExecuteExportExcel();
+        return;
     }
 
-    // 3. Thống kê điểm số
-    const total = sorted.length;
-    const avg = (sorted.reduce((acc, s) => acc + (Number(s.score) || 0), 0) / (total || 1)).toFixed(2);
-    const max = total > 0 ? Math.max(...sorted.map(s => Number(s.score) || 0)).toFixed(2) : '0.00';
-    const min = total > 0 ? Math.min(...sorted.map(s => Number(s.score) || 0)).toFixed(2) : '0.00';
+    // 1. Quét thu thập danh sách Lớp, Phòng thi, Khối từ cả bài chấm và danh sách thí sinh
+    const classSet = new Set();
+    const roomSet = new Set();
+    const gradeSet = new Set();
 
-    let dupSbdCount = 0;
-    let dupSbdCodeCount = 0;
-    sorted.forEach(s => {
-        const d = getSubmissionDuplicateStatus(s, sorted);
-        if (d) {
-            if (d.isSameSbdCode || d.type === 'both') dupSbdCodeCount++;
-            else if (d.isSameSbd || d.type === 'sbd_only') dupSbdCount++;
+    if (state.exam?.className) classSet.add(state.exam.className);
+
+    const allRecords = [
+        ...(Array.isArray(state.submissions) ? state.submissions : []),
+        ...(Array.isArray(state.students) ? state.students : [])
+    ];
+
+    allRecords.forEach(r => {
+        if (r.class_name) classSet.add(r.class_name);
+        if (r.room) roomSet.add(r.room);
+        if (r.grade) gradeSet.add(r.grade);
+        else if (r.class_name) {
+            const m = String(r.class_name).match(/^([0-9]{1,2})/);
+            if (m) gradeSet.add(`Khối ${m[1]}`);
         }
     });
 
-    // 4. Xây dựng nội dung file Excel (HTML Spreadsheet với đầy đủ styles, borders, màu nền và định dạng text)
-    const rowsHtml = sorted.map((s, idx) => {
-        const dupe = getSubmissionDuplicateStatus(s, sorted);
-        let rowBg = '#FFFFFF';
-        let textColor = '#0F172A';
-        let note = '';
+    _exportAvailableOptions.classes = Array.from(classSet).filter(Boolean).sort((a, b) => a.localeCompare(b, 'vi', { numeric: true }));
+    _exportAvailableOptions.rooms = Array.from(roomSet).filter(Boolean).sort((a, b) => a.localeCompare(b, 'vi', { numeric: true }));
+    _exportAvailableOptions.grades = Array.from(gradeSet).filter(Boolean).sort((a, b) => a.localeCompare(b, 'vi', { numeric: true }));
 
-        if (dupe) {
-            if (dupe.isSameSbdCode || dupe.type === 'both') {
-                rowBg = '#FFE4E6'; // Màu đỏ hồng nhạt cho trường hợp trùng cả SBD và Mã đề
-                textColor = '#9F1239';
-                note = 'Trùng cả SBD & Mã đề';
-            } else if (dupe.isSameSbd || dupe.type === 'sbd_only') {
-                rowBg = '#FEF3C7'; // Màu vàng cam nhạt cho trường hợp trùng SBD
-                textColor = '#92400E';
-                note = 'Trùng SBD';
+    // Cập nhật tóm tắt thống kê
+    const statsEl = document.getElementById('exportStatsSummaryText');
+    if (statsEl) {
+        statsEl.textContent = `Tổng: ${state.submissions?.length || 0} bài chấm · ${state.students?.length || 0} thí sinh đăng ký`;
+    }
+
+    // Đặt mặc định radio "all"
+    const radioAll = document.querySelector('input[name="exportScope"][value="all"]');
+    if (radioAll) radioAll.checked = true;
+
+    window.handleExportScopeChange();
+    modal.classList.remove('hidden');
+};
+
+window.closeExportExcelModal = function() {
+    document.getElementById('exportExcelModal')?.classList.add('hidden');
+};
+
+window.handleExportScopeChange = function() {
+    const scope = document.querySelector('input[name="exportScope"]:checked')?.value || 'all';
+    const container = document.getElementById('exportFilterSelectContainer');
+    const label = document.getElementById('exportFilterLabel');
+    const select = document.getElementById('exportFilterSelect');
+
+    if (!container || !label || !select) return;
+
+    if (scope === 'all') {
+        container.classList.add('hidden');
+        return;
+    }
+
+    container.classList.remove('hidden');
+
+    if (scope === 'class') {
+        label.textContent = 'Chọn lớp cần xuất:';
+        select.innerHTML = '<option value="__ALL_SHEETS__">📁 Tất cả các lớp (Mỗi lớp 1 Sheet riêng trong file Excel)</option>' +
+            _exportAvailableOptions.classes.map(c => `<option value="${c}">🏫 Lớp ${c}</option>`).join('');
+    } else if (scope === 'room') {
+        label.textContent = 'Chọn phòng thi cần xuất:';
+        select.innerHTML = '<option value="__ALL_SHEETS__">📁 Tất cả các phòng thi (Mỗi phòng 1 Sheet riêng trong file Excel)</option>' +
+            _exportAvailableOptions.rooms.map(r => `<option value="${r}">🚪 ${r}</option>`).join('');
+    } else if (scope === 'grade') {
+        label.textContent = 'Chọn khối cần xuất:';
+        select.innerHTML = '<option value="__ALL_SHEETS__">📁 Tất cả các khối (Mỗi khối 1 Sheet riêng trong file Excel)</option>' +
+            _exportAvailableOptions.grades.map(g => `<option value="${g}">🎓 ${g}</option>`).join('');
+    }
+};
+
+window.confirmExecuteExportExcel = function() {
+    const scope = document.querySelector('input[name="exportScope"]:checked')?.value || 'all';
+    const filterVal = document.getElementById('exportFilterSelect')?.value || '__ALL_SHEETS__';
+
+    const optOfficial = Boolean(document.getElementById('exportOptOfficialColumns')?.checked ?? true);
+    const optIncludeAbsent = Boolean(document.getElementById('exportOptIncludeAbsent')?.checked ?? true);
+    const optPartScores = Boolean(document.getElementById('exportOptPartScores')?.checked ?? true);
+    const optImageLink = Boolean(document.getElementById('exportOptImageLink')?.checked ?? true);
+
+    const examName = state.exam?.name || 'Bài kiểm tra OMR';
+    const teacherName = state.user?.displayName || state.user?.name || 'Giáo viên';
+
+    // Xây dựng danh sách các Worksheet cần tạo
+    let sheetsConfig = [];
+
+    if (scope === 'all') {
+        sheetsConfig.push({
+            title: 'Tất cả bài thi',
+            filterFn: () => true
+        });
+    } else if (scope === 'class') {
+        if (filterVal === '__ALL_SHEETS__') {
+            const list = _exportAvailableOptions.classes.length > 0 ? _exportAvailableOptions.classes : ['Lớp chung'];
+            list.forEach(c => {
+                sheetsConfig.push({
+                    title: `Lớp ${c}`,
+                    filterFn: (sub, st) => (sub?.class_name === c || st?.class_name === c)
+                });
+            });
+        } else {
+            sheetsConfig.push({
+                title: `Lớp ${filterVal}`,
+                filterFn: (sub, st) => (sub?.class_name === filterVal || st?.class_name === filterVal)
+            });
+        }
+    } else if (scope === 'room') {
+        if (filterVal === '__ALL_SHEETS__') {
+            const list = _exportAvailableOptions.rooms.length > 0 ? _exportAvailableOptions.rooms : ['Phòng 1'];
+            list.forEach(r => {
+                sheetsConfig.push({
+                    title: r,
+                    filterFn: (sub, st) => (sub?.room === r || st?.room === r)
+                });
+            });
+        } else {
+            sheetsConfig.push({
+                title: filterVal,
+                filterFn: (sub, st) => (sub?.room === filterVal || st?.room === filterVal)
+            });
+        }
+    } else if (scope === 'grade') {
+        if (filterVal === '__ALL_SHEETS__') {
+            const list = _exportAvailableOptions.grades.length > 0 ? _exportAvailableOptions.grades : ['Toàn khối'];
+            list.forEach(g => {
+                const gradeNum = g.replace(/\D/g, '');
+                sheetsConfig.push({
+                    title: g,
+                    filterFn: (sub, st) => {
+                        const target = sub || st;
+                        return target?.grade === g || (target?.class_name && target.class_name.startsWith(gradeNum));
+                    }
+                });
+            });
+        } else {
+            const gradeNum = filterVal.replace(/\D/g, '');
+            sheetsConfig.push({
+                title: filterVal,
+                filterFn: (sub, st) => {
+                    const target = sub || st;
+                    return target?.grade === filterVal || (target?.class_name && target.class_name.startsWith(gradeNum));
+                }
+            });
+        }
+    }
+
+    // Xây dựng nội dung từng Sheet
+    const worksheetsXml = sheetsConfig.map(sh => `
+        <x:ExcelWorksheet>
+            <x:Name>${sh.title.replace(/[:\\/?*\[\]]/g, '_').substring(0, 31)}</x:Name>
+            <x:WorksheetOptions>
+                <x:DisplayGridlines/>
+            </x:WorksheetOptions>
+        </x:ExcelWorksheet>
+    `).join('');
+
+    const tablesHtml = sheetsConfig.map(sh => {
+        // 1. Lọc các bài chấm thuộc sheet này
+        const subsInSheet = (state.submissions || []).filter(sub => sh.filterFn(sub, null));
+
+        // Sắp xếp bài chấm theo điểm giảm dần (nếu bằng nhau thì theo SBD)
+        subsInSheet.sort((a, b) => {
+            const scoreDiff = (Number(b.score) || 0) - (Number(a.score) || 0);
+            if (scoreDiff !== 0) return scoreDiff;
+            return String(a.student_no || '').localeCompare(String(b.student_no || ''), undefined, { numeric: true });
+        });
+
+        // 2. Tính thứ hạng cho các bài có điểm
+        let currentRank = 1;
+        const rankMap = new Map();
+        for (let i = 0; i < subsInSheet.length; i++) {
+            if (i > 0 && (Number(subsInSheet[i].score) || 0) < (Number(subsInSheet[i - 1].score) || 0)) {
+                currentRank = i + 1;
             }
+            rankMap.set(subsInSheet[i].id, currentRank);
         }
 
-        const studentName = s.student_name || (s.student_no ? `Học sinh #${s.student_no}` : `Phiếu #${idx + 1}`);
-        const className = s.class_name || examClass || '---';
-        const scoreVal = (Number(s.score) || 0).toFixed(2);
-        const rankVal = ranks[idx];
+        // 3. Xử lý thí sinh vắng thi nếu được chọn
+        const allRows = subsInSheet.map(s => ({
+            isAbsent: false,
+            id: s.id,
+            name: s.student_name || (s.student_no ? `Học sinh #${s.student_no}` : '---'),
+            student_no: s.student_no || '',
+            dob: s.dob || '',
+            gender: s.gender || '',
+            room: s.room || '',
+            code: s.code || '',
+            part1: (s.part1_score !== undefined) ? Number(s.part1_score).toFixed(2) : '',
+            part2: (s.part2_score !== undefined) ? Number(s.part2_score).toFixed(2) : '',
+            part3: (s.part3_score !== undefined) ? Number(s.part3_score).toFixed(2) : '',
+            score: (s.score !== undefined) ? Number(s.score).toFixed(2) : '0.00',
+            rank: rankMap.get(s.id) || '',
+            class_name: s.class_name || '',
+            photo_url: s.telegram_photo_url || ''
+        }));
+
+        let absentCount = 0;
+        if (optIncludeAbsent && Array.isArray(state.students) && state.students.length > 0) {
+            const presentSbds = new Set(subsInSheet.map(s => String(s.student_no || '').trim().replace(/^0+/, '')));
+
+            state.students.forEach(st => {
+                if (!sh.filterFn(null, st)) return;
+                const cleanStSbd = String(st.student_no || '').trim().replace(/^0+/, '');
+                if (!presentSbds.has(cleanStSbd)) {
+                    absentCount++;
+                    allRows.push({
+                        isAbsent: true,
+                        id: st.id || ('abs_' + st.student_no),
+                        name: st.name || `Học sinh #${st.student_no}`,
+                        student_no: st.student_no || '',
+                        dob: st.dob || '',
+                        gender: st.gender || '',
+                        room: st.room || '',
+                        code: '---',
+                        part1: '---',
+                        part2: '---',
+                        part3: '---',
+                        score: '---',
+                        rank: '---',
+                        class_name: st.class_name || '',
+                        photo_url: ''
+                    });
+                }
+            });
+        }
+
+        // Sắp xếp lại danh sách: Bài thi trước (theo thứ hạng điểm) hoặc theo SBD
+        allRows.sort((a, b) => {
+            if (a.isAbsent !== b.isAbsent) return a.isAbsent ? 1 : -1;
+            return String(a.student_no).localeCompare(String(b.student_no), undefined, { numeric: true });
+        });
+
+        // Thống kê điểm số
+        const testedCount = subsInSheet.length;
+        const totalCandidates = testedCount + absentCount;
+        const scores = subsInSheet.map(s => Number(s.score) || 0);
+        const avgScore = testedCount > 0 ? (scores.reduce((a, b) => a + b, 0) / testedCount).toFixed(2) : '0.00';
+        const maxScore = testedCount > 0 ? Math.max(...scores).toFixed(2) : '0.00';
+        const minScore = testedCount > 0 ? Math.min(...scores).toFixed(2) : '0.00';
+
+        // Xây dựng dòng dữ liệu
+        const trRows = allRows.map((r, idx) => {
+            const rowBg = r.isAbsent ? '#FFF1F2' : (idx % 2 === 1 ? '#F8FAFC' : '#FFFFFF');
+            const textColor = r.isAbsent ? '#BE123C' : '#0F172A';
+
+            return `
+                <tr style="background-color: ${rowBg}; color: ${textColor}; height: 26px; text-align: center;">
+                    <td style="border: 1px solid #CBD5E1; vertical-align: middle;">${idx + 1}</td>
+                    <td style="border: 1px solid #CBD5E1; text-align: left; padding-left: 8px; font-weight: ${r.isAbsent ? 'normal' : '500'}; vertical-align: middle;">${r.name}</td>
+                    ${optOfficial ? `<td style="border: 1px solid #CBD5E1; vertical-align: middle;">${r.dob}</td>` : ''}
+                    ${optOfficial ? `<td style="border: 1px solid #CBD5E1; vertical-align: middle;">${r.gender}</td>` : ''}
+                    <td style="border: 1px solid #CBD5E1; font-weight: bold; mso-number-format: '\\@'; vertical-align: middle;">${r.student_no}</td>
+                    ${optOfficial ? `<td style="border: 1px solid #CBD5E1; vertical-align: middle;">${r.room}</td>` : ''}
+                    ${optPartScores ? `<td style="border: 1px solid #CBD5E1; font-weight: bold; mso-number-format: '\\@'; vertical-align: middle;">${r.code}</td>` : ''}
+                    ${optPartScores ? `<td style="border: 1px solid #CBD5E1; vertical-align: middle;">${r.part1}</td>` : ''}
+                    ${optPartScores ? `<td style="border: 1px solid #CBD5E1; vertical-align: middle;">${r.part2}</td>` : ''}
+                    ${optPartScores ? `<td style="border: 1px solid #CBD5E1; vertical-align: middle;">${r.part3}</td>` : ''}
+                    <td style="border: 1px solid #CBD5E1; font-weight: bold; color: ${r.isAbsent ? '#BE123C' : '#047857'}; vertical-align: middle; mso-number-format: '0\\.00';">${r.score}</td>
+                    <td style="border: 1px solid #CBD5E1; font-weight: bold; vertical-align: middle;">${r.rank}</td>
+                    <td style="border: 1px solid #CBD5E1; font-weight: bold; color: #DC2626; vertical-align: middle;">${r.isAbsent ? 'x' : ''}</td>
+                    <td style="border: 1px solid #CBD5E1; vertical-align: middle;">${r.class_name}</td>
+                    ${optImageLink ? `<td style="border: 1px solid #CBD5E1; vertical-align: middle; font-size: 9pt;">${r.photo_url ? `<a href="${r.photo_url}" target="_blank" style="color: #0284C7; text-decoration: underline;">Xem ảnh</a>` : '---'}</td>` : ''}
+                </tr>
+            `;
+        }).join('');
+
+        // Tính tổng số cột để colspan
+        let colCount = 6;
+        if (optOfficial) colCount += 3;
+        if (optPartScores) colCount += 4;
+        if (optImageLink) colCount += 1;
 
         return `
-            <tr style="background-color: ${rowBg}; color: ${textColor}; height: 28px;">
-                <td style="border: 1px solid #CBD5E1; text-align: center; font-weight: normal; vertical-align: middle;">${idx + 1}</td>
-                <td style="border: 1px solid #CBD5E1; text-align: center; font-weight: bold; mso-number-format: '\\@'; vertical-align: middle;">${s.student_no || '---'}</td>
-                <td style="border: 1px solid #CBD5E1; text-align: left; padding-left: 8px; font-weight: 500; vertical-align: middle;">${studentName}</td>
-                <td style="border: 1px solid #CBD5E1; text-align: center; vertical-align: middle;">${className}</td>
-                <td style="border: 1px solid #CBD5E1; text-align: center; font-weight: bold; vertical-align: middle;">${scoreVal}</td>
-                <td style="border: 1px solid #CBD5E1; text-align: center; font-weight: bold; vertical-align: middle;">${rankVal}</td>
-            </tr>
+            <table border="1" style="border-collapse: collapse; width: 100%; margin-bottom: 35px;">
+                <!-- DÒNG TIÊU ĐỀ -->
+                <tr>
+                    <td colspan="${colCount}" style="text-align: center; font-size: 15pt; font-weight: bold; color: #0F172A; height: 38px; vertical-align: middle; background-color: #F8FAFC;">
+                        BẢNG KẾT QUẢ CHẤM THI: ${examName.toUpperCase()} - ${sh.title.toUpperCase()}
+                    </td>
+                </tr>
+                <tr>
+                    <td colspan="${colCount}" style="text-align: center; font-size: 10pt; color: #64748B; height: 24px; vertical-align: middle;">
+                        Giáo viên: <b>${teacherName}</b> &nbsp;|&nbsp; Ngày xuất: <b>${new Date().toLocaleString('vi-VN')}</b>
+                    </td>
+                </tr>
+                <tr><td colspan="${colCount}" style="height: 10px; border: none;"></td></tr>
+
+                <!-- THỐNG KÊ TỔNG QUAN -->
+                <tr style="background-color: #F1F5F9; font-weight: bold; text-align: center; font-size: 10pt; height: 26px;">
+                    <td style="border: 1px solid #CBD5E1; padding: 4px;">Tổng thí sinh</td>
+                    <td style="border: 1px solid #CBD5E1; padding: 4px;">Dự thi</td>
+                    <td style="border: 1px solid #CBD5E1; padding: 4px; color: #DC2626;">Vắng thi</td>
+                    <td style="border: 1px solid #CBD5E1; padding: 4px; color: #0284C7;">Điểm TB</td>
+                    <td style="border: 1px solid #CBD5E1; padding: 4px; color: #16A34A;">Cao nhất</td>
+                    <td style="border: 1px solid #CBD5E1; padding: 4px; color: #DC2626;">Thấp nhất</td>
+                    <td colspan="${colCount - 6}" style="border: 1px solid #CBD5E1; background-color: #F8FAFC;"></td>
+                </tr>
+                <tr style="text-align: center; font-size: 11pt; font-weight: bold; height: 28px;">
+                    <td style="border: 1px solid #CBD5E1;">${totalCandidates}</td>
+                    <td style="border: 1px solid #CBD5E1; color: #047857;">${testedCount}</td>
+                    <td style="border: 1px solid #CBD5E1; color: #DC2626;">${absentCount}</td>
+                    <td style="border: 1px solid #CBD5E1; color: #0284C7;">${avgScore}</td>
+                    <td style="border: 1px solid #CBD5E1; color: #16A34A;">${maxScore}</td>
+                    <td style="border: 1px solid #CBD5E1; color: #DC2626;">${minScore}</td>
+                    <td colspan="${colCount - 6}" style="border: 1px solid #CBD5E1; background-color: #FFFFFF;"></td>
+                </tr>
+                <tr><td colspan="${colCount}" style="height: 12px; border: none;"></td></tr>
+
+                <!-- TIÊU ĐỀ CỘT -->
+                <tr style="background-color: #E2E8F0; font-weight: bold; text-align: center; height: 32px; font-size: 10.5pt;">
+                    <th style="border: 1px solid #94A3B8; width: 45px;">STT</th>
+                    <th style="border: 1px solid #94A3B8; width: 190px; text-align: left; padding-left: 8px;">Họ và tên</th>
+                    ${optOfficial ? `<th style="border: 1px solid #94A3B8; width: 95px;">Ngày sinh</th>` : ''}
+                    ${optOfficial ? `<th style="border: 1px solid #94A3B8; width: 65px;">Giới tính</th>` : ''}
+                    <th style="border: 1px solid #94A3B8; width: 95px;">Số báo danh</th>
+                    ${optOfficial ? `<th style="border: 1px solid #94A3B8; width: 85px;">Phòng thi</th>` : ''}
+                    ${optPartScores ? `<th style="border: 1px solid #94A3B8; width: 65px;">Mã đề</th>` : ''}
+                    ${optPartScores ? `<th style="border: 1px solid #94A3B8; width: 65px;">Điểm P1</th>` : ''}
+                    ${optPartScores ? `<th style="border: 1px solid #94A3B8; width: 65px;">Điểm P2</th>` : ''}
+                    ${optPartScores ? `<th style="border: 1px solid #94A3B8; width: 65px;">Điểm P3</th>` : ''}
+                    <th style="border: 1px solid #94A3B8; width: 80px;">Điểm thi</th>
+                    <th style="border: 1px solid #94A3B8; width: 70px;">Thứ hạng</th>
+                    <th style="border: 1px solid #94A3B8; width: 70px;">Vắng thi</th>
+                    <th style="border: 1px solid #94A3B8; width: 90px;">Lớp</th>
+                    ${optImageLink ? `<th style="border: 1px solid #94A3B8; width: 85px;">Ảnh bài thi</th>` : ''}
+                </tr>
+
+                <!-- DỮ LIỆU THÍ SINH -->
+                ${trRows}
+            </table>
         `;
     }).join('');
 
-    const excelHtml = `
+    const excelFullHtml = `
         <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
         <head>
             <meta charset="utf-8">
@@ -6759,88 +7044,53 @@ window.exportResultsToExcel = () => {
             <xml>
                 <x:ExcelWorkbook>
                     <x:ExcelWorksheets>
-                        <x:ExcelWorksheet>
-                            <x:Name>Bảng Điểm</x:Name>
-                            <x:WorksheetOptions>
-                                <x:DisplayGridlines/>
-                            </x:WorksheetOptions>
-                        </x:ExcelWorksheet>
+                        ${worksheetsXml}
                     </x:ExcelWorksheets>
                 </x:ExcelWorkbook>
             </xml>
             <![endif]-->
             <style>
                 body { font-family: 'Segoe UI', Arial, sans-serif; color: #0F172A; }
-                table { border-collapse: collapse; width: 100%; }
+                table { border-collapse: collapse; width: 100%; margin-bottom: 30px; }
                 th, td { mso-style-parent: style0; }
             </style>
         </head>
         <body>
-            <table>
-                <!-- DÒNG TIÊU ĐỀ BÀI THI -->
-                <tr>
-                    <td colspan="6" style="text-align: center; font-size: 16pt; font-weight: bold; color: #0F172A; height: 40px; vertical-align: middle;">
-                        BẢNG KẾT QUẢ CHẤM THI: ${(examName || 'OMR').toUpperCase()}
-                    </td>
-                </tr>
-                <tr>
-                    <td colspan="6" style="text-align: center; font-size: 10pt; color: #64748B; height: 24px; vertical-align: middle;">
-                        Giáo viên: <b>${teacherName}</b> &nbsp;|&nbsp; Ngày xuất: <b>${new Date().toLocaleString('vi-VN')}</b>
-                    </td>
-                </tr>
-                <tr><td colspan="6" style="height: 12px;"></td></tr>
-
-                <!-- BẢNG THỐNG KÊ ĐIỂM -->
-                <tr style="background-color: #F8FAFC; font-weight: bold; text-align: center;">
-                    <th colspan="6" style="border: 1px solid #CBD5E1; background-color: #F1F5F9; font-size: 11pt; padding: 6px; text-align: left;">
-                        📊 BẢNG THỐNG KÊ ĐIỂM SỐ
-                    </th>
-                </tr>
-                <tr style="background-color: #F8FAFC; text-align: center; font-size: 10pt; height: 26px;">
-                    <td style="border: 1px solid #CBD5E1; font-weight: bold; width: 60px;">Tổng số bài</td>
-                    <td style="border: 1px solid #CBD5E1; font-weight: bold; width: 100px;">Điểm trung bình</td>
-                    <td style="border: 1px solid #CBD5E1; font-weight: bold; width: 220px;">Điểm cao nhất</td>
-                    <td style="border: 1px solid #CBD5E1; font-weight: bold; width: 120px;">Điểm thấp nhất</td>
-                    <td style="border: 1px solid #CBD5E1; font-weight: bold; width: 100px; background-color: #FEF3C7; color: #92400E;">Trùng SBD</td>
-                    <td style="border: 1px solid #CBD5E1; font-weight: bold; width: 100px; background-color: #FFE4E6; color: #9F1239;">Trùng cả SBD &amp; Mã</td>
-                </tr>
-                <tr style="text-align: center; font-size: 11pt; height: 30px;">
-                    <td style="border: 1px solid #CBD5E1; font-weight: bold;">${total}</td>
-                    <td style="border: 1px solid #CBD5E1; font-weight: bold; color: #0284C7;">${avg}</td>
-                    <td style="border: 1px solid #CBD5E1; font-weight: bold; color: #16A34A;">${max}</td>
-                    <td style="border: 1px solid #CBD5E1; font-weight: bold; color: #DC2626;">${min}</td>
-                    <td style="border: 1px solid #CBD5E1; font-weight: bold; background-color: ${dupSbdCount > 0 ? '#FEF3C7' : '#FFFFFF'}; color: ${dupSbdCount > 0 ? '#B45309' : '#64748B'};">${dupSbdCount}</td>
-                    <td style="border: 1px solid #CBD5E1; font-weight: bold; background-color: ${dupSbdCodeCount > 0 ? '#FFE4E6' : '#FFFFFF'}; color: ${dupSbdCodeCount > 0 ? '#BE123C' : '#64748B'};">${dupSbdCodeCount}</td>
-                </tr>
-                <tr><td colspan="6" style="height: 16px;"></td></tr>
-
-                <!-- DÒNG TIÊU ĐỀ CỦA BẢNG ĐIỂM (IN ĐẬM, ĐỔ NỀN XÁM NHẠT #E2E8F0, CÓ BO VIỀN) -->
-                <tr style="background-color: #E2E8F0; font-weight: bold; text-align: center; height: 34px;">
-                    <th style="border: 1px solid #94A3B8; padding: 8px 12px; width: 60px; vertical-align: middle;">STT</th>
-                    <th style="border: 1px solid #94A3B8; padding: 8px 12px; width: 100px; vertical-align: middle;">SBD</th>
-                    <th style="border: 1px solid #94A3B8; padding: 8px 12px; width: 220px; text-align: left; vertical-align: middle;">Họ và tên</th>
-                    <th style="border: 1px solid #94A3B8; padding: 8px 12px; width: 120px; vertical-align: middle;">Lớp</th>
-                    <th style="border: 1px solid #94A3B8; padding: 8px 12px; width: 100px; vertical-align: middle;">Điểm</th>
-                    <th style="border: 1px solid #94A3B8; padding: 8px 12px; width: 100px; vertical-align: middle;">Thứ hạng</th>
-                </tr>
-
-                <!-- CÁC DÒNG DỮ LIỆU ĐÃ BO VIỀN VÀ BÔI MÀU CẢNH BÁO TRÙNG -->
-                ${rowsHtml}
-            </table>
+            ${tablesHtml}
         </body>
         </html>
     `;
 
-    const blob = new Blob(['\uFEFF' + excelHtml], { type: 'application/vnd.ms-excel;charset=utf-8;' });
+    // Tải file về máy
+    const blob = new Blob(['\uFEFF' + excelFullHtml], { type: 'application/vnd.ms-excel;charset=utf-8;' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    const cleanFileName = `Bang_diem_${(examName || 'Bai_thi').replace(/[\s/\\:*?"<>|]+/g, '_')}_${Date.now()}.xls`;
-    link.download = cleanFileName;
+
+    let scopeLabel = 'Tat_ca';
+    if (scope === 'class') scopeLabel = filterVal === '__ALL_SHEETS__' ? 'Cac_Lop' : `Lop_${filterVal}`;
+    else if (scope === 'room') scopeLabel = filterVal === '__ALL_SHEETS__' ? 'Cac_Phong' : `Phong_${filterVal}`;
+    else if (scope === 'grade') scopeLabel = filterVal === '__ALL_SHEETS__' ? 'Cac_Khoi' : `Khoi_${filterVal}`;
+
+    const cleanExam = (examName || 'Bai_thi').replace(/[\s/\\:*?"<>|]+/g, '_');
+    link.download = `Bang_diem_${scopeLabel}_${cleanExam}_${Date.now()}.xls`;
+
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    setTimeout(() => URL.revokeObjectURL(link.href), 10000);
+    setTimeout(() => {
+        URL.revokeObjectURL(link.href);
+    }, 1000);
+
+    window.closeExportExcelModal();
+    if (typeof showToast === 'function') {
+        showToast('Xuất bảng điểm Excel thành công!', 'success');
+    }
 };
+
+// Bí danh để tương thích với tất cả các nút "Xuất Excel" hiện tại
+window.exportResultsToExcel = window.openExportExcelModal;
+window.executeDirectExportExcel = window.confirmExecuteExportExcel;
+
 
 // ========================================================
 // 7. KEYS & BAREM TAB
@@ -7630,78 +7880,195 @@ window.openImportStudentsToClassModal = () => {
     document.getElementById('importStudentsToClassModal').classList.remove('hidden');
 };
 
-window.handleStudentExcelFile = async (file) => {
-    if (!file) return;
-    if (!window.XLSX) {
-        Swal.fire('Thiếu thư viện', 'Thư viện SheetJS chưa được tải. Vui lòng thử lại!', 'error');
-        return;
+// ========================================================
+// BỘ PHÂN TÍCH DANH SÁCH THÍ SINH THEO MẪU CHÍNH THỨC
+// Hỗ trợ các cột: STT, Họ và tên, Ngày sinh, Giới tính, SBD, Phòng thi, Điểm, Vắng thi, Ghi chú (Lớp)
+// ========================================================
+function parseCsvRows(text) {
+    if (!text || !text.trim()) return [];
+    const lines = [];
+    let curLine = '';
+    let inQuotes = false;
+    for (let i = 0; i < text.length; i++) {
+        const c = text[i];
+        if (c === '"') {
+            if (inQuotes && text[i + 1] === '"') {
+                curLine += '"';
+                i++;
+            } else {
+                inQuotes = !inQuotes;
+                curLine += '"';
+            }
+        } else if ((c === '\n' || c === '\r') && !inQuotes) {
+            if (c === '\r' && text[i + 1] === '\n') i++;
+            if (curLine.trim()) lines.push(curLine.trim());
+            curLine = '';
+        } else {
+            curLine += c;
+        }
+    }
+    if (curLine.trim()) lines.push(curLine.trim());
+
+    return lines.map(line => {
+        const row = [];
+        let cur = '';
+        let inside = false;
+        for (let i = 0; i < line.length; i++) {
+            const ch = line[i];
+            if (ch === '"') {
+                if (inside && line[i + 1] === '"') {
+                    cur += '"';
+                    i++;
+                } else {
+                    inside = !inside;
+                }
+            } else if ((ch === ',' || ch === '\t' || ch === ';') && !inside) {
+                row.push(cur.trim());
+                cur = '';
+            } else {
+                cur += ch;
+            }
+        }
+        row.push(cur.trim());
+        return row;
+    });
+}
+
+function parseCandidateRoster(rawRows) {
+    if (!rawRows || rawRows.length === 0) return [];
+
+    let headerIdx = -1;
+    let sbdCol = -1, nameCol = -1, dobCol = -1, genderCol = -1, roomCol = -1, scoreCol = -1, absentCol = -1, noteCol = -1;
+
+    for (let r = 0; r < Math.min(rawRows.length, 10); r++) {
+        const row = rawRows[r].map(c => String(c || '').toLowerCase().trim());
+        for (let c = 0; c < row.length; c++) {
+            const v = row[c];
+            if (v.includes('họ và tên') || v.includes('họ tên') || (v.includes('tên') && !v.includes('lớp') && !v.includes('trường')) || v.includes('thí sinh')) nameCol = c;
+            else if (v.includes('ngày sinh') || v.includes('ngaysinh') || v.includes('năm sinh') || v === 'dob') dobCol = c;
+            else if (v.includes('giới tính') || v.includes('gioitinh') || v.includes('nam/nữ') || v === 'gt') genderCol = c;
+            else if (v.includes('số báo danh') || v === 'sbd' || v.includes('báo danh') || v.includes('mã hs')) sbdCol = c;
+            else if (v.includes('phòng thi') || v.includes('phòng') || v.includes('room')) roomCol = c;
+            else if (v.includes('điểm thi') || v === 'điểm') scoreCol = c;
+            else if (v.includes('vắng thi') || v.includes('vắng')) absentCol = c;
+            else if (v.includes('ghi chú') || v.includes('lớp') || v.includes('lop') || v.includes('class')) noteCol = c;
+        }
+        if (sbdCol !== -1 && nameCol !== -1) {
+            headerIdx = r;
+            break;
+        }
     }
 
+    const startRow = headerIdx !== -1 ? headerIdx + 1 : 0;
+    const students = [];
+
+    for (let r = startRow; r < rawRows.length; r++) {
+        const row = rawRows[r];
+        if (!row || row.length < 2) continue;
+
+        let sbd = '', name = '', dob = '', gender = '', room = '', score = '', absent = '', note = '', className = '', grade = '';
+
+        if (headerIdx !== -1) {
+            sbd = sbdCol !== -1 ? String(row[sbdCol] || '').trim() : '';
+            name = nameCol !== -1 ? String(row[nameCol] || '').trim() : '';
+            dob = dobCol !== -1 ? String(row[dobCol] || '').trim() : '';
+            gender = genderCol !== -1 ? String(row[genderCol] || '').trim() : '';
+            room = roomCol !== -1 ? String(row[roomCol] || '').trim() : '';
+            score = scoreCol !== -1 ? String(row[scoreCol] || '').trim() : '';
+            absent = absentCol !== -1 ? String(row[absentCol] || '').trim() : '';
+            note = noteCol !== -1 ? String(row[noteCol] || '').trim() : '';
+        } else {
+            // Nhận diện theo vị trí cột mẫu chính thức:
+            // STT(0), Họ tên(1), Ngày sinh(2), Giới tính(3), SBD(4), Phòng thi(5), Điểm(6), Vắng(7), Ghi chú/Lớp(8)
+            if (row.length >= 5) {
+                name = String(row[1] || '').trim();
+                dob = String(row[2] || '').trim();
+                gender = String(row[3] || '').trim();
+                sbd = String(row[4] || '').trim();
+                room = String(row[5] || '').trim();
+                score = String(row[6] || '').trim();
+                absent = String(row[7] || '').trim();
+                note = String(row[8] || '').trim();
+            } else {
+                sbd = String(row[0] || '').trim();
+                name = String(row[1] || '').trim();
+                note = String(row[2] || '').trim();
+            }
+        }
+
+        sbd = sbd.replace(/^['"]+/, '').trim();
+        name = name.replace(/^['"]+/, '').trim();
+        if (!sbd && !name) continue;
+
+        if (gender.toUpperCase() === 'X') gender = 'Nữ';
+        else if (gender.toLowerCase() === 'nam' || gender.toLowerCase() === 'nữ') gender = gender.charAt(0).toUpperCase() + gender.slice(1);
+
+        // Trích xuất Lớp từ cột Ghi chú hoặc Tên (VD: "Lớp 6D2" -> "6D2")
+        const classMatch = (note + ' ' + name).match(/L[ớo]p\s*([0-9]{1,2}[A-Za-z0-9_-]*)/i) || note.match(/\b([0-9]{1,2}[A-Za-z0-9_-]+)\b/);
+        if (classMatch) {
+            className = classMatch[1].toUpperCase();
+        } else if (note) {
+            className = note;
+        }
+
+        // Trích xuất Khối từ tên lớp (VD: 6D1 -> Khối 6, 10A1 -> Khối 10)
+        const gradeMatch = className.match(/^([0-9]{1,2})/);
+        if (gradeMatch) {
+            grade = `Khối ${gradeMatch[1]}`;
+        }
+
+        if (room && !String(room).toLowerCase().startsWith('phòng')) {
+            room = `Phòng ${room}`;
+        }
+
+        students.push({
+            id: 'st_' + Date.now() + '_' + (sbd || Math.random().toString(36).substr(2, 6)),
+            student_no: sbd,
+            name: name,
+            dob: dob,
+            gender: gender,
+            room: room,
+            score: score,
+            absent: absent,
+            note: note,
+            class_name: className,
+            grade: grade
+        });
+    }
+
+    return students;
+}
+
+window.handleStudentExcelFile = async (file) => {
+    if (!file) return;
     try {
         Swal.showLoading();
-        const buffer = await file.arrayBuffer();
-        const wb = window.XLSX.read(buffer, { type: 'array' });
-        const firstSheetName = wb.SheetNames[0];
-        const ws = wb.Sheets[firstSheetName];
-        const rows = window.XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+        let rows = [];
+        if (file.name.endsWith('.csv') || file.type.includes('csv')) {
+            const text = await file.text();
+            rows = parseCsvRows(text);
+        } else {
+            if (!window.XLSX) {
+                Swal.fire('Thiếu thư viện', 'Thư viện SheetJS chưa được tải. Vui lòng thử lại!', 'error');
+                return;
+            }
+            const buffer = await file.arrayBuffer();
+            const wb = window.XLSX.read(buffer, { type: 'array' });
+            const firstSheetName = wb.SheetNames[0];
+            const ws = wb.Sheets[firstSheetName];
+            rows = window.XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+        }
 
         if (!rows || rows.length === 0) {
-            Swal.fire('File trống', 'Không tìm thấy dữ liệu trong file Excel!', 'warning');
+            Swal.fire('File trống', 'Không tìm thấy dữ liệu trong file!', 'warning');
             return;
         }
 
-        let headerIdx = -1;
-        let sbdCol = -1, nameCol = -1, phoneCol = -1, noteCol = -1;
-
-        for (let r = 0; r < Math.min(rows.length, 10); r++) {
-            const rowStr = rows[r].map(c => String(c).toLowerCase());
-            for (let c = 0; c < rowStr.length; c++) {
-                const val = rowStr[c];
-                if (val.includes('sbd') || val.includes('số báo danh') || val.includes('báo danh') || val.includes('mã hs')) sbdCol = c;
-                if (val.includes('họ') || val.includes('tên') || val.includes('họ và tên') || val.includes('thí sinh')) nameCol = c;
-                if (val.includes('sđt') || val.includes('điện thoại') || val.includes('phone') || val.includes('phụ huynh')) phoneCol = c;
-                if (val.includes('ghi chú') || val.includes('tổ') || val.includes('nhóm') || val.includes('lớp')) noteCol = c;
-            }
-            if (sbdCol !== -1 || nameCol !== -1) {
-                headerIdx = r;
-                break;
-            }
-        }
-
-        if (sbdCol === -1 && nameCol === -1) {
-            headerIdx = 0;
-            sbdCol = 0;
-            nameCol = 1;
-            phoneCol = 2;
-            noteCol = 3;
-        } else {
-            if (sbdCol === -1) sbdCol = 0;
-            if (nameCol === -1) nameCol = 1;
-        }
-
-        const parsed = [];
-        for (let r = headerIdx + 1; r < rows.length; r++) {
-            const row = rows[r];
-            if (!row || row.length === 0) continue;
-            let sbd = String(row[sbdCol] || '').trim();
-            let name = String(row[nameCol] || '').trim();
-            let phone = phoneCol !== -1 ? String(row[phoneCol] || '').trim() : '';
-            let note = noteCol !== -1 ? String(row[noteCol] || '').trim() : '';
-
-            sbd = sbd.replace(/^['"]/, '');
-            phone = phone.replace(/^['"]/, '');
-
-            if (!sbd && !name) continue;
-            if (!sbd) sbd = String(parsed.length + 1).padStart(3, '0');
-            if (!name) name = `Học sinh ${sbd}`;
-
-            parsed.push({ student_no: sbd, name, phone, note });
-        }
-
+        const parsed = parseCandidateRoster(rows);
         Swal.close();
         displayImportStudentsPreview(parsed);
     } catch(err) {
-        Swal.fire('Lỗi đọc file Excel', err.message, 'error');
+        Swal.fire('Lỗi đọc file', err.message, 'error');
     }
 };
 
@@ -7713,26 +8080,8 @@ window.previewPastedStudents = (text) => {
         return;
     }
 
-    const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
-    const parsed = [];
-
-    lines.forEach((line, idx) => {
-        const parts = line.split(/[,;\t]/).map(p => p.trim());
-        let sbd = parts[0] || String(idx + 1).padStart(3, '0');
-        let name = parts[1] || `Học sinh ${sbd}`;
-        let phone = parts[2] || '';
-        let note = parts[3] || '';
-
-        if (/^\d{1,2}$/.test(parts[0]) && parts[1] && /^\d{3,8}$/.test(parts[1])) {
-            sbd = parts[1];
-            name = parts[2] || `Học sinh ${sbd}`;
-            phone = parts[3] || '';
-            note = parts[4] || '';
-        }
-
-        parsed.push({ student_no: sbd, name, phone, note });
-    });
-
+    const rows = parseCsvRows(text);
+    const parsed = parseCandidateRoster(rows);
     displayImportStudentsPreview(parsed);
 };
 
@@ -7750,56 +8099,83 @@ function displayImportStudentsPreview(students) {
     }
 
     previewCont.classList.remove('hidden');
-    if (countLabel) countLabel.textContent = `Đã nhận diện: ${students.length} học sinh`;
+    if (countLabel) countLabel.textContent = `Đã nhận diện: ${students.length} thí sinh`;
 
-    tbody.innerHTML = students.slice(0, 50).map(s => `
-        <tr class="hover:bg-gray-50 dark:hover:bg-[#1E1B29]">
-            <td class="p-2 font-mono font-bold text-center text-slate-800 dark:text-slate-100">${s.student_no}</td>
-            <td class="p-2 font-semibold text-slate-900 dark:text-white">${s.name}</td>
-            <td class="p-2 text-slate-500 font-mono">${s.phone || '---'}</td>
-            <td class="p-2 text-slate-400">${s.note || '---'}</td>
+    tbody.innerHTML = students.slice(0, 60).map(s => `
+        <tr class="hover:bg-gray-50 dark:hover:bg-[#1E1B29] text-center">
+            <td class="p-2 font-mono font-bold text-slate-800 dark:text-slate-100">${s.student_no}</td>
+            <td class="p-2 text-left font-semibold text-slate-900 dark:text-white">${s.name}</td>
+            <td class="p-2 text-slate-600 dark:text-slate-300 font-mono">${s.dob || '---'}</td>
+            <td class="p-2 text-slate-600 dark:text-slate-300">${s.gender || '---'}</td>
+            <td class="p-2 font-semibold text-slate-700 dark:text-slate-200">${s.room || '---'}</td>
+            <td class="p-2 font-bold text-emerald-600 dark:text-emerald-400">${s.class_name || '---'}</td>
+            <td class="p-2 text-slate-500 font-semibold">${s.grade || '---'}</td>
         </tr>
-    `).join('') + (students.length > 50 ? `<tr><td colspan="4" class="p-2 text-center text-slate-400 italic">...và ${students.length - 50} học sinh khác</td></tr>` : '');
+    `).join('') + (students.length > 60 ? `<tr><td colspan="7" class="p-2 text-center text-slate-400 italic">...và ${students.length - 60} thí sinh khác</td></tr>` : '');
 }
 
 window.confirmApplyImportedStudents = () => {
-    const cls = getActiveOmrClass();
-    if (!cls) return;
-
     const list = window._parsedImportStudents || [];
     if (list.length === 0) {
-        Swal.fire('Chưa có dữ liệu', 'Vui lòng chọn file Excel hoặc dán danh sách học sinh trước!', 'warning');
+        Swal.fire('Chưa có dữ liệu', 'Vui lòng chọn file Excel hoặc dán danh sách thí sinh trước!', 'warning');
         return;
     }
 
+    const cls = getActiveOmrClass();
     const mode = document.querySelector('input[name="importStudentMode"]:checked')?.value || 'replace';
 
     const formatted = list.map(s => ({
-        id: 'st_' + Date.now() + '_' + s.student_no,
+        id: s.id || ('st_' + Date.now() + '_' + s.student_no),
         student_no: s.student_no,
         name: s.name,
-        phone: s.phone,
-        note: s.note
+        dob: s.dob || '',
+        gender: s.gender || '',
+        room: s.room || '',
+        class_name: s.class_name || (cls ? cls.name : ''),
+        grade: s.grade || '',
+        note: s.note || '',
+        phone: s.phone || ''
     }));
 
-    if (mode === 'replace') {
-        cls.students = formatted;
-    } else {
-        if (!Array.isArray(cls.students)) cls.students = [];
-        cls.students.push(...formatted);
+    // 1. Lưu vào lớp đang chọn nếu có
+    if (cls) {
+        if (mode === 'replace') {
+            cls.students = formatted;
+        } else {
+            if (!Array.isArray(cls.students)) cls.students = [];
+            cls.students.push(...formatted);
+        }
+        cls.updatedAt = new Date().toISOString();
+        saveLocalOmrClasses(state.omrClasses);
     }
 
-    cls.updatedAt = new Date().toISOString();
-    saveLocalOmrClasses(state.omrClasses);
+    // 2. Gán trực tiếp vào danh sách thí sinh của bài thi hiện tại
+    if (mode === 'replace' || !Array.isArray(state.students)) {
+        state.students = formatted;
+    } else {
+        state.students.push(...formatted);
+    }
+    if (state.exam?.id) {
+        try {
+            localStorage.setItem(`omr_students_${state.exam.id}`, JSON.stringify(state.students));
+        } catch (_) {}
+    }
 
-    document.getElementById('importStudentsToClassModal').classList.add('hidden');
-    window.renderStudentsTab();
+    // 3. Tự động cập nhật / làm giàu dữ liệu cho toàn bộ các bài thi đã chấm hiện tại
+    enrichSubmissionsFromClassRoster();
+    syncSubmissionClassFilterOptions();
+    renderInlineSubmissionsList();
+    window.renderResultsTable();
+    updateOverviewStats();
+
+    document.getElementById('importStudentsToClassModal')?.classList.add('hidden');
+    if (typeof window.renderStudentsTab === 'function') window.renderStudentsTab();
 
     Swal.fire({
         icon: 'success',
-        title: 'Nạp danh sách thành công!',
-        text: `Đã nạp ${formatted.length} học sinh vào lớp "${cls.name}". Tổng sĩ số: ${cls.students.length} học sinh.`,
-        timer: 2500
+        title: 'Nạp danh sách thí sinh thành công!',
+        text: `Đã nạp ${formatted.length} thí sinh và tự động ghép thông tin Lớp, Phòng thi cho các bài chấm.`,
+        timer: 2000
     });
 };
 
