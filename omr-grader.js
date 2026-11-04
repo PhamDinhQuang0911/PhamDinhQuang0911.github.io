@@ -2212,12 +2212,12 @@ function renderInlineSubmissionsList() {
             : '';
 
         // Tự động cắt chữ viết tay trong nền nếu chưa có hoặc là bản cắt cũ
-        if (!hasName && (!s.name_image || !s._nameImageV2) && (s.stamped_image || s.image_data)) {
+        if (!hasName && (!s.name_image || !s._nameImageV3) && (s.stamped_image || s.image_data)) {
             const rawSrc = s.image_data || s.stamped_image;
             cropCandidateHandwrittenName(rawSrc, s.template_key).then(cropUrl => {
                 if (cropUrl) {
                     s.name_image = cropUrl;
-                    s._nameImageV2 = true;
+                    s._nameImageV3 = true;
                     const imgEl = document.getElementById(`subNameImg_${s.id}`);
                     if (imgEl) {
                         imgEl.src = cropUrl;
@@ -2258,7 +2258,7 @@ function renderInlineSubmissionsList() {
                             <span>SBD: <b class="text-slate-800 dark:text-slate-200 font-bold">${s.student_no || '--'}</b></span>
                             <span>·</span>
                             <span>Mã: <b class="text-slate-800 dark:text-slate-200 font-bold">${s.code || '--'}</b></span>
-                            ${(s.telegram_photo_url || s.telegram_file_id) ? `<span class="text-sky-500 text-[10px] inline-flex items-center gap-0.5" title="Đã lưu ảnh lên Telegram"><i class="fa-brands fa-telegram"></i></span>` : ''}
+                            ${(s.telegram_photo_url || s.telegram_file_id) ? `<span class="text-emerald-500 text-[10px] inline-flex items-center gap-0.5" title="Đã sao lưu an toàn"><i class="fa-solid fa-circle-check"></i></span>` : ''}
                             ${dupeBadge}
                         </div>
                         ` : `
@@ -2275,7 +2275,7 @@ function renderInlineSubmissionsList() {
                                     <span>SBD: <b class="text-slate-900 dark:text-white font-extrabold">${s.student_no || '--'}</b></span>
                                     <span>·</span>
                                     <span>Mã: <b class="text-slate-900 dark:text-white font-extrabold">${s.code || '--'}</b></span>
-                                    ${(s.telegram_photo_url || s.telegram_file_id) ? `<span class="text-sky-500 text-[10px] inline-flex items-center gap-0.5" title="Đã lưu ảnh lên Telegram"><i class="fa-brands fa-telegram"></i></span>` : ''}
+                                    ${(s.telegram_photo_url || s.telegram_file_id) ? `<span class="text-emerald-500 text-[10px] inline-flex items-center gap-0.5" title="Đã sao lưu an toàn"><i class="fa-solid fa-circle-check"></i></span>` : ''}
                                     ${dupeBadge}
                                 </div>
                                 <div class="text-[10px] font-semibold text-amber-600 dark:text-amber-400 flex items-center gap-1 mt-0.5 truncate">
@@ -3429,13 +3429,20 @@ function recognizeSheetFromGray(gray, options = {}) {
                     matchedTplKey = tplKey;
                 }
 
-                // TỐI ƯU HIỆU NĂNG ĐỘT PHÁ:
-                // Nếu mẫu phiếu hiện tại (được ưu tiên đầu danh sách) đã khớp chuẩn, dừng ngay lập tức!
-                // Tránh việc lặp qua 6 mẫu khác một cách lãng phí làm chậm gấp 7 lần.
-                if (tplKey === activeTpl && score >= 90) {
+                // DỪNG SỚM CHÍNH XÁC & BẢO ĐẢM TỐC ĐỘ (<20s / 100 bài):
+                // Chỉ dừng sớm nếu mẫu active thật sự khớp rất cao (nhiều mốc nội bộ, đọc được mã đề/SBD/đáp án)
+                const isHighConfidenceActive = (tplKey === activeTpl) &&
+                    ((soMoc >= 14) || (totalMoc <= 12 && soMoc >= 7)) &&
+                    mocRatio >= 0.45 &&
+                    (codeDigits >= 2 || sbdDigits >= 2) &&
+                    score >= 180;
+
+                if (isHighConfidenceActive) {
                     break;
                 }
-                if (bestScore >= 200) {
+
+                // Nếu bất kỳ mẫu nào đạt điểm tuyệt đối xuất sắc (soMoc cao + đọc đầy đủ mã đề + sbd + đáp án)
+                if (bestScore >= 240 && soMoc >= 8 && (codeDigits >= 2 || sbdDigits >= 2 || ansCount >= 4)) {
                     break;
                 }
             }
@@ -3695,19 +3702,19 @@ function detectExistingHeadersOffset(canvasOrImg) {
 function cropCandidateHandwrittenName(rectifiedSource, tplKey = null, isStamped = false) {
     if (!rectifiedSource) return Promise.resolve(null);
     const activeKey = tplKey || state.exam?.sheet_template || 'qmcv1239';
-    // Toạ độ dòng 4. Họ và tên thí sinh chuẩn xác trên phiếu QMCV1239 (Khung [16.53, 23.39])
-    let rect = [570/1653, 470/2339, 505/1653, 110/2339]; // default qmcv1239 bao trọn cả nhãn và tên viết tay
-    if (activeKey === 'bgd2025original' || activeKey === 'bgd2') rect = [700/1638, 410/2339, 390/1638, 95/2339];
-    else if (activeKey === 'phutho') rect = [665/1654, 380/2339, 440/1654, 85/2339];
+    // Toạ độ dòng 4. Họ và tên thí sinh chuẩn xác trên từng mẫu phiếu
+    let rect = [400/1653, 485/2339, 645/1653, 75/2339]; // default qmcv1239 bao trọn cả nhãn và tên viết tay
+    if (activeKey === 'bgd2025original' || activeKey === 'bgd2') rect = [370/1638, 485/2339, 700/1638, 75/2339];
+    else if (activeKey === 'phutho') rect = [390/1654, 410/2339, 540/1654, 75/2339];
     else if (activeKey === 'tnmaker40') rect = [1020/2479, 440/1746, 580/2479, 140/1746];
-    else if (activeKey === 'qm40') rect = [1120/1735, 75/919, 380/1735, 120/919];
+    else if (activeKey === 'qm40') rect = [1050/1735, 10/919, 550/1735, 170/919];
 
     return new Promise(resolve => {
         const processSource = (source) => {
             const srcW = source.width || source.naturalWidth || 1552;
             const srcH = source.height || source.naturalHeight || 2200;
-            // Chỉ dò header nếu ảnh đã từng đóng dấu; nếu là phiếu nắn phẳng thô mới thì offset = 0
-            const headerOffset = isStamped ? detectExistingHeadersOffset(source) : 0;
+            // Tự động phát hiện dải header QMath nếu ảnh truyền vào là ảnh đã đóng dấu
+            const headerOffset = detectExistingHeadersOffset(source);
             const sheetH = Math.max(1, srcH - headerOffset);
 
             const canvas = document.createElement('canvas');
@@ -3960,11 +3967,11 @@ async function displayLastResultInspector(sub, rawResult) {
     // Handwriting Image: Cập nhật lại ảnh chữ viết tay nếu chưa có hoặc bản cũ
     const hwImg = document.getElementById('resHandwrittenImg');
     const noHwText = document.getElementById('resNoHandwritingText');
-    if ((!sub.name_image || !sub._nameImageV2) && (sub.stamped_image || sub.image_data)) {
+    if ((!sub.name_image || !sub._nameImageV3) && (sub.stamped_image || sub.image_data)) {
         cropCandidateHandwrittenName(sub.image_data || sub.stamped_image, sub.template_key).then(cropUrl => {
             if (cropUrl) {
                 sub.name_image = cropUrl;
-                sub._nameImageV2 = true;
+                sub._nameImageV3 = true;
                 if (hwImg && state.lastSubmission?.id === sub.id) {
                     hwImg.src = cropUrl;
                     hwImg.classList.remove('hidden');
@@ -4417,12 +4424,7 @@ async function generateStampedGradedSheet(sub, rawResult) {
     // 6. VẼ PHIẾU NẮN PHẲNG BÊN DƯỚI HEADER (Y: headerH)
     ctx.drawImage(rectImg, 0, headerH, sheetW, sheetH);
 
-    if (rawResult.onlyHeaderUpgrade) {
-        const outUrl = canvas.toDataURL('image/jpeg', 0.90);
-        canvas.width = 1;
-        canvas.height = 1;
-        return outUrl;
-    }
+    // Always proceed to Section 7 to draw colored rings on stamped sheet
 
     // 7. VẼ ĐÁNH DẤU CHI TIẾT TRỰC TIẾP CẢ 3 PHẦN LÊN ẢNH (Vòng tròn đậm rõ hơn)
     const key = resolveKeyForCode(sub.code);
@@ -5257,7 +5259,8 @@ function playBatchSuccessChime() {
 // ========================================================
 // 5. LIVE FULLSCREEN CAMERA STREAM CONTROLLER & CONTINUOUS AUTO-SCANNER
 // ========================================================
-state.cameraZoom = 1.0;
+state.cameraZoom = 0.5;
+state.userSelectedCamera = false;
 state.isTorchOn = false;
 state.backCameras = [];
 state.activeCameraIndex = 0;
@@ -5476,6 +5479,7 @@ function startAutoScanLoop() {
 
             // Tìm 4 mốc đen góc phiếu ưu tiên sát 4 ô vuông định vị
             let found = null;
+            let matchedTpl = tpl;
             if (window.findQMCorners) {
                 found = window.findQMCorners(gray, tpl, info.guideHints);
                 // Nếu chưa tìm thấy theo mẫu đang chọn, tự động thử các mẫu phiếu phổ biến khác (qmcv1239, TNMaker, BGD...)
@@ -5484,14 +5488,63 @@ function startAutoScanLoop() {
                     for (const fbKey of fallbackKeys) {
                         if (window.MAU[fbKey]) {
                             found = window.findQMCorners(gray, window.MAU[fbKey], info.guideHints);
-                            if (found) break;
+                            if (found) { matchedTpl = window.MAU[fbKey]; break; }
                         }
                     }
                 }
             }
 
+            // Kiểm định nghiêm ngặt tính hợp lệ của phiếu thi trước khi tự động quét:
+            // 1. Phải có đủ 4 góc đúng trật tự hình học (TL, TR, BR, BL)
+            // 2. Kích thước phiếu phải chiếm tối thiểu 40% khung hình ngắm (không bắt vật nhỏ lặt vặt)
+            // 3. Tỉ lệ khung hình (Aspect Ratio) phải chuẩn xác theo mẫu đứng hoặc ngang
+            let isValidSheet = false;
             if (found && found.corners && found.corners.length === 4) {
-                state.consecutiveCornerDetections = (state.consecutiveCornerDetections || 0) + 1;
+                const c = found.corners;
+                const [tl, tr, br, bl] = c;
+                if (tr.x > tl.x && br.x > bl.x && bl.y > tl.y && br.y > tr.y) {
+                    const topW = Math.hypot(tr.x - tl.x, tr.y - tl.y);
+                    const botW = Math.hypot(br.x - bl.x, br.y - bl.y);
+                    const leftH = Math.hypot(bl.x - tl.x, bl.y - tl.y);
+                    const rightH = Math.hypot(br.x - tr.x, br.y - tr.y);
+                    const avgW = (topW + botW) / 2;
+                    const avgH = (leftH + rightH) / 2;
+                    const minDim = Math.min(testCanvas.width, testCanvas.height);
+
+                    const isBigEnough = avgW > minDim * 0.40 && avgH > minDim * 0.40;
+                    const ratio = avgH / Math.max(1, avgW);
+                    const isTplLandscape = (matchedTpl?.khung?.[2] || 0) > (matchedTpl?.khung?.[3] || 0);
+                    const isRatioValid = isTplLandscape 
+                        ? (ratio >= 0.50 && ratio <= 0.92) 
+                        : (ratio >= 1.10 && ratio <= 1.75);
+
+                    const soMoc = found.refined?.soMoc || 0;
+                    if (isBigEnough && isRatioValid && (soMoc >= 5 || (soMoc >= 4 && isBigEnough))) {
+                        isValidSheet = true;
+                    }
+                }
+            }
+
+            if (isValidSheet) {
+                // Kiểm tra độ ổn định vị trí góc giữa các khung hình liên tiếp để tránh rung tay
+                const currCorners = found.corners;
+                const prev = state._lastDetectedCorners;
+                let isStable = false;
+                if (prev && prev.length === 4) {
+                    let maxDrift = 0;
+                    for (let i = 0; i < 4; i++) {
+                        const d = Math.hypot(currCorners[i].x - prev[i].x, currCorners[i].y - prev[i].y);
+                        if (d > maxDrift) maxDrift = d;
+                    }
+                    if (maxDrift < 40) isStable = true;
+                }
+                state._lastDetectedCorners = currCorners;
+
+                if (isStable) {
+                    state.consecutiveCornerDetections = (state.consecutiveCornerDetections || 0) + 1;
+                } else {
+                    state.consecutiveCornerDetections = 1;
+                }
 
                 // Làm sáng 4 ô vuông định vị màu xanh ngọc
                 document.querySelectorAll('.camera-corner-bracket').forEach(b => {
@@ -5500,13 +5553,15 @@ function startAutoScanLoop() {
 
                 const statusText = document.getElementById('cameraStatusText');
                 if (statusText) {
-                    statusText.innerHTML = '<span class="text-emerald-400 font-extrabold">✓ Đã nhận diện đủ 4 ô định vị góc! Đang tự động chấm...</span>';
+                    const soMoc = found.refined?.soMoc || 4;
+                    statusText.innerHTML = `<span class="text-emerald-400 font-extrabold">✓ Đã khớp mẫu phiếu (${soMoc} mốc chuẩn)! Đang giữ yên để chụp...</span>`;
                 }
 
-                // Tốc độ Nhanh/Vừa: chấm ngay lập tức từ khung hình đã khóa 4 góc; Chậm: đợi 2 nhịp ổn định
-                const reqFrames = state.autoScanSpeed === 'slow' ? 2 : 1;
+                // Yêu cầu tối thiểu 2 khung hình ổn định liên tiếp (chế độ chậm: 3)
+                const reqFrames = state.autoScanSpeed === 'slow' ? 3 : 2;
                 if (state.consecutiveCornerDetections >= reqFrames) {
                     state.consecutiveCornerDetections = 0;
+                    state._lastDetectedCorners = null;
                     lastAutoScanTime = Date.now();
                     await window.captureCameraFrame({
                         preCaptured: {
@@ -5519,9 +5574,14 @@ function startAutoScanLoop() {
                 }
             } else {
                 state.consecutiveCornerDetections = 0;
+                state._lastDetectedCorners = null;
                 document.querySelectorAll('.camera-corner-bracket').forEach(b => {
                     b.classList.remove('detected');
                 });
+                const statusText = document.getElementById('cameraStatusText');
+                if (statusText && !sheetArea?.classList.contains('hidden')) {
+                    statusText.innerHTML = '<span>Hướng camera vuông góc vào phiếu thi để quét tự động</span>';
+                }
             }
         } catch(e) {
             // Ignore frame detection error in periodic loop
@@ -5661,6 +5721,14 @@ window.startCameraStream = async () => {
         // Enumerate devices once permission is granted
         await getAvailableCameras();
 
+        // Ưu tiên mặc định Camera 0.5x (Góc siêu rộng) khi mở camera
+        if (!state.userSelectedCamera && state.ultraWideCamera && state.currentCameraDeviceId !== state.ultraWideCamera.deviceId) {
+            state.currentCameraDeviceId = state.ultraWideCamera.deviceId;
+            state.activeCameraIndex = state.backCameras.findIndex(c => c.deviceId === state.ultraWideCamera.deviceId);
+            console.log("Tự động chuyển sang Camera 0.5x góc siêu rộng làm mặc định:", state.ultraWideCamera.label);
+            return window.startCameraStream();
+        }
+
         const [track] = stream.getVideoTracks();
         if (track) {
             const settings = track.getSettings ? track.getSettings() : {};
@@ -5730,6 +5798,7 @@ window.stopCameraStream = () => {
 };
 
 window.closeCameraScanner = () => {
+    state.userSelectedCamera = false;
     window.stopCameraStream();
     window.dismissCameraResultSheet();
     const cameraArea = document.getElementById('scanCameraArea');
@@ -5805,6 +5874,7 @@ window.cycleBackCamera = async () => {
 window.switchCameraLens = window.cycleBackCamera;
 
 window.setCameraZoom = async (val) => {
+    state.userSelectedCamera = true;
     if (!state.currentCameraStream) return;
     const [track] = state.currentCameraStream.getVideoTracks();
     if (!track) return;
@@ -6180,10 +6250,10 @@ window.renderResultsTable = () => {
             <td class="p-3 text-center text-slate-400 text-[11px]">${new Date(s.createdAt).toLocaleTimeString('vi-VN', {hour:'2-digit', minute:'2-digit', day:'2-digit', month:'2-digit'})}</td>
             <td class="p-3 text-center">
                 <div class="flex items-center justify-center gap-1.5">
-                    ${s.telegram_photo_url ? `
-                    <a href="${s.telegram_photo_url}" target="_blank" rel="noopener noreferrer" class="w-8 h-8 rounded-xl bg-sky-50 hover:bg-sky-100 dark:bg-sky-950/50 text-sky-600 dark:text-sky-300 flex items-center justify-center transition-all active:scale-95 cursor-pointer border border-sky-200 dark:border-sky-800" title="Xem ảnh gốc lưu trên Kênh Telegram">
-                        <i class="fa-brands fa-telegram text-xs"></i>
-                    </a>` : ''}
+                    ${(s.telegram_photo_url || s.telegram_file_id) ? `
+                    <span class="w-8 h-8 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 flex items-center justify-center border border-emerald-200 dark:border-emerald-800/60" title="Đã lưu ảnh bài chấm an toàn">
+                        <i class="fa-solid fa-circle-check text-sm"></i>
+                    </span>` : ''}
                     <button type="button" onclick="window.quickAssignStudentToSubmission('${s.id}')" class="w-8 h-8 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 flex items-center justify-center transition-all active:scale-95 cursor-pointer" title="Gán tên / SBD học sinh cho phiếu này">
                         <i class="fa-solid fa-user-pen text-xs text-emerald-600 dark:text-emerald-400"></i>
                     </button>
@@ -9070,7 +9140,7 @@ async function reStampSubmission(sub) {
             rectifiedCanvas: bodyCanvas,
             template: tpl,
             templateKey: tplKey,
-            onlyHeaderUpgrade: true
+            onlyHeaderUpgrade: false
         });
 
         if (newStamped) {
