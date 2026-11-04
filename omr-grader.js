@@ -2527,8 +2527,6 @@ window.deleteSubmissionDirect = async (subId) => {
         renderInlineSubmissionsList();
     });
 };
-}
-window.renderInlineSubmissionsList = renderInlineSubmissionsList;
 
 window.quickAssignStudentToSubmission = async (subId) => {
     const sub = state.submissions.find(s => s.id === subId);
