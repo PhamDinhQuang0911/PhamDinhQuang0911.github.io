@@ -3,7 +3,7 @@ import {
     getFirestore, doc, getDoc, setDoc, updateDoc, collection, query, where, getDocs, addDoc, deleteDoc,
     limit, orderBy, includeQuestions, getOrCreateParentWatchToken,
     enableMultiTabIndexedDbPersistence
-} from "./supabase-db-compat.js?v=20261105_v126";
+} from "./supabase-db-compat.js?v=20261105_v127";
 
 if (typeof window !== 'undefined') {
     window.showToast = window.showToast || function(msg, icon) {
@@ -1554,9 +1554,11 @@ async function triggerProcessTelegramBatches() {
             updateTelegramUploadPill(false);
             updateStorageStatusBadges();
 
+            const curBaseIdx = (typeof window !== 'undefined' && typeof window._roundRobinBotIndex === 'number') ? window._roundRobinBotIndex : (typeof roundRobinBotIndex === 'number' ? roundRobinBotIndex : 0);
+
             // Chia đều mỗi ảnh trong batch 10 cho 1 bot riêng biệt
             const uploadPromises = batch.map(async (item, idxInBatch) => {
-                let token = tokens[(roundRobinBotIndex + idxInBatch) % tokens.length];
+                let token = tokens[(curBaseIdx + idxInBatch) % tokens.length];
                 let success = false;
 
                 // Nén ảnh sang ~75KB
