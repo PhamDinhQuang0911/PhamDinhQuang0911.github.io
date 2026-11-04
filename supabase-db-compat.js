@@ -1334,7 +1334,9 @@ function sanitizeColumnValue(col, v) {
         return v;
     }
     if (col === 'allowed_class_ids') {
-        if (Array.isArray(v)) return v;
+        if (Array.isArray(v)) {
+            return v.flat(Infinity).filter(x => typeof x === 'string' && x.trim().length > 0);
+        }
         if (typeof v === 'string' && v.trim()) return [v.trim()];
         return [];
     }
@@ -1409,7 +1411,18 @@ function toSupabasePayload(table, id, data) {
     }
     const noRawDataTables = ['orders', 'vouchers', 'site_settings'];
     if (!noRawDataTables.includes(table)) {
-        converted.raw_data = data;
+        const cleanRaw = { ...data };
+        if (converted.access_type !== undefined) {
+            cleanRaw.access_type = converted.access_type;
+            cleanRaw.accessType = converted.access_type;
+        }
+        if (converted.allowed_class_ids !== undefined) {
+            cleanRaw.allowed_class_ids = converted.allowed_class_ids;
+            cleanRaw.allowedClassIds = converted.allowed_class_ids;
+            cleanRaw.allowedClassId = converted.allowed_class_ids;
+            cleanRaw.assignTo = converted.allowed_class_ids;
+        }
+        converted.raw_data = cleanRaw;
     }
     return converted;
 }
@@ -2229,6 +2242,19 @@ export async function setDoc(docRef, data, options = {}) {
                 .maybeSingle();
             if (existingRow) {
                 const unwrapped = unwrapRecord(existingRow);
+                // Xóa các key snake_case trong unwrapped nếu data truyền vào key camelCase (hoặc ngược lại)
+                // để tránh việc key cũ trong unwrapped đè lên giá trị mới của data sau mergeDeep
+                for (const k of Object.keys(data)) {
+                    const mappedCol = mapFieldToColumn(k);
+                    if (mappedCol && mappedCol !== k) {
+                        delete unwrapped[mappedCol];
+                    }
+                    for (const [aliasK, aliasCol] of Object.entries(FIELD_TO_COLUMN_MAP)) {
+                        if (aliasCol === mappedCol && aliasK !== k) {
+                            delete unwrapped[aliasK];
+                        }
+                    }
+                }
                 finalData = mergeDeep(unwrapped, data);
             }
         } catch (e) {

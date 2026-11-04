@@ -9136,15 +9136,9 @@
 
             let code = null;
             let targetUid = student.uid;
-            if (!targetUid && (student.email || student.username)) {
-                try {
-                    const cand = student.email ? student.email.toLowerCase() : `${student.username.toLowerCase()}@hocsinh.com`;
-                    const qU = query(collection(db, "users"), where("email", "==", cand));
-                    const snapU = await getDocs(qU);
-                    if (!snapU.empty) targetUid = snapU.docs[0].id;
-                } catch (_) {}
-            }
+            const candEmail = (student.email || (student.username ? `${student.username.toLowerCase()}@hocsinh.com` : '')).toLowerCase().trim();
 
+            // 1. Kiểm tra theo UID trước
             if (targetUid) {
                 try {
                     const uSnap = await getDoc(doc(db, "users", targetUid));
@@ -9157,13 +9151,45 @@
                 } catch (_) {}
             }
 
+            // 2. Nếu chưa có mã, tìm kiếm theo email / username trong toàn bộ bảng users để dùng chung 1 mã ID duy nhất
+            if (!code && candEmail) {
+                try {
+                    const qU = query(collection(db, "users"), where("email", "==", candEmail));
+                    const snapU = await getDocs(qU);
+                    if (!snapU.empty) {
+                        for (const d of snapU.docs) {
+                            const uData = d.data();
+                            if (uData.studentCode && uData.studentCode.startsWith('HS') && uData.studentCode.length === 10) {
+                                code = uData.studentCode;
+                                if (!targetUid) targetUid = d.id;
+                                break;
+                            }
+                        }
+                    }
+                } catch (_) {}
+            }
+
+            // 3. Nếu vẫn chưa có mã, sinh mã mới
             if (!code) {
                 code = await window.generateUniqueStudentCode();
-                if (targetUid) {
-                    try {
-                        await setDoc(doc(db, "users", targetUid), { studentCode: code }, { merge: true });
-                    } catch (_) {}
-                }
+            }
+
+            // 4. Đồng bộ mã ID này vào TẤT CẢ các bản ghi user có email / UID này
+            if (targetUid) {
+                try {
+                    await setDoc(doc(db, "users", targetUid), { studentCode: code }, { merge: true });
+                } catch (_) {}
+            }
+            if (candEmail) {
+                try {
+                    const qU = query(collection(db, "users"), where("email", "==", candEmail));
+                    const snapU = await getDocs(qU);
+                    snapU.forEach(d => {
+                        if (d.id !== targetUid) {
+                            setDoc(doc(db, "users", d.id), { studentCode: code }, { merge: true }).catch(() => {});
+                        }
+                    });
+                } catch (_) {}
             }
 
             student.studentCode = code;
