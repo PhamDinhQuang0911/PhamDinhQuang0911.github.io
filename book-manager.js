@@ -1813,19 +1813,24 @@ window.saveBookToCloudflare = async function() {
         const data = await uploadRes.json();
         
         // Save to local book list
+        const curUser = (window.currentUser || (typeof auth !== 'undefined' && auth.currentUser) || null);
+        const curUid = curUser ? curUser.uid : '';
+        const curEmail = curUser ? (curUser.email || '').toLowerCase().trim() : '';
+
         let books = JSON.parse(localStorage.getItem('digitized_books') || '[]');
         const existingIdx = books.findIndex(b => b.mapId === mapId);
+        const bookEntry = {
+            mapId: mapId,
+            title: title,
+            url: data.url,
+            date: new Date().toISOString(),
+            authorId: curUid,
+            authorEmail: curEmail
+        };
         if (existingIdx !== -1) {
-            books[existingIdx].title = title;
-            books[existingIdx].url = data.url;
-            books[existingIdx].date = new Date().toISOString();
+            books[existingIdx] = { ...books[existingIdx], ...bookEntry };
         } else {
-            books.push({
-                mapId: mapId,
-                title: title,
-                url: data.url,
-                date: new Date().toISOString()
-            });
+            books.push(bookEntry);
         }
         localStorage.setItem('digitized_books', JSON.stringify(books));
         
@@ -1866,9 +1871,22 @@ window.deleteCurrentBook = async function() {
     if(!window.currentBookData || !window.currentBookData.mapId) return;
     if(!confirm("Bạn có chắc chắn muốn xóa tài liệu này? Hành động này sẽ xóa file trên Cloudflare.")) return;
     
+    const curUser = (window.currentUser || (typeof auth !== 'undefined' && auth.currentUser) || null);
+    const curEmail = curUser ? (curUser.email || '').toLowerCase().trim() : '';
+    const curUid = curUser ? curUser.uid : '';
+    const isSuper = window.isSuperAdmin === true || (curEmail && (typeof ROOT_SUPER_ADMINS !== 'undefined' && ROOT_SUPER_ADMINS.map(e => e.toLowerCase()).includes(curEmail)));
+
     const mapId = window.currentBookData.mapId;
     let books = JSON.parse(localStorage.getItem('digitized_books') || '[]');
     const book = books.find(b => b.mapId === mapId);
+
+    if (book && !isSuper) {
+        const isOwn = (book.authorId && book.authorId === curUid) || (book.authorEmail && book.authorEmail.toLowerCase() === curEmail);
+        if (!isOwn) {
+            alert("⛔ Bạn không thể xóa sách của Super Admin!");
+            return;
+        }
+    }
     
     if (book && book.url) {
         try {
@@ -1980,20 +1998,48 @@ async function loadBookList(skipFetch = false) {
     }
     
     let books = JSON.parse(localStorage.getItem('digitized_books') || '[]');
-    if (books.length === 0) {
-        list.innerHTML = `<div class="text-center text-sm text-gray-400 py-4">Chưa có bài nào</div>`;
+    
+    // Lọc theo phân quyền: GV chỉ xem sách do mình tự tạo hoặc được Super Admin cấp phép
+    const curUser = (window.currentUser || (typeof auth !== 'undefined' && auth.currentUser) || null);
+    const curEmail = curUser ? (curUser.email || '').toLowerCase().trim() : '';
+    const curUid = curUser ? curUser.uid : '';
+    const isSuper = window.isSuperAdmin === true || (curEmail && (typeof ROOT_SUPER_ADMINS !== 'undefined' && ROOT_SUPER_ADMINS.map(e => e.toLowerCase()).includes(curEmail)));
+    const assigned = Array.isArray(window.assignedBookIds) ? window.assignedBookIds : [];
+
+    let visibleBooks = books;
+    if (!isSuper && curUser) {
+        visibleBooks = books.filter(b => {
+            const isOwn = (b.authorId && b.authorId === curUid) ||
+                          (b.authorEmail && b.authorEmail.toLowerCase() === curEmail);
+            const isAssigned = assigned.includes('*') || assigned.includes(b.mapId) || assigned.includes(b.title);
+            return isOwn || isAssigned;
+        });
+    }
+
+    if (visibleBooks.length === 0) {
+        list.innerHTML = `<div class="text-center text-sm text-gray-400 py-6">
+            <i class="fa-solid fa-book-open text-2xl text-gray-300 mb-1.5 block"></i>
+            ${!isSuper ? 'Bạn chưa có sách tự số hóa và chưa được cấp phép sách của Quản trị viên.' : 'Chưa có tài liệu nào.'}
+        </div>`;
         return;
     }
     
-    list.innerHTML = books.map((b, i) => `
-        <div class="p-3 bg-white rounded-lg border border-gray-200 shadow-sm hover:border-teal-500 cursor-pointer transition-colors" onclick="window.loadBookToEditor('${b.mapId}')">
-            <h4 class="font-bold text-gray-800 text-sm truncate">${b.title}</h4>
-            <div class="flex items-center justify-between mt-1 text-xs text-gray-500">
-                <span>${b.mapId}</span>
-                <a href="${b.url}" target="_blank" onclick="event.stopPropagation()" class="hover:text-teal-700" title="Xem JSON nguồn"><i class="fa-solid fa-code"></i></a>
+    list.innerHTML = visibleBooks.map((b, i) => {
+        const isOwn = (b.authorId && b.authorId === curUid) || (b.authorEmail && b.authorEmail.toLowerCase() === curEmail);
+        const tagBadge = isSuper ? '' : (isOwn ? '<span class="text-[9px] bg-teal-50 text-teal-700 dark:bg-teal-950 dark:text-teal-300 px-1.5 py-0.2 rounded font-bold">Của tôi</span>' : '<span class="text-[9px] bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 px-1.5 py-0.2 rounded font-bold">Được cấp phép</span>');
+        return `
+        <div class="p-3 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm hover:border-teal-500 cursor-pointer transition-colors" onclick="window.loadBookToEditor('${b.mapId}')">
+            <div class="flex items-center justify-between gap-1 mb-0.5">
+                <h4 class="font-bold text-gray-800 dark:text-gray-100 text-sm truncate flex-1">${b.title}</h4>
+                ${tagBadge}
+            </div>
+            <div class="flex items-center justify-between mt-1 text-xs text-gray-500 dark:text-gray-400">
+                <span class="truncate max-w-[200px] font-mono text-[11px]">${b.mapId}</span>
+                <a href="${b.url}" target="_blank" onclick="event.stopPropagation()" class="hover:text-teal-700 dark:hover:text-teal-400" title="Xem JSON nguồn"><i class="fa-solid fa-code"></i></a>
             </div>
         </div>
-    `).reverse().join('');
+        `;
+    }).reverse().join('');
 }
 
 document.addEventListener('DOMContentLoaded', () => {

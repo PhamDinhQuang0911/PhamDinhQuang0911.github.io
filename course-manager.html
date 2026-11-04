@@ -1677,10 +1677,31 @@
         let canManageCourses = false;
         let canDeleteCourses = false;
         let canViewCourses = false;
+        window.isSuperAdmin = false;
+        window.assignedCourseIds = [];
+        window.currentTeacherUid = '';
+        window.currentTeacherEmail = '';
+
+        function formatStudentCount(val) {
+            if (typeof val === 'number') return val;
+            if (Array.isArray(val)) return val.length;
+            if (val && typeof val === 'object') {
+                if (typeof val.count === 'number') return val.count;
+                if (Array.isArray(val.list)) return val.list.length;
+                return Object.keys(val).length;
+            }
+            const n = parseInt(val, 10);
+            return isNaN(n) ? 0 : n;
+        }
 
         async function checkCoursePermissions(user) {
-            const userEmail = (user.email || '').toLowerCase().trim();
+            window.currentTeacherUid = user.uid;
+            window.currentTeacherEmail = (user.email || '').toLowerCase().trim();
+            const userEmail = window.currentTeacherEmail;
+
             if (ROOT_SUPER_ADMINS.map(e => e.toLowerCase()).includes(userEmail)) {
+                window.isSuperAdmin = true;
+                window.assignedCourseIds = ['*'];
                 canManageCourses = true;
                 canDeleteCourses = true;
                 canViewCourses = true;
@@ -1699,6 +1720,10 @@
                     const qSnap = await getDocs(q);
                     if (!qSnap.empty) acc = qSnap.docs[0].data();
                 }
+                if (!acc) {
+                    const uSnap = await getDoc(doc(db, "users", user.uid));
+                    if (uSnap.exists()) acc = uSnap.data();
+                }
                 if (acc) {
                     if (acc.status === 'locked') {
                         alert('⛔ Tài khoản của bạn đã bị khóa bởi Super Admin!');
@@ -1706,14 +1731,18 @@
                         return false;
                     }
                     if (acc.role === 'super_admin') {
+                        window.isSuperAdmin = true;
+                        window.assignedCourseIds = ['*'];
                         canManageCourses = true;
                         canDeleteCourses = true;
                         canViewCourses = true;
                         return true;
                     }
+                    window.isSuperAdmin = false;
+                    window.assignedCourseIds = Array.isArray(acc.assignedCourseIds) ? acc.assignedCourseIds : [];
                     const perms = Array.isArray(acc.permissions) ? acc.permissions : [];
                     canManageCourses = perms.includes('courses.manage');
-                    canDeleteCourses = perms.includes('courses.delete') || canManageCourses;
+                    canDeleteCourses = perms.includes('courses.delete');
                     canViewCourses = canManageCourses || perms.includes('courses.use') || perms.includes('courses.view');
                     return canViewCourses;
                 }
@@ -2124,6 +2153,23 @@
                     cachedCourses.push({ id: doc.id, ...doc.data() });
                 });
                 
+                // Lọc khóa học theo phân quyền Giáo viên: Chỉ xem khóa tự tạo hoặc khóa được cấp phép
+                if (!window.isSuperAdmin) {
+                    const currentUid = (auth.currentUser ? auth.currentUser.uid : '');
+                    const currentEmail = (auth.currentUser?.email || '').toLowerCase().trim();
+                    const allowedIds = Array.isArray(window.assignedCourseIds) ? window.assignedCourseIds : [];
+
+                    cachedCourses = cachedCourses.filter(c => {
+                        const isOwner = (c.teacherId && c.teacherId === currentUid) ||
+                                        (c.teacher_id && c.teacher_id === currentUid) ||
+                                        (c.authorId && c.authorId === currentUid) ||
+                                        (c.author_id && c.author_id === currentUid) ||
+                                        (currentEmail && (c.createdBy === currentEmail || c.teacherEmail === currentEmail));
+                        const isAssigned = allowedIds.includes('*') || allowedIds.includes(c.id);
+                        return isOwner || isAssigned;
+                    });
+                }
+
                 // Đảm bảo sắp xếp mới nhất lên đầu client-side
                 cachedCourses.sort((a, b) => new Date(b.createdAt || b.updatedAt || 0) - new Date(a.createdAt || a.updatedAt || 0));
                 
@@ -2147,7 +2193,13 @@
             else document.getElementById('viewGridContainer').classList.remove('hidden');
 
             if(cachedCourses.length === 0) {
-                const emptyHTML = `<div class="col-span-full p-8 text-center text-gray-400">Chưa có khóa học.</div>`;
+                const emptyMsg = !window.isSuperAdmin 
+                    ? 'Bạn chưa được cấp phép khóa học nào và chưa tạo khóa học riêng. Vui lòng liên hệ Quản trị viên để được gán khóa học!' 
+                    : 'Chưa có khóa học nào trên hệ thống.';
+                const emptyHTML = `<div class="col-span-full p-8 text-center text-gray-500 font-medium">
+                    <i class="fa-solid fa-graduation-cap text-3xl mb-2 text-gray-300 block"></i>
+                    ${emptyMsg}
+                </div>`;
                 listTable.innerHTML = `<tr><td colspan="5">${emptyHTML}</td></tr>`;
                 gridContainer.innerHTML = emptyHTML;
                 return;
@@ -2187,6 +2239,18 @@
                 const hasQProtection = c.isQuestionProtected !== false && (c.bookMapId || (Array.isArray(c.restrictedQuestionIds) && c.restrictedQuestionIds.length > 0) || assignedClassCount > 0);
                 const protectBadge = hasQProtection ? '<span class="bg-amber-50 text-amber-700 px-2 py-0.5 rounded text-[10px] font-bold inline-block mt-1 ml-1 border border-amber-200" title="Đang bảo vệ câu hỏi tra cứu theo ID"><i class="fa-solid fa-shield-halved mr-0.5"></i> Khóa ID</span>' : '';
 
+                const currentUid = (auth.currentUser ? auth.currentUser.uid : '');
+                const currentEmail = (auth.currentUser?.email || '').toLowerCase().trim();
+                const isCourseOwner = window.isSuperAdmin || 
+                                      (c.teacherId && c.teacherId === currentUid) ||
+                                      (c.teacher_id && c.teacher_id === currentUid) ||
+                                      (c.authorId && c.authorId === currentUid) ||
+                                      (c.author_id && c.author_id === currentUid) ||
+                                      (currentEmail && (c.createdBy === currentEmail || c.teacherEmail === currentEmail));
+                const canEditThisCourse = isCourseOwner && canManageCourses;
+                const canDeleteThisCourse = isCourseOwner && (canManageCourses || canDeleteCourses);
+                const studentCountFormatted = formatStudentCount(c.students);
+
                 // --- RENDER LIST ROW ---
                 listTable.innerHTML += `
                 <tr class="hover:bg-gray-50 border-b border-gray-100 group transition-colors ${isSoldOut ? 'bg-red-50/20' : ''}">
@@ -2196,16 +2260,16 @@
                     </td>
                     <td class="p-4"><div class="font-bold text-gray-800 group-hover:text-brand transition-colors">${c.title}</div>${typeBadge}${soldOutBadge}${classBadge}${protectBadge}</td>
                     <td class="p-4 text-xs text-gray-500 font-bold">${strucText}</td>
-                    <td class="p-4 text-center"><span class="bg-primary-50 text-primary-700 px-2.5 py-1 rounded-full text-xs font-bold border border-primary-100">${c.students || 0} lượt</span></td>
+                    <td class="p-4 text-center"><span class="bg-primary-50 text-primary-700 px-2.5 py-1 rounded-full text-xs font-bold border border-primary-100">${studentCountFormatted} lượt</span></td>
                     <td class="p-4 text-right">
                         <div class="flex justify-end gap-2">
                             <button onclick="window.openAssignCourseClasses('${c.id}')" class="p-2 bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-600 hover:text-white transition-all shadow-sm" title="Gán khóa học cho Lớp học"><i class="fa-solid fa-chalkboard-user"></i></button>
                             <button onclick="window.toggleCourseAntiScreenshot('${c.id}')" class="p-2 ${c.antiScreenshot === false ? 'bg-gray-100 text-gray-400' : 'bg-rose-50 text-rose-600'} rounded-lg hover:bg-rose-600 hover:text-white transition-all shadow-sm" title="${c.antiScreenshot === false ? 'Đang CHO PHÉP chụp ảnh bài giảng (Bấm để CẤM chụp)' : 'Đang CẤM chụp màn hình bài giảng (Bấm để cho phép)'}"><i class="fa-solid ${c.antiScreenshot === false ? 'fa-camera' : 'fa-shield-halved'}"></i></button>
                             <button onclick="window.openStudentManager('${c.id}')" class="p-2 bg-green-50 text-green-600 rounded-lg hover:bg-green-600 hover:text-white transition-all shadow-sm" title="Quản lý KH/Học viên"><i class="fa-solid fa-user-plus"></i></button>
-                            ${canManageCourses ? `<button onclick="window.openCurriculumEditor('${c.id}')" class="p-2 bg-purple-50 text-purple-600 rounded-lg hover:bg-purple-600 hover:text-white transition-all shadow-sm ${(c.type !== 'course' && c.type !== 'exam_pack') ? 'hidden' : ''}" title="Soạn đề & giáo án"><i class="fa-solid fa-book-open"></i></button>` : ''}
+                            ${canEditThisCourse ? `<button onclick="window.openCurriculumEditor('${c.id}')" class="p-2 bg-purple-50 text-purple-600 rounded-lg hover:bg-purple-600 hover:text-white transition-all shadow-sm ${(c.type !== 'course' && c.type !== 'exam_pack') ? 'hidden' : ''}" title="Soạn đề & giáo án"><i class="fa-solid fa-book-open"></i></button>` : ''}
                             <button onclick="window.copyProductLinkAdmin('${c.id}')" class="p-2 bg-teal-50 text-teal-600 rounded-lg hover:bg-teal-600 hover:text-white transition-all shadow-sm" title="Copy link mua hàng"><i class="fa-solid fa-share-nodes"></i></button>
-                            ${canManageCourses ? `<button onclick="window.editCourse('${c.id}')" class="p-2 bg-gray-100 text-gray-600 rounded-lg hover:bg-primary-50 hover:text-primary-600 transition-all" title="Chỉnh sửa"><i class="fa-solid fa-pen"></i></button>` : ''}
-                            ${(canManageCourses || canDeleteCourses) ? `<button onclick="window.deleteCourse('${c.id}')" class="p-2 bg-gray-100 text-gray-600 rounded-lg hover:bg-red-50 hover:text-red-600 transition-all" title="Xóa"><i class="fa-solid fa-trash"></i></button>` : ''}
+                            ${canEditThisCourse ? `<button onclick="window.editCourse('${c.id}')" class="p-2 bg-gray-100 text-gray-600 rounded-lg hover:bg-primary-50 hover:text-primary-600 transition-all" title="Chỉnh sửa"><i class="fa-solid fa-pen"></i></button>` : ''}
+                            ${canDeleteThisCourse ? `<button onclick="window.deleteCourse('${c.id}')" class="p-2 bg-gray-100 text-gray-600 rounded-lg hover:bg-red-50 hover:text-red-600 transition-all" title="Xóa"><i class="fa-solid fa-trash"></i></button>` : ''}
                         </div>
                     </td>
                 </tr>`;
@@ -2217,7 +2281,7 @@
                         <img src="${thumb}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500">
                         ${isSoldOut ? '<div class="absolute top-2 left-2 bg-red-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-lg shadow"><i class="fa-solid fa-ban mr-0.5"></i> BÁN HẾT</div>' : ''}
                         ${totalImgCount > 1 ? `<div class="absolute bottom-2 left-2 bg-black/60 text-white text-[10px] font-bold px-2 py-0.5 rounded-md backdrop-blur-xs flex items-center gap-1 shadow"><i class="fa-solid fa-images"></i> ${totalImgCount} ảnh</div>` : ''}
-                        <div class="absolute top-2 right-2 bg-black/50 text-white text-xs px-2 py-1 rounded-lg backdrop-blur-sm"><i class="fa-solid fa-shopping-cart"></i> ${c.students||0}</div>
+                        <div class="absolute top-2 right-2 bg-black/50 text-white text-xs px-2 py-1 rounded-lg backdrop-blur-sm"><i class="fa-solid fa-shopping-cart"></i> ${studentCountFormatted}</div>
                     </div>
                     <div class="p-5 flex flex-col flex-1">
                         <h3 class="font-bold text-gray-800 text-lg mb-1 line-clamp-2 group-hover:text-brand transition-colors">${c.title}</h3>
@@ -2228,10 +2292,10 @@
                             <button onclick="window.openAssignCourseClasses('${c.id}')" class="col-span-1 py-2 bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-600 hover:text-white transition-colors flex items-center justify-center" title="Gán cho Lớp học"><i class="fa-solid fa-chalkboard-user"></i></button>
                             <button onclick="window.toggleCourseAntiScreenshot('${c.id}')" class="col-span-1 py-2 ${c.antiScreenshot === false ? 'bg-gray-50 text-gray-400' : 'bg-rose-50 text-rose-600'} rounded-lg hover:bg-rose-600 hover:text-white transition-colors flex items-center justify-center" title="${c.antiScreenshot === false ? 'Đang CHO PHÉP chụp ảnh (Bấm để CẤM chụp)' : 'Đang CẤM chụp màn hình (Bấm để cho phép)'}"><i class="fa-solid ${c.antiScreenshot === false ? 'fa-camera' : 'fa-shield-halved'}"></i></button>
                             <button onclick="window.openStudentManager('${c.id}')" class="col-span-1 py-2 bg-green-50 text-green-600 rounded-lg hover:bg-green-600 hover:text-white transition-colors flex items-center justify-center" title="Học viên/Đơn hàng"><i class="fa-solid fa-user-plus"></i></button>
-                            ${canManageCourses ? `<button onclick="window.openCurriculumEditor('${c.id}')" class="col-span-1 py-2 bg-purple-50 text-purple-600 rounded-lg hover:bg-purple-600 hover:text-white transition-colors ${(c.type !== 'course' && c.type !== 'exam_pack') ? 'hidden' : ''} flex items-center justify-center" title="Giáo án & Bộ đề"><i class="fa-solid fa-book-open"></i></button>` : ''}
+                            ${canEditThisCourse ? `<button onclick="window.openCurriculumEditor('${c.id}')" class="col-span-1 py-2 bg-purple-50 text-purple-600 rounded-lg hover:bg-purple-600 hover:text-white transition-colors ${(c.type !== 'course' && c.type !== 'exam_pack') ? 'hidden' : ''} flex items-center justify-center" title="Giáo án & Bộ đề"><i class="fa-solid fa-book-open"></i></button>` : ''}
                             <button onclick="window.copyProductLinkAdmin('${c.id}')" class="col-span-1 py-2 bg-teal-50 text-teal-600 rounded-lg hover:bg-teal-600 hover:text-white transition-colors flex items-center justify-center" title="Copy link mua hàng"><i class="fa-solid fa-share-nodes"></i></button>
-                            ${canManageCourses ? `<button onclick="window.editCourse('${c.id}')" class="col-span-1 py-2 bg-gray-50 text-gray-600 rounded-lg hover:bg-primary-50 hover:text-primary-600 transition-colors flex items-center justify-center" title="Chỉnh sửa"><i class="fa-solid fa-pen"></i></button>` : ''}
-                            ${(canManageCourses || canDeleteCourses) ? `<button onclick="window.deleteCourse('${c.id}')" class="col-span-1 py-2 bg-gray-50 text-gray-600 rounded-lg hover:bg-red-50 hover:text-red-600 transition-colors flex items-center justify-center" title="Xóa"><i class="fa-solid fa-trash"></i></button>` : ''}
+                            ${canEditThisCourse ? `<button onclick="window.editCourse('${c.id}')" class="col-span-1 py-2 bg-gray-50 text-gray-600 rounded-lg hover:bg-primary-50 hover:text-primary-600 transition-colors flex items-center justify-center" title="Chỉnh sửa"><i class="fa-solid fa-pen"></i></button>` : ''}
+                            ${canDeleteThisCourse ? `<button onclick="window.deleteCourse('${c.id}')" class="col-span-1 py-2 bg-gray-50 text-gray-600 rounded-lg hover:bg-red-50 hover:text-red-600 transition-colors flex items-center justify-center" title="Xóa"><i class="fa-solid fa-trash"></i></button>` : ''}
                         </div>
                     </div>
                 </div>`;

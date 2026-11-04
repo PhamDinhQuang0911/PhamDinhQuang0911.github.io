@@ -411,13 +411,21 @@
             "phamngockhanh.942002@gmail.com"
         ];
 
+        window.isSuperAdmin = false;
+        window.assignedBookIds = [];
+        window.currentUser = null;
+
         onAuthStateChanged(auth, async (user) => {
             if (!user) {
                 window.location.href = "index.html";
                 return;
             }
+            window.currentUser = user;
             const email = (user.email || '').toLowerCase().trim();
             if (ROOT_SUPER_ADMINS.map(e => e.toLowerCase()).includes(email)) {
+                window.isSuperAdmin = true;
+                window.assignedBookIds = ['*'];
+                if (typeof window.loadBookList === 'function') window.loadBookList();
                 return;
             }
             try {
@@ -432,15 +440,29 @@
                     const qSnap = await getDocs(query(collection(db, "admin_accounts"), where("email", "==", email)));
                     if (!qSnap.empty) acc = qSnap.docs[0].data();
                 }
+                if (!acc) {
+                    const uSnap = await getDoc(doc(db, "users", user.uid));
+                    if (uSnap.exists()) acc = uSnap.data();
+                }
                 if (acc) {
                     if (acc.status === 'locked') {
                         alert('⛔ Tài khoản của bạn đã bị khóa!');
                         window.location.href = "index.html";
                         return;
                     }
-                    if (acc.role === 'super_admin') return;
+                    if (acc.role === 'super_admin') {
+                        window.isSuperAdmin = true;
+                        window.assignedBookIds = ['*'];
+                        if (typeof window.loadBookList === 'function') window.loadBookList();
+                        return;
+                    }
                     const perms = Array.isArray(acc.permissions) ? acc.permissions : [];
-                    if (perms.includes('books.create')) return;
+                    if (perms.includes('books.create')) {
+                        window.isSuperAdmin = false;
+                        window.assignedBookIds = Array.isArray(acc.assignedBookIds) ? acc.assignedBookIds : [];
+                        if (typeof window.loadBookList === 'function') window.loadBookList();
+                        return;
+                    }
                 }
             } catch (err) {
                 console.error("Lỗi kiểm tra quyền Sách:", err);
