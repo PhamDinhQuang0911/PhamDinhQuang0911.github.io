@@ -2293,6 +2293,7 @@
                                 <tr>
                                     <th class="px-4 py-3 font-bold w-12 text-center">STT</th>
                                     <th class="px-4 py-3 font-bold">Họ tên</th>
+                                    <th class="px-4 py-3 font-bold">Mã ID</th>
                                     <th class="px-4 py-3 font-bold">Tài khoản/Email</th>
                                     <th class="px-4 py-3 font-bold">Loại TK</th>
                                     <th class="px-4 py-3 font-bold">Lớp đang học</th>
@@ -9110,7 +9111,8 @@
             let attempts = 0;
             while (!isUnique && attempts < 15) {
                 attempts++;
-                const num = Math.floor(100000 + Math.random() * 900000);
+                // Sinh ngẫu nhiên 8 chữ số sau tiền tố HS (VD: HS10000001 -> HS99999999)
+                const num = Math.floor(10000000 + Math.random() * 90000000);
                 code = 'HS' + num;
                 try {
                     const q = query(collection(db, "users"), where("studentCode", "==", code));
@@ -9122,7 +9124,91 @@
                     isUnique = true;
                 }
             }
-            return code || ('HS' + Math.floor(100000 + Math.random() * 900000));
+            return code || ('HS' + Math.floor(10000000 + Math.random() * 90000000));
+        };
+
+        // Hàm đảm bảo học sinh luôn có Mã ID 8 số hợp lệ (HSxxxxxxxx)
+        window.ensureStudentCodeForStudent = async (student) => {
+            if (!student) return '';
+            if (student.studentCode && student.studentCode.startsWith('HS') && student.studentCode.length === 10) {
+                return student.studentCode;
+            }
+
+            let code = null;
+            let targetUid = student.uid;
+            if (!targetUid && (student.email || student.username)) {
+                try {
+                    const cand = student.email ? student.email.toLowerCase() : `${student.username.toLowerCase()}@hocsinh.com`;
+                    const qU = query(collection(db, "users"), where("email", "==", cand));
+                    const snapU = await getDocs(qU);
+                    if (!snapU.empty) targetUid = snapU.docs[0].id;
+                } catch (_) {}
+            }
+
+            if (targetUid) {
+                try {
+                    const uSnap = await getDoc(doc(db, "users", targetUid));
+                    if (uSnap.exists()) {
+                        const uData = uSnap.data();
+                        if (uData.studentCode && uData.studentCode.startsWith('HS') && uData.studentCode.length === 10) {
+                            code = uData.studentCode;
+                        }
+                    }
+                } catch (_) {}
+            }
+
+            if (!code) {
+                code = await window.generateUniqueStudentCode();
+                if (targetUid) {
+                    try {
+                        await setDoc(doc(db, "users", targetUid), { studentCode: code }, { merge: true });
+                    } catch (_) {}
+                }
+            }
+
+            student.studentCode = code;
+            return code;
+        };
+
+        // Tự động rà soát và cấp Mã ID 8 số cho toàn bộ học sinh trong lớp nếu chưa có
+        window.ensureClassStudentsHaveCodes = async (classId, students) => {
+            if (!classId || !Array.isArray(students) || students.length === 0) return;
+            let hasChange = false;
+            for (let i = 0; i < students.length; i++) {
+                const st = students[i];
+                if (!st.studentCode || !st.studentCode.startsWith('HS') || st.studentCode.length !== 10) {
+                    const code = await window.ensureStudentCodeForStudent(st);
+                    if (code) hasChange = true;
+                }
+            }
+            if (hasChange) {
+                renderStudentList(students);
+                try {
+                    await updateDoc(doc(db, "classes", classId), { students: students });
+                    const cIdx = (window.allClassesData || []).findIndex(c => c.id === classId);
+                    if (cIdx !== -1) {
+                        window.allClassesData[cIdx].students = students;
+                        window.safeSetStorage('lms_cached_classes', JSON.stringify(window.allClassesData));
+                    }
+                } catch (err) {
+                    console.warn("Lỗi đồng bộ mã ID học sinh:", err);
+                }
+            }
+        };
+
+        // Nút bấm cấp nhanh Mã ID cho 1 học sinh ngay trên bảng
+        window.grantCodeToStudent = async (index) => {
+            const st = currentClassStudents[index];
+            if (!st) return;
+            window.showNotification("Đang cấp Mã ID 8 số cho học sinh...", "info");
+            const code = await window.ensureStudentCodeForStudent(st);
+            renderStudentList(currentClassStudents);
+            if (currentViewingClassId) {
+                try {
+                    await updateDoc(doc(db, "classes", currentViewingClassId), { students: currentClassStudents });
+                } catch (_) {}
+            }
+            window.showNotification(`Đã cấp Mã ID: ${code} cho ${st.name}!`, "success");
         };
 
         window.currentClassTab = 'mine';
@@ -9814,6 +9900,7 @@
                 window.currentClassData = cachedClass; // Store data
                 currentClassStudents = cachedClass.students || [];
                 renderStudentList(currentClassStudents);
+                window.ensureClassStudentsHaveCodes(id, currentClassStudents);
                 if(!name && titleEl) titleEl.textContent = cachedClass.name;
                 const zaloDisp = document.getElementById('zaloGroupUidDisplay');
                 if(zaloDisp) zaloDisp.textContent = cachedClass.zaloGroupUid ? `UID: ${cachedClass.zaloGroupUid}` : 'Cài UID Nhóm Zalo';
@@ -9838,6 +9925,7 @@
                         updateDoc(doc(db, "classes", id), { studentIds: indexedStudentIds }).catch(console.warn);
                     }
                     renderStudentList(currentClassStudents);
+                    window.ensureClassStudentsHaveCodes(id, currentClassStudents);
                     // Tự động kiểm tra đồng bộ Zalo UID ngầm
                     setTimeout(() => window.syncZaloUids(), 1000);
                     // Update cache
@@ -9921,7 +10009,7 @@
         // --- NEW FEATURE 2: ADD EXISTING STUDENT ---
         window.addExistingStudent = async () => {
             if (!currentViewingClassId) return;
-            const inputCode = await window.customPrompt("Nhập Mã ID Học sinh (VD: HS100001 hoặc 100001):", "VD: HS100001");
+            const inputCode = await window.customPrompt("Nhập Mã ID Học sinh gồm 8 số sau chữ HS (VD: HS10000001 hoặc 10000001):", "VD: HS10000001");
             if (!inputCode) return;
             const cleanCode = inputCode.trim();
             if (!cleanCode) return;
@@ -9935,6 +10023,14 @@
                 if (querySnapshot.empty && !cleanCode.toUpperCase().startsWith('HS')) {
                     q = query(collection(db, "users"), where("studentCode", "==", 'HS' + cleanCode));
                     querySnapshot = await getDocs(q);
+                }
+
+                if (querySnapshot.empty) {
+                    const digits = cleanCode.replace(/\D/g, '');
+                    if (digits.length > 0 && digits.length <= 8) {
+                        q = query(collection(db, "users"), where("studentCode", "==", 'HS' + digits.padStart(8, '0')));
+                        querySnapshot = await getDocs(q);
+                    }
                 }
 
                 // 2. Fallback tìm kiếm theo username / email phòng trường hợp học sinh cũ chưa có studentCode
@@ -11820,9 +11916,9 @@
                 list.forEach((st, index) => { 
                     const isTeacherCreated = st.password && st.password !== "";
                     const passDisplay = isTeacherCreated ? (st.password) : '<span class="px-2 py-1 bg-green-50 text-green-600 rounded text-xs font-bold">Bảo mật</span>';
-                    const codeDisplay = st.studentCode 
+                    const codeDisplay = (st.studentCode && st.studentCode.startsWith('HS')) 
                         ? `<span onclick="event.stopPropagation(); navigator.clipboard.writeText('${st.studentCode}'); window.showNotification('Đã sao chép Mã ID: ${st.studentCode}', 'success');" class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-mono font-black bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 transition-colors cursor-pointer shadow-2xs" title="Bấm để sao chép Mã ID"><i class="fa-solid fa-id-badge text-[11px]"></i> ${st.studentCode}</span>` 
-                        : `<span class="text-xs text-slate-400 italic">---</span>`;
+                        : `<button type="button" onclick="event.stopPropagation(); window.grantCodeToStudent(${index});" class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 transition cursor-pointer shadow-2xs" title="Bấm để tự động cấp Mã ID 8 số"><i class="fa-solid fa-wand-magic-sparkles text-[10px]"></i> Cấp ID</button>`;
                     const sbdDisplay = window.normalizeStudentSbd(st.sbd, index + 1);
                     
                     // Desktop table row
@@ -11840,8 +11936,22 @@
             
             document.getElementById('editStuName').value = st.name || ''; 
             document.getElementById('editStuSBD').value = window.normalizeStudentSbd(st.sbd, index + 1);
-            if (document.getElementById('editStuCode')) {
-                document.getElementById('editStuCode').value = st.studentCode || '---';
+            const editStuCodeEl = document.getElementById('editStuCode');
+            if (editStuCodeEl) {
+                if (st.studentCode && st.studentCode.startsWith('HS') && st.studentCode.length === 10) {
+                    editStuCodeEl.value = st.studentCode;
+                } else {
+                    editStuCodeEl.value = 'Đang lấy mã ID...';
+                    window.ensureStudentCodeForStudent(st).then(code => {
+                        if (editingStudentIndex === index && editStuCodeEl) {
+                            editStuCodeEl.value = code;
+                        }
+                        renderStudentList(currentClassStudents);
+                        if (currentViewingClassId) {
+                            updateDoc(doc(db, "classes", currentViewingClassId), { students: currentClassStudents }).catch(console.warn);
+                        }
+                    });
+                }
             } 
             document.getElementById('editStuGender').value = st.gender || 'Nam'; 
             document.getElementById('editStuPhone').value = st.phoneStudent || ''; 
@@ -12014,9 +12124,15 @@
                     return;
                 }
 
+                const codeVal = document.getElementById('editStuCode')?.value;
+                const validCode = (codeVal && codeVal.startsWith('HS') && !codeVal.includes('---') && !codeVal.includes('...')) 
+                    ? codeVal 
+                    : (studentData.studentCode || await window.generateUniqueStudentCode());
+
                 const updatedStudent = {
                     ...studentData,
                     uid: targetUid || studentData.uid || "",
+                    studentCode: validCode,
                     name: name,
                     sbd: targetSbd,
                     gender: document.getElementById('editStuGender').value,
@@ -12052,6 +12168,7 @@
                     try {
                         const userSync = {
                             displayName: name,
+                            studentCode: validCode,
                             sbd: updatedStudent.sbd || "",
                             phoneStudent: updatedStudent.phoneStudent || "",
                             phoneParent: updatedStudent.phoneParent || "",
@@ -12101,7 +12218,18 @@
             document.getElementById('cardClassName').textContent = `Lớp: ${className}`;
             document.getElementById('cardStudentSbd').textContent = `SBD: ${window.normalizeStudentSbd(student.sbd, window.currentQrStudentIndex + 1)}`;
             const cardIdEl = document.getElementById('cardStudentId');
-            if (cardIdEl) cardIdEl.textContent = `ID: ${student.studentCode || '---'}`;
+            if (cardIdEl) {
+                if (student.studentCode && student.studentCode.startsWith('HS')) {
+                    cardIdEl.textContent = `ID: ${student.studentCode}`;
+                } else {
+                    cardIdEl.textContent = 'ID: Đang cấp...';
+                    window.ensureStudentCodeForStudent(student).then(code => {
+                        if (window.currentQrStudentIndex === index && cardIdEl) {
+                            cardIdEl.textContent = `ID: ${code}`;
+                        }
+                    });
+                }
+            }
             document.getElementById('cardStudentUser').textContent = student.username || student.email?.split('@')[0] || '---';
 
             const qrBox = document.getElementById('cardQrCodeBox');
@@ -23598,7 +23726,7 @@ function renderTagFilterUI() {
         window.loadAllGlobalStudents = async () => {
             const tbody = document.getElementById('globalStudentTable');
             const mbList = document.getElementById('globalStudentListMobile');
-            if(tbody) tbody.innerHTML = '<tr><td colspan="7" class="text-center py-8"><i class="fa-solid fa-spinner fa-spin text-2xl text-slate-500"></i></td></tr>';
+            if(tbody) tbody.innerHTML = '<tr><td colspan="8" class="text-center py-8"><i class="fa-solid fa-spinner fa-spin text-2xl text-slate-500"></i></td></tr>';
             if(mbList) mbList.innerHTML = '<div class="text-center py-8"><i class="fa-solid fa-spinner fa-spin text-2xl text-slate-500"></i></div>';
             
             // 1. Thu thập học sinh từ các lớp học hiện có
@@ -23667,6 +23795,7 @@ function renderTagFilterUI() {
                         }
                         if (email && !existing.email) existing.email = email;
                         if (username && !existing.username) existing.username = username;
+                        if (u.studentCode && !existing.studentCode) existing.studentCode = u.studentCode;
                         existing.qpoints = Math.max(existing.qpoints || 0, qp);
                         if (!existing.name || existing.name === existing.username) existing.name = name;
                     } else if (u.role === 'student' || !u.role || u.role === 'user') {
@@ -23674,6 +23803,7 @@ function renderTagFilterUI() {
                             uid: uid,
                             name: name,
                             username: username,
+                            studentCode: u.studentCode || '',
                             email: u.email || '',
                             phone: u.phone || '',
                             sbd: u.sbd || '',
@@ -23719,7 +23849,7 @@ function renderTagFilterUI() {
                         if (st.teacherId !== teacherFilter) return false;
                     }
                 }
-                const searchStr = `${st.name || ''} ${st.username || ''} ${st.email || ''} ${st.sbd || ''} ${st.phone || ''}`.toLowerCase();
+                const searchStr = `${st.name || ''} ${st.studentCode || ''} ${st.username || ''} ${st.email || ''} ${st.sbd || ''} ${st.phone || ''}`.toLowerCase();
                 return searchStr.includes(query);
             });
             
@@ -23753,6 +23883,7 @@ function renderTagFilterUI() {
                             <tr class="bg-white hover:bg-gray-50 border-b cursor-pointer transition-colors" onclick="window.openStudentInfo('${uidSafe}')">
                                 <td class="px-4 py-3 font-medium text-slate-600 text-center">${index + 1}</td>
                                 <td class="px-4 py-3 font-bold text-gray-900 flex items-center">${st.name} ${teacherInfo}</td>
+                                <td class="px-4 py-3">${st.studentCode ? `<span onclick="event.stopPropagation(); navigator.clipboard.writeText('${st.studentCode}'); window.showNotification('Đã sao chép Mã ID: ${st.studentCode}', 'success');" class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-mono font-black bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 cursor-pointer shadow-2xs" title="Bấm để sao chép Mã ID"><i class="fa-solid fa-id-badge text-[11px]"></i> ${st.studentCode}</span>` : `<span class="text-xs text-slate-400 italic">---</span>`}</td>
                                 <td class="px-4 py-3 text-primary-600 font-medium">${st.username || st.email}</td>
                                 <td class="px-4 py-3">${typeBadge}</td>
                                 <td class="px-4 py-3 text-sm text-gray-600 truncate max-w-[180px]" title="${st.classes.join(', ')}">${st.classes.join(', ')}</td>
@@ -23774,7 +23905,7 @@ function renderTagFilterUI() {
                         mbList.innerHTML += `
                             <div class="p-4 bg-white border-b cursor-pointer hover:bg-gray-50" onclick="window.openStudentInfo('${uidSafe}')">
                                 <div class="flex justify-between items-start mb-1.5">
-                                    <div class="font-bold text-gray-900">${st.name}</div>
+                                    <div class="font-bold text-gray-900 flex items-center gap-1.5">${st.name} ${st.studentCode ? `<span class="text-[10px] font-mono font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100">ID: ${st.studentCode}</span>` : ''}</div>
                                     <div class="flex items-center gap-1.5">
                                         <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-black bg-amber-50 text-amber-700 border border-amber-200">
                                             <i class="fa-solid fa-coins text-amber-500"></i> ${qpVal.toLocaleString('vi-VN')} Qp
