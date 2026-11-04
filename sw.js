@@ -14,7 +14,7 @@
  * (network-first) nhưng nên tăng khi đổi styles.css/utils.js để chắc chắn.
  */
 
-const VERSION = 'qmath-v130-hd-telegram-cross-device-sync';
+const VERSION = 'qmath-v131-auto-contrast-turbo-bot-sync';
 const STATIC_CACHE = `${VERSION}-static`;
 const PAGE_CACHE = `${VERSION}-pages`;
 const CDN_CACHE = `${VERSION}-cdn`;

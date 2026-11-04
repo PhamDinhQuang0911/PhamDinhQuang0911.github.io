@@ -1196,6 +1196,24 @@ function unwrapRecord(r) {
     if (r.className !== undefined) res.className = r.className;
     if (r.studentEmail !== undefined) res.studentEmail = r.studentEmail;
 
+    // Khôi phục siêu dữ liệu OMR (telegramFileId, studentNo, examCode, scores) từ brief_notes & teacher_feedback mà không cần đọc raw_data
+    if (r.brief_notes && typeof r.brief_notes === 'string' && r.brief_notes.startsWith('{')) {
+        try {
+            const meta = JSON.parse(r.brief_notes);
+            if (meta.tg && !res.telegramFileId) res.telegramFileId = meta.tg;
+            if (meta.url && !res.telegramPhotoUrl) res.telegramPhotoUrl = meta.url;
+            if (meta.sbd && !res.studentNo) res.studentNo = meta.sbd;
+            if (meta.code && (!res.examCode || res.examCode === '101')) res.examCode = meta.code;
+            if (meta.p1 !== undefined && res.part1Score === undefined) res.part1Score = meta.p1;
+            if (meta.p2 !== undefined && res.part2Score === undefined) res.part2Score = meta.p2;
+            if (meta.p3 !== undefined && res.part3Score === undefined) res.part3Score = meta.p3;
+            if (meta.ans && !res.omrPart1) res.omrPart1 = meta.ans;
+        } catch (_) {}
+    }
+    if (r.teacher_feedback && !res.telegramFileId) {
+        res.telegramFileId = r.teacher_feedback;
+    }
+
     // Khôi phục studentNo từ student_id dạng omr_sbd_xxxx
     if (!res.studentNo && r.student_id && String(r.student_id).startsWith('omr_sbd_')) {
         res.studentNo = String(r.student_id).replace(/^omr_sbd_/, '');
@@ -1445,6 +1463,27 @@ function toSupabasePayload(table, id, data) {
             cleanRaw.assignTo = converted.allowed_class_ids;
         }
         converted.raw_data = cleanRaw;
+    }
+    if (table === 'results') {
+        const tgId = data.telegramFileId || data.telegram_file_id || '';
+        const meta = {
+            tg: tgId,
+            url: data.telegramPhotoUrl || data.telegram_photo_url || '',
+            sbd: data.studentNo || data.student_no || '',
+            code: data.examCode || data.code || '',
+            p1: Number(data.part1Score ?? data.part1_score ?? 0),
+            p2: Number(data.part2Score ?? data.part2_score ?? 0),
+            p3: Number(data.part3Score ?? data.part3_score ?? 0),
+            ans: data.omrPart1 || data.answers || ''
+        };
+        converted.brief_notes = JSON.stringify(meta);
+        if (tgId) converted.teacher_feedback = tgId;
+        // Loại bỏ stampedImage khổng lồ khỏi raw_data để chống statement timeout và phình to database
+        if (converted.raw_data && (tgId || converted.raw_data.telegramFileId)) {
+            delete converted.raw_data.stampedImage;
+            delete converted.raw_data.stamped_image;
+            delete converted.raw_data.image_data;
+        }
     }
     return converted;
 }
@@ -1898,7 +1937,7 @@ export async function getDocs(queryOrColRef) {
             selectCols = 'id,title,folder_id,teacher_id,duration,pass_score,status,access_type,allowed_class_ids,purpose,subject,grade,question_count,password,proctoring,attempts,start_time,end_time,n8n_webhooks,created_at,updated_at';
         }
         if (table === 'results') {
-            selectCols = 'id,exam_id,student_id,student_name,class_id,score,correct_count,total_questions,submit_count,submitted_at,duration,is_passed,answers,brief_notes,cheat_count,pass_score_snapshot,teacher_feedback,telegramFileId:raw_data->>telegramFileId,telegramPhotoUrl:raw_data->>telegramPhotoUrl';
+            selectCols = 'id,exam_id,student_id,student_name,class_id,score,correct_count,total_questions,submit_count,submitted_at,duration,is_passed,answers,brief_notes,teacher_feedback';
         }
         let queryBuilder = supabase.from(table).select(selectCols);
 

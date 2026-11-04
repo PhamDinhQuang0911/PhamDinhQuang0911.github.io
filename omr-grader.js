@@ -3,7 +3,7 @@ import {
     getFirestore, doc, getDoc, setDoc, updateDoc, collection, query, where, getDocs, addDoc, deleteDoc,
     limit, orderBy, includeQuestions, getOrCreateParentWatchToken,
     enableMultiTabIndexedDbPersistence
-} from "./supabase-db-compat.js?v=20261105_v130";
+} from "./supabase-db-compat.js?v=20261105_v131";
 
 if (typeof window !== 'undefined') {
     window.showToast = window.showToast || function(msg, icon) {
@@ -1305,8 +1305,8 @@ function dataUrlToBlob(dataUrl) {
 // ========================================================
 let tgPillHideTimeout = null;
 
-// Nén ảnh bài chấm trực tiếp thành Blob nhị phân HD siêu nét (~220KB - 280KB) giữ 100% độ sắc nét chuẩn in ấn & soi bài
-async function compressSheetForTelegramBlob(dataUrlOrBlob, maxWidth = 1552, quality = 0.86) {
+// Nén ảnh bài chấm trực tiếp thành Blob nhị phân HD siêu nét chuẩn 1280px (native Telegram CDN), tải siêu tốc ~85KB - 110KB
+async function compressSheetForTelegramBlob(dataUrlOrBlob, maxWidth = 1280, quality = 0.78) {
     if (!dataUrlOrBlob) return null;
     if (dataUrlOrBlob instanceof Blob) return dataUrlOrBlob;
     if (typeof dataUrlOrBlob !== 'string' || !dataUrlOrBlob.startsWith('data:image')) {
@@ -1352,7 +1352,7 @@ async function compressSheetForTelegramBlob(dataUrlOrBlob, maxWidth = 1552, qual
 }
 
 // Nén ảnh bài chấm giữ chuẩn HD siêu sắc nét
-async function compressSheetForTelegram(dataUrl, maxWidth = 1552, quality = 0.86) {
+async function compressSheetForTelegram(dataUrl, maxWidth = 1280, quality = 0.78) {
     if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image')) {
         return dataUrl;
     }
@@ -1590,9 +1590,12 @@ async function triggerProcessTelegramBatches() {
 
     const runBotWorker = async (token, botIndex) => {
         let lastSendTime = 0;
-        // Giãn cách tối thiểu giữa 2 lần gửi của CÙNG 1 bot là 280ms (đảm bảo không bao giờ quá 1 msg/giây/chat/bot)
-        // Với 11 bot: 11 bot x (1 / 0.3s) = ~30 - 36 bài/giây thông lượng thực tế!
-        const MIN_BOT_INTERVAL = 280;
+        // Giãn cách tối thiểu giữa 2 lần gửi của CÙNG 1 bot là 1050ms (đảm bảo không bao giờ chạm ngưỡng 1 msg/s/bot của Telegram)
+        // Với 11 bot được kích hoạt so le (staggered), hệ thống đạt thông lượng thực tế ~10 - 11 bài/giây KHÔNG BAO GIỜ bị 429!
+        const MIN_BOT_INTERVAL = 1050;
+
+        // Khởi động so le các bot worker (cách nhau 95ms) để tạo đường truyền mượt mà như băng chuyền
+        await new Promise(r => setTimeout(r, botIndex * 95));
 
         try {
             while (state.telegramConfig?.enabled) {
@@ -1619,7 +1622,7 @@ async function triggerProcessTelegramBatches() {
                 let photoBlob = item.blob || item.sub?._telegramBlob;
                 if (!photoBlob) {
                     const raw = item.imgDataUrl || item.sub?.stamped_image || item.sub?.image_data;
-                    photoBlob = await compressSheetForTelegramBlob(raw, 1552, 0.86);
+                    photoBlob = await compressSheetForTelegramBlob(raw, 1280, 0.78);
                     if (item.sub) item.sub._telegramBlob = photoBlob;
                 }
 
@@ -2059,7 +2062,14 @@ async function loadExamSubmissions(examId) {
             </div>`;
     }
 
-    await fetchSubmissionsFromCloud(examId, list);
+    try {
+        await Promise.race([
+            fetchSubmissionsFromCloud(examId, list),
+            new Promise(r => setTimeout(r, 6000))
+        ]);
+    } catch(err) {
+        console.warn("Lỗi nạp bài chấm từ đám mây:", err);
+    }
     state.submissions = list;
     if (state.gradedCountsByExam) state.gradedCountsByExam[examId] = list.length;
     saveSubmissionsToLocalSafe(examId, list);
@@ -2081,7 +2091,7 @@ async function fetchSubmissionsFromCloud(examId, list) {
             const rawSubId = String(r.id).replace(`omr_${examId}_`, '') || r.id;
             const existing = list.find(x => x.id === rawSubId || x.lmsResultId === r.id);
 
-            const tgFileId = r.telegramFileId || r.telegram_file_id || '';
+            const tgFileId = r.telegramFileId || r.telegram_file_id || r.teacher_feedback || '';
             const tgPhotoUrl = r.telegramPhotoUrl || r.telegram_photo_url || '';
 
             if (!existing) {
@@ -2134,6 +2144,7 @@ async function fetchSubmissionsFromCloud(examId, list) {
                     const subIdSafe = (existing.id || '').replace(/[^a-zA-Z0-9_-]/g, '');
                     updateDoc(doc(db, "results", `omr_${existing.examId || examId}_${subIdSafe}`), {
                         telegramFileId: existing.telegram_file_id,
+                        teacherFeedback: existing.telegram_file_id,
                         telegramPhotoUrl: existing.telegram_photo_url || ''
                     }).catch(() => {});
                 }
@@ -3879,8 +3890,8 @@ function recognizeSheetFromGray(gray, options = {}) {
     const tplKey = matchedTplKey || activeTpl;
     const tpl = (window.MAU && window.MAU[tplKey]) ? window.MAU[tplKey] : window.MAU.qmcv1239;
 
-    // Fast perspective rectification với mẫu phiếu đã khớp
-    const rectW = options.fastRectify !== false ? 960 : 1552;
+    // Fast perspective rectification với mẫu phiếu đã khớp (Chuẩn 1552px 1:1 với Canvas đóng dấu, chống vỡ mờ nhòe nét)
+    const rectW = 1552;
     const outH = getSheetHeight(tplKey, tpl, rectW);
     const target = getSheetTransform(tplKey, tpl, outH, rectW);
     const outCanvas = document.createElement('canvas');
@@ -3890,6 +3901,24 @@ function recognizeSheetFromGray(gray, options = {}) {
     const outData = outCtx.createImageData(rectW, outH);
     const dst = outData.data;
     const gw = gray.w, gh = gray.h, gd = gray.d;
+
+    // Tự động cân bằng tương phản & làm sạch nền giấy trắng siêu nét (Document Scanner Auto-Level LUT)
+    const lut = new Uint8Array(256);
+    let sumLow = 0, countLow = 0, sumHigh = 0, countHigh = 0;
+    const sampleStep = Math.max(1, (gd.length / 500) | 0);
+    for (let i = 0; i < gd.length; i += sampleStep) {
+        const v = gd[i];
+        if (v > 150) { sumHigh += v; countHigh++; }
+        else if (v < 110) { sumLow += v; countLow++; }
+    }
+    const whitePt = countHigh > 20 ? Math.min(225, Math.max(165, (sumHigh / countHigh) * 0.96)) : 190;
+    const blackPt = countLow > 20 ? Math.max(25, Math.min(95, (sumLow / countLow) * 1.1)) : 60;
+    const range = Math.max(1, whitePt - blackPt);
+    for (let i = 0; i < 256; i++) {
+        if (i >= whitePt) lut[i] = 255;
+        else if (i <= blackPt) lut[i] = 0;
+        else lut[i] = Math.round(((i - blackPt) * 255) / range);
+    }
 
     // Nhân ma trận composite M = H * target một lần duy nhất ngoài vòng lặp
     // Triệt tiêu hoàn toàn 2.66 triệu lần gọi hàm ap() và phép cấp phát mảng [x, y]
@@ -3913,7 +3942,8 @@ function recognizeSheetFromGray(gray, options = {}) {
             const invW = 1.0 / (m6 * x + w0);
             const xx = ((m0 * x + x0) * invW + 0.5) | 0;
             const yy = ((m3 * x + y0) * invW + 0.5) | 0;
-            const val = (xx >= 0 && yy >= 0 && xx < gw && yy < gh) ? gd[yy * gw + xx] : 255;
+            const rawVal = (xx >= 0 && yy >= 0 && xx < gw && yy < gh) ? gd[yy * gw + xx] : 255;
+            const val = lut[rawVal];
             const idx = rowOff + (x << 2);
             dst[idx] = val;
             dst[idx + 1] = val;
@@ -5107,14 +5137,25 @@ async function generateStampedGradedSheet(sub, rawResult) {
         }
     }
 
-    // Tạo sẵn Telegram Blob HD siêu sắc nét (1552px chuẩn canvas, chất lượng 0.86) trực tiếp từ Canvas đang trong bộ nhớ
+    // Tạo sẵn Telegram Blob HD siêu sắc nét chuẩn 1280px (native Telegram CDN), tải siêu tốc ~85KB - 110KB
     if (sub) {
         try {
-            canvas.toBlob((blob) => {
+            const tgW = 1280;
+            const tgH = Math.round(canvas.height * (tgW / canvas.width));
+            const tgCanvas = document.createElement('canvas');
+            tgCanvas.width = tgW;
+            tgCanvas.height = tgH;
+            const tgCtx = tgCanvas.getContext('2d');
+            tgCtx.imageSmoothingEnabled = true;
+            tgCtx.imageSmoothingQuality = 'high';
+            tgCtx.drawImage(canvas, 0, 0, tgW, tgH);
+            tgCanvas.toBlob((blob) => {
+                tgCanvas.width = 1;
+                tgCanvas.height = 1;
                 if (blob && sub) {
                     sub._telegramBlob = blob;
                 }
-            }, 'image/jpeg', 0.86);
+            }, 'image/jpeg', 0.78);
         } catch (_) {}
     }
 
@@ -5562,10 +5603,21 @@ async function syncSubmissionToLmsResultsCollection(sub) {
         omrPart1: sub.answers || '',
         omrPart2: sub.part2 || [],
         omrPart3: sub.part3 || [],
-        stampedImage: compressedStamped || '',
+        stampedImage: (sub.telegram_file_id ? '' : (compressedStamped || '')),
         nameImage: sub.name_image || '',
         telegramPhotoUrl: sub.telegram_photo_url || '',
         telegramFileId: sub.telegram_file_id || '',
+        teacherFeedback: sub.telegram_file_id || '',
+        briefNotes: JSON.stringify({
+            tg: sub.telegram_file_id || '',
+            url: sub.telegram_photo_url || '',
+            sbd: sub.student_no || '',
+            code: sub.code || state.exam.omrCode || '101',
+            p1: Number(sub.part1_score) || 0,
+            p2: Number(sub.part2_score) || 0,
+            p3: Number(sub.part3_score) || 0,
+            ans: sub.answers || ''
+        }),
         gradingSource: 'omr',
         submissionMode: 'offline_omr',
         gradedAt: new Date().toISOString(),
