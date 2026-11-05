@@ -5077,6 +5077,9 @@
                                 <span id="teacherOrdersBadgeCount" class="px-2 py-0.5 text-[10px] rounded-full bg-indigo-100 text-indigo-700 font-bold">0 đơn</span>
                             </div>
                             <div class="flex items-center gap-2 flex-wrap">
+                                <button type="button" id="btnBulkDeleteTeacherOrders" onclick="window.deleteSelectedTeacherOrders()" class="hidden px-2.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1 shadow-2xs" title="Xóa tất cả các đơn đã tích chọn">
+                                    <i class="fa-solid fa-trash-can"></i> <span id="bulkDeleteTeacherOrdersText">Xóa đã chọn (0)</span>
+                                </button>
                                 <select id="filterTeacherOrderStatus" onchange="window.filterTeacherOrders(this.value)" class="text-xs px-2.5 py-1.5 border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 outline-none cursor-pointer">
                                     <option value="all">Tất cả trạng thái</option>
                                     <option value="pending">⏳ Chờ thanh toán</option>
@@ -5094,7 +5097,10 @@
                             <table class="w-full text-left text-xs border-collapse min-w-[700px]">
                                 <thead>
                                     <tr class="bg-gray-50 dark:bg-[#201d30] text-gray-600 dark:text-gray-300 font-bold uppercase text-[11px] border-b border-gray-200 dark:border-[#38344D]">
-                                        <th class="py-2.5 px-3 pl-4">Thầy / Cô Đăng Ký</th>
+                                        <th class="py-2.5 px-2 pl-4 w-9 text-center">
+                                            <input type="checkbox" id="chkSelectAllTeacherOrders" onchange="window.toggleSelectAllTeacherOrders(this.checked)" class="w-3.5 h-3.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer" title="Chọn tất cả">
+                                        </th>
+                                        <th class="py-2.5 px-3">Thầy / Cô Đăng Ký</th>
                                         <th class="py-2.5 px-3">Mã Đơn / Nội Dung CK</th>
                                         <th class="py-2.5 px-3 text-right">Số Tiền</th>
                                         <th class="py-2.5 px-3 text-center">Thời Gian</th>
@@ -5104,7 +5110,7 @@
                                 </thead>
                                 <tbody id="teacherOrdersTableBody" class="divide-y divide-gray-100 dark:divide-[#2d2940]">
                                     <tr>
-                                        <td colspan="6" class="py-8 text-center text-slate-500">
+                                        <td colspan="7" class="py-8 text-center text-slate-500">
                                             <i class="fa-solid fa-spinner fa-spin mr-2"></i> Đang tải danh sách đơn đăng ký...
                                         </td>
                                     </tr>
@@ -5957,7 +5963,7 @@
             getFirestore, doc, getDoc, getDocFromCache, setDoc, collection, addDoc, query, where, orderBy, getDocs, updateDoc, deleteDoc, arrayUnion, arrayRemove, limit, enableMultiTabIndexedDbPersistence, onSnapshot, increment,
             getStorage, ref, deleteObject, getFunctions, httpsCallable, supabase, DEFAULT_ADMIN,
             getOrCreateStudentQrToken, resetStudentQrToken, generateQrLoginToken
-        } from "./supabase-db-compat.js?v=30";
+        } from "./supabase-db-compat.js?v=31";
         import { DEFAULT_QPOINT_PACKAGES, getQPointConfig, getStudentQPointTransactions } from "./qpoint.js?v=30";
 
         // 1. CẤU HÌNH SUPABASE (HỆ THỐNG ĐÃ CHUYỂN TỪ FIREBASE SANG SUPABASE)
@@ -7130,7 +7136,7 @@
 
                     snapOrd.forEach(d => {
                         const data = d.data();
-                        if (data.orderType !== 'teacher_upgrade' && data.orderType !== 'teacher_registration') return;
+                        const oType = data.orderType || data.order_type; if (oType !== 'teacher_upgrade' && oType !== 'teacher_registration') return;
                         const s = String(data.status || '').toLowerCase().trim();
                         if (s === 'paid' || s === 'approved' || s === 'completed' || s === 'success' || s === 'resolved') {
                             hasPaidTeacherOrder = true;
@@ -7970,7 +7976,7 @@
         window.loadTeacherOrdersList = async () => {
             const tbody = document.getElementById('teacherOrdersTableBody');
             if (tbody) {
-                tbody.innerHTML = `<tr><td colspan="6" class="p-8 text-center text-slate-500"><i class="fa-solid fa-spinner fa-spin mr-2"></i> Đang tải & đối soát danh sách đơn đăng ký giáo viên...</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="7" class="p-8 text-center text-slate-500"><i class="fa-solid fa-spinner fa-spin mr-2"></i> Đang tải & đối soát danh sách đơn đăng ký giáo viên...</td></tr>`;
             }
 
             try {
@@ -8024,8 +8030,8 @@
                         }
                     }
 
-                    // 3. Nếu đơn đã được ngân hàng xác nhận thanh toán ('paid') nhưng chưa cấp quyền Admin -> tự động cấp quyền ngay
-                    if (isPaid && ord.roleGranted !== true) {
+                    // 3. Nếu đơn vừa được ngân hàng xác nhận thanh toán ('paid') -> tự động cấp quyền Admin và chuyển sang 'completed'
+                    if (s === 'paid') {
                         ordersToAutoGrant.push(ord);
                         ord.status = 'completed';
                         ord.roleGranted = true;
@@ -8081,7 +8087,7 @@
                 window.renderTeacherOrdersTable(filterStatus);
             } catch (err) {
                 console.error("Lỗi tải đơn đăng ký giáo viên:", err);
-                if (tbody) tbody.innerHTML = `<tr><td colspan="6" class="p-8 text-center text-rose-700 font-bold"><i class="fa-solid fa-triangle-exclamation mr-2"></i> Lỗi: ${err.message}</td></tr>`;
+                if (tbody) tbody.innerHTML = `<tr><td colspan="7" class="p-8 text-center text-rose-700 font-bold"><i class="fa-solid fa-triangle-exclamation mr-2"></i> Lỗi: ${err.message}</td></tr>`;
             }
         };
 
@@ -8096,8 +8102,55 @@
             if (!ok) return;
             try {
                 await deleteDoc(doc(db, "orders", orderId));
+                window.allTeacherOrders = (window.allTeacherOrders || []).filter(o => o.id !== orderId);
+                const countBadge = document.getElementById('teacherOrdersBadgeCount');
+                if (countBadge) countBadge.textContent = `${window.allTeacherOrders.length} đơn`;
+                const filterStatus = document.getElementById('filterTeacherOrderStatus')?.value || 'all';
+                window.renderTeacherOrdersTable(filterStatus);
                 window.showNotification("Đã xóa đơn đăng ký giáo viên!", "success");
-                await window.loadTeacherOrdersList();
+            } catch(e) {
+                window.showNotification("Lỗi khi xóa đơn: " + e.message, "error");
+            }
+        };
+
+        window.toggleSelectAllTeacherOrders = (checked) => {
+            document.querySelectorAll('.chk-teacher-order').forEach(cb => { cb.checked = !!checked; });
+            window.updateSelectedTeacherOrdersUI();
+        };
+
+        window.updateSelectedTeacherOrdersUI = () => {
+            const checkedBoxes = Array.from(document.querySelectorAll('.chk-teacher-order:checked'));
+            const allBoxes = Array.from(document.querySelectorAll('.chk-teacher-order'));
+            const selectAllEl = document.getElementById('chkSelectAllTeacherOrders');
+            if (selectAllEl) {
+                selectAllEl.checked = allBoxes.length > 0 && checkedBoxes.length === allBoxes.length;
+            }
+            const btnBulk = document.getElementById('btnBulkDeleteTeacherOrders');
+            const txtBulk = document.getElementById('bulkDeleteTeacherOrdersText');
+            if (btnBulk && txtBulk) {
+                if (checkedBoxes.length > 0) {
+                    btnBulk.classList.remove('hidden');
+                    txtBulk.textContent = `Xóa đã chọn (${checkedBoxes.length})`;
+                } else {
+                    btnBulk.classList.add('hidden');
+                }
+            }
+        };
+
+        window.deleteSelectedTeacherOrders = async () => {
+            const ids = Array.from(document.querySelectorAll('.chk-teacher-order:checked')).map(cb => cb.value).filter(Boolean);
+            if (ids.length === 0) return;
+            const ok = await window.customConfirm(`Bạn có chắc muốn xóa ${ids.length} đơn đăng ký giáo viên đã chọn?`);
+            if (!ok) return;
+            try {
+                await Promise.allSettled(ids.map(id => deleteDoc(doc(db, "orders", id))));
+                const idSet = new Set(ids);
+                window.allTeacherOrders = (window.allTeacherOrders || []).filter(o => !idSet.has(o.id));
+                const countBadge = document.getElementById('teacherOrdersBadgeCount');
+                if (countBadge) countBadge.textContent = `${window.allTeacherOrders.length} đơn`;
+                const filterStatus = document.getElementById('filterTeacherOrderStatus')?.value || 'all';
+                window.renderTeacherOrdersTable(filterStatus);
+                window.showNotification(`🗑️ Đã xóa ${ids.length} đơn đăng ký giáo viên!`, "success");
             } catch(e) {
                 window.showNotification("Lỗi khi xóa đơn: " + e.message, "error");
             }
@@ -8111,6 +8164,11 @@
             const tbody = document.getElementById('teacherOrdersTableBody');
             if (!tbody) return;
 
+            const selectAllEl = document.getElementById('chkSelectAllTeacherOrders');
+            if (selectAllEl) selectAllEl.checked = false;
+            const btnBulk = document.getElementById('btnBulkDeleteTeacherOrders');
+            if (btnBulk) btnBulk.classList.add('hidden');
+
             let list = window.allTeacherOrders || [];
             if (filterStatus === 'completed') {
                 list = list.filter(o => isTeacherOrderPaidStatus(o.status));
@@ -8119,7 +8177,7 @@
             }
 
             if (list.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="6" class="p-8 text-center text-slate-500 italic">Không có đơn đăng ký giáo viên nào trong danh mục này.</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="7" class="p-8 text-center text-slate-500 italic">Không có đơn đăng ký giáo viên nào trong danh mục này.</td></tr>`;
                 return;
             }
 
@@ -8144,13 +8202,17 @@
                 const name = order.userName || order.studentName || 'Chưa đặt tên';
                 const email = order.loginId || order.userEmail || order.email || '';
                 const phone = order.userPhone || order.phone || '';
-                const sourceLabel = order.orderType === 'teacher_registration'
+                const oType = order.orderType || order.order_type || '';
+                const sourceLabel = oType === 'teacher_registration'
                     ? 'Đăng ký GV VIP mới'
                     : (order.source === 'free_teacher' || order.packageTitle === 'Nâng cấp Giáo Viên VIP' ? 'Nâng cấp từ GV Free' : 'Nâng cấp VIP');
 
                 return `
                     <tr class="hover:bg-gray-50/80 dark:hover:bg-[#201d30] transition-colors">
-                        <td class="py-2.5 px-3 pl-4">
+                        <td class="py-2.5 px-2 pl-4 text-center">
+                            <input type="checkbox" value="${order.id}" onchange="window.updateSelectedTeacherOrdersUI()" class="chk-teacher-order w-3.5 h-3.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer">
+                        </td>
+                        <td class="py-2.5 px-3">
                             <div class="font-bold text-gray-900 dark:text-white flex items-center gap-1.5">
                                 <i class="fa-solid fa-chalkboard-user text-purple-600"></i>
                                 <span>${name}</span>
@@ -8174,20 +8236,20 @@
                             ${statusBadge}
                         </td>
                         <td class="py-2.5 px-3 text-right pr-4">
-                            ${!isPaid ? `
-                                <div class="inline-flex items-center justify-end gap-1.5">
+                            <div class="inline-flex items-center justify-end gap-1.5">
+                                ${!isPaid ? `
                                     <button type="button" onclick="window.manualApproveTeacherOrder('${order.id}')" class="px-2.5 py-1 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white rounded-lg text-xs font-bold shadow-2xs transition flex items-center gap-1 cursor-pointer" title="Duyệt tay & cấp quyền Giáo viên VIP tức thì">
                                         <i class="fa-solid fa-check"></i> <span>Duyệt Ngay</span>
                                     </button>
-                                    <button type="button" onclick="window.deleteTeacherOrder('${order.id}')" class="w-7 h-7 bg-rose-50 hover:bg-rose-100 text-rose-600 dark:bg-rose-950/50 dark:text-rose-400 rounded-lg text-xs font-bold transition flex items-center justify-center cursor-pointer border border-rose-200 dark:border-rose-800" title="Xóa đơn này">
-                                        <i class="fa-solid fa-trash-can text-[11px]"></i>
-                                    </button>
-                                </div>
-                            ` : `
-                                <span class="text-[11px] font-bold text-emerald-700 dark:text-emerald-400 inline-flex items-center gap-1">
-                                    <i class="fa-solid fa-shield-check"></i> Đã cấp quyền Admin
-                                </span>
-                            `}
+                                ` : `
+                                    <span class="text-[11px] font-bold text-emerald-700 dark:text-emerald-400 inline-flex items-center gap-1 mr-1">
+                                        <i class="fa-solid fa-shield-check"></i> Đã cấp quyền
+                                    </span>
+                                `}
+                                <button type="button" onclick="window.deleteTeacherOrder('${order.id}')" class="px-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-600 dark:bg-rose-950/60 dark:hover:bg-rose-900/80 dark:text-rose-400 rounded-lg text-xs font-bold transition inline-flex items-center gap-1 cursor-pointer border border-rose-200 dark:border-rose-800" title="Xóa đơn này">
+                                    <i class="fa-solid fa-trash-can text-[11px]"></i> <span>Xóa</span>
+                                </button>
+                            </div>
                         </td>
                     </tr>
                 `;
@@ -8444,7 +8506,7 @@
                     const userTeacherOrders = [];
                     snapExisting.forEach(d => {
                         const data = d.data();
-                        if (data.orderType === 'teacher_upgrade' || data.orderType === 'teacher_registration') {
+                        const oType = data.orderType || data.order_type; if (oType === 'teacher_upgrade' || oType === 'teacher_registration') {
                             userTeacherOrders.push({ id: d.id, ...data });
                         }
                     });

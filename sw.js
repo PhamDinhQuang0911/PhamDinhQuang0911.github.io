@@ -14,7 +14,7 @@
  * (network-first) nhưng nên tăng khi đổi styles.css/utils.js để chắc chắn.
  */
 
-const VERSION = 'qmath-v133-invalid-code-handling-and-auto-class-sync';
+const VERSION = 'qmath-v135-teacher-orders-delete-all';
 const STATIC_CACHE = `${VERSION}-static`;
 const PAGE_CACHE = `${VERSION}-pages`;
 const CDN_CACHE = `${VERSION}-cdn`;
@@ -82,7 +82,7 @@ self.addEventListener('fetch', (event) => {
   // 2. Trang HTML (điều hướng): network-first
   if (req.mode === 'navigate') {
     event.respondWith(
-      fetch(req)
+      fetch(req, { cache: 'no-cache' })
         .then((res) => {
           const copy = res.clone();
           caches.open(PAGE_CACHE).then((c) => c.put(req, copy));

@@ -1249,6 +1249,9 @@ function unwrapRecord(r) {
     if (r.course_id !== undefined) res.courseId = r.course_id;
     if (r.user_id !== undefined) res.userId = r.user_id;
     if (r.user_name !== undefined) res.userName = r.user_name;
+    if (r.user_phone !== undefined) res.userPhone = r.user_phone;
+    if (r.order_type !== undefined) res.orderType = r.order_type;
+    if (r.delivery_type !== undefined) res.deliveryType = r.delivery_type;
     if (r.course_title !== undefined) res.courseTitle = r.course_title;
     if (r.shipping_info !== undefined) res.shippingInfo = r.shipping_info;
     if (r.created_at !== undefined) res.createdAt = r.created_at;
