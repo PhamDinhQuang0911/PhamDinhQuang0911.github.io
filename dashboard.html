@@ -5076,12 +5076,15 @@
                                 <span class="font-black text-gray-800 dark:text-white text-xs uppercase tracking-wide">Danh Sách Yêu Cầu Nâng Cấp Giáo Viên</span>
                                 <span id="teacherOrdersBadgeCount" class="px-2 py-0.5 text-[10px] rounded-full bg-indigo-100 text-indigo-700 font-bold">0 đơn</span>
                             </div>
-                            <div class="flex items-center gap-2">
+                            <div class="flex items-center gap-2 flex-wrap">
                                 <select id="filterTeacherOrderStatus" onchange="window.filterTeacherOrders(this.value)" class="text-xs px-2.5 py-1.5 border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 outline-none cursor-pointer">
                                     <option value="all">Tất cả trạng thái</option>
                                     <option value="pending">⏳ Chờ thanh toán</option>
                                     <option value="completed">✅ Đã hoàn thành</option>
                                 </select>
+                                <button type="button" onclick="window.cleanExpiredTeacherOrdersNow()" class="px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 dark:bg-amber-950/50 dark:text-amber-300 dark:border-amber-800 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1" title="Xóa các đơn chờ chưa thanh toán quá 30 phút & gộp đơn trùng">
+                                    <i class="fa-solid fa-broom"></i> <span class="hidden sm:inline">Dọn đơn quá hạn</span>
+                                </button>
                                 <button type="button" onclick="window.loadTeacherOrdersList()" class="px-2.5 py-1.5 bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 text-gray-700 dark:text-gray-300 rounded-lg text-xs font-bold transition cursor-pointer" title="Làm mới danh sách">
                                     <i class="fa-solid fa-rotate"></i>
                                 </button>
@@ -7113,6 +7116,74 @@
                 return true;
             }
 
+            // 0. Helper tự động kiểm tra đơn thanh toán Giáo viên VIP (kích hoạt tự động nếu đã thanh toán, xóa đơn chờ quá 30 phút)
+            const checkAndReconcileUserTeacherOrders = async () => {
+                try {
+                    const qOrd = query(collection(db, "orders"), where("userId", "==", user.uid));
+                    const snapOrd = await getDocs(qOrd);
+                    if (snapOrd.empty) return false;
+                    const now = Date.now();
+                    let hasPaidTeacherOrder = false;
+                    const toDeleteIds = [];
+                    const paidOrdersToMark = [];
+                    const pendingTeacherOrders = [];
+
+                    snapOrd.forEach(d => {
+                        const data = d.data();
+                        if (data.orderType !== 'teacher_upgrade' && data.orderType !== 'teacher_registration') return;
+                        const s = String(data.status || '').toLowerCase().trim();
+                        if (s === 'paid' || s === 'approved' || s === 'completed' || s === 'success' || s === 'resolved') {
+                            hasPaidTeacherOrder = true;
+                            if (data.roleGranted !== true || s !== 'completed') {
+                                paidOrdersToMark.push(d.id);
+                            }
+                        } else if (s === 'pending' || s === 'cancelled' || s === 'abandoned') {
+                            const refTime = new Date(data.updatedAt || data.createdAt || 0).getTime();
+                            if (now - refTime > 30 * 60 * 1000) {
+                                toDeleteIds.push(d.id);
+                            } else if (s === 'pending') {
+                                pendingTeacherOrders.push({ id: d.id, time: refTime });
+                            }
+                        }
+                    });
+
+                    // Chỉ giữ tối đa 1 đơn pending mới nhất cho giáo viên này
+                    if (pendingTeacherOrders.length > 1) {
+                        pendingTeacherOrders.sort((a, b) => b.time - a.time);
+                        for (let i = 1; i < pendingTeacherOrders.length; i++) {
+                            toDeleteIds.push(pendingTeacherOrders[i].id);
+                        }
+                    }
+
+                    if (toDeleteIds.length > 0) {
+                        Promise.allSettled(toDeleteIds.map(id => deleteDoc(doc(db, "orders", id)))).catch(() => {});
+                    }
+
+                    if (hasPaidTeacherOrder) {
+                        if (typeof window.grantTeacherRoleToUser === 'function') {
+                            await window.grantTeacherRoleToUser({
+                                userId: user.uid,
+                                email: userEmail,
+                                displayName: user.displayName || userEmail.split('@')[0],
+                                teacherTier: 'vip'
+                            });
+                        }
+                        if (paidOrdersToMark.length > 0) {
+                            Promise.allSettled(paidOrdersToMark.map(id => updateDoc(doc(db, "orders", id), {
+                                status: 'completed',
+                                roleGranted: true,
+                                approvalType: 'auto_payment',
+                                approvedAt: new Date().toISOString()
+                            }))).catch(() => {});
+                        }
+                        return true;
+                    }
+                } catch(eChk) {
+                    console.warn("Lỗi kiểm tra đơn nâng cấp giáo viên của user:", eChk);
+                }
+                return false;
+            };
+
             // 1. Kiểm tra trong configurations/admin_roles
             try {
                 const cfgRef = doc(db, "configurations", "admin_roles");
@@ -7129,7 +7200,15 @@
                         }
 
                         // Tự động kiểm tra & nâng cấp cấp đủ quyền cho Giáo viên VIP nếu tài khoản bị thiếu quyền hoặc chứa quyền cũ
-                        const isFree = found.teacherTier === 'free' || found.role === 'teacher_free';
+                        let isFree = found.teacherTier === 'free' || found.role === 'teacher_free';
+                        if (isFree) {
+                            const upgradedByOrder = await checkAndReconcileUserTeacherOrders();
+                            if (upgradedByOrder) {
+                                isFree = false;
+                                found.teacherTier = 'vip';
+                                found.role = 'admin';
+                            }
+                        }
                         let perms = Array.isArray(found.permissions) ? [...found.permissions] : [];
                         const needsUpgrade = perms.length === 0 || 
                                              perms.includes('view_dashboard') || 
@@ -7340,6 +7419,24 @@
                 }
             } catch(eUser) {
                 console.warn("Lỗi kiểm tra users doc trong loadAdminProfile:", eUser);
+            }
+
+            // Nếu tài khoản vừa đăng ký giáo viên mới và đã thanh toán đơn hàng tự động (status='paid')
+            const autoActivated = await checkAndReconcileUserTeacherOrders();
+            if (autoActivated) {
+                window.currentAdminProfile = {
+                    id: user.uid,
+                    uid: user.uid,
+                    email: userEmail,
+                    displayName: user.displayName || userEmail.split('@')[0],
+                    role: 'admin',
+                    teacherTier: 'vip',
+                    status: 'active',
+                    permissions: [...(ADMIN_PRESETS.teacher_full || [])],
+                    assignedCourseIds: ['*'],
+                    isRoot: false
+                };
+                return true;
             }
 
             return false;
@@ -7863,37 +7960,121 @@
             }
         };
 
-        // 3. TẢI DANH SÁCH ĐƠN ĐĂNG KÝ GIÁO VIÊN
+        // 3. TẢI DANH SÁCH ĐƠN ĐĂNG KÝ GIÁO VIÊN (TỰ ĐỘNG CẤP QUYỀN KHI ĐÃ THANH TOÁN & TỰ XÓA ĐƠN CHỜ QUÁ 30 PHÚT)
         window.allTeacherOrders = [];
+        const isTeacherOrderPaidStatus = (statusVal) => {
+            const s = String(statusVal || '').toLowerCase().trim();
+            return s === 'paid' || s === 'completed' || s === 'approved' || s === 'success' || s === 'resolved';
+        };
+
         window.loadTeacherOrdersList = async () => {
             const tbody = document.getElementById('teacherOrdersTableBody');
             if (tbody) {
-                tbody.innerHTML = `<tr><td colspan="6" class="p-8 text-center text-slate-500"><i class="fa-solid fa-spinner fa-spin mr-2"></i> Đang tải danh sách đơn đăng ký giáo viên...</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="6" class="p-8 text-center text-slate-500"><i class="fa-solid fa-spinner fa-spin mr-2"></i> Đang tải & đối soát danh sách đơn đăng ký giáo viên...</td></tr>`;
             }
 
             try {
-                let orders = [];
+                let rawOrders = [];
                 try {
                     const q1 = query(collection(db, "orders"), where("orderType", "in", ["teacher_upgrade", "teacher_registration"]));
                     const snap1 = await getDocs(q1);
-                    snap1.forEach(d => orders.push({ id: d.id, ...d.data() }));
+                    snap1.forEach(d => rawOrders.push({ id: d.id, ...d.data() }));
                 } catch(e) {
                     try {
                         const q2 = query(collection(db, "orders"), where("orderType", "==", "teacher_upgrade"));
                         const snap2 = await getDocs(q2);
-                        snap2.forEach(d => orders.push({ id: d.id, ...d.data() }));
+                        snap2.forEach(d => rawOrders.push({ id: d.id, ...d.data() }));
                     } catch(e2){}
                 }
 
-                orders.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
-                window.allTeacherOrders = orders;
+                // Sắp xếp mới nhất lên đầu trước khi lọc trùng
+                rawOrders.sort((a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0));
+
+                const now = Date.now();
+                const EXPIRE_MS = 30 * 60 * 1000; // 30 phút (như cơ chế mua sách/khóa học)
+                const junkOrderIdsToDelete = [];
+                const ordersToAutoGrant = [];
+                const seenPendingByUser = new Set();
+                const validOrders = [];
+
+                for (const ord of rawOrders) {
+                    const s = String(ord.status || 'pending').toLowerCase().trim();
+                    const isPaid = isTeacherOrderPaidStatus(s);
+                    const isPendingOrAbandoned = (s === 'pending' || s === 'cancelled' || s === 'abandoned');
+                    const refTime = new Date(ord.updatedAt || ord.createdAt || 0).getTime();
+                    const isExpired = refTime > 0 && (now - refTime > EXPIRE_MS);
+
+                    // 1. Tự động xóa đơn chưa thanh toán quá 30 phút (trừ khi vừa bấm báo chuyển khoản trong 30 phút gần nhất)
+                    const transferTime = ord.transferredAt ? new Date(ord.transferredAt).getTime() : 0;
+                    const recentlyTransferred = transferTime > 0 && (now - transferTime <= EXPIRE_MS);
+                    if (!isPaid && isPendingOrAbandoned && isExpired && !recentlyTransferred) {
+                        junkOrderIdsToDelete.push(ord.id);
+                        continue;
+                    }
+
+                    // 2. Chống trùng đơn pending: mỗi giáo viên chỉ giữ tối đa 1 đơn pending mới nhất trên hệ thống
+                    if (!isPaid) {
+                        const userKey = (ord.userId || ord.userEmail || ord.email || '').toLowerCase().trim();
+                        if (userKey) {
+                            if (seenPendingByUser.has(userKey)) {
+                                junkOrderIdsToDelete.push(ord.id);
+                                continue;
+                            }
+                            seenPendingByUser.add(userKey);
+                        }
+                    }
+
+                    // 3. Nếu đơn đã được ngân hàng xác nhận thanh toán ('paid') nhưng chưa cấp quyền Admin -> tự động cấp quyền ngay
+                    if (isPaid && ord.roleGranted !== true) {
+                        ordersToAutoGrant.push(ord);
+                        ord.status = 'completed';
+                        ord.roleGranted = true;
+                    }
+
+                    validOrders.push(ord);
+                }
+
+                // Xóa ngầm các đơn quá hạn / đơn trùng khỏi Firestore
+                if (junkOrderIdsToDelete.length > 0) {
+                    console.log(`[TeacherOrders Auto-Clean] Đang xóa ${junkOrderIdsToDelete.length} đơn quá hạn/trùng:`, junkOrderIdsToDelete);
+                    Promise.allSettled(junkOrderIdsToDelete.map(id => deleteDoc(doc(db, "orders", id)))).catch(() => {});
+                }
+
+                // Tự động cấp quyền Admin VIP cho các đơn đã thanh toán
+                if (ordersToAutoGrant.length > 0) {
+                    for (const paidOrd of ordersToAutoGrant) {
+                        try {
+                            await window.grantTeacherRoleToUser({
+                                userId: paidOrd.userId,
+                                email: paidOrd.userEmail || paidOrd.email,
+                                displayName: paidOrd.userName || paidOrd.studentName,
+                                phone: paidOrd.userPhone || paidOrd.phone,
+                                teacherTier: 'vip'
+                            });
+                            await updateDoc(doc(db, "orders", paidOrd.id), {
+                                status: 'completed',
+                                paidStatus: paidOrd.status || 'paid',
+                                roleGranted: true,
+                                approvalType: paidOrd.approvalType || 'auto_payment',
+                                approvedAt: new Date().toISOString()
+                            });
+                        } catch(eGrant) {
+                            console.warn("Lỗi tự động cấp quyền cho đơn đã thanh toán:", paidOrd.id, eGrant);
+                        }
+                    }
+                    if (typeof window.loadAdminAccountsList === 'function') {
+                        window.loadAdminAccountsList().catch(() => {});
+                    }
+                }
+
+                window.allTeacherOrders = validOrders;
 
                 const countBadge = document.getElementById('teacherOrdersBadgeCount');
-                if (countBadge) countBadge.textContent = `${orders.length} đơn`;
+                if (countBadge) countBadge.textContent = `${validOrders.length} đơn`;
                 const tabBadge = document.getElementById('tabCountTeacherRequests');
                 if (tabBadge) {
-                    const pendingCount = orders.filter(o => o.status === 'pending').length;
-                    tabBadge.textContent = pendingCount > 0 ? `${pendingCount} chờ` : `${orders.length}`;
+                    const pendingCount = validOrders.filter(o => !isTeacherOrderPaidStatus(o.status)).length;
+                    tabBadge.textContent = pendingCount > 0 ? `${pendingCount} chờ` : `${validOrders.length}`;
                 }
 
                 const filterStatus = document.getElementById('filterTeacherOrderStatus')?.value || 'all';
@@ -7901,6 +8082,24 @@
             } catch (err) {
                 console.error("Lỗi tải đơn đăng ký giáo viên:", err);
                 if (tbody) tbody.innerHTML = `<tr><td colspan="6" class="p-8 text-center text-rose-700 font-bold"><i class="fa-solid fa-triangle-exclamation mr-2"></i> Lỗi: ${err.message}</td></tr>`;
+            }
+        };
+
+        window.cleanExpiredTeacherOrdersNow = async () => {
+            await window.loadTeacherOrdersList();
+            window.showNotification("🧹 Đã quét đối soát, gộp đơn trùng và dọn sạch các đơn chờ quá hạn (>30 phút)!", "success");
+        };
+
+        window.deleteTeacherOrder = async (orderId) => {
+            if (!orderId) return;
+            const ok = await window.customConfirm("Bạn có chắc muốn xóa đơn đăng ký giáo viên này khỏi danh sách?");
+            if (!ok) return;
+            try {
+                await deleteDoc(doc(db, "orders", orderId));
+                window.showNotification("Đã xóa đơn đăng ký giáo viên!", "success");
+                await window.loadTeacherOrdersList();
+            } catch(e) {
+                window.showNotification("Lỗi khi xóa đơn: " + e.message, "error");
             }
         };
 
@@ -7913,8 +8112,10 @@
             if (!tbody) return;
 
             let list = window.allTeacherOrders || [];
-            if (filterStatus !== 'all') {
-                list = list.filter(o => (o.status || 'pending') === filterStatus);
+            if (filterStatus === 'completed') {
+                list = list.filter(o => isTeacherOrderPaidStatus(o.status));
+            } else if (filterStatus === 'pending') {
+                list = list.filter(o => !isTeacherOrderPaidStatus(o.status));
             }
 
             if (list.length === 0) {
@@ -7923,18 +8124,18 @@
             }
 
             tbody.innerHTML = list.map(order => {
-                const isPaid = order.status === 'completed' || order.status === 'success' || order.status === 'approved';
+                const isPaid = isTeacherOrderPaidStatus(order.status);
                 const isManual = order.manualApproved === true || order.approvalType === 'manual';
 
                 let statusBadge = '';
                 if (isManual) {
                     statusBadge = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300 border border-indigo-200"><i class="fa-solid fa-user-check"></i> Duyệt tay</span>`;
                 } else if (isPaid) {
-                    statusBadge = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-200"><i class="fa-solid fa-circle-check"></i> Đã kích hoạt</span>`;
+                    statusBadge = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-200"><i class="fa-solid fa-circle-check"></i> Đã thanh toán & Cấp quyền</span>`;
                 } else if (order.manualTransferred) {
-                    statusBadge = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300 border border-blue-200 animate-pulse" title="Giáo viên đã xác nhận chuyển khoản, chờ duyệt"><i class="fa-solid fa-receipt"></i> Đã báo CK</span>`;
+                    statusBadge = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300 border border-blue-200 animate-pulse" title="Giáo viên đã xác nhận chuyển khoản, đang đối soát"><i class="fa-solid fa-receipt"></i> Đã báo CK</span>`;
                 } else {
-                    statusBadge = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300 border border-amber-200 animate-pulse"><i class="fa-solid fa-clock"></i> Chờ thanh toán</span>`;
+                    statusBadge = `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300 border border-amber-200 animate-pulse"><i class="fa-solid fa-clock"></i> Chờ thanh toán (Tự xóa sau 30p)</span>`;
                 }
 
                 const createdStr = order.createdAt ? new Date(order.createdAt).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' }) : '---';
@@ -7943,6 +8144,9 @@
                 const name = order.userName || order.studentName || 'Chưa đặt tên';
                 const email = order.loginId || order.userEmail || order.email || '';
                 const phone = order.userPhone || order.phone || '';
+                const sourceLabel = order.orderType === 'teacher_registration'
+                    ? 'Đăng ký GV VIP mới'
+                    : (order.source === 'free_teacher' || order.packageTitle === 'Nâng cấp Giáo Viên VIP' ? 'Nâng cấp từ GV Free' : 'Nâng cấp VIP');
 
                 return `
                     <tr class="hover:bg-gray-50/80 dark:hover:bg-[#201d30] transition-colors">
@@ -7958,7 +8162,7 @@
                         </td>
                         <td class="py-2.5 px-3">
                             <span class="font-mono font-bold text-indigo-700 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/60 px-2 py-0.5 rounded border border-indigo-100 dark:border-indigo-900/40">${order.content || order.orderCode || order.id}</span>
-                            <div class="text-[10px] text-slate-500 mt-0.5">${order.orderType === 'teacher_registration' ? 'Đăng ký mới' : 'Nâng cấp từ HS'}</div>
+                            <div class="text-[10px] text-slate-500 mt-0.5">${sourceLabel}</div>
                         </td>
                         <td class="py-2.5 px-3 text-right font-black text-rose-700 dark:text-rose-400">
                             ${amountFormatted}
@@ -7971,12 +8175,17 @@
                         </td>
                         <td class="py-2.5 px-3 text-right pr-4">
                             ${!isPaid ? `
-                                <button type="button" onclick="window.manualApproveTeacherOrder('${order.id}')" class="px-2.5 py-1 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white rounded-lg text-xs font-bold shadow-2xs transition flex items-center gap-1 ml-auto cursor-pointer" title="Duyệt tay & cấp quyền Giáo viên tức thì">
-                                    <i class="fa-solid fa-check"></i> <span>Duyệt Ngay</span>
-                                </button>
+                                <div class="inline-flex items-center justify-end gap-1.5">
+                                    <button type="button" onclick="window.manualApproveTeacherOrder('${order.id}')" class="px-2.5 py-1 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white rounded-lg text-xs font-bold shadow-2xs transition flex items-center gap-1 cursor-pointer" title="Duyệt tay & cấp quyền Giáo viên VIP tức thì">
+                                        <i class="fa-solid fa-check"></i> <span>Duyệt Ngay</span>
+                                    </button>
+                                    <button type="button" onclick="window.deleteTeacherOrder('${order.id}')" class="w-7 h-7 bg-rose-50 hover:bg-rose-100 text-rose-600 dark:bg-rose-950/50 dark:text-rose-400 rounded-lg text-xs font-bold transition flex items-center justify-center cursor-pointer border border-rose-200 dark:border-rose-800" title="Xóa đơn này">
+                                        <i class="fa-solid fa-trash-can text-[11px]"></i>
+                                    </button>
+                                </div>
                             ` : `
                                 <span class="text-[11px] font-bold text-emerald-700 dark:text-emerald-400 inline-flex items-center gap-1">
-                                    <i class="fa-solid fa-shield-check"></i> Đã cấp quyền
+                                    <i class="fa-solid fa-shield-check"></i> Đã cấp quyền Admin
                                 </span>
                             `}
                         </td>
@@ -7991,28 +8200,30 @@
             if (!order) return;
 
             const name = order.userName || order.userEmail || orderId;
-            const ok = await window.customConfirm(`Xác nhận DUYỆT TAY đơn đăng ký của Thầy/Cô ${name}?\n\nHệ thống sẽ lập tức cấp toàn bộ quyền Giáo viên cho tài khoản này.`);
+            const ok = await window.customConfirm(`Xác nhận DUYỆT TAY đơn đăng ký của Thầy/Cô ${name}?\n\nHệ thống sẽ lập tức cấp toàn bộ quyền Giáo viên VIP (Admin) cho tài khoản này.`);
             if (!ok) return;
 
             try {
-                // 1. Cập nhật đơn hàng
+                // 1. Tự động cấp quyền Giáo viên VIP (Admin)
+                await window.grantTeacherRoleToUser({
+                    userId: order.userId,
+                    email: order.userEmail || order.email,
+                    displayName: order.userName || order.studentName,
+                    phone: order.userPhone || order.phone,
+                    teacherTier: 'vip'
+                });
+
+                // 2. Cập nhật đơn hàng
                 await updateDoc(doc(db, "orders", orderId), {
                     status: 'completed',
+                    roleGranted: true,
                     manualApproved: true,
                     approvalType: 'manual',
                     approvedBy: window.currentAdminProfile?.email || 'super_admin',
                     approvedAt: new Date().toISOString()
                 });
 
-                // 2. Tự động cấp quyền Giáo viên
-                await window.grantTeacherRoleToUser({
-                    userId: order.userId,
-                    email: order.userEmail,
-                    displayName: order.userName,
-                    phone: order.userPhone
-                });
-
-                window.showNotification(`🎉 Đã duyệt và cấp quyền Giáo viên thành công cho ${name}!`, 'success');
+                window.showNotification(`🎉 Đã duyệt và cấp quyền Giáo viên VIP thành công cho ${name}!`, 'success');
                 await window.loadTeacherOrdersList();
                 await window.loadAdminAccountsList();
             } catch (err) {
@@ -8107,17 +8318,72 @@
             }
         };
 
-        // 6. XỬ LÝ NÂNG CẤP VIP & QUẢN LÝ QPOINT CHO GIÁO VIÊN
+        // 6. XỬ LÝ NÂNG CẤP VIP & QUẢN LÝ QPOINT CHO GIÁO VIÊN (CƠ CHẾ THANH TOÁN TỰ ĐỘNG NHƯ MUA SÁCH & CHỈ TẠO 1 ĐƠN DUY NHẤT)
         let teacherUpgradeQrCountdownInterval = null;
+        let teacherUpgradeRecheckTimer = null;
+        let teacherUpgradeAutoScanInterval = null;
         let teacherUpgradeOrderListener = null;
         let currentTeacherUpgradeOrderId = null;
         let currentTeacherUpgradeMemo = null;
         let teacherUpgradeBankConfig = null;
+        let _isCreatingTeacherUpgradeOrder = false;
 
-        window.openTeacherVipUpgradeModal = async () => {
+        window.triggerTeacherUpgradeScan = (isAuto = true) => {
+            const scanUrl = teacherUpgradeBankConfig?.SCAN_TRIGGER_URL || "https://script.google.com/macros/s/AKfycbxTRrSksmNVCb9UjOXhfTmKjY4XFrZO5QlIc_CnPoemUEEo5akhPoCmpYv3_x78AN_neQ/exec";
+            if (!scanUrl) return;
+            try {
+                const pingUrl = scanUrl + (scanUrl.includes('?') ? '&' : '?') + '_t=' + Date.now();
+                const img = new Image();
+                img.src = pingUrl;
+            } catch(e) {}
+            try {
+                fetch(scanUrl, {
+                    method: 'GET',
+                    mode: 'no-cors',
+                    credentials: 'omit',
+                    cache: 'no-store'
+                }).catch(() => {});
+            } catch(e) {}
+            if (!isAuto && window.showNotification) {
+                window.showNotification("⚡ Đã gửi yêu cầu đối soát giao dịch tới hệ thống ngân hàng!", "info");
+            }
+        };
+
+        window.startTeacherUpgradeRecheckTimer = (seconds = 30) => {
+            if (teacherUpgradeRecheckTimer) clearInterval(teacherUpgradeRecheckTimer);
+            const noticeEl = document.getElementById('tUpgradeRecheckNotice');
+            const numEl = document.getElementById('tUpgradeRecheckNum');
+            const btnEl = document.getElementById('btnRecheckTeacherVipUpgrade');
+
+            if (noticeEl) noticeEl.classList.remove('hidden');
+            if (btnEl) btnEl.classList.add('hidden');
+            if (numEl) numEl.textContent = `${seconds}s`;
+
+            let rem = seconds;
+            teacherUpgradeRecheckTimer = setInterval(() => {
+                rem--;
+                if (rem > 0) {
+                    if (numEl) numEl.textContent = `${rem}s`;
+                } else {
+                    clearInterval(teacherUpgradeRecheckTimer);
+                    teacherUpgradeRecheckTimer = null;
+                    if (noticeEl) noticeEl.classList.add('hidden');
+                    if (btnEl) {
+                        btnEl.classList.remove('hidden');
+                        btnEl.disabled = false;
+                    }
+                }
+            }, 1000);
+        };
+
+        window.openTeacherVipUpgradeModal = async (forceRefreshQr = false) => {
             const modal = document.getElementById('teacherVipUpgradeModal');
             if (!modal) return;
-            modal.classList.remove('hidden');
+            // Hiển thị trang thanh toán ngay lập tức (gỡ cả hidden, opacity-0, pointer-events-none)
+            modal.classList.remove('hidden', 'opacity-0', 'pointer-events-none');
+            document.body.classList.add('modal-active');
+            const scrollArea = modal.querySelector('.overflow-y-auto');
+            if (scrollArea) scrollArea.scrollTop = 0;
 
             if (window._teacherHlsInstance) {
                 window._teacherHlsInstance.destroy();
@@ -8131,118 +8397,251 @@
             const user = auth.currentUser;
             if (!user) return;
 
-            // Nạp cấu hình gói nếu chưa có
-            if (!window.cachedTeacherPkgConfig) {
-                try {
-                    const snap = await getDoc(doc(db, "configurations", "teacher_package_config"));
-                    if (snap.exists()) window.cachedTeacherPkgConfig = snap.data();
-                } catch(e) {}
-            }
-            const pkg = window.cachedTeacherPkgConfig || {};
-            const price = Number(pkg.price) || 500000;
-            const priceFormatted = price.toLocaleString('vi-VN') + ' đ';
+            // Khóa chống bấm liên tiếp tạo nhiều đơn
+            if (_isCreatingTeacherUpgradeOrder) return;
+            _isCreatingTeacherUpgradeOrder = true;
 
-            const priceTableEl = document.getElementById('teacherUpgradeTableVipPrice');
-            if (priceTableEl) priceTableEl.textContent = `${priceFormatted} / ${pkg.period === 'yearly' ? '1 Năm' : 'Vĩnh viễn'}`;
-
-            // Nạp thông tin ngân hàng
-            if (!teacherUpgradeBankConfig) {
-                try {
-                    const snapBank = await getDoc(doc(db, "site_settings", "payment_config"));
-                    teacherUpgradeBankConfig = snapBank.exists() ? snapBank.data() : { BANK_ID: "970422", BANK_NAME: "MB Bank", ACCOUNT_NO: "0000", ACCOUNT_NAME: "ADMIN", TEMPLATE: "compact2" };
-                } catch(e) {
-                    teacherUpgradeBankConfig = { BANK_ID: "970422", BANK_NAME: "MB Bank", ACCOUNT_NO: "0000", ACCOUNT_NAME: "ADMIN", TEMPLATE: "compact2" };
-                }
-            }
-
-            const randCode = Math.random().toString(36).substring(2, 7).toUpperCase();
-            currentTeacherUpgradeMemo = `GV ${randCode}`;
-
-            const bNameEl = document.getElementById('tUpgradeBankNameDisplay');
-            const bAccEl = document.getElementById('tUpgradeAccountNoDisplay');
-            const bOwnerEl = document.getElementById('tUpgradeAccountOwnerDisplay');
-            const bAmtEl = document.getElementById('tUpgradeAmountDisplay');
-            const bAmtRawEl = document.getElementById('tUpgradeAmountRaw');
-            const bMemoEl = document.getElementById('tUpgradeMemoDisplay');
-
-            if (bNameEl) bNameEl.textContent = teacherUpgradeBankConfig.BANK_NAME || teacherUpgradeBankConfig.BANK_ID || 'MB Bank';
-            if (bAccEl) bAccEl.textContent = teacherUpgradeBankConfig.ACCOUNT_NO || '';
-            if (bOwnerEl) bOwnerEl.textContent = teacherUpgradeBankConfig.ACCOUNT_NAME ? `(${teacherUpgradeBankConfig.ACCOUNT_NAME})` : '';
-            if (bAmtEl) bAmtEl.textContent = priceFormatted;
-            if (bAmtRawEl) bAmtRawEl.textContent = String(price);
-            if (bMemoEl) bMemoEl.textContent = currentTeacherUpgradeMemo;
-
-            const bankId = teacherUpgradeBankConfig.BANK_ID || '970422';
-            const accNo = teacherUpgradeBankConfig.ACCOUNT_NO || '';
-            const template = teacherUpgradeBankConfig.TEMPLATE || 'compact2';
-            const qrUrl = `https://img.vietqr.io/image/${bankId}-${accNo}-${template}.png?amount=${price}&addInfo=${encodeURIComponent(currentTeacherUpgradeMemo)}&accountName=${encodeURIComponent(teacherUpgradeBankConfig.ACCOUNT_NAME || '')}`;
-
-            const qrImg = document.getElementById('tUpgradeVietQrImage');
-            const qrLoading = document.getElementById('tUpgradeQrLoading');
-            if (qrLoading) qrLoading.classList.remove('hidden');
-            if (qrImg) {
-                qrImg.onload = () => qrLoading?.classList.add('hidden');
-                qrImg.onerror = () => qrLoading?.classList.add('hidden');
-                qrImg.src = qrUrl;
-            }
-
-            // Tạo order lưu vào collection `orders`
             try {
-                const ordRef = await addDoc(collection(db, "orders"), {
-                    orderType: 'teacher_upgrade',
-                    userId: user.uid,
-                    userName: window.currentAdminProfile?.displayName || user.displayName || user.email?.split('@')[0],
-                    userEmail: (user.email || '').toLowerCase().trim(),
-                    amount: price,
-                    memo: currentTeacherUpgradeMemo,
-                    content: currentTeacherUpgradeMemo,
-                    orderCode: randCode,
-                    packageTitle: 'Nâng cấp Giáo Viên VIP',
-                    status: 'pending',
-                    createdAt: new Date().toISOString()
-                });
-                currentTeacherUpgradeOrderId = ordRef.id;
+                // Nạp cấu hình gói nếu chưa có
+                if (!window.cachedTeacherPkgConfig) {
+                    try {
+                        const snap = await getDoc(doc(db, "configurations", "teacher_package_config"));
+                        if (snap.exists()) window.cachedTeacherPkgConfig = snap.data();
+                    } catch(e) {}
+                }
+                const pkg = window.cachedTeacherPkgConfig || {};
+                const price = Number(pkg.price) || 500000;
+                const priceFormatted = price.toLocaleString('vi-VN') + ' đ';
+                const periodLabel = pkg.period === 'yearly' ? '1 Năm' : 'Vĩnh viễn';
 
-                // Lắng nghe realtime
-                if (teacherUpgradeOrderListener) { teacherUpgradeOrderListener(); teacherUpgradeOrderListener = null; }
-                teacherUpgradeOrderListener = onSnapshot(doc(db, "orders", ordRef.id), async (snap) => {
-                    if (snap.exists()) {
-                        const s = String(snap.data().status || '').toLowerCase().trim();
-                        if (s === 'completed' || s === 'approved' || s === 'paid' || s === 'resolved' || s === 'success') {
-                            await window.onTeacherVipUpgradeSuccess();
+                const priceTableEl = document.getElementById('teacherUpgradeTableVipPrice');
+                if (priceTableEl) priceTableEl.textContent = `${priceFormatted} / ${periodLabel}`;
+                const headerBadgeEl = document.getElementById('tUpgradeOrderSummaryPrice');
+                if (headerBadgeEl) headerBadgeEl.textContent = `${priceFormatted} (${periodLabel})`;
+
+                // Nạp thông tin ngân hàng
+                if (!teacherUpgradeBankConfig) {
+                    try {
+                        const snapBank = await getDoc(doc(db, "site_settings", "payment_config"));
+                        teacherUpgradeBankConfig = snapBank.exists() ? snapBank.data() : { BANK_ID: "970422", BANK_NAME: "MB Bank", ACCOUNT_NO: "0000", ACCOUNT_NAME: "ADMIN", TEMPLATE: "compact2" };
+                    } catch(e) {
+                        teacherUpgradeBankConfig = { BANK_ID: "970422", BANK_NAME: "MB Bank", ACCOUNT_NO: "0000", ACCOUNT_NAME: "ADMIN", TEMPLATE: "compact2" };
+                    }
+                }
+
+                // KIỂM TRA ĐƠN HÀNG HIỆN CÓ CỦA GIÁO VIÊN TRÊN FIRESTORE (CHỈ TẠO 1 ĐƠN DUY NHẤT & TỰ XÓA ĐƠN QUÁ 30 PHÚT)
+                const userEmail = (user.email || '').toLowerCase().trim();
+                const userName = window.currentAdminProfile?.displayName || user.displayName || userEmail.split('@')[0] || 'Giáo viên';
+                const userPhone = window.currentAdminProfile?.phone || user.phoneNumber || null;
+
+                let existingPendingOrder = null;
+                const now = Date.now();
+                const EXPIRE_MS = 30 * 60 * 1000; // 30 phút
+
+                try {
+                    const qExisting = query(collection(db, "orders"), where("userId", "==", user.uid));
+                    const snapExisting = await getDocs(qExisting);
+                    const userTeacherOrders = [];
+                    snapExisting.forEach(d => {
+                        const data = d.data();
+                        if (data.orderType === 'teacher_upgrade' || data.orderType === 'teacher_registration') {
+                            userTeacherOrders.push({ id: d.id, ...data });
+                        }
+                    });
+
+                    // Kiểm tra nếu đã có đơn thanh toán thành công
+                    const paidOrd = userTeacherOrders.find(o => isTeacherOrderPaidStatus(o.status));
+                    if (paidOrd) {
+                        await window.onTeacherVipUpgradeSuccess(paidOrd.id);
+                        return;
+                    }
+
+                    // Phân loại đơn pending còn hạn vs quá hạn (>30 phút)
+                    const validPendings = [];
+                    const expiredOrDuplicateIds = [];
+                    userTeacherOrders.forEach(o => {
+                        const s = String(o.status || 'pending').toLowerCase().trim();
+                        const refTime = new Date(o.updatedAt || o.createdAt || 0).getTime();
+                        if ((s === 'pending' || s === 'cancelled' || s === 'abandoned') && (now - refTime > EXPIRE_MS)) {
+                            expiredOrDuplicateIds.push(o.id);
+                        } else if (s === 'pending') {
+                            validPendings.push(o);
+                        }
+                    });
+
+                    validPendings.sort((a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0));
+                    if (validPendings.length > 0) {
+                        existingPendingOrder = validPendings[0];
+                        for (let i = 1; i < validPendings.length; i++) {
+                            expiredOrDuplicateIds.push(validPendings[i].id);
                         }
                     }
-                });
-            } catch(eOrd) {
-                console.warn("Lỗi lưu đơn hàng nâng cấp:", eOrd);
-            }
 
-            // Đếm ngược 10 phút
-            if (teacherUpgradeQrCountdownInterval) clearInterval(teacherUpgradeQrCountdownInterval);
-            let timeLeft = 600;
-            const cdEl = document.getElementById('tUpgradeQrCountdown');
-            const updateCd = () => {
-                const m = Math.floor(timeLeft / 60);
-                const s = timeLeft % 60;
-                if (cdEl) cdEl.textContent = `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-            };
-            updateCd();
-            teacherUpgradeQrCountdownInterval = setInterval(() => {
-                timeLeft--;
-                if (timeLeft <= 0) {
-                    clearInterval(teacherUpgradeQrCountdownInterval);
-                    teacherUpgradeQrCountdownInterval = null;
-                } else {
-                    updateCd();
+                    if (expiredOrDuplicateIds.length > 0) {
+                        Promise.allSettled(expiredOrDuplicateIds.map(id => deleteDoc(doc(db, "orders", id)))).catch(() => {});
+                    }
+                } catch(eCheck) {
+                    console.warn("Lỗi kiểm tra đơn nâng cấp hiện có:", eCheck);
                 }
-            }, 1000);
+
+                let randCode = '';
+                if (existingPendingOrder && !forceRefreshQr) {
+                    // Tái sử dụng đơn đang chờ thanh toán (không tạo đơn mới)
+                    currentTeacherUpgradeOrderId = existingPendingOrder.id;
+                    currentTeacherUpgradeMemo = existingPendingOrder.content || existingPendingOrder.memo || `GV ${existingPendingOrder.orderCode || 'VIP'}`;
+                    randCode = existingPendingOrder.orderCode || currentTeacherUpgradeMemo.replace(/^GV\s+/i, '');
+
+                    if (Number(existingPendingOrder.amount) !== price) {
+                        await updateDoc(doc(db, "orders", existingPendingOrder.id), {
+                            amount: price,
+                            userName: userName,
+                            userEmail: userEmail,
+                            updatedAt: new Date().toISOString()
+                        }).catch(() => {});
+                    }
+                } else {
+                    randCode = Math.random().toString(36).substring(2, 7).toUpperCase();
+                    currentTeacherUpgradeMemo = `GV ${randCode}`;
+
+                    if (existingPendingOrder && forceRefreshQr) {
+                        currentTeacherUpgradeOrderId = existingPendingOrder.id;
+                        await updateDoc(doc(db, "orders", existingPendingOrder.id), {
+                            amount: price,
+                            memo: currentTeacherUpgradeMemo,
+                            content: currentTeacherUpgradeMemo,
+                            orderCode: randCode,
+                            userName: userName,
+                            userEmail: userEmail,
+                            updatedAt: new Date().toISOString()
+                        }).catch(() => {});
+                    } else {
+                        const ordRef = await addDoc(collection(db, "orders"), {
+                            orderType: 'teacher_upgrade',
+                            source: 'free_teacher',
+                            userId: user.uid,
+                            userName: userName,
+                            userEmail: userEmail,
+                            userPhone: userPhone,
+                            amount: price,
+                            memo: currentTeacherUpgradeMemo,
+                            content: currentTeacherUpgradeMemo,
+                            orderCode: randCode,
+                            packageTitle: 'Nâng cấp Giáo Viên VIP',
+                            status: 'pending',
+                            createdAt: new Date().toISOString(),
+                            updatedAt: new Date().toISOString()
+                        });
+                        currentTeacherUpgradeOrderId = ordRef.id;
+                    }
+                }
+
+                // Cập nhật UI thông tin chuyển khoản
+                const bNameEl = document.getElementById('tUpgradeBankNameDisplay');
+                const bAccEl = document.getElementById('tUpgradeAccountNoDisplay');
+                const bOwnerEl = document.getElementById('tUpgradeAccountOwnerDisplay');
+                const bAmtEl = document.getElementById('tUpgradeAmountDisplay');
+                const bAmtRawEl = document.getElementById('tUpgradeAmountRaw');
+                const bMemoEl = document.getElementById('tUpgradeMemoDisplay');
+
+                if (bNameEl) bNameEl.textContent = teacherUpgradeBankConfig.BANK_NAME || teacherUpgradeBankConfig.BANK_ID || 'MB Bank';
+                if (bAccEl) bAccEl.textContent = teacherUpgradeBankConfig.ACCOUNT_NO || '';
+                if (bOwnerEl) bOwnerEl.textContent = teacherUpgradeBankConfig.ACCOUNT_NAME ? `(${teacherUpgradeBankConfig.ACCOUNT_NAME})` : '';
+                if (bAmtEl) bAmtEl.textContent = priceFormatted;
+                if (bAmtRawEl) bAmtRawEl.textContent = String(price);
+                if (bMemoEl) bMemoEl.textContent = currentTeacherUpgradeMemo;
+
+                const bankId = teacherUpgradeBankConfig.BANK_ID || '970422';
+                const accNo = teacherUpgradeBankConfig.ACCOUNT_NO || '';
+                const template = teacherUpgradeBankConfig.TEMPLATE || 'compact2';
+                const qrUrl = `https://img.vietqr.io/image/${bankId}-${accNo}-${template}.png?amount=${price}&addInfo=${encodeURIComponent(currentTeacherUpgradeMemo)}&accountName=${encodeURIComponent(teacherUpgradeBankConfig.ACCOUNT_NAME || '')}`;
+
+                const qrImg = document.getElementById('tUpgradeVietQrImage');
+                const qrLoading = document.getElementById('tUpgradeQrLoading');
+                const qrExpiredOverlay = document.getElementById('tUpgradeQrExpiredOverlay');
+                if (qrExpiredOverlay) qrExpiredOverlay.classList.add('hidden');
+                if (qrLoading) qrLoading.classList.remove('hidden');
+                if (qrImg) {
+                    qrImg.onload = () => qrLoading?.classList.add('hidden');
+                    qrImg.onerror = () => qrLoading?.classList.add('hidden');
+                    qrImg.src = qrUrl;
+                }
+
+                // Reset nút xác nhận chuyển khoản
+                const btnConfirm = document.getElementById('btnConfirmTeacherVipTransferred');
+                if (btnConfirm) {
+                    btnConfirm.disabled = false;
+                    btnConfirm.className = "w-full py-2.5 px-3 bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs rounded-xl shadow-md active:scale-95 transition-all flex items-center justify-center gap-1.5 cursor-pointer";
+                    btnConfirm.innerHTML = '<i class="fa-solid fa-circle-check"></i> Đã chuyển khoản, xác nhận ngay';
+                }
+
+                // Lắng nghe realtime đơn hàng trên Firestore (như mua sách)
+                if (teacherUpgradeOrderListener) { teacherUpgradeOrderListener(); teacherUpgradeOrderListener = null; }
+                if (currentTeacherUpgradeOrderId) {
+                    teacherUpgradeOrderListener = onSnapshot(doc(db, "orders", currentTeacherUpgradeOrderId), async (snap) => {
+                        if (snap.exists() && isTeacherOrderPaidStatus(snap.data().status)) {
+                            await window.onTeacherVipUpgradeSuccess(currentTeacherUpgradeOrderId);
+                        }
+                    });
+                }
+
+                // Bắt đầu đếm ngược 30s cho nút Kiểm tra lại & tự động kích hoạt quét ngân hàng
+                window.startTeacherUpgradeRecheckTimer(30);
+                window.triggerTeacherUpgradeScan(true);
+                if (teacherUpgradeAutoScanInterval) clearInterval(teacherUpgradeAutoScanInterval);
+                teacherUpgradeAutoScanInterval = setInterval(() => {
+                    window.triggerTeacherUpgradeScan(true);
+                }, 20000);
+
+                // Đếm ngược hiệu lực QR 10 phút
+                if (teacherUpgradeQrCountdownInterval) clearInterval(teacherUpgradeQrCountdownInterval);
+                let timeLeft = 600;
+                const cdEl = document.getElementById('tUpgradeQrCountdown');
+                const updateCd = () => {
+                    const m = Math.floor(timeLeft / 60);
+                    const s = timeLeft % 60;
+                    if (cdEl) cdEl.textContent = `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+                };
+                updateCd();
+                teacherUpgradeQrCountdownInterval = setInterval(() => {
+                    timeLeft--;
+                    if (timeLeft <= 0) {
+                        clearInterval(teacherUpgradeQrCountdownInterval);
+                        teacherUpgradeQrCountdownInterval = null;
+                        if (qrExpiredOverlay) qrExpiredOverlay.classList.remove('hidden');
+                    } else {
+                        updateCd();
+                    }
+                }, 1000);
+            } finally {
+                _isCreatingTeacherUpgradeOrder = false;
+            }
         };
 
         window.closeTeacherVipUpgradeModal = () => {
             const modal = document.getElementById('teacherVipUpgradeModal');
-            if (modal) modal.classList.add('hidden');
+            if (modal) modal.classList.add('hidden', 'opacity-0', 'pointer-events-none');
+            document.body.classList.remove('modal-active');
             if (teacherUpgradeQrCountdownInterval) { clearInterval(teacherUpgradeQrCountdownInterval); teacherUpgradeQrCountdownInterval = null; }
+            if (teacherUpgradeRecheckTimer) { clearInterval(teacherUpgradeRecheckTimer); teacherUpgradeRecheckTimer = null; }
+            if (teacherUpgradeAutoScanInterval) { clearInterval(teacherUpgradeAutoScanInterval); teacherUpgradeAutoScanInterval = null; }
             if (teacherUpgradeOrderListener) { teacherUpgradeOrderListener(); teacherUpgradeOrderListener = null; }
+        };
+
+        window.downloadTeacherUpgradeQr = () => {
+            const qrImg = document.getElementById('tUpgradeVietQrImage');
+            if (!qrImg || !qrImg.src) return;
+            try {
+                const a = document.createElement('a');
+                a.href = qrImg.src;
+                a.download = `VietQR_GiaoVienVIP_${currentTeacherUpgradeMemo || 'QMath'}.png`;
+                a.target = '_blank';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                window.showNotification("Đã tải ảnh mã QR về máy!", "success");
+            } catch(e) {
+                window.open(qrImg.src, '_blank');
+            }
         };
 
         window.copyUpgradeField = (elemId, label) => {
@@ -8256,6 +8655,49 @@
             });
         };
 
+        window.recheckTeacherVipUpgradePayment = async () => {
+            const btn = document.getElementById('btnRecheckTeacherVipUpgrade');
+            const orig = btn ? btn.innerHTML : '';
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang đối soát giao dịch...';
+            }
+            try {
+                if (currentTeacherUpgradeOrderId) {
+                    const snap0 = await getDoc(doc(db, "orders", currentTeacherUpgradeOrderId));
+                    if (snap0.exists() && isTeacherOrderPaidStatus(snap0.data().status)) {
+                        await window.onTeacherVipUpgradeSuccess(currentTeacherUpgradeOrderId);
+                        return;
+                    }
+                }
+                window.triggerTeacherUpgradeScan(false);
+                await new Promise(r => setTimeout(r, 1200));
+                if (currentTeacherUpgradeOrderId) {
+                    const snap1 = await getDoc(doc(db, "orders", currentTeacherUpgradeOrderId));
+                    if (snap1.exists() && isTeacherOrderPaidStatus(snap1.data().status)) {
+                        await window.onTeacherVipUpgradeSuccess(currentTeacherUpgradeOrderId);
+                        return;
+                    }
+                }
+                await new Promise(r => setTimeout(r, 1500));
+                if (currentTeacherUpgradeOrderId) {
+                    const snap2 = await getDoc(doc(db, "orders", currentTeacherUpgradeOrderId));
+                    if (snap2.exists() && isTeacherOrderPaidStatus(snap2.data().status)) {
+                        await window.onTeacherVipUpgradeSuccess(currentTeacherUpgradeOrderId);
+                        return;
+                    }
+                }
+                window.showNotification("Hệ thống đã gửi yêu cầu đối soát tới ngân hàng. Nếu Thầy/Cô vừa chuyển khoản, ngân hàng có thể mất 30s - 1 phút để cập nhật. Vui lòng thử bấm lại sau giây lát!", "info");
+            } catch(e) {
+                console.error("Lỗi kiểm tra lại thanh toán VIP:", e);
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = orig || '<i class="fa-solid fa-rotate"></i> Kiểm tra lại giao dịch';
+                }
+            }
+        };
+
         window.confirmTeacherVipTransferred = async () => {
             const btn = document.getElementById('btnConfirmTeacherVipTransferred');
             const orig = btn ? btn.innerHTML : '';
@@ -8265,16 +8707,32 @@
                 if (currentTeacherUpgradeOrderId) {
                     await updateDoc(doc(db, "orders", currentTeacherUpgradeOrderId), {
                         manualTransferred: true,
-                        transferredAt: new Date().toISOString()
+                        transferredAt: new Date().toISOString(),
+                        updatedAt: new Date().toISOString()
                     });
                 }
-                if (teacherUpgradeBankConfig?.SCAN_TRIGGER_URL) {
-                    try { fetch(teacherUpgradeBankConfig.SCAN_TRIGGER_URL, { mode: 'no-cors' }); } catch(e) {}
+                window.triggerTeacherUpgradeScan(true);
+
+                // Smart polling như cơ chế mua sách/khóa học
+                if (currentTeacherUpgradeOrderId) {
+                    await new Promise(r => setTimeout(r, 1200));
+                    const snap1 = await getDoc(doc(db, "orders", currentTeacherUpgradeOrderId));
+                    if (snap1.exists() && isTeacherOrderPaidStatus(snap1.data().status)) {
+                        await window.onTeacherVipUpgradeSuccess(currentTeacherUpgradeOrderId);
+                        return;
+                    }
+                    await new Promise(r => setTimeout(r, 1500));
+                    const snap2 = await getDoc(doc(db, "orders", currentTeacherUpgradeOrderId));
+                    if (snap2.exists() && isTeacherOrderPaidStatus(snap2.data().status)) {
+                        await window.onTeacherVipUpgradeSuccess(currentTeacherUpgradeOrderId);
+                        return;
+                    }
                 }
-                window.showNotification("🎉 Đã gửi xác nhận chuyển khoản! Hệ thống đang đối soát và tự động nâng cấp cho Thầy/Cô...", "info");
+
+                window.showNotification("🎉 Đã gửi xác nhận chuyển khoản! Hệ thống đang đối soát tự động và sẽ kích hoạt quyền Admin VIP ngay khi khớp lệnh...", "info");
                 if (btn) {
                     btn.className = "w-full py-2.5 px-3 bg-emerald-700 text-white font-bold text-xs rounded-xl cursor-default flex items-center justify-center gap-1.5 opacity-90";
-                    btn.innerHTML = '<i class="fa-solid fa-check"></i> Đã gửi báo chuyển khoản';
+                    btn.innerHTML = '<i class="fa-solid fa-check"></i> Đã gửi báo chuyển khoản (Đang quét tự động...)';
                 }
             } catch(e) {
                 console.error("Lỗi xác nhận chuyển khoản VIP:", e);
@@ -8283,29 +8741,43 @@
             }
         };
 
-        window.onTeacherVipUpgradeSuccess = async () => {
+        window.onTeacherVipUpgradeSuccess = async (orderIdToComplete = null) => {
+            const ordId = orderIdToComplete || currentTeacherUpgradeOrderId;
             window.closeTeacherVipUpgradeModal();
             const user = auth.currentUser;
             if (!user) return;
 
-            // Kích hoạt VIP role
+            // Kích hoạt VIP Admin role
             await window.grantTeacherRoleToUser({
                 userId: user.uid,
                 email: user.email,
                 displayName: window.currentAdminProfile?.displayName || user.displayName,
+                phone: window.currentAdminProfile?.phone || user.phoneNumber || null,
                 teacherTier: 'vip'
             });
 
+            if (ordId) {
+                try {
+                    await updateDoc(doc(db, "orders", ordId), {
+                        status: 'completed',
+                        roleGranted: true,
+                        approvalType: 'auto_payment',
+                        approvedAt: new Date().toISOString()
+                    });
+                } catch(eUp) {}
+            }
+
             if (window.currentAdminProfile) {
+                window.currentAdminProfile.role = 'admin';
                 window.currentAdminProfile.teacherTier = 'vip';
                 window.currentAdminProfile.permissions = [...(ADMIN_PRESETS.teacher_full || [])];
             }
             window.applyUIPermissions();
-            window.showNotification("👑 Chúc mừng Thầy/Cô đã nâng cấp thành công Giáo viên VIP! Toàn bộ tính năng cao cấp đã được mở khóa.", "success");
+            window.showNotification("👑 Chúc mừng Thầy/Cô đã thanh toán và nâng cấp thành công Giáo viên VIP! Toàn bộ quyền Admin đã được mở khóa.", "success");
         };
 
         window.closeTeacherInsufficientQpModal = () => {
-            document.getElementById('teacherInsufficientQpModal')?.classList.add('hidden');
+            document.getElementById('teacherInsufficientQpModal')?.classList.add('hidden', 'opacity-0', 'pointer-events-none');
         };
 
         window.loadTeacherQPointBalance = async () => {
@@ -8354,7 +8826,7 @@
                 if (msgEl) {
                     msgEl.innerHTML = `Tính năng <b>${featureName || featureKey}</b> yêu cầu <span class="font-bold text-amber-800">${cost} QPoint</span>, nhưng số dư hiện tại của Thầy/Cô chỉ còn <span class="font-bold text-gray-700 dark:text-gray-300">${currentQp} QPoint</span>.`;
                 }
-                document.getElementById('teacherInsufficientQpModal')?.classList.remove('hidden');
+                document.getElementById('teacherInsufficientQpModal')?.classList.remove('hidden', 'opacity-0', 'pointer-events-none');
                 return false;
             }
 
@@ -16344,12 +16816,30 @@ function renderTagFilterUI() {
         function initNotifications(user) {
             if(notifUnsubscribe) notifUnsubscribe();
             
+            // Tự động đối soát & dọn đơn đăng ký giáo viên quá hạn ngầm cho Super Admin
+            if (window.currentAdminProfile?.role === 'super_admin' && typeof window.loadTeacherOrdersList === 'function') {
+                setTimeout(() => { window.loadTeacherOrdersList().catch(() => {}); }, 1500);
+            }
+
             // Lắng nghe các yêu cầu 'pending' (chờ duyệt)
             const q = query(collection(db, "access_requests"), where("status", "==", "pending"));
             
             notifUnsubscribe = onSnapshot(q, (snapshot) => {
                 const requests = [];
-                snapshot.forEach(doc => requests.push({ id: doc.id, ...doc.data() }));
+                const obsoleteTeacherReqIds = [];
+                snapshot.forEach(docSnap => {
+                    const d = docSnap.data();
+                    // Loại bỏ và tự động dọn dẹp các bản ghi teacher_upgrade / teacher_registration cũ trong access_requests
+                    // để không bị hiển thị nhầm thành "Xin làm lại: Đề thi"
+                    if (d.type === 'teacher_upgrade' || d.type === 'teacher_registration') {
+                        obsoleteTeacherReqIds.push(docSnap.id);
+                        return;
+                    }
+                    requests.push({ id: docSnap.id, ...d });
+                });
+                if (obsoleteTeacherReqIds.length > 0) {
+                    Promise.allSettled(obsoleteTeacherReqIds.map(id => deleteDoc(doc(db, "access_requests", id)))).catch(() => {});
+                }
                 
                 // Sắp xếp: Mới nhất lên đầu
                 requests.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
@@ -25967,8 +26457,8 @@ window.deleteTag = async (id) => {
     </div>
 </div>
 
-<!-- Teacher VIP Upgrade Modal (Bảng so sánh Free vs VIP + Thanh toán VietQR) -->
-<div id="teacherVipUpgradeModal" class="modal opacity-0 pointer-events-none hidden fixed inset-0 z-[170] overflow-y-auto p-2 sm:p-4 md:p-6 bg-gray-900/80 backdrop-blur-sm flex justify-center items-start sm:items-center">
+<!-- Teacher VIP Upgrade Modal (Trang Thanh toán VietQR + Bảng so sánh Free vs VIP) -->
+<div id="teacherVipUpgradeModal" class="modal hidden fixed inset-0 z-[170] overflow-y-auto p-2 sm:p-4 md:p-6 bg-gray-900/80 backdrop-blur-sm flex justify-center items-start sm:items-center">
     <div class="modal-content relative bg-white dark:bg-slate-900 w-full max-w-4xl max-h-[94vh] sm:max-h-[90vh] my-auto rounded-3xl shadow-2xl border border-indigo-200 dark:border-indigo-900/60 overflow-hidden flex flex-col">
         <!-- Header -->
         <div class="px-4 py-3.5 sm:px-6 sm:py-4 bg-gradient-to-r from-slate-900 via-indigo-950 to-purple-950 text-white flex justify-between items-center shrink-0">
@@ -25978,10 +26468,10 @@ window.deleteTag = async (id) => {
                 </div>
                 <div>
                     <div class="flex items-center gap-2">
-                        <h3 class="font-black text-base sm:text-lg text-white tracking-tight">Nâng Cấp Giáo Viên VIP (Pro)</h3>
+                        <h3 class="font-black text-base sm:text-lg text-white tracking-tight">Thanh Toán Nâng Cấp Giáo Viên VIP</h3>
                         <span class="text-[9px] font-black uppercase tracking-wider bg-gradient-to-r from-amber-400 to-orange-400 text-slate-950 px-2 py-0.5 rounded-full shadow-2xs">VIP PRO</span>
                     </div>
-                    <p class="text-[11px] sm:text-xs text-purple-200/80 mt-0.5 hidden xs:block">Sử dụng toàn bộ tính năng cao cấp không giới hạn, không tốn QPoint</p>
+                    <p class="text-[11px] sm:text-xs text-purple-200/80 mt-0.5 hidden xs:block">Quét mã VietQR để tự động kích hoạt quyền Admin VIP tức thì</p>
                 </div>
             </div>
             <button type="button" onclick="window.closeTeacherVipUpgradeModal()" class="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-colors cursor-pointer" title="Đóng">
@@ -25991,8 +26481,110 @@ window.deleteTag = async (id) => {
 
         <!-- Body Scrollable -->
         <div class="p-4 sm:p-6 overflow-y-auto flex-1 min-h-0 bg-slate-50/50 dark:bg-slate-900/50 space-y-5">
-            <!-- Bảng so sánh tính năng Free vs VIP -->
-            <div class="overflow-x-auto border-y border-slate-200 dark:border-slate-700">
+            <!-- 1. KHỐI THANH TOÁN VIETQR TRỰC TIẾP (ƯU TIÊN LÊN ĐẦU NHƯ TRANG THANH TOÁN MUA SÁCH) -->
+            <div class="bg-white dark:bg-slate-800/90 rounded-2xl border border-indigo-200 dark:border-slate-700 p-4 sm:p-5 shadow-sm">
+                <div class="grid grid-cols-1 md:grid-cols-12 gap-4 items-start">
+                    <div class="md:col-span-7 space-y-3">
+                        <div class="p-3 bg-indigo-50/80 dark:bg-slate-800 rounded-xl border border-indigo-100 dark:border-slate-700 flex items-center justify-between gap-2">
+                            <div class="flex items-center gap-2.5 min-w-0">
+                                <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-600 to-purple-600 text-white flex items-center justify-center text-base font-black shrink-0">
+                                    <i class="fa-solid fa-chalkboard-user"></i>
+                                </div>
+                                <div class="min-w-0">
+                                    <div class="text-[10px] font-black uppercase text-indigo-700 dark:text-indigo-400 tracking-wider">Đơn nâng cấp tự động</div>
+                                    <div class="text-xs sm:text-sm font-black text-gray-900 dark:text-white truncate">Gói Tài Khoản Giáo Viên VIP (Admin)</div>
+                                </div>
+                            </div>
+                            <span id="tUpgradeOrderSummaryPrice" class="text-xs font-black text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-2.5 py-1 rounded-lg border border-emerald-200 dark:border-emerald-800 shrink-0">500.000 đ</span>
+                        </div>
+
+                        <div class="space-y-2 text-xs">
+                            <div class="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-900/80 border border-gray-100 dark:border-slate-700 flex items-center justify-between">
+                                <div>
+                                    <div class="text-[10px] text-slate-500 font-bold uppercase">Ngân hàng nhận</div>
+                                    <div id="tUpgradeBankNameDisplay" class="font-bold text-gray-800 dark:text-white text-xs sm:text-sm mt-0.5">...</div>
+                                </div>
+                                <button type="button" onclick="window.copyUpgradeField('tUpgradeBankNameDisplay', 'Tên ngân hàng')" class="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 bg-white dark:bg-slate-700 px-2.5 py-1 rounded-lg border border-indigo-200 dark:border-slate-600 hover:bg-indigo-50 active:scale-95 cursor-pointer shadow-2xs">Sao chép</button>
+                            </div>
+                            <div class="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-900/80 border border-gray-100 dark:border-slate-700 flex items-center justify-between">
+                                <div>
+                                    <div class="text-[10px] text-slate-500 font-bold uppercase">Số tài khoản & Chủ TK</div>
+                                    <div class="flex items-center gap-2 mt-0.5">
+                                        <span id="tUpgradeAccountNoDisplay" class="font-mono font-black text-indigo-700 dark:text-indigo-400 text-sm sm:text-base tracking-wider">...</span>
+                                        <span id="tUpgradeAccountOwnerDisplay" class="text-[11px] font-bold text-slate-600 dark:text-slate-400 uppercase"></span>
+                                    </div>
+                                </div>
+                                <button type="button" onclick="window.copyUpgradeField('tUpgradeAccountNoDisplay', 'Số tài khoản')" class="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 bg-white dark:bg-slate-700 px-2.5 py-1 rounded-lg border border-indigo-200 dark:border-slate-600 hover:bg-indigo-50 active:scale-95 cursor-pointer shadow-2xs">Sao chép</button>
+                            </div>
+                            <div class="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 flex items-center justify-between">
+                                <div>
+                                    <div class="text-[10px] text-amber-700 dark:text-amber-400 font-bold uppercase">Số tiền kích hoạt</div>
+                                    <div id="tUpgradeAmountDisplay" class="text-base sm:text-lg font-black text-amber-800 dark:text-amber-400 mt-0.5">500.000 đ</div>
+                                </div>
+                                <button type="button" onclick="window.copyUpgradeField('tUpgradeAmountRaw', 'Số tiền')" class="text-[10px] font-bold text-amber-700 dark:text-amber-300 bg-white dark:bg-slate-700 px-2.5 py-1 rounded-lg border border-amber-300 dark:border-amber-700 hover:bg-amber-100 active:scale-95 cursor-pointer shadow-2xs">Sao chép</button>
+                                <span id="tUpgradeAmountRaw" class="hidden">500000</span>
+                            </div>
+                            <div class="p-3 rounded-xl bg-purple-50 dark:bg-purple-950/40 border-2 border-purple-300 dark:border-purple-700 flex items-center justify-between">
+                                <div>
+                                    <div class="text-[10px] text-purple-700 dark:text-purple-300 font-black uppercase flex items-center gap-1"><i class="fa-solid fa-triangle-exclamation"></i> Nội dung chuyển khoản (Bắt buộc chính xác)</div>
+                                    <div id="tUpgradeMemoDisplay" class="font-mono font-black text-purple-950 dark:text-purple-200 text-sm sm:text-base mt-0.5 tracking-wider select-all">GV ...</div>
+                                </div>
+                                <button type="button" onclick="window.copyUpgradeField('tUpgradeMemoDisplay', 'Nội dung chuyển khoản')" class="text-[10px] font-bold text-white bg-purple-600 px-3 py-1.5 rounded-lg hover:bg-purple-700 active:scale-95 cursor-pointer shadow-2xs">Sao chép</button>
+                            </div>
+                        </div>
+
+                        <div class="p-3 bg-blue-50 dark:bg-blue-950/30 rounded-xl border border-blue-100 dark:border-slate-700 flex items-start gap-2.5 text-xs text-blue-900 dark:text-blue-300">
+                            <i class="fa-solid fa-circle-info text-blue-700 mt-0.5 shrink-0"></i>
+                            <span>Sau khi chuyển khoản đúng <b>Nội dung CK</b>, hệ thống tự động đối soát như khi mua sách và cấp quyền <b>Admin Giáo viên VIP</b> tức thì. Đơn chờ không thanh toán sẽ tự động xóa sau 30 phút.</span>
+                        </div>
+                    </div>
+
+                    <div class="md:col-span-5 flex flex-col items-center justify-between p-3 bg-slate-50/80 dark:bg-slate-900/70 rounded-2xl border border-gray-200 dark:border-slate-700 space-y-3">
+                        <div class="flex items-center justify-between w-full text-[11px] font-bold text-gray-600 dark:text-gray-300">
+                            <span class="uppercase flex items-center gap-1"><i class="fa-solid fa-qrcode text-indigo-600"></i> Mã VietQR Nhanh</span>
+                            <span class="inline-flex items-center gap-1 text-amber-800 bg-amber-100 dark:bg-amber-950 dark:text-amber-300 px-2 py-0.5 rounded-lg font-mono text-[11px]">
+                                <i class="fa-regular fa-clock"></i> <span id="tUpgradeQrCountdown">10:00</span>
+                            </span>
+                        </div>
+
+                        <div class="relative w-44 sm:w-48 aspect-square bg-white p-2 rounded-2xl shadow-xs border border-gray-100 flex items-center justify-center">
+                            <img id="tUpgradeVietQrImage" src="" alt="Mã VietQR" class="w-full h-full object-contain rounded-xl">
+                            <div id="tUpgradeQrLoading" class="absolute inset-0 bg-white/90 dark:bg-slate-900/90 flex flex-col items-center justify-center gap-2 rounded-xl z-10">
+                                <i class="fa-solid fa-spinner fa-spin text-2xl text-indigo-600"></i>
+                                <span class="text-[11px] font-bold text-gray-600 dark:text-gray-300">Đang tạo mã VietQR...</span>
+                            </div>
+                            <div id="tUpgradeQrExpiredOverlay" class="hidden absolute inset-0 bg-gray-900/85 backdrop-blur-xs flex flex-col items-center justify-center p-3 rounded-xl z-20 text-white text-center">
+                                <i class="fa-solid fa-clock-rotate-left text-2xl text-amber-400 mb-1"></i>
+                                <div class="text-xs font-bold">Mã QR đã hết hạn</div>
+                                <button type="button" onclick="window.openTeacherVipUpgradeModal(true)" class="mt-2 px-3 py-1 bg-amber-500 text-slate-950 font-bold text-[10px] rounded-lg cursor-pointer">Làm mới mã QR</button>
+                            </div>
+                        </div>
+
+                        <button type="button" onclick="window.downloadTeacherUpgradeQr()" class="inline-flex items-center gap-1 px-3 py-1 bg-indigo-50 dark:bg-slate-800 hover:bg-indigo-100 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-slate-700 rounded-lg text-[10px] font-bold transition cursor-pointer">
+                            <i class="fa-solid fa-download text-[9px]"></i> Tải ảnh mã QR
+                        </button>
+
+                        <div class="w-full p-3 rounded-xl border border-indigo-200 dark:border-indigo-900/60 bg-indigo-50/60 dark:bg-slate-800 text-center space-y-2">
+                            <div class="flex items-center justify-center gap-1.5 text-indigo-700 dark:text-indigo-300 text-[11px] font-black uppercase">
+                                <span class="w-2 h-2 rounded-full bg-indigo-600 animate-ping"></span>
+                                <span>Đang quét thanh toán tự động</span>
+                            </div>
+                            <div id="tUpgradeRecheckNotice" class="text-[10px] text-slate-500 font-medium">
+                                Có thể kiểm tra lại sau <b id="tUpgradeRecheckNum" class="text-indigo-600">30s</b>
+                            </div>
+                            <button type="button" id="btnRecheckTeacherVipUpgrade" onclick="window.recheckTeacherVipUpgradePayment()" class="hidden w-full py-2 px-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-xs transition flex items-center justify-center gap-1.5 cursor-pointer">
+                                <i class="fa-solid fa-rotate"></i> <span>Kiểm tra lại giao dịch</span>
+                            </button>
+                            <button type="button" id="btnConfirmTeacherVipTransferred" onclick="window.confirmTeacherVipTransferred()" class="w-full py-2.5 px-3 bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs rounded-xl shadow-md active:scale-95 transition-all flex items-center justify-center gap-1.5 cursor-pointer">
+                                <i class="fa-solid fa-circle-check"></i> Đã chuyển khoản, xác nhận ngay
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 2. Bảng so sánh tính năng Free vs VIP -->
+            <div class="overflow-x-auto border border-slate-200 dark:border-slate-700 rounded-2xl bg-white dark:bg-slate-800/80">
                 <div class="p-3.5 bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-slate-800 dark:to-slate-750 border-b border-gray-200 dark:border-slate-700 flex items-center justify-between">
                     <span class="font-black text-xs sm:text-sm text-gray-800 dark:text-gray-200 uppercase tracking-wide flex items-center gap-2">
                         <i class="fa-solid fa-scale-balanced text-indigo-600"></i> Bảng So Sánh Tính Năng: Giáo Viên Free vs. Giáo Viên VIP
@@ -26059,86 +26651,12 @@ window.deleteTag = async (id) => {
                     </table>
                 </div>
             </div>
-
-            <!-- VietQR Box -->
-            <div class="grid grid-cols-1 md:grid-cols-12 gap-4">
-                <div class="md:col-span-7 space-y-3">
-                    <div class="p-4 space-y-3 pt-3 border-t border-slate-100">
-                        <h4 class="text-xs sm:text-sm font-black text-gray-800 dark:text-gray-200 uppercase tracking-wide flex items-center gap-2 border-b border-gray-100 dark:border-slate-700 pb-2">
-                            <i class="fa-solid fa-building-columns text-indigo-600"></i> Thông tin thanh toán VietQR
-                        </h4>
-                        <div class="space-y-2 text-xs">
-                            <div class="p-2.5 rounded-lg bg-slate-50 dark:bg-slate-800/80 flex items-center justify-between">
-                                <div>
-                                    <div class="text-[10px] text-slate-500 font-bold uppercase">Ngân hàng nhận</div>
-                                    <div id="tUpgradeBankNameDisplay" class="font-bold text-gray-800 dark:text-white text-xs sm:text-sm mt-0.5">...</div>
-                                </div>
-                                <button type="button" onclick="window.copyUpgradeField('tUpgradeBankNameDisplay', 'Tên ngân hàng')" class="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 bg-white dark:bg-slate-700 px-2.5 py-1 rounded-lg border border-indigo-200 dark:border-slate-600 hover:bg-indigo-50 active:scale-95 cursor-pointer shadow-2xs">Sao chép</button>
-                            </div>
-                            <div class="p-2.5 rounded-lg bg-slate-50 dark:bg-slate-800/80 flex items-center justify-between">
-                                <div>
-                                    <div class="text-[10px] text-slate-500 font-bold uppercase">Số tài khoản</div>
-                                    <div id="tUpgradeAccountNoDisplay" class="font-mono font-black text-indigo-700 dark:text-indigo-400 text-sm sm:text-base mt-0.5 tracking-wider">...</div>
-                                    <div id="tUpgradeAccountOwnerDisplay" class="text-[11px] font-bold text-slate-600 uppercase mt-0.5"></div>
-                                </div>
-                                <button type="button" onclick="window.copyUpgradeField('tUpgradeAccountNoDisplay', 'Số tài khoản')" class="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 bg-white dark:bg-slate-700 px-2.5 py-1 rounded-lg border border-indigo-200 dark:border-slate-600 hover:bg-indigo-50 active:scale-95 cursor-pointer shadow-2xs">Sao chép</button>
-                            </div>
-                            <div class="p-2.5 rounded-lg bg-amber-50 dark:bg-amber-950/40 flex items-center justify-between">
-                                <div>
-                                    <div class="text-[10px] text-amber-700 dark:text-amber-400 font-bold uppercase">Số tiền kích hoạt</div>
-                                    <div id="tUpgradeAmountDisplay" class="text-base sm:text-lg font-black text-amber-800 dark:text-amber-400 mt-0.5">500.000 đ</div>
-                                </div>
-                                <button type="button" onclick="window.copyUpgradeField('tUpgradeAmountRaw', 'Số tiền')" class="text-[10px] font-bold text-amber-700 dark:text-amber-300 bg-white dark:bg-slate-700 px-2.5 py-1 rounded-lg border border-amber-300 dark:border-amber-700 hover:bg-amber-100 active:scale-95 cursor-pointer shadow-2xs">Sao chép</button>
-                                <span id="tUpgradeAmountRaw" class="hidden">500000</span>
-                            </div>
-                            <div class="p-2.5 rounded-lg bg-purple-50 dark:bg-purple-950/40 flex items-center justify-between">
-                                <div>
-                                    <div class="text-[10px] text-purple-700 dark:text-purple-300 font-black uppercase flex items-center gap-1"><i class="fa-solid fa-triangle-exclamation"></i> Nội dung chuyển khoản (bắt buộc)</div>
-                                    <div id="tUpgradeMemoDisplay" class="font-mono font-black text-purple-950 dark:text-purple-200 text-sm sm:text-base mt-0.5 tracking-wider select-all">GV ...</div>
-                                </div>
-                                <button type="button" onclick="window.copyUpgradeField('tUpgradeMemoDisplay', 'Nội dung chuyển khoản')" class="text-[10px] font-bold text-white bg-purple-600 px-2.5 py-1.5 rounded-lg hover:bg-purple-700 active:scale-95 cursor-pointer shadow-2xs">Sao chép</button>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="p-3 bg-blue-50 dark:bg-blue-950/30 rounded-lg flex items-start gap-2.5 text-xs text-blue-900 dark:text-blue-300">
-                        <i class="fa-solid fa-circle-info text-blue-700 mt-0.5 shrink-0"></i>
-                        <span>Sau khi Quý Thầy/Cô hoàn tất chuyển khoản với đúng <b>Nội dung CK</b>, hệ thống sẽ tự động đối soát và kích hoạt Gói VIP tức thì.</span>
-                    </div>
-                </div>
-
-                <div class="md:col-span-5 flex flex-col items-center justify-between p-3 space-y-3">
-                    <div class="text-center w-full">
-                        <div class="text-xs font-black text-gray-800 dark:text-white uppercase tracking-wider flex items-center justify-center gap-1.5">
-                            <i class="fa-solid fa-qrcode text-indigo-600"></i> Quét mã VietQR Nhanh
-                        </div>
-                        <p class="text-[10px] text-slate-500 mt-0.5">Tự động điền đúng STK, Số tiền và Nội dung</p>
-                    </div>
-
-                    <div class="relative w-48 sm:w-56 aspect-square bg-gray-50 dark:bg-slate-900 p-2 flex items-center justify-center">
-                        <img id="tUpgradeVietQrImage" src="" alt="Mã VietQR" class="w-full h-full object-contain rounded-xl">
-                        <div id="tUpgradeQrLoading" class="absolute inset-0 bg-white/90 dark:bg-slate-900/90 flex flex-col items-center justify-center gap-2">
-                            <i class="fa-solid fa-spinner fa-spin text-2xl text-indigo-600"></i>
-                            <span class="text-[11px] font-bold text-gray-600 dark:text-gray-300">Đang tạo mã VietQR...</span>
-                        </div>
-                    </div>
-
-                    <div class="w-full space-y-2">
-                        <div class="text-center text-[11px] font-semibold text-slate-600">
-                            Hiệu lực mã QR: <span id="tUpgradeQrCountdown" class="font-mono font-bold text-amber-800">10:00</span>
-                        </div>
-                        <button type="button" id="btnConfirmTeacherVipTransferred" onclick="window.confirmTeacherVipTransferred()" class="w-full py-2.5 px-3 bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs rounded-xl shadow-md active:scale-95 transition-all flex items-center justify-center gap-1.5 cursor-pointer">
-                            <i class="fa-solid fa-circle-check"></i> Đã chuyển khoản, xác nhận ngay
-                        </button>
-                    </div>
-                </div>
-            </div>
         </div>
     </div>
 </div>
 
 <!-- Modal Thông báo thiếu QPoint -->
-<div id="teacherInsufficientQpModal" class="modal opacity-0 pointer-events-none hidden fixed inset-0 z-[180] overflow-y-auto p-4 bg-gray-900/80 backdrop-blur-sm flex justify-center items-center">
+<div id="teacherInsufficientQpModal" class="modal hidden fixed inset-0 z-[180] overflow-y-auto p-4 bg-gray-900/80 backdrop-blur-sm flex justify-center items-center">
     <div class="modal-content relative bg-white dark:bg-slate-900 w-full max-w-md rounded-3xl shadow-2xl border border-amber-200 dark:border-amber-900/60 overflow-hidden flex flex-col p-6 text-center space-y-4">
         <div class="w-14 h-14 mx-auto rounded-2xl bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-400 flex items-center justify-center text-2xl shadow-inner">
             <i class="fa-solid fa-coins"></i>

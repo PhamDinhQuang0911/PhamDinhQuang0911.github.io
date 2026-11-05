@@ -1774,6 +1774,41 @@
                 try { localStorage.setItem('qmath_role_mode', 'student'); } catch(e) {}
 
                 window.updateTeacherSwitchUI(isTeacher);
+
+                // Tự động đối soát đơn nâng cấp Giáo viên VIP (cấp quyền nếu đã 'paid' và xóa đơn 'pending' quá 30 phút)
+                (async () => {
+                    try {
+                        const qT = query(collection(db, "orders"), where("userId", "==", user.uid));
+                        const snapT = await getDocs(qT);
+                        const nowMs = Date.now();
+                        const EXPIRE_MS = 30 * 60 * 1000;
+                        for (const dSnap of snapT.docs) {
+                            const o = dSnap.data();
+                            if (o.orderType !== 'teacher_upgrade' && o.orderType !== 'teacher_registration') continue;
+                            const st = String(o.status || '').toLowerCase().trim();
+                            if (st === 'paid' || st === 'completed' || st === 'approved' || st === 'success' || st === 'resolved') {
+                                if (!isTeacher || o.roleGranted !== true) {
+                                    if (typeof window.activateTeacherRoleForStudent === 'function') {
+                                        await window.activateTeacherRoleForStudent();
+                                    }
+                                    await updateDoc(doc(db, "orders", dSnap.id), {
+                                        status: 'completed',
+                                        roleGranted: true,
+                                        approvalType: o.approvalType || 'auto_payment',
+                                        approvedAt: o.approvedAt || new Date().toISOString()
+                                    }).catch(() => {});
+                                    isTeacher = true;
+                                    window.updateTeacherSwitchUI(true);
+                                }
+                            } else if (st === 'pending' || st === 'cancelled' || st === 'abandoned') {
+                                const createdMs = o.createdAt ? new Date(o.createdAt).getTime() : 0;
+                                if (createdMs > 0 && (nowMs - createdMs > EXPIRE_MS)) {
+                                    deleteDoc(doc(db, "orders", dSnap.id)).catch(() => {});
+                                }
+                            }
+                        }
+                    } catch (eReconcile) {}
+                })();
                 
                 // 1. Tải thông tin người dùng (Nhanh)
                 loadSiteLogo();
@@ -9520,6 +9555,8 @@
         let currentStuTeacherOrderId = null;
         let currentStuTeacherReqId = null;
         let currentStuTeacherMemo = '';
+        let stuTeacherAutoScanTimer = null;
+        let _isProceedingStuTeacherUpgrade = false;
 
         // Tải cấu hình gói giáo viên từ Firestore
         window.loadStudentTeacherPackageConfig = async () => {
@@ -9616,11 +9653,37 @@
 
             window.backToStuTeacherStep1();
             await window.loadStudentTeacherPackageConfig();
+
+            // Nếu tài khoản đang là Giáo viên Free thì chuyển thẳng tới màn hình thanh toán VietQR (Bước 2)
+            if (user) {
+                try {
+                    let isFreeTeacher = false;
+                    const uSnap = await getDoc(doc(db, "users", user.uid));
+                    if (uSnap.exists() && uSnap.data().teacherTier === 'free') {
+                        isFreeTeacher = true;
+                    }
+                    if (!isFreeTeacher) {
+                        const cfgSnap = await getDoc(doc(db, "configurations", "admin_roles"));
+                        if (cfgSnap.exists()) {
+                            const userEmail = (user.email || '').toLowerCase().trim();
+                            const accs = cfgSnap.data().accounts || [];
+                            const myAcc = accs.find(a => (userEmail && (a.email || '').toLowerCase() === userEmail) || a.id === user.uid);
+                            if (myAcc && (myAcc.teacherTier === 'free' || myAcc.role === 'teacher_free')) {
+                                isFreeTeacher = true;
+                            }
+                        }
+                    }
+                    if (isFreeTeacher) {
+                        await window.proceedStudentTeacherUpgrade();
+                    }
+                } catch(eCheckFree) {}
+            }
         };
 
         window.closeStudentTeacherUpgradeModal = () => {
             if (stuTeacherQrCountdownInterval) { clearInterval(stuTeacherQrCountdownInterval); stuTeacherQrCountdownInterval = null; }
             if (stuTeacherRecheckTimer) { clearInterval(stuTeacherRecheckTimer); stuTeacherRecheckTimer = null; }
+            if (stuTeacherAutoScanTimer) { clearInterval(stuTeacherAutoScanTimer); stuTeacherAutoScanTimer = null; }
             if (stuTeacherOrderListener) { stuTeacherOrderListener(); stuTeacherOrderListener = null; }
             if (stuTeacherReqListener) { stuTeacherReqListener(); stuTeacherReqListener = null; }
             if (stuTeacherAdminListener) { stuTeacherAdminListener(); stuTeacherAdminListener = null; }
@@ -9630,6 +9693,7 @@
         window.backToStuTeacherStep1 = () => {
             if (stuTeacherQrCountdownInterval) { clearInterval(stuTeacherQrCountdownInterval); stuTeacherQrCountdownInterval = null; }
             if (stuTeacherRecheckTimer) { clearInterval(stuTeacherRecheckTimer); stuTeacherRecheckTimer = null; }
+            if (stuTeacherAutoScanTimer) { clearInterval(stuTeacherAutoScanTimer); stuTeacherAutoScanTimer = null; }
             if (stuTeacherOrderListener) { stuTeacherOrderListener(); stuTeacherOrderListener = null; }
             if (stuTeacherReqListener) { stuTeacherReqListener(); stuTeacherReqListener = null; }
             if (stuTeacherAdminListener) { stuTeacherAdminListener(); stuTeacherAdminListener = null; }
@@ -9664,6 +9728,8 @@
                 if (window.showNotification) window.showNotification("Vui lòng đăng nhập để nâng cấp tài khoản!", "warning");
                 return;
             }
+            if (_isProceedingStuTeacherUpgrade) return;
+            _isProceedingStuTeacherUpgrade = true;
 
             const btn = document.getElementById('btnProceedStuTeacherUpgrade');
             const origHtml = btn ? btn.innerHTML : '';
@@ -9687,9 +9753,97 @@
                 const price = Number(currentTeacherPkgConfig?.price) || 500000;
                 const priceFormatted = price.toLocaleString('vi-VN') + ' đ';
 
-                // 2. Tạo nội dung chuyển khoản độc nhất: GV {orderCode}
-                const randCode = Math.random().toString(36).substring(2, 7).toUpperCase();
-                currentStuTeacherMemo = `GV ${randCode}`;
+                // 2. Kiểm tra đơn hàng nâng cấp Giáo viên hiện có của tài khoản này (Tái sử dụng đơn chờ < 30p, tự xóa đơn quá hạn / trùng lặp)
+                const nowMs = Date.now();
+                const EXPIRE_MS = 30 * 60 * 1000;
+                let existingPendingOrder = null;
+
+                try {
+                    const qExisting = query(collection(db, "orders"), where("userId", "==", user.uid));
+                    const snapExisting = await getDocs(qExisting);
+                    const userTeacherOrders = [];
+
+                    snapExisting.forEach(docSnap => {
+                        const d = docSnap.data();
+                        if (d.orderType === 'teacher_upgrade' || d.orderType === 'teacher_registration') {
+                            userTeacherOrders.push({ id: docSnap.id, ...d });
+                        }
+                    });
+
+                    userTeacherOrders.sort((a, b) => {
+                        const tA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+                        const tB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+                        return tB - tA;
+                    });
+
+                    const paidOrder = userTeacherOrders.find(o => {
+                        const s = String(o.status || '').toLowerCase().trim();
+                        return s === 'paid' || s === 'completed' || s === 'approved' || s === 'success' || s === 'resolved';
+                    });
+
+                    if (paidOrder) {
+                        currentStuTeacherOrderId = paidOrder.id;
+                        document.getElementById('stuTeacherStep1')?.classList.add('hidden');
+                        document.getElementById('stuTeacherStep2')?.classList.remove('hidden');
+                        await window.handleTeacherPaymentSuccess();
+                        return;
+                    }
+
+                    const validPendingList = [];
+                    for (const ord of userTeacherOrders) {
+                        const s = String(ord.status || '').toLowerCase().trim();
+                        const createdMs = ord.createdAt ? new Date(ord.createdAt).getTime() : 0;
+                        const ageMs = createdMs > 0 ? (nowMs - createdMs) : 0;
+                        if (s === 'pending' && ageMs > 0 && ageMs <= EXPIRE_MS) {
+                            validPendingList.push(ord);
+                        } else if (s === 'pending' || s === 'cancelled' || s === 'abandoned') {
+                            deleteDoc(doc(db, "orders", ord.id)).catch(() => {});
+                        }
+                    }
+
+                    if (validPendingList.length > 0) {
+                        existingPendingOrder = validPendingList[0];
+                        for (let i = 1; i < validPendingList.length; i++) {
+                            deleteDoc(doc(db, "orders", validPendingList[i].id)).catch(() => {});
+                        }
+                    }
+                } catch(eLookup) {
+                    console.warn("Lỗi kiểm tra đơn nâng cấp GV hiện có:", eLookup);
+                }
+
+                if (existingPendingOrder) {
+                    currentStuTeacherOrderId = existingPendingOrder.id;
+                    currentStuTeacherMemo = existingPendingOrder.memo || existingPendingOrder.content || `GV ${existingPendingOrder.orderCode || 'VIP'}`;
+                    if (Number(existingPendingOrder.amount) !== price) {
+                        updateDoc(doc(db, "orders", existingPendingOrder.id), {
+                            amount: price,
+                            packageTitle: currentTeacherPkgConfig?.title || 'Gói Giáo Viên VIP',
+                            updatedAt: new Date().toISOString()
+                        }).catch(() => {});
+                    }
+                } else {
+                    const randCode = Math.random().toString(36).substring(2, 7).toUpperCase();
+                    currentStuTeacherMemo = `GV ${randCode}`;
+
+                    const ordData = {
+                        orderType: 'teacher_upgrade',
+                        userId: user.uid,
+                        userName: user.displayName || user.email?.split('@')[0] || 'Giáo viên mới',
+                        userEmail: (user.email || '').toLowerCase().trim(),
+                        userPhone: user.phoneNumber || null,
+                        amount: price,
+                        memo: currentStuTeacherMemo,
+                        content: currentStuTeacherMemo,
+                        orderCode: randCode,
+                        packageTitle: currentTeacherPkgConfig?.title || 'Gói Giáo Viên VIP',
+                        status: 'pending',
+                        createdAt: new Date().toISOString()
+                    };
+
+                    const ordRef = await addDoc(collection(db, "orders"), ordData);
+                    currentStuTeacherOrderId = ordRef.id;
+                }
+                currentStuTeacherReqId = null;
 
                 // 3. Hiển thị UI ngân hàng
                 const bNameEl = document.getElementById('stuTeacherBankNameDisplay');
@@ -9725,40 +9879,6 @@
                     qrImg.src = qrUrl;
                 }
 
-                // 5. Lưu đơn hàng vào collection `orders` và `access_requests`
-                const ordData = {
-                    orderType: 'teacher_upgrade',
-                    userId: user.uid,
-                    userName: user.displayName || user.email?.split('@')[0] || 'Giáo viên mới',
-                    userEmail: (user.email || '').toLowerCase().trim(),
-                    userPhone: user.phoneNumber || null,
-                    amount: price,
-                    memo: currentStuTeacherMemo,
-                    content: currentStuTeacherMemo,
-                    orderCode: randCode,
-                    packageTitle: currentTeacherPkgConfig?.title || 'Gói Giáo Viên VIP',
-                    status: 'pending',
-                    createdAt: new Date().toISOString()
-                };
-
-                const ordRef = await addDoc(collection(db, "orders"), ordData);
-                currentStuTeacherOrderId = ordRef.id;
-
-                try {
-                    const reqRef = await addDoc(collection(db, "access_requests"), {
-                        type: 'teacher_upgrade',
-                        studentId: user.uid,
-                        studentName: user.displayName || user.email?.split('@')[0] || 'Giáo viên mới',
-                        studentEmail: (user.email || '').toLowerCase().trim(),
-                        amount: price,
-                        content: currentStuTeacherMemo,
-                        orderId: ordRef.id,
-                        status: 'pending',
-                        createdAt: new Date().toISOString()
-                    });
-                    currentStuTeacherReqId = reqRef.id;
-                } catch(eReq) {}
-
                 // 6. Chuyển UI sang Bước 2
                 const i1 = document.getElementById('stuTeacherStepInd1');
                 const i2 = document.getElementById('stuTeacherStepInd2');
@@ -9789,20 +9909,23 @@
                 // 7. Bật đếm ngược QR 10p, recheck 30s và listener Realtime
                 window.startStuTeacherQrCountdown();
                 window.startStuTeacherRecheckTimer();
-                window.startStuTeacherRealtimeListener(currentStuTeacherOrderId, currentStuTeacherReqId);
+                window.startStuTeacherRealtimeListener(currentStuTeacherOrderId, null);
 
-                // Kích hoạt webhook quét ngân hàng tự động ngay
-                try {
-                    if (teacherBankConfig.SCAN_TRIGGER_URL) {
-                        fetch(teacherBankConfig.SCAN_TRIGGER_URL, { mode: 'no-cors' }).catch(() => {});
-                    }
-                } catch(eTrig) {}
+                // Kích hoạt webhook quét ngân hàng tự động ngay và định kỳ mỗi 20s
+                if (window.triggerStudentTeacherScan) {
+                    window.triggerStudentTeacherScan(true);
+                }
+                if (stuTeacherAutoScanTimer) clearInterval(stuTeacherAutoScanTimer);
+                stuTeacherAutoScanTimer = setInterval(() => {
+                    if (window.triggerStudentTeacherScan) window.triggerStudentTeacherScan(true);
+                }, 20000);
 
             } catch (err) {
                 console.error("Lỗi khởi tạo nâng cấp giáo viên:", err);
                 if (window.showNotification) window.showNotification("Lỗi: " + err.message, "error");
                 else alert("Lỗi: " + err.message);
             } finally {
+                _isProceedingStuTeacherUpgrade = false;
                 if (btn) { btn.innerHTML = origHtml; btn.disabled = false; }
             }
         };
@@ -10019,7 +10142,7 @@
                 }, (err) => console.warn("Lỗi listener access_requests:", err));
             }
 
-            // 3. Lắng nghe configurations/admin_roles xem tài khoản đã được cấp quyền chưa (Super Admin duyệt tay)
+            // 3. Lắng nghe configurations/admin_roles xem tài khoản đã được cấp quyền VIP chưa (Super Admin duyệt tay)
             const user = auth.currentUser;
             if (user) {
                 const userEmail = (user.email || '').toLowerCase().trim();
@@ -10027,8 +10150,9 @@
                     if (snap.exists()) {
                         const accounts = snap.data().accounts || [];
                         const hasRole = accounts.some(a => 
-                            (userEmail && (a.email || '').toLowerCase() === userEmail) || 
-                            (user.uid && a.id === user.uid)
+                            ((userEmail && (a.email || '').toLowerCase() === userEmail) || 
+                            (user.uid && a.id === user.uid)) &&
+                            a.teacherTier !== 'free' && a.role !== 'teacher_free'
                         );
                         if (hasRole) {
                             await window.handleTeacherPaymentSuccess();
@@ -10050,7 +10174,7 @@
                     const snapOrd = await getDoc(doc(db, "orders", currentStuTeacherOrderId));
                     if (snapOrd.exists()) {
                         const s = String(snapOrd.data().status || '').toLowerCase();
-                        if (s === 'completed' || s === 'approved' || s === 'paid' || s === 'resolved') success = true;
+                        if (s === 'completed' || s === 'approved' || s === 'paid' || s === 'resolved' || s === 'success') success = true;
                     }
                 }
 
@@ -10061,7 +10185,7 @@
                         const snapCfg = await getDoc(doc(db, "configurations", "admin_roles"));
                         if (snapCfg.exists()) {
                             const accounts = snapCfg.data().accounts || [];
-                            if (accounts.some(a => (userEmail && (a.email || '').toLowerCase() === userEmail) || (user.uid && a.id === user.uid))) {
+                            if (accounts.some(a => ((userEmail && (a.email || '').toLowerCase() === userEmail) || (user.uid && a.id === user.uid)) && a.teacherTier !== 'free' && a.role !== 'teacher_free')) {
                                 success = true;
                             }
                         }
@@ -10084,7 +10208,7 @@
                     const snap1 = await getDoc(doc(db, "orders", currentStuTeacherOrderId));
                     if (snap1.exists()) {
                         const s = String(snap1.data().status || '').toLowerCase();
-                        if (s === 'completed' || s === 'approved' || s === 'paid' || s === 'resolved') success = true;
+                        if (s === 'completed' || s === 'approved' || s === 'paid' || s === 'resolved' || s === 'success') success = true;
                     }
                 }
 
@@ -10094,7 +10218,7 @@
                     const snap2 = await getDoc(doc(db, "orders", currentStuTeacherOrderId));
                     if (snap2.exists()) {
                         const s = String(snap2.data().status || '').toLowerCase();
-                        if (s === 'completed' || s === 'approved' || s === 'paid' || s === 'resolved') success = true;
+                        if (s === 'completed' || s === 'approved' || s === 'paid' || s === 'resolved' || s === 'success') success = true;
                     }
                 }
 
@@ -10116,11 +10240,23 @@
             // Dọn dẹp listeners
             if (stuTeacherQrCountdownInterval) { clearInterval(stuTeacherQrCountdownInterval); stuTeacherQrCountdownInterval = null; }
             if (stuTeacherRecheckTimer) { clearInterval(stuTeacherRecheckTimer); stuTeacherRecheckTimer = null; }
+            if (stuTeacherAutoScanTimer) { clearInterval(stuTeacherAutoScanTimer); stuTeacherAutoScanTimer = null; }
             if (stuTeacherOrderListener) { stuTeacherOrderListener(); stuTeacherOrderListener = null; }
             if (stuTeacherReqListener) { stuTeacherReqListener(); stuTeacherReqListener = null; }
             if (stuTeacherAdminListener) { stuTeacherAdminListener(); stuTeacherAdminListener = null; }
 
-            // Tự động cấp quyền Giáo viên
+            if (currentStuTeacherOrderId) {
+                try {
+                    await updateDoc(doc(db, "orders", currentStuTeacherOrderId), {
+                        status: 'completed',
+                        roleGranted: true,
+                        approvalType: 'auto_payment',
+                        approvedAt: new Date().toISOString()
+                    });
+                } catch(eUpd) {}
+            }
+
+            // Tự động cấp quyền Giáo viên VIP
             await window.activateTeacherRoleForStudent();
 
             // Cập nhật UI sang hộp thoại thành công

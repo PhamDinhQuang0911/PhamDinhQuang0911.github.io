@@ -1374,6 +1374,19 @@
                                 isStaffUser = true;
                             }
                         }
+                        if (!isStaffUser) {
+                            const qOrd = query(collection(db, "orders"), where("userId", "==", user.uid));
+                            const snapOrd = await getDocs(qOrd);
+                            snapOrd.forEach(dSnap => {
+                                const o = dSnap.data();
+                                if (o.orderType === 'teacher_registration' || o.orderType === 'teacher_upgrade') {
+                                    const st = String(o.status || '').toLowerCase().trim();
+                                    if (st === 'paid' || st === 'completed' || st === 'approved' || st === 'success' || st === 'resolved') {
+                                        isStaffUser = true;
+                                    }
+                                }
+                            });
+                        }
                     } catch(e) {}
                 }
 
@@ -4010,6 +4023,7 @@
         let currentTRegMemo = '';
         let currentTRegUser = null;
         let currentTRegEmail = '';
+        let tRegAutoScanTimer = null;
 
         window.loadTeacherRegPackageConfig = async () => {
             try {
@@ -4086,6 +4100,7 @@
         window.closeTeacherRegisterModal = () => {
             if (tRegQrCountdownInterval) { clearInterval(tRegQrCountdownInterval); tRegQrCountdownInterval = null; }
             if (tRegRecheckTimer) { clearInterval(tRegRecheckTimer); tRegRecheckTimer = null; }
+            if (tRegAutoScanTimer) { clearInterval(tRegAutoScanTimer); tRegAutoScanTimer = null; }
             if (tRegOrderListener) { tRegOrderListener(); tRegOrderListener = null; }
             if (tRegReqListener) { tRegReqListener(); tRegReqListener = null; }
             if (tRegAdminListener) { tRegAdminListener(); tRegAdminListener = null; }
@@ -4129,6 +4144,7 @@
         window.backToTeacherRegStep1 = () => {
             if (tRegQrCountdownInterval) { clearInterval(tRegQrCountdownInterval); tRegQrCountdownInterval = null; }
             if (tRegRecheckTimer) { clearInterval(tRegRecheckTimer); tRegRecheckTimer = null; }
+            if (tRegAutoScanTimer) { clearInterval(tRegAutoScanTimer); tRegAutoScanTimer = null; }
             if (tRegOrderListener) { tRegOrderListener(); tRegOrderListener = null; }
             if (tRegReqListener) { tRegReqListener(); tRegReqListener = null; }
             if (tRegAdminListener) { tRegAdminListener(); tRegAdminListener = null; }
@@ -4203,12 +4219,13 @@
             if (msgEl) msgEl.classList.add('hidden');
 
             try {
-                // 1. KIỂM TRA TRÙNG LẶP TÊN ĐĂNG NHẬP / EMAIL / SĐT (Yêu cầu 5)
+                // 1. KIỂM TRA TRÙNG LẶP TÊN ĐĂNG NHẬP / EMAIL / SĐT (Bỏ qua nếu là chính user đang trong phiên đăng ký hiện tại)
+                const activeRegUid = currentTRegUser?.uid || auth.currentUser?.uid || null;
                 // 1a. Kiểm tra số điện thoại trong users
                 try {
                     const qPhone = query(collection(db, "users"), where("phone", "==", cleanPhone));
                     const snapPhone = await getDocs(qPhone);
-                    if (!snapPhone.empty) {
+                    if (!snapPhone.empty && snapPhone.docs.some(d => d.id !== activeRegUid)) {
                         throw new Error(`Số điện thoại "${phone}" đã được đăng ký trên hệ thống! Vui lòng dùng số khác hoặc đăng nhập.`);
                     }
                 } catch(eP) {
@@ -4218,13 +4235,13 @@
                 // 1b. Kiểm tra username & email trong users
                 const qUser1 = query(collection(db, "users"), where("username", "==", username));
                 const snapUser1 = await getDocs(qUser1);
-                if (!snapUser1.empty) {
+                if (!snapUser1.empty && snapUser1.docs.some(d => d.id !== activeRegUid)) {
                     throw new Error(`Tên đăng nhập "${rawUserOrEmail}" đã có người sử dụng! Vui lòng chọn tên đăng nhập khác.`);
                 }
 
                 const qUser2 = query(collection(db, "users"), where("email", "==", authEmail));
                 const snapUser2 = await getDocs(qUser2);
-                if (!snapUser2.empty) {
+                if (!snapUser2.empty && snapUser2.docs.some(d => d.id !== activeRegUid)) {
                     throw new Error(`Tên đăng nhập hoặc Email "${rawUserOrEmail}" đã tồn tại trên hệ thống! Vui lòng chọn tên đăng nhập khác.`);
                 }
 
@@ -4405,9 +4422,84 @@
                 const price = Number(tRegPkgConfig?.price) || 500000;
                 const priceFormatted = price.toLocaleString('vi-VN') + ' đ';
 
-                // 6. Tạo mã chuyển khoản độc nhất: GV {orderCode}
-                const randCode = Math.random().toString(36).substring(2, 7).toUpperCase();
-                currentTRegMemo = `GV ${randCode}`;
+                // 6. Kiểm tra đơn hàng chờ thanh toán hiện có của user này để chỉ giữ tối đa 1 đơn pending
+                const nowMs = Date.now();
+                const EXPIRE_MS = 30 * 60 * 1000;
+                let existingPendingOrder = null;
+
+                try {
+                    const qExisting = query(collection(db, "orders"), where("userId", "==", user.uid));
+                    const snapExisting = await getDocs(qExisting);
+                    const userOrders = [];
+                    snapExisting.forEach(docSnap => {
+                        const d = docSnap.data();
+                        if (d.orderType === 'teacher_registration' || d.orderType === 'teacher_upgrade') {
+                            userOrders.push({ id: docSnap.id, ...d });
+                        }
+                    });
+                    userOrders.sort((a, b) => {
+                        const tA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+                        const tB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+                        return tB - tA;
+                    });
+
+                    const validPending = [];
+                    for (const ord of userOrders) {
+                        const s = String(ord.status || '').toLowerCase().trim();
+                        const createdMs = ord.createdAt ? new Date(ord.createdAt).getTime() : 0;
+                        const ageMs = createdMs > 0 ? (nowMs - createdMs) : 0;
+                        if (s === 'pending' && ageMs > 0 && ageMs <= EXPIRE_MS) {
+                            validPending.push(ord);
+                        } else if (s === 'pending' || s === 'cancelled' || s === 'abandoned') {
+                            deleteDoc(doc(db, "orders", ord.id)).catch(() => {});
+                        }
+                    }
+
+                    if (validPending.length > 0) {
+                        existingPendingOrder = validPending[0];
+                        for (let i = 1; i < validPending.length; i++) {
+                            deleteDoc(doc(db, "orders", validPending[i].id)).catch(() => {});
+                        }
+                    }
+                } catch(eLookup) {}
+
+                if (existingPendingOrder) {
+                    currentTRegOrderId = existingPendingOrder.id;
+                    currentTRegMemo = existingPendingOrder.memo || existingPendingOrder.content || `GV ${existingPendingOrder.orderCode || 'VIP'}`;
+                    updateDoc(doc(db, "orders", existingPendingOrder.id), {
+                        userName: name,
+                        username: username,
+                        userEmail: authEmail,
+                        loginId: rawUserOrEmail,
+                        userPhone: cleanPhone,
+                        userSchool: school,
+                        amount: price,
+                        packageTitle: tRegPkgConfig?.title || 'Đăng ký Giáo viên VIP',
+                        updatedAt: new Date().toISOString()
+                    }).catch(() => {});
+                } else {
+                    const randCode = Math.random().toString(36).substring(2, 7).toUpperCase();
+                    currentTRegMemo = `GV ${randCode}`;
+                    const ordRef = await addDoc(collection(db, "orders"), {
+                        orderType: 'teacher_registration',
+                        userId: user.uid,
+                        userName: name,
+                        username: username,
+                        userEmail: authEmail,
+                        loginId: rawUserOrEmail,
+                        userPhone: cleanPhone,
+                        userSchool: school,
+                        amount: price,
+                        memo: currentTRegMemo,
+                        content: currentTRegMemo,
+                        orderCode: randCode,
+                        packageTitle: tRegPkgConfig?.title || 'Đăng ký Giáo viên VIP',
+                        status: 'pending',
+                        createdAt: new Date().toISOString()
+                    });
+                    currentTRegOrderId = ordRef.id;
+                }
+                currentTRegReqId = null;
 
                 // 7. Cập nhật UI Bước 2
                 const bNameEl = document.getElementById('tRegBankNameDisplay');
@@ -4442,41 +4534,6 @@
                     qrImg.onerror = () => qrLoading?.classList.add('hidden');
                     qrImg.src = qrUrl;
                 }
-
-                // 9. Lưu đơn hàng vào collection `orders` và `access_requests`
-                const ordRef = await addDoc(collection(db, "orders"), {
-                    orderType: 'teacher_registration',
-                    userId: user.uid,
-                    userName: name,
-                    username: username,
-                    userEmail: authEmail,
-                    loginId: rawUserOrEmail,
-                    userPhone: cleanPhone,
-                    userSchool: school,
-                    amount: price,
-                    memo: currentTRegMemo,
-                    content: currentTRegMemo,
-                    orderCode: randCode,
-                    packageTitle: tRegPkgConfig?.title || 'Đăng ký Giáo viên VIP',
-                    status: 'pending',
-                    createdAt: new Date().toISOString()
-                });
-                currentTRegOrderId = ordRef.id;
-
-                try {
-                    const reqRef = await addDoc(collection(db, "access_requests"), {
-                        type: 'teacher_registration',
-                        studentId: user.uid,
-                        studentName: name,
-                        studentEmail: authEmail,
-                        amount: price,
-                        content: currentTRegMemo,
-                        orderId: ordRef.id,
-                        status: 'pending',
-                        createdAt: new Date().toISOString()
-                    });
-                    currentTRegReqId = reqRef.id;
-                } catch(eReq) {}
 
                 // 10. Chuyển sang Bước 2 UI (MÃ QR & BẢNG THANH TOÁN NGAY LẬP TỨC)
                 const i1 = document.getElementById('tRegStepInd1');
@@ -4515,14 +4572,16 @@
                 // 11. Khởi chạy timer & listeners
                 window.startTeacherRegQrCountdown();
                 window.startTeacherRegRecheckTimer();
-                window.startTeacherRegRealtimeListener(currentTRegOrderId, currentTRegReqId, authEmail, user.uid);
+                window.startTeacherRegRealtimeListener(currentTRegOrderId, null, authEmail, user.uid);
 
-                // Kích hoạt webhook quét ngân hàng tự động ngay
-                try {
-                    if (tRegBankConfig.SCAN_TRIGGER_URL) {
-                        fetch(tRegBankConfig.SCAN_TRIGGER_URL, { mode: 'no-cors' }).catch(() => {});
-                    }
-                } catch(eTrig) {}
+                // Kích hoạt webhook quét ngân hàng tự động ngay và định kỳ mỗi 20s
+                if (window.triggerTeacherScan) {
+                    window.triggerTeacherScan(true);
+                }
+                if (tRegAutoScanTimer) clearInterval(tRegAutoScanTimer);
+                tRegAutoScanTimer = setInterval(() => {
+                    if (window.triggerTeacherScan) window.triggerTeacherScan(true);
+                }, 20000);
 
             } catch(err) {
                 console.error("Lỗi đăng ký giáo viên:", err);
@@ -4760,8 +4819,9 @@
                     if (snap.exists()) {
                         const accounts = snap.data().accounts || [];
                         const hasRole = accounts.some(a => 
-                            (cleanEmail && (a.email || '').toLowerCase() === cleanEmail) || 
-                            (uid && a.id === uid)
+                            ((cleanEmail && (a.email || '').toLowerCase() === cleanEmail) || 
+                            (uid && a.id === uid)) &&
+                            a.teacherTier !== 'free' && a.role !== 'teacher_free'
                         );
                         if (hasRole) {
                             await window.handleTeacherRegPaymentSuccess();
@@ -4783,7 +4843,7 @@
                     const snapOrd = await getDoc(doc(db, "orders", currentTRegOrderId));
                     if (snapOrd.exists()) {
                         const s = String(snapOrd.data().status || '').toLowerCase();
-                        if (s === 'completed' || s === 'approved' || s === 'paid' || s === 'resolved') success = true;
+                        if (s === 'completed' || s === 'approved' || s === 'paid' || s === 'resolved' || s === 'success') success = true;
                     }
                 }
 
@@ -4791,7 +4851,7 @@
                     const snapCfg = await getDoc(doc(db, "configurations", "admin_roles"));
                     if (snapCfg.exists()) {
                         const accounts = snapCfg.data().accounts || [];
-                        if (accounts.some(a => (a.email || '').toLowerCase() === currentTRegEmail.toLowerCase())) {
+                        if (accounts.some(a => (a.email || '').toLowerCase() === currentTRegEmail.toLowerCase() && a.teacherTier !== 'free' && a.role !== 'teacher_free')) {
                             success = true;
                         }
                     }
@@ -4813,7 +4873,7 @@
                     const snap1 = await getDoc(doc(db, "orders", currentTRegOrderId));
                     if (snap1.exists()) {
                         const s = String(snap1.data().status || '').toLowerCase();
-                        if (s === 'completed' || s === 'approved' || s === 'paid' || s === 'resolved') success = true;
+                        if (s === 'completed' || s === 'approved' || s === 'paid' || s === 'resolved' || s === 'success') success = true;
                     }
                 }
 
@@ -4823,7 +4883,7 @@
                     const snap2 = await getDoc(doc(db, "orders", currentTRegOrderId));
                     if (snap2.exists()) {
                         const s = String(snap2.data().status || '').toLowerCase();
-                        if (s === 'completed' || s === 'approved' || s === 'paid' || s === 'resolved') success = true;
+                        if (s === 'completed' || s === 'approved' || s === 'paid' || s === 'resolved' || s === 'success') success = true;
                     }
                 }
 
@@ -4844,9 +4904,21 @@
         window.handleTeacherRegPaymentSuccess = async () => {
             if (tRegQrCountdownInterval) { clearInterval(tRegQrCountdownInterval); tRegQrCountdownInterval = null; }
             if (tRegRecheckTimer) { clearInterval(tRegRecheckTimer); tRegRecheckTimer = null; }
+            if (tRegAutoScanTimer) { clearInterval(tRegAutoScanTimer); tRegAutoScanTimer = null; }
             if (tRegOrderListener) { tRegOrderListener(); tRegOrderListener = null; }
             if (tRegReqListener) { tRegReqListener(); tRegReqListener = null; }
             if (tRegAdminListener) { tRegAdminListener(); tRegAdminListener = null; }
+
+            if (currentTRegOrderId) {
+                try {
+                    await updateDoc(doc(db, "orders", currentTRegOrderId), {
+                        status: 'completed',
+                        roleGranted: true,
+                        approvalType: 'auto_payment',
+                        approvedAt: new Date().toISOString()
+                    });
+                } catch(eUpd) {}
+            }
 
             // Cấp quyền Admin/Giáo viên chuẩn theo cấu hình Super Admin
             await window.grantTeacherRoleToNewAccount();
