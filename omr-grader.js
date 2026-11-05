@@ -3,7 +3,7 @@ import {
     getFirestore, doc, getDoc, setDoc, updateDoc, collection, query, where, getDocs, addDoc, deleteDoc,
     limit, orderBy, includeQuestions, getOrCreateParentWatchToken,
     enableMultiTabIndexedDbPersistence
-} from "./supabase-db-compat.js?v=20261105_v132";
+} from "./supabase-db-compat.js?v=20261105_v133";
 
 if (typeof window !== 'undefined') {
     window.showToast = window.showToast || function(msg, icon) {
@@ -581,6 +581,36 @@ async function loadTeacherExams() {
                 console.warn("Firestore omr_exams failed:", e);
             }
 
+            // Đồng bộ danh sách Lớp OMR từ Cloud
+            try {
+                const qCls = query(collection(db, "omr_local_classes"), where("teacherId", "==", state.teacherUid));
+                const snapCls = await getDocs(qCls);
+                if (snapCls && snapCls.docs.length > 0) {
+                    const cloudClasses = snapCls.docs
+                        .map(d => ({ id: d.id, ...d.data() }))
+                        .filter(c => c && c.id !== 'omr_cls_demo_12a1' && !c.isSample && !(c.name === '12A1' && (c.students || []).some(s => s.name === 'Nguyễn Văn An')));
+                    if (cloudClasses.length > 0) {
+                        const localCls = Array.isArray(state.omrClasses) ? state.omrClasses : [];
+                        cloudClasses.forEach(cCls => {
+                            const existIdx = localCls.findIndex(l => l.id === cCls.id);
+                            if (existIdx >= 0) {
+                                if ((cCls.students || []).length >= (localCls[existIdx].students || []).length) {
+                                    localCls[existIdx] = cCls;
+                                }
+                            } else {
+                                localCls.push(cCls);
+                            }
+                        });
+                        state.omrClasses = localCls;
+                        try {
+                            localStorage.setItem('omr_local_classes', JSON.stringify(state.omrClasses));
+                        } catch (_) {}
+                    }
+                }
+            } catch(e) {
+                console.warn("Sync cloud omr_local_classes failed:", e);
+            }
+
             // 2. Try loading LMS exams collection (sorted newest first, up to 300)
             try {
                 const qLms = query(collection(db, "exams"), orderBy("createdAt", "desc"), limit(300));
@@ -765,46 +795,17 @@ function createSampleExamObj() {
         part1_point: 0.25,
         part2_points: [0.1, 0.25, 0.5, 1.0],
         part3_point: 0.5,
-        codes: ['101', '102', '103', '104'],
+        codes: [],
         createdAt: new Date().toISOString()
     };
 }
 
 function createSampleKeys(examId) {
-    return [
-        {
-            id: `key_${examId}_101`,
-            examId,
-            teacherId: state.teacherUid,
-            code: '101',
-            answers: 'ABCDABCDABCD',
-            part2: ['ĐSĐS', 'SĐSĐ', 'ĐĐSS', 'SSĐĐ'],
-            part3: ['3', '-4,5', '12', '1,5', '20', '-1'],
-            isSample: true,
-            updatedAt: new Date().toISOString()
-        },
-        {
-            id: `key_${examId}_102`,
-            examId,
-            teacherId: state.teacherUid,
-            code: '102',
-            answers: 'BCDAABCDABCD',
-            part2: ['SĐSĐ', 'ĐSĐS', 'SSĐĐ', 'ĐĐSS'],
-            part3: ['-1', '3', '1,5', '12', '-4,5', '20'],
-            isSample: true,
-            updatedAt: new Date().toISOString()
-        }
-    ];
+    return [];
 }
 
 function createSampleStudents(examId) {
-    return [
-        { id: `st_${examId}_001`, examId, teacherId: state.teacherUid, student_no: '001', name: 'Nguyễn Văn An', class_name: '12A1' },
-        { id: `st_${examId}_002`, examId, teacherId: state.teacherUid, student_no: '002', name: 'Trần Thị Bình', class_name: '12A1' },
-        { id: `st_${examId}_003`, examId, teacherId: state.teacherUid, student_no: '003', name: 'Lê Hoàng Cường', class_name: '12A1' },
-        { id: `st_${examId}_004`, examId, teacherId: state.teacherUid, student_no: '004', name: 'Phạm Minh Đức', class_name: '12A2' },
-        { id: `st_${examId}_005`, examId, teacherId: state.teacherUid, student_no: '005', name: 'Vũ Ngọc Hân', class_name: '12A2' }
-    ];
+    return [];
 }
 
 function saveLocalExams(exams) {
@@ -1060,8 +1061,10 @@ async function loadExamKeys(examId) {
     if (keys.length === 0) {
         const local = JSON.parse(localStorage.getItem(`omr_keys_${examId}`) || '[]');
         if (local.length > 0) keys = local;
-        else keys = createSampleKeys(examId);
+        else keys = [];
     }
+    // Lọc bỏ triệt để các mã đề mẫu nếu có
+    keys = (keys || []).filter(k => k && !k.isSample);
     state.keys = {};
     keys.forEach(k => { state.keys[k.code] = k; });
     // Tự động gộp tất cả mã đề đã lưu vào danh sách mã đề của bài thi
@@ -1099,11 +1102,14 @@ async function loadExamStudents(examId) {
                     class_name: linkedCls.name
                 }));
             } else {
-                list = createSampleStudents(examId);
+                list = [];
             }
         }
     }
-    state.students = list;
+    // Lọc bỏ triệt để bất kỳ học sinh mẫu mặc định
+    state.students = (list || []).filter(st => st && !st.isSample && !st.id?.includes('st_demo') && !(st.name === 'Nguyễn Văn An' && st.class_name === '12A1'));
+    // Tự động đồng bộ danh sách học sinh này vào OMR Class để tab "Lớp & SBD" lập tức thấy đúng lớp & số lượng
+    syncExamStudentsToActiveOmrClass();
 }
 
 // ========================================================
@@ -2287,141 +2293,68 @@ function findStudentBySbd(sbdInput, examId = state.exam?.id, classId = state.exa
     const num = clean ? String(parseInt(clean, 10)) : '';
     if (!clean && !num) return null;
 
-    const isMatch = (st) => {
+    const isMatch = (st, exactOnly = false) => {
         if (!st) return false;
+        // Bỏ qua hoàn toàn học sinh mẫu mặc định
+        if (st.isSample || st.id?.includes('st_demo') || st.id?.includes('omr_cls_demo') || (st.name === 'Nguyễn Văn An' && st.class_name === '12A1')) return false;
         const stClean = String(st.student_no || st.sbd || st.id || '').trim().replace(/\D/g, '');
+        if (clean && stClean && clean === stClean) return true;
+        if (exactOnly) return false;
         const stNum = stClean ? String(parseInt(stClean, 10)) : '';
-        return (clean && stClean && clean === stClean) || (num && stNum && num === stNum);
+        return Boolean(num && stNum && num === stNum);
     };
 
-    // 1. Kiểm tra state.students (danh sách học sinh gán cho đề thi hiện tại)
-    if (Array.isArray(state.students) && state.students.length > 0) {
-        const m = state.students.find(isMatch);
-        if (m && (m.name || m.student_name)) {
-            return {
-                name: m.name || m.student_name,
-                student_no: m.student_no || clean,
-                class_name: m.class_name || state.exam?.className || '',
-                grade: m.grade || '',
-                room: m.room || '',
-                dob: m.dob || '',
-                gender: m.gender || '',
-                class_id: m.class_id || state.exam?.classId || '',
-                student_uid: m.student_uid || '',
-                student_email: m.student_email || '',
-                phone: m.phone || '',
-                note: m.note || ''
-            };
-        }
-    }
+    const buildResult = (m, fallbackClass = '') => ({
+        name: m.name || m.student_name,
+        student_no: m.student_no || clean,
+        class_name: m.class_name || fallbackClass || state.exam?.className || '',
+        grade: m.grade || '',
+        room: m.room || '',
+        dob: m.dob || '',
+        gender: m.gender || '',
+        class_id: m.class_id || state.exam?.classId || '',
+        student_uid: m.student_uid || '',
+        student_email: m.student_email || '',
+        phone: m.phone || '',
+        note: m.note || ''
+    });
 
-    // 2. Kiểm tra lớp OMR đang chọn (active OMR class)
     const activeCls = (typeof getActiveOmrClass === 'function') ? getActiveOmrClass() : null;
-    if (activeCls && Array.isArray(activeCls.students)) {
-        const m = activeCls.students.find(isMatch);
-        if (m && (m.name || m.student_name)) {
-            return {
-                name: m.name || m.student_name,
-                student_no: m.student_no || clean,
-                class_name: m.class_name || activeCls.name || '',
-                class_id: m.class_id || activeCls.id || '',
-                student_uid: m.student_uid || '',
-                student_email: m.student_email || '',
-                phone: m.phone || ''
-            };
-        }
-    }
-
-    // 3. Kiểm tra lớp được gắn cho bài thi (state.exam?.classId)
-    const targetClassId = classId || state.exam?.classId;
     const allClasses = [
         ...(Array.isArray(state.omrClasses) ? state.omrClasses : []),
         ...(Array.isArray(state.classes) ? state.classes : [])
     ];
-    if (targetClassId) {
-        const examCls = allClasses.find(c => c.id === targetClassId);
-        if (examCls && Array.isArray(examCls.students)) {
-            const m = examCls.students.find(isMatch);
-            if (m && (m.name || m.student_name)) {
-                return {
-                    name: m.name || m.student_name,
-                    student_no: m.student_no || clean,
-                    class_name: m.class_name || examCls.name || '',
-                    class_id: m.class_id || examCls.id || '',
-                    student_uid: m.student_uid || '',
-                    student_email: m.student_email || '',
-                    phone: m.phone || ''
-                };
-            }
-        }
-    }
 
-    // 4. Quét qua tất cả các lớp trong state.omrClasses / state.classes
+    // BƯỚC 1: Tìm khớp CHÍNH XÁC (Exact match) trước
+    if (Array.isArray(state.students) && state.students.length > 0) {
+        const m = state.students.find(st => isMatch(st, true));
+        if (m && (m.name || m.student_name)) return buildResult(m);
+    }
+    if (activeCls && Array.isArray(activeCls.students)) {
+        const m = activeCls.students.find(st => isMatch(st, true));
+        if (m && (m.name || m.student_name)) return buildResult(m, activeCls.name);
+    }
     for (const cls of allClasses) {
         if (Array.isArray(cls.students)) {
-            const m = cls.students.find(isMatch);
-            if (m && (m.name || m.student_name)) {
-                return {
-                    name: m.name || m.student_name,
-                    student_no: m.student_no || clean,
-                    class_name: m.class_name || cls.name || '',
-                    class_id: m.class_id || cls.id || '',
-                    student_uid: m.student_uid || '',
-                    student_email: m.student_email || '',
-                    phone: m.phone || ''
-                };
-            }
+            const m = cls.students.find(st => isMatch(st, true));
+            if (m && (m.name || m.student_name)) return buildResult(m, cls.name);
         }
     }
 
-    // 5. Kiểm tra localStorage `omr_local_classes` phòng trường hợp state.omrClasses chưa nạp kịp
-    try {
-        const rawLocalClasses = localStorage.getItem('omr_local_classes');
-        if (rawLocalClasses) {
-            const localClsList = JSON.parse(rawLocalClasses);
-            if (Array.isArray(localClsList)) {
-                for (const cls of localClsList) {
-                    if (Array.isArray(cls.students)) {
-                        const m = cls.students.find(isMatch);
-                        if (m && (m.name || m.student_name)) {
-                            return {
-                                name: m.name || m.student_name,
-                                student_no: m.student_no || clean,
-                                class_name: m.class_name || cls.name || '',
-                                class_id: m.class_id || cls.id || '',
-                                student_uid: m.student_uid || '',
-                                student_email: m.student_email || '',
-                                phone: m.phone || ''
-                            };
-                        }
-                    }
-                }
-            }
+    // BƯỚC 2: Fallback tìm theo số nguyên (Numeric match - bỏ qua các số 0 ở đầu)
+    if (Array.isArray(state.students) && state.students.length > 0) {
+        const m = state.students.find(st => isMatch(st, false));
+        if (m && (m.name || m.student_name)) return buildResult(m);
+    }
+    if (activeCls && Array.isArray(activeCls.students)) {
+        const m = activeCls.students.find(st => isMatch(st, false));
+        if (m && (m.name || m.student_name)) return buildResult(m, activeCls.name);
+    }
+    for (const cls of allClasses) {
+        if (Array.isArray(cls.students)) {
+            const m = cls.students.find(st => isMatch(st, false));
+            if (m && (m.name || m.student_name)) return buildResult(m, cls.name);
         }
-    } catch (_) {}
-
-    // 6. Kiểm tra localStorage `omr_students_${examId}`
-    if (examId) {
-        try {
-            const rawExStudents = localStorage.getItem(`omr_students_${examId}`);
-            if (rawExStudents) {
-                const exStudents = JSON.parse(rawExStudents);
-                if (Array.isArray(exStudents)) {
-                    const m = exStudents.find(isMatch);
-                    if (m && (m.name || m.student_name)) {
-                        return {
-                            name: m.name || m.student_name,
-                            student_no: m.student_no || clean,
-                            class_name: m.class_name || state.exam?.className || '',
-                            class_id: m.class_id || state.exam?.classId || '',
-                            student_uid: m.student_uid || '',
-                            student_email: m.student_email || '',
-                            phone: m.phone || ''
-                        };
-                    }
-                }
-            }
-        } catch (_) {}
     }
 
     return null;
@@ -2623,11 +2556,15 @@ function renderInlineSubmissionsList() {
 
     inlineListEl.innerHTML = filtered.map((s, idx) => {
         const hasName = !!(s.student_name && String(s.student_name).trim() && !String(s.student_name).startsWith('Học sinh #') && !String(s.student_name).startsWith('Phiếu '));
+        const isUnknownCode = !!(s.is_unknown_code || !resolveKeyForCode(s.code));
         const scoreNum = Number(s.score ?? 0);
         const dupeStatus = getSubmissionDuplicateStatus(s, state.submissions);
         const rowClass = dupeStatus ? dupeStatus.rowBg : 'hover:bg-slate-50/90 dark:hover:bg-[#262335]/70';
         const dupeBadge = dupeStatus
             ? `<span class="px-1.5 py-0.5 rounded text-[10px] font-bold border ${dupeStatus.badgeBg}" title="Phát hiện ${dupeStatus.dupeCount} bài có cùng SBD ${s.student_no}">${dupeStatus.label}</span>`
+            : '';
+        const unknownCodeBadge = isUnknownCode
+            ? `<span class="px-1.5 py-0.2 rounded bg-rose-100 text-rose-700 dark:bg-rose-950/70 dark:text-rose-300 text-[10px] font-bold border border-rose-300 dark:border-rose-800 shrink-0" title="Mã đề không tồn tại trong danh sách đáp án">⚠️ Mã đề không tồn tại</span>`
             : '';
 
         // Tự động cắt chữ viết tay trong nền nếu chưa có hoặc là bản cắt cũ
@@ -2678,6 +2615,7 @@ function renderInlineSubmissionsList() {
                             <span>·</span>
                             <span>Mã: <b class="text-slate-800 dark:text-slate-200 font-bold">${s.code || '--'}</b></span>
                             <span id="subStorageStatus_${s.id}">${(s.telegram_photo_url || s.telegram_file_id) ? `<span class="text-emerald-500 text-[10px] inline-flex items-center gap-0.5" title="Đã sao lưu an toàn"><i class="fa-solid fa-circle-check"></i></span>` : ''}</span>
+                            ${unknownCodeBadge}
                             ${dupeBadge}
                         </div>
                         ` : `
@@ -2695,6 +2633,7 @@ function renderInlineSubmissionsList() {
                                     <span>·</span>
                                     <span>Mã: <b class="text-slate-900 dark:text-white font-extrabold">${s.code || '--'}</b></span>
                                     <span id="subStorageStatus_${s.id}">${(s.telegram_photo_url || s.telegram_file_id) ? `<span class="text-emerald-500 text-[10px] inline-flex items-center gap-0.5" title="Đã sao lưu an toàn"><i class="fa-solid fa-circle-check"></i></span>` : ''}</span>
+                                    ${unknownCodeBadge}
                                     ${dupeBadge}
                                 </div>
                                 <div class="text-[10px] font-semibold text-amber-600 dark:text-amber-400 flex items-center gap-1 mt-0.5 truncate">
@@ -3698,11 +3637,13 @@ async function processSingleSheet(source, options = {}) {
         student_email: studentEmail,
         class_id: classId,
         class_name: className,
-        code: rawResult.code || state.exam.codes[0] || '101',
+        code: rawResult.code || (state.exam?.codes && state.exam.codes[0]) || '',
         score: scoreData.totalScore,
         part1_score: scoreData.part1Score,
         part2_score: scoreData.part2Score,
         part3_score: scoreData.part3Score,
+        is_unknown_code: Boolean(scoreData.isUnknownCode),
+        code_error: scoreData.isUnknownCode ? 'Mã đề không tồn tại trong danh sách đáp án' : '',
         answers: rawResult.part1,
         part2: rawResult.part2,
         part3: rawResult.part3Text || rawResult.part3,
@@ -4333,8 +4274,10 @@ function cropCandidateHandwrittenName(rectifiedSource, tplKey = null, isStamped 
 }
 
 function resolveKeyForCode(code) {
+    if (!state.keys || Object.keys(state.keys).length === 0) return null;
     const c = String(code || '').trim();
-    if (c && state.keys[c]) return state.keys[c];
+    if (!c) return null;
+    if (state.keys[c]) return state.keys[c];
     const stripped = c.replace(/^0+/, '');
     if (stripped && state.keys[stripped]) return state.keys[stripped];
     const padded4 = c.padStart(4, '0');
@@ -4342,8 +4285,8 @@ function resolveKeyForCode(code) {
     for (const [k, v] of Object.entries(state.keys)) {
         if (k.replace(/^0+/, '') === stripped && stripped !== '') return v;
     }
-    const firstKey = Object.keys(state.keys)[0];
-    return firstKey ? state.keys[firstKey] : { answers: '', part2: [], part3: [] };
+    // Tuyệt đối KHÔNG fallback lấy firstKey nếu mã đề không tồn tại trong danh sách đáp án
+    return null;
 }
 
 function normalizeP3Answer(val) {
@@ -4364,6 +4307,17 @@ function isP3Match(studentVal, keyVal) {
 
 function calculateExamScore(code, studentP1, studentP2, studentP3) {
     const key = resolveKeyForCode(code);
+    if (!key) {
+        return {
+            part1Score: 0,
+            part2Score: 0,
+            part3Score: 0,
+            totalScore: 0,
+            p1Correct: 0,
+            p3Correct: 0,
+            isUnknownCode: true
+        };
+    }
     const p1Pt = state.exam?.part1_point ?? 0.25;
     const p2Pts = state.exam?.part2_points || [0.1, 0.25, 0.5, 1.0];
     const p3Pt = state.exam?.part3_point ?? 0.5;
@@ -4439,7 +4393,8 @@ function calculateExamScore(code, studentP1, studentP2, studentP3) {
         part3Score: Math.round(part3Score * 100) / 100,
         totalScore,
         p1Correct,
-        p3Correct
+        p3Correct,
+        isUnknownCode: false
     };
 }
 
@@ -4448,16 +4403,38 @@ async function displayLastResultInspector(sub, rawResult) {
     if (!card) return;
     card.classList.remove('hidden');
 
+    const hasValidKey = !!resolveKeyForCode(sub.code);
     document.getElementById('resStudentTitle').textContent = sub.student_name ? `Thí sinh: ${sub.student_name}` : `Thí sinh: SBD ${sub.student_no || '---'}`;
     document.getElementById('resScoreBadge').textContent = `${(sub.score ?? 0).toFixed(2)} đ`;
     document.getElementById('resSbdVal').textContent = sub.student_no || '---';
-    document.getElementById('resCodeVal').textContent = sub.code || '---';
+    const codeEl = document.getElementById('resCodeVal');
+    if (codeEl) {
+        if (!hasValidKey) {
+            codeEl.innerHTML = `<span class="text-rose-600 dark:text-rose-400 font-black">${sub.code || '---'} (KHÔNG TỒN TẠI)</span>`;
+        } else {
+            codeEl.textContent = sub.code || '---';
+        }
+    }
     document.getElementById('resTimeVal').textContent = sub.createdAt ? new Date(sub.createdAt).toLocaleTimeString('vi-VN') : 'Vừa xong';
 
     document.getElementById('resP1Score').textContent = (sub.part1_score ?? 0).toFixed(2);
     document.getElementById('resP2Score').textContent = (sub.part2_score ?? 0).toFixed(2);
     document.getElementById('resP3Score').textContent = (sub.part3_score ?? 0).toFixed(2);
     document.getElementById('resTotalScore').textContent = (sub.score ?? 0).toFixed(2);
+
+    // Cảnh báo mã đề không tồn tại trong danh sách đáp án
+    const unknownCodeBox = document.getElementById('resUnknownCodeNoticeBox');
+    const unknownCodeText = document.getElementById('resUnknownCodeNoticeText');
+    if (unknownCodeBox) {
+        if (!hasValidKey) {
+            if (unknownCodeText) {
+                unknownCodeText.innerHTML = `Mã đề <b>"${sub.code || '---'}"</b> không tồn tại trong danh sách đáp án của đề thi này. Điểm số bài thi được tính là 0.00đ. Thầy/Cô có thể sửa lại Mã đề cho học sinh ở ô "Mã đề" bên dưới hoặc sang Tab "Đáp án &amp; Mã đề" để bổ sung đáp án.`;
+            }
+            unknownCodeBox.classList.remove('hidden');
+        } else {
+            unknownCodeBox.classList.add('hidden');
+        }
+    }
 
     // Hiển thị thông báo câu đính chính nếu có
     const overrideBox = document.getElementById('resOverrideAlertBox');
@@ -4863,9 +4840,18 @@ async function generateStampedGradedSheet(sub, rawResult) {
     ctx.fillStyle = '#475569';
     ctx.font = 'bold 21px "Segoe UI", Arial, sans-serif';
     ctx.fillText('Mã đề:', cardX + 270, cardY + 196);
-    ctx.fillStyle = '#dc2626';
-    ctx.font = '900 36px "Courier New", monospace';
-    ctx.fillText(sub.code || '---', cardX + 355, cardY + 198);
+    const hasValidKeyForHeader = !!resolveKeyForCode(sub.code);
+    if (!hasValidKeyForHeader) {
+        ctx.fillStyle = '#dc2626';
+        ctx.font = '900 32px "Courier New", monospace';
+        ctx.fillText(sub.code || '---', cardX + 355, cardY + 198);
+        ctx.font = '900 15px "Segoe UI", Arial, sans-serif';
+        ctx.fillText('(KHÔNG TỒN TẠI)', cardX + 445, cardY + 196);
+    } else {
+        ctx.fillStyle = '#dc2626';
+        ctx.font = '900 36px "Courier New", monospace';
+        ctx.fillText(sub.code || '---', cardX + 355, cardY + 198);
+    }
 
     // Dòng 4: Lớp
     ctx.fillStyle = '#475569';
@@ -5010,6 +4996,8 @@ async function generateStampedGradedSheet(sub, rawResult) {
 
     // 7. VẼ ĐÁNH DẤU CHI TIẾT TRỰC TIẾP CẢ 3 PHẦN LÊN ẢNH (Vòng tròn đậm rõ hơn)
     const key = resolveKeyForCode(sub.code);
+    const hasValidKey = !!key;
+    const safeKey = key || { answers: '', part2: [], part3: [] };
     const kFrame = tpl.khung || [0, 0, 16.53, 23.39];
     const kx0 = kFrame[0] || 0;
     const ky0 = kFrame[1] || 0;
@@ -5032,10 +5020,9 @@ async function generateStampedGradedSheet(sub, rawResult) {
         ctx.restore();
     };
 
-        // 7.0. ĐÁNH DẤU VÙNG MÃ ĐỀ (KHOANH VÒNG VÀNG/ĐỎ NỔI BẬT NẾU TÔ SAI MÃ ĐỀ)
+    // 7.0. ĐÁNH DẤU VÙNG MÃ ĐỀ (KHOANH ĐỎ HẾT KHI MÃ ĐỀ KHÔNG TỒN TẠI TRONG ĐÁP ÁN)
     if (tpl.made && Array.isArray(tpl.made)) {
         const studentCodeStr = String(sub.code || '').trim();
-        const hasValidKey = !!(studentCodeStr && (state.keys[studentCodeStr] || state.keys[studentCodeStr.replace(/^0+/, '')] || state.keys[studentCodeStr.padStart(4, '0')]));
         for (let col = 0; col < tpl.made.length; col++) {
             let digit = -1;
             if (rawResult?.madem && rawResult.madem[col] !== undefined && rawResult.madem[col] >= 0) {
@@ -5047,13 +5034,24 @@ async function generateStampedGradedSheet(sub, rawResult) {
             if (digit >= 0 && digit <= 9 && tpl.made[col]?.[digit]) {
                 const ptMade = tpl.made[col][digit];
                 if (!hasValidKey) {
-                    // Tô sai mã đề: Khoanh vòng vàng dày nổi bật kèm viền đỏ thể hiện ô mã đề đã tô sai
-                    drawRingOnCanvas(ptMade, '#f59e0b', 5.5, 16.5);
-                    drawRingOnCanvas(ptMade, '#ef4444', 2.5, 12);
+                    // Mã đề không tồn tại trong danh sách đáp án: Khoanh đỏ hết các ô đã tô
+                    drawRingOnCanvas(ptMade, '#dc2626', 6, 17);
+                    drawRingOnCanvas(ptMade, '#f87171', 3, 11);
                 } else {
                     drawRingOnCanvas(ptMade, '#10b981', 3.5, 15);
                 }
             }
+        }
+        if (!hasValidKey && tpl.made[0] && tpl.made[0][0]) {
+            const firstPt = tpl.made[0][0];
+            const bannerCx = (firstPt[0] - kx0) * scaleX;
+            const bannerCy = (firstPt[1] - ky0) * scaleY + headerH - 42;
+            ctx.save();
+            ctx.fillStyle = '#dc2626';
+            ctx.font = '900 19px "Segoe UI", Arial, sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillText('⚠️ MÃ ĐỀ KHÔNG TỒN TẠI TRONG ĐÁP ÁN', Math.max(10, bannerCx - 10), Math.max(headerH + 22, bannerCy));
+            ctx.restore();
         }
     }
 
@@ -5062,15 +5060,22 @@ async function generateStampedGradedSheet(sub, rawResult) {
         const qCount1 = Math.min(tpl.p1.length, state.exam?.question_count || 12);
         for (let q = 0; q < qCount1; q++) {
             const studentAns = (sub.answers || '')[q];
-            const keyAns = (key.answers || '')[q];
+            const keyAns = (safeKey.answers || '')[q];
             const isOverride = sub.manual_overrides?.p1?.[q] || sub.manual_overrides?.p1?.[String(q)];
-            const isBonus = key.bonus_p1 && (key.bonus_p1[q] === true || key.bonus_p1[String(q)] === true);
+            const isBonus = safeKey.bonus_p1 && (safeKey.bonus_p1[q] === true || safeKey.bonus_p1[String(q)] === true);
 
             ['A', 'B', 'C', 'D'].forEach((char, optIdx) => {
                 const pt = tpl.p1[q][optIdx];
                 if (!pt) return;
                 const isStudentMark = studentAns === char;
                 const isKeyMark = keyAns === char;
+
+                if (!hasValidKey) {
+                    if (isStudentMark) {
+                        drawRingOnCanvas(pt, '#ef4444', 4.5, 15.5); // Khoanh đỏ ô học sinh tô vì mã đề không có đáp án
+                    }
+                    return;
+                }
 
                 if (isOverride && isStudentMark) {
                     // GIÁO VIÊN ĐÃ ĐÍNH CHÍNH CÂU NÀY: VÒNG TÍM NỔI BẬT
@@ -5099,8 +5104,8 @@ async function generateStampedGradedSheet(sub, rawResult) {
         const qCount2 = state.exam?.part2_count || 4;
         for (let q = 0; q < qCount2; q++) {
             const sChunk = (sub.part2 && sub.part2[q]) ? sub.part2[q] : '----';
-            const kChunk = (key.part2 && key.part2[q]) ? key.part2[q] : '----';
-            const isQBonus = key.bonus_p2 && (key.bonus_p2[q] === true || key.bonus_p2[String(q)] === true);
+            const kChunk = (safeKey.part2 && safeKey.part2[q]) ? safeKey.part2[q] : '----';
+            const isQBonus = safeKey.bonus_p2 && (safeKey.bonus_p2[q] === true || safeKey.bonus_p2[String(q)] === true);
 
             for (let r = 0; r < 4; r++) {
                 const idx = q * 4 + r;
@@ -5112,6 +5117,12 @@ async function generateStampedGradedSheet(sub, rawResult) {
                 const sChar = (sChunk[r] || '-').toUpperCase().replace('D', 'Đ');
                 const kChar = (kChunk[r] || '-').toUpperCase().replace('D', 'Đ');
                 const isItemOverride = sub.manual_overrides?.p2?.[`${q}_${r}`];
+
+                if (!hasValidKey) {
+                    const targetPt = sChar === 'Đ' ? ptD : (sChar === 'S' ? ptS : null);
+                    if (targetPt) drawRingOnCanvas(targetPt, '#ef4444', 4.5, 15.5);
+                    continue;
+                }
 
                 if (isItemOverride) {
                     const targetPt = sChar === 'Đ' ? ptD : (sChar === 'S' ? ptS : null);
@@ -5155,10 +5166,10 @@ async function generateStampedGradedSheet(sub, rawResult) {
             } else if (rawResult.part3Text) {
                 sAns = String(rawResult.part3Text[q] || '').trim();
             }
-            const kAns = String((key.part3 && key.part3[q]) || '').trim();
+            const kAns = String((safeKey.part3 && safeKey.part3[q]) || '').trim();
             const isP3Override = sub.manual_overrides?.p3?.[q] || sub.manual_overrides?.p3?.[String(q)];
-            const isP3Bonus = key.bonus_p3 && (key.bonus_p3[q] === true || key.bonus_p3[String(q)] === true);
-            const isMatch = isP3Bonus || isP3Match(sAns, kAns);
+            const isP3Bonus = safeKey.bonus_p3 && (safeKey.bonus_p3[q] === true || safeKey.bonus_p3[String(q)] === true);
+            const isMatch = hasValidKey && (isP3Bonus || isP3Match(sAns, kAns));
 
             // Khoanh tròn các ô số học sinh đã tô ở 4 cột (Xanh lá nếu đúng, Đỏ nếu sai, Vàng nét đứt nếu là vị trí đáp án đúng)
             let p3mStudent = (rawResult.p3m && rawResult.p3m[q]) || sub.p3m?.[q] || null;
@@ -5172,7 +5183,7 @@ async function generateStampedGradedSheet(sub, rawResult) {
             }
 
             let p3mKey = null;
-            if (kAns && tpl.p3hang) {
+            if (hasValidKey && kAns && tpl.p3hang) {
                 p3mKey = [];
                 for (let col = 0; col < 4; col++) {
                     const ch = kAns[col] || '';
@@ -5187,7 +5198,9 @@ async function generateStampedGradedSheet(sub, rawResult) {
                     const v = p3mStudent[col];
                     if (v >= 0 && tpl.p3[q]?.[col]?.[v]) {
                         const pt = tpl.p3[q][col][v];
-                        if (isP3Override) {
+                        if (!hasValidKey) {
+                            drawRingOnCanvas(pt, '#ef4444', 5, 15.5);
+                        } else if (isP3Override) {
                             drawRingOnCanvas(pt, '#9333ea', 6, 16);
                             drawRingOnCanvas(pt, '#d8b4fe', 3, 11);
                         } else if (isP3Bonus || isMatch) {
@@ -5200,7 +5213,7 @@ async function generateStampedGradedSheet(sub, rawResult) {
             }
 
             // 2. Nếu học sinh làm sai, khoanh tròn VÀNG NÉT ĐỨT vị trí đáp án đúng
-            if (!isMatch && !isP3Bonus && p3mKey) {
+            if (hasValidKey && !isMatch && !isP3Bonus && p3mKey) {
                 for (let col = 0; col < 4; col++) {
                     const vk = p3mKey[col];
                     if (vk >= 0 && tpl.p3[q]?.[col]?.[vk]) {
@@ -5254,7 +5267,9 @@ async function generateStampedGradedSheet(sub, rawResult) {
                 ctx.font = '900 19px "Segoe UI", Arial, sans-serif';
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
-                if (isP3Override) {
+                if (!hasValidKey) {
+                    ctx.fillText(`✗ ${sAns || 'Trống'} (Chưa có đáp án)`, bx + bw / 2, by + bh / 2);
+                } else if (isP3Override) {
                     ctx.fillText(`★ Đã sửa: ${sAns || '---'} (+${isMatch ? (state.exam?.part3_point ?? 0.5) : 0}đ)`, bx + bw / 2, by + bh / 2);
                 } else if (isP3Bonus) {
                     ctx.fillText(`★ Cho điểm: ${sAns || '---'} (+${state.exam?.part3_point ?? 0.5}đ)`, bx + bw / 2, by + bh / 2);
@@ -6899,11 +6914,16 @@ window.renderResultsTable = () => {
                     ${s.name_image ? `<img src="${s.name_image}" class="h-5 max-w-[90px] object-contain border border-slate-200 dark:border-slate-700 rounded bg-white" title="Chữ viết tay gốc">` : ''}
                 </div>
             </td>
-            <td class="p-3 text-center font-mono font-bold text-slate-700 dark:text-slate-300">${s.code || '---'}</td>
+            <td class="p-3 text-center">
+                <div class="font-mono font-bold text-slate-700 dark:text-slate-300">${s.code || '---'}</div>
+                ${(s.is_unknown_code || !resolveKeyForCode(s.code)) 
+                    ? `<span class="inline-block px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-700 dark:bg-rose-950/70 dark:text-rose-300 border border-rose-300 dark:border-rose-800" title="Mã đề không tồn tại trong danh sách đáp án">Không tồn tại</span>` 
+                    : ''}
+            </td>
             <td class="p-3 text-center font-mono text-slate-600 dark:text-slate-400 hidden md:table-cell">${(s.part1_score ?? 0).toFixed(2)}</td>
             <td class="p-3 text-center font-mono text-slate-600 dark:text-slate-400 hidden md:table-cell">${(s.part2_score ?? 0).toFixed(2)}</td>
             <td class="p-3 text-center font-mono text-slate-600 dark:text-slate-400 hidden md:table-cell">${(s.part3_score ?? 0).toFixed(2)}</td>
-            <td class="p-3 text-center font-mono font-black text-emerald-600 dark:text-emerald-400 text-sm">${(s.score ?? 0).toFixed(2)}</td>
+            <td class="p-3 text-center font-mono font-black ${(s.is_unknown_code || !resolveKeyForCode(s.code)) ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'} text-sm">${(s.score ?? 0).toFixed(2)}</td>
             <td class="p-3 text-center text-slate-400 text-[11px]">${new Date(s.createdAt).toLocaleTimeString('vi-VN', {hour:'2-digit', minute:'2-digit', day:'2-digit', month:'2-digit'})}</td>
             <td class="p-3 text-center">
                 <div class="flex items-center justify-center gap-1.5">
@@ -7519,27 +7539,37 @@ window.renderKeysTab = (preferredCode) => {
     
     // Hợp nhất toàn bộ mã đề từ cấu hình đề thi VÀ toàn bộ đáp án đã nạp vào state.keys
     const keyCodes = Object.keys(state.keys || {}).map(String);
-    const examCodes = (Array.isArray(state.exam.codes) ? state.exam.codes : []).map(String);
+    let examCodes = (Array.isArray(state.exam.codes) ? state.exam.codes : []).map(String);
     
-    // Nếu đã nạp đáp án thực tế, ưu tiên bỏ các mã mặc định mẫu (101-104) nếu chúng không có đáp án thực
+    // Loại bỏ hoàn toàn mã đề mẫu (101-104) nếu bài thi có mã đề khác hoặc không có đáp án thực sự cho mã mẫu
+    const sampleCodes = ['101', '102', '103', '104'];
+    const hasOtherCodes = examCodes.some(c => !sampleCodes.includes(c)) || keyCodes.some(c => !sampleCodes.includes(c));
+    if (hasOtherCodes) {
+        examCodes = examCodes.filter(c => !sampleCodes.includes(c) || (state.keys && state.keys[c] && !state.keys[c].isSample));
+    }
+    
     const allCodesSet = new Set([...examCodes, ...keyCodes]);
-    if (allCodesSet.size === 0) allCodesSet.add('101');
     const allCodes = Array.from(allCodesSet).filter(Boolean).sort();
     
     // Đồng bộ ngược lại vào state.exam.codes
     state.exam.codes = allCodes;
 
     if (selector) {
-        selector.innerHTML = allCodes.map(c => `<option value="${c}">${c}</option>`).join('');
-        if (preferredCode && allCodes.includes(String(preferredCode))) {
-            selector.value = String(preferredCode);
-        } else if (selector.value && allCodes.includes(selector.value)) {
-            // Giữ nguyên mã đề đang chọn
+        if (allCodes.length === 0) {
+            selector.innerHTML = `<option value="">-- Chưa có mã đề --</option>`;
+            selector.value = '';
         } else {
-            selector.value = allCodes[0];
+            selector.innerHTML = allCodes.map(c => `<option value="${c}">${c}</option>`).join('');
+            if (preferredCode && allCodes.includes(String(preferredCode))) {
+                selector.value = String(preferredCode);
+            } else if (selector.value && allCodes.includes(selector.value)) {
+                // Giữ nguyên mã đề đang chọn
+            } else {
+                selector.value = allCodes[0];
+            }
         }
     }
-    const currentCode = selector?.value || allCodes[0] || '101';
+    const currentCode = selector?.value || allCodes[0] || '';
     window.loadCodeKeyInputs(currentCode);
 };
 
@@ -7768,23 +7798,65 @@ window.saveAllKeys = async () => {
 // ========================================================
 
 function getDefaultOmrClasses() {
-    return [
-        {
-            id: 'omr_cls_demo_12a1',
-            name: '12A1',
-            academicYear: '2024-2025',
-            description: 'Lớp OMR độc lập mẫu',
-            students: [
-                { id: 'st_demo_001', student_no: '001', name: 'Nguyễn Văn An', phone: '0912345678', note: 'Tổ 1' },
-                { id: 'st_demo_002', student_no: '002', name: 'Trần Thị Bình', phone: '0987654321', note: 'Tổ 1' },
-                { id: 'st_demo_003', student_no: '003', name: 'Lê Hoàng Cường', phone: '0905123456', note: 'Tổ 2' },
-                { id: 'st_demo_004', student_no: '004', name: 'Phạm Minh Đức', phone: '0934567890', note: 'Tổ 2' },
-                { id: 'st_demo_005', student_no: '005', name: 'Hoàng Mai Hương', phone: '0978901234', note: 'Tổ 3' }
-            ],
+    return [];
+}
+
+function syncExamStudentsToActiveOmrClass() {
+    if (!state.exam || !Array.isArray(state.students) || state.students.length === 0) return;
+    
+    // Đảm bảo state.omrClasses là mảng, lọc bỏ các lớp mẫu demo
+    if (!Array.isArray(state.omrClasses)) state.omrClasses = [];
+    state.omrClasses = state.omrClasses.filter(c => c && c.id !== 'omr_cls_demo_12a1' && !c.isSample && !(c.name === '12A1' && (c.students || []).some(s => s.name === 'Nguyễn Văn An')));
+
+    const examClassName = (state.exam.className || state.exam.title || 'Lớp OMR').trim();
+    const examClassId = state.exam.classId || ('omr_cls_exam_' + (state.exam.id || 'current'));
+
+    // Chuẩn hóa danh sách học sinh từ state.students (loại bỏ học sinh mẫu)
+    const validStudents = state.students
+        .filter(s => s && !s.isSample && !s.id?.includes('st_demo') && !(s.name === 'Nguyễn Văn An' && s.student_no === '001'))
+        .map(s => ({
+            id: s.id || `st_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+            student_no: String(s.student_no || s.sbd || '').trim(),
+            name: String(s.name || '').trim(),
+            phone: String(s.phone || '').trim(),
+            note: String(s.note || '').trim(),
+            dob: String(s.dob || '').trim(),
+            gender: String(s.gender || '').trim(),
+            room: String(s.room || '').trim(),
+            class_name: String(s.class_name || s.class || '').trim(),
+            grade: String(s.grade || '').trim()
+        }));
+
+    if (validStudents.length === 0) return;
+
+    // Tìm lớp theo ID hoặc tên
+    let targetCls = state.omrClasses.find(c => c.id === examClassId || c.id === state.exam.classId || c.name === examClassName);
+
+    if (!targetCls) {
+        targetCls = {
+            id: examClassId,
+            name: examClassName,
+            academicYear: '2025-2026',
+            description: `Đồng bộ từ bài thi "${state.exam.title || examClassName}"`,
+            students: validStudents,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString()
+        };
+        state.omrClasses.unshift(targetCls);
+    } else {
+        // Cập nhật danh sách học sinh nếu số lượng học sinh trong bài thi đầy đủ hơn
+        if (!targetCls.students || targetCls.students.length < validStudents.length) {
+            targetCls.students = validStudents;
+            targetCls.updatedAt = new Date().toISOString();
         }
-    ];
+    }
+
+    state.exam.classId = targetCls.id;
+    state.activeOmrClassId = targetCls.id;
+    try {
+        localStorage.setItem('omr_active_class_id', targetCls.id);
+        localStorage.setItem('omr_local_classes', JSON.stringify(state.omrClasses));
+    } catch (_) {}
 }
 
 function loadLocalOmrClasses() {
@@ -7794,17 +7866,24 @@ function loadLocalOmrClasses() {
         if (raw) {
             classes = JSON.parse(raw);
         }
-        if (!Array.isArray(classes) || classes.length === 0) {
-            classes = getDefaultOmrClasses();
-            localStorage.setItem('omr_local_classes', JSON.stringify(classes));
+        if (Array.isArray(classes)) {
+            // Lọc bỏ triệt để lớp mẫu 12A1 / demo
+            classes = classes.filter(c => c && c.id !== 'omr_cls_demo_12a1' && !c.isSample && !(c.name === '12A1' && (c.students || []).some(s => s.name === 'Nguyễn Văn An')));
+        } else {
+            classes = [];
         }
         state.omrClasses = classes;
+        
+        // Tự động đồng bộ từ học sinh của bài thi hiện tại nếu có
+        syncExamStudentsToActiveOmrClass();
+
         const savedActiveId = localStorage.getItem('omr_active_class_id');
-        const found = classes.find(c => c.id === savedActiveId);
-        state.activeOmrClassId = found ? found.id : (classes[0]?.id || null);
+        const found = state.omrClasses.find(c => c.id === savedActiveId);
+        state.activeOmrClassId = found ? found.id : (state.omrClasses[0]?.id || null);
     } catch(e) {
         console.warn("Lỗi tải danh sách lớp OMR local:", e);
-        state.omrClasses = getDefaultOmrClasses();
+        state.omrClasses = [];
+        syncExamStudentsToActiveOmrClass();
         state.activeOmrClassId = state.omrClasses[0]?.id || null;
     }
     return state.omrClasses;
@@ -7841,6 +7920,13 @@ function getActiveOmrClass() {
 window.renderStudentsTab = () => {
     if (!state.omrClasses || state.omrClasses.length === 0) {
         loadLocalOmrClasses();
+    } else {
+        syncExamStudentsToActiveOmrClass();
+    }
+    if (state.exam?.classId && state.omrClasses.some(c => c.id === state.exam.classId)) {
+        state.activeOmrClassId = state.exam.classId;
+    } else if (!state.activeOmrClassId && state.omrClasses.length > 0) {
+        state.activeOmrClassId = state.omrClasses[0].id;
     }
     window.renderOmrClassesList();
     window.renderActiveOmrClassStudents();
@@ -7906,6 +7992,7 @@ window.renderOmrClassesList = () => {
 
 window.selectOmrClass = (classId) => {
     state.activeOmrClassId = classId;
+    state.activeSubClassFilter = '';
     localStorage.setItem('omr_active_class_id', classId);
     window.renderOmrClassesList();
     window.renderActiveOmrClassStudents();
@@ -7928,7 +8015,7 @@ window.confirmCreateOmrClass = () => {
         Swal.fire('Lưu ý', 'Vui lòng nhập tên lớp học!', 'warning');
         return;
     }
-    const year = document.getElementById('newOmrClassYear')?.value.trim() || '2024-2025';
+    const year = document.getElementById('newOmrClassYear')?.value.trim() || '2025-2026';
     const desc = document.getElementById('newOmrClassDesc')?.value.trim() || '';
 
     const newClass = {
@@ -7943,6 +8030,7 @@ window.confirmCreateOmrClass = () => {
 
     state.omrClasses.push(newClass);
     state.activeOmrClassId = newClass.id;
+    state.activeSubClassFilter = '';
     saveLocalOmrClasses(state.omrClasses);
 
     document.getElementById('createOmrClassModal').classList.add('hidden');
@@ -7993,9 +8081,14 @@ window.deleteActiveOmrClass = async () => {
     });
 
     if (res.isConfirmed) {
-        state.omrClasses = state.omrClasses.filter(c => c.id !== cls.id);
+        const deletedId = cls.id;
+        state.omrClasses = state.omrClasses.filter(c => c.id !== deletedId);
         state.activeOmrClassId = state.omrClasses[0]?.id || null;
+        state.activeSubClassFilter = '';
         saveLocalOmrClasses(state.omrClasses);
+        try {
+            deleteDoc(doc(db, "omr_local_classes", deletedId));
+        } catch (_) {}
         window.renderStudentsTab();
         Swal.fire('Đã xóa', 'Lớp học đã được xóa thành công.', 'success');
     }
@@ -8017,21 +8110,86 @@ window.createExamForSelectedOmrClass = () => {
     }
 };
 
+window.setActiveSubClassFilter = (subClass) => {
+    state.activeSubClassFilter = (state.activeSubClassFilter === subClass) ? '' : subClass;
+    window.renderActiveOmrClassStudents();
+};
+
 window.renderActiveOmrClassStudents = () => {
     const tbody = document.getElementById('studentsTableBody');
     const countBadge = document.getElementById('activeClassStudentCountBadge');
     const sidebarCountBadge = document.getElementById('studentsCountBadge');
+    const subFilterCont = document.getElementById('activeClassSubFiltersContainer');
     if (!tbody) return;
 
     const cls = getActiveOmrClass();
     if (!cls) {
         tbody.innerHTML = `<tr><td colspan="8" class="p-8 text-center text-slate-400 italic">Chưa chọn lớp OMR nào.</td></tr>`;
         if (countBadge) countBadge.textContent = '0 học sinh';
+        if (subFilterCont) subFilterCont.classList.add('hidden');
         return;
     }
 
+    const allClassStudents = Array.isArray(cls.students) ? cls.students : [];
+
+    // Tự động phân tích các phân lớp con (ví dụ: 9D1, 9D2, 9D3, 9D4)
+    const subClassCounts = {};
+    allClassStudents.forEach(s => {
+        let sc = s.class_name || '';
+        if (!sc && s.note) {
+            const cMatch = s.note.match(/L[ớo]p\s*([0-9]{1,2}[A-Za-z0-9_-]*)/i) || s.note.match(/\b([0-9]{1,2}[A-Za-z0-9_-]+)\b/);
+            if (cMatch) sc = cMatch[1].toUpperCase();
+        }
+        if (sc) {
+            subClassCounts[sc] = (subClassCounts[sc] || 0) + 1;
+        }
+    });
+
+    const subClasses = Object.keys(subClassCounts).sort();
+
+    // Hiển thị thanh nút lọc phân lớp con nếu có từ 2 lớp con trở lên
+    if (subFilterCont) {
+        if (subClasses.length > 1) {
+            subFilterCont.classList.remove('hidden');
+            const activeFilter = state.activeSubClassFilter || '';
+            const allBtnActive = !activeFilter;
+            
+            let filterHtml = `
+                <span class="text-xs font-bold text-slate-500 dark:text-slate-400 flex items-center gap-1 mr-1">
+                    <i class="fa-solid fa-filter text-[10px] text-emerald-500"></i> Lọc lớp:
+                </span>
+                <button type="button" onclick="window.setActiveSubClassFilter('')" class="px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${allBtnActive ? 'bg-emerald-600 text-white shadow-xs' : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700'}">
+                    Tất cả (${allClassStudents.length})
+                </button>
+            `;
+
+            subClasses.forEach(sc => {
+                const isSelected = activeFilter === sc;
+                filterHtml += `
+                    <button type="button" onclick="window.setActiveSubClassFilter('${sc}')" class="px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${isSelected ? 'bg-indigo-600 text-white shadow-xs' : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700'}">
+                        ${sc} (${subClassCounts[sc]})
+                    </button>
+                `;
+            });
+
+            subFilterCont.innerHTML = filterHtml;
+        } else {
+            subFilterCont.classList.add('hidden');
+        }
+    }
+
     const queryStr = (document.getElementById('classStudentSearchInput')?.value || '').trim().toLowerCase();
-    let roster = Array.isArray(cls.students) ? cls.students : [];
+    let roster = [...allClassStudents];
+
+    // Lọc theo lớp con nếu được chọn
+    if (state.activeSubClassFilter) {
+        const scFilter = state.activeSubClassFilter.toLowerCase();
+        roster = roster.filter(s => {
+            const sc = (s.class_name || '').toLowerCase();
+            const nt = (s.note || '').toLowerCase();
+            return sc === scFilter || nt.includes(scFilter);
+        });
+    }
 
     if (queryStr) {
         roster = roster.filter(s =>
@@ -8045,12 +8203,16 @@ window.renderActiveOmrClassStudents = () => {
         );
     }
 
-    if (countBadge) countBadge.textContent = `${(cls.students || []).length} học sinh`;
-    if (sidebarCountBadge) sidebarCountBadge.textContent = (cls.students || []).length;
+    const filteredCountText = (roster.length !== allClassStudents.length)
+        ? `${roster.length}/${allClassStudents.length} học sinh`
+        : `${allClassStudents.length} học sinh`;
+
+    if (countBadge) countBadge.textContent = filteredCountText;
+    if (sidebarCountBadge) sidebarCountBadge.textContent = allClassStudents.length;
 
     if (roster.length === 0) {
-        const emptyMsg = queryStr
-            ? 'Không tìm thấy học sinh nào khớp với từ khóa tìm kiếm.'
+        const emptyMsg = (queryStr || state.activeSubClassFilter)
+            ? 'Không tìm thấy học sinh nào khớp với bộ lọc hiện tại.'
             : `Lớp "${cls.name}" hiện chưa có học sinh nào. Bấm <b>"Nạp Excel / Dán SBD"</b> hoặc <b>"+ Thêm học sinh"</b> để nạp ngay!`;
         tbody.innerHTML = `<tr><td colspan="8" class="p-8 text-center text-slate-400 italic">${emptyMsg}</td></tr>`;
         return;
@@ -8069,11 +8231,15 @@ window.renderActiveOmrClassStudents = () => {
             if (cMatch) classVal = cMatch[1].toUpperCase();
         }
 
-        // Match with current exam submissions
-        const sub = (state.submissions || []).find(sub =>
-            sub.student_no === s.student_no ||
-            (s.student_no && String(Number(sub.student_no || 0)) === String(Number(s.student_no)))
-        );
+        // Match with current exam submissions - ưu tiên khớp chính xác SBD
+        const sbdClean = String(s.student_no || '').trim();
+        const sbdNum = sbdClean.replace(/^0+/, '');
+        const sub = (state.submissions || []).find(sub => {
+            const subSbd = String(sub.student_no || '').trim();
+            if (subSbd === sbdClean) return true;
+            if (sbdNum && subSbd.replace(/^0+/, '') === sbdNum) return true;
+            return false;
+        });
 
         const statusBadge = sub
             ? `<span class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 inline-flex items-center gap-1 shadow-2xs"><i class="fa-solid fa-circle-check"></i> Đã chấm: ${(Number(sub.score) || 0).toFixed(2)}đ</span>`
