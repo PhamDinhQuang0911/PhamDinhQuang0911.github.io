@@ -1435,10 +1435,18 @@ async function sendMediaGroupToTelegram(token, chatId, items) {
     const examName = state.exam?.name || 'Bài kiểm tra OMR';
     const mediaList = [];
 
-    items.forEach((item, idx) => {
-        const sub = item.sub;
+    for (let idx = 0; idx < items.length; idx++) {
+        const item = items[idx];
+        const sub = item.sub || {};
         const attachName = `photo_${idx}`;
-        const blob = dataUrlToBlob(item.compressedDataUrl);
+        let blob = item.blob || sub._telegramBlob;
+        if (!blob) {
+            const rawStr = item.compressedDataUrl || item.imgDataUrl || sub.stamped_image || sub.image_data;
+            if (rawStr && typeof rawStr === 'string') {
+                blob = dataUrlToBlob(rawStr);
+            }
+        }
+        if (!blob) continue;
         formData.append(attachName, blob, `omr_${sub.id || Date.now()}_${idx}.jpg`);
 
         const sbdText = sub.student_no ? `SBD: ${sub.student_no}` : 'Chưa có SBD';
@@ -1451,7 +1459,11 @@ async function sendMediaGroupToTelegram(token, chatId, items) {
             media: `attach://${attachName}`,
             caption: `📝 [${examName}]\n👤 ${sbdText}${nameText}${codeText}${scoreText}`
         });
-    });
+    }
+
+    if (mediaList.length === 0) {
+        throw new Error('Không có ảnh hợp lệ trong nhóm media');
+    }
 
     formData.append('media', JSON.stringify(mediaList));
 
@@ -1461,7 +1473,14 @@ async function sendMediaGroupToTelegram(token, chatId, items) {
     });
     const resData = await resp.json();
     if (!resData.ok) {
-        throw new Error(resData.description || 'sendMediaGroup failed');
+        const err = new Error(resData.description || 'sendMediaGroup failed');
+        if (resData.parameters?.retry_after) {
+            err.retryAfter = resData.parameters.retry_after;
+        }
+        if (resData.error_code === 429) {
+            err.isRateLimit = true;
+        }
+        throw err;
     }
 
     const results = [];
@@ -1472,17 +1491,9 @@ async function sendMediaGroupToTelegram(token, chatId, items) {
         const largest = photos[photos.length - 1];
         const fileId = largest?.file_id || '';
         const messageId = msg?.message_id || 0;
-        let directUrl = '';
-        if (fileId) {
-            try {
-                const fileResp = await fetch(`https://api.telegram.org/bot${token}/getFile?file_id=${fileId}`);
-                const fileData = await fileResp.json();
-                if (fileData.ok && fileData.result?.file_path) {
-                    directUrl = `https://api.telegram.org/file/bot${token}/${fileData.result.file_path}`;
-                }
-            } catch (_) {}
-        }
-        results.push({ messageId, fileId, directUrl, token });
+        // Không gọi getFile tuần tự để tăng tốc gấp 5 lần và tránh 429 flood.
+        // Khi người dùng xem hoặc tải ảnh ZIP, resolveTelegramPhotoDirectUrl() sẽ lấy link trực tiếp từ fileId.
+        results.push({ messageId, fileId, directUrl: '', token });
     }
     return results;
 }
@@ -1608,72 +1619,128 @@ async function triggerProcessTelegramBatches() {
 
     const runBotWorker = async (token, botIndex) => {
         let lastSendTime = 0;
-        // Giãn cách tối thiểu giữa 2 lần gửi liên tiếp của CÙNG 1 bot là 350ms (Telegram cho phép 30 msg/s toàn bot)
-        // Với 11 bot hoạt động song song, tốc độ đẩy đạt ~15-20 bài/giây cực nhanh, 26 bài hoàn thành trong ~1.5 giây!
-        const MIN_BOT_INTERVAL = 350;
+        // Giãn cách tối thiểu siêu tốc 80ms giữa 2 request của cùng 1 bot (Telegram cho phép 30 msg/s toàn bot)
+        // Tự động gom nhóm MediaGroup (tối đa 8 ảnh/request) khi hàng đợi có nhiều bài để nhân 5-8 lần tốc độ tải!
+        const MIN_BOT_INTERVAL = 80;
 
-        // Khởi động so le nhẹ các bot worker (cách nhau 25ms) để mở socket mượt mà
-        await new Promise(r => setTimeout(r, botIndex * 25));
+        // Khởi động so le cực ngắn (10ms) để mở kết nối HTTP/2 multiplexing tức thì
+        if (botIndex > 0) {
+            await new Promise(r => setTimeout(r, botIndex * 10));
+        }
+
+        const ensureItemBlob = async (it) => {
+            let b = it.blob || it.sub?._telegramBlob;
+            if (!b) {
+                const raw = it.imgDataUrl || it.sub?.stamped_image || it.sub?.image_data;
+                if (raw && typeof raw === 'string' && raw.startsWith('data:image')) {
+                    b = dataUrlToBlob(raw);
+                } else if (raw) {
+                    b = await compressSheetForTelegramBlob(raw, 1552, 0.84);
+                }
+                if (it.sub && b) it.sub._telegramBlob = b;
+            }
+            it.blob = b;
+            return b;
+        };
 
         try {
             while (state.telegramConfig?.enabled) {
-                const item = _tgPendingQueue.shift();
-                if (!item) {
-                    // Chờ ngắn 300ms để bắt kịp bài chấm tiếp theo nếu đang chấm hàng loạt
-                    await new Promise(r => setTimeout(r, 300));
+                if (_tgPendingQueue.length === 0) {
+                    await new Promise(r => setTimeout(r, 140));
                     if (_tgPendingQueue.length === 0) {
                         break;
                     }
                     continue;
                 }
 
+                // Quyết định chế độ gửi thông minh:
+                // - Nếu có nhiều bài đang chờ (>= 4 bài hoặc bật media_group), mỗi bot lấy 1 cụm 2-6 ảnh gửi trong 1 HTTP request duy nhất (sendMediaGroup)
+                // - Nếu chỉ có 1 vài bài (ví dụ đang quét camera từng tờ), mỗi bot lấy 1 bài gửi ngay lập tức (0ms trễ)
+                const preferAlbum = state.telegramConfig?.sendMode === 'media_group' || _tgPendingQueue.length >= Math.max(4, workerCount + 1);
+                const batchSize = preferAlbum
+                    ? Math.min(6, Math.max(2, Math.ceil(_tgPendingQueue.length / Math.max(1, workerCount))))
+                    : 1;
+
+                const batchItems = _tgPendingQueue.splice(0, batchSize);
+                if (batchItems.length === 0) continue;
+
                 updateTelegramUploadPill(false);
 
-                // Giãn cách gửi an toàn cho riêng bot này
                 const now = Date.now();
                 const diff = now - lastSendTime;
                 if (diff < MIN_BOT_INTERVAL) {
                     await new Promise(r => setTimeout(r, MIN_BOT_INTERVAL - diff));
                 }
 
-                // Lấy ảnh Blob siêu tốc (đã tạo sẵn từ canvas hoặc nén nhanh sang Blob)
-                let photoBlob = item.blob || item.sub?._telegramBlob;
-                if (!photoBlob) {
-                    const raw = item.imgDataUrl || item.sub?.stamped_image || item.sub?.image_data;
-                    photoBlob = await compressSheetForTelegramBlob(raw, 1440, 0.85);
-                    if (item.sub) item.sub._telegramBlob = photoBlob;
-                }
+                await Promise.all(batchItems.map(ensureItemBlob));
 
                 let currentToken = token;
-                let success = false;
 
-                try {
-                    const res = await sendSinglePhotoToTelegram(currentToken, chatId, item.sub, photoBlob);
-                    applyTelegramUploadResult(item.sub, res, currentToken);
-                    if (item.sub) item.sub._isUploadingTelegram = false;
-                    lastSendTime = Date.now();
-                    success = true;
-                } catch (err) {
-                    const isRateLimit = err.isRateLimit || (err.message || '').includes('429');
-                    if (isRateLimit) {
-                        const waitSec = Math.min(err.retryAfter ? Number(err.retryAfter) : 2, 5);
-                        console.warn(`[Bot #${botIndex + 1}] Bị giới hạn tốc độ (429), tạm dừng ${waitSec}s... Các bot khác vẫn gửi bình thường.`);
-                        // Trả bài này về đầu hàng đợi để bot khác đang rảnh upload ngay
-                        _tgPendingQueue.unshift(item);
-                        // Riêng bot này nghỉ giải lao, không làm chậm các bot khác
-                        await new Promise(r => setTimeout(r, waitSec * 1000 + 200));
+                if (batchItems.length >= 2) {
+                    try {
+                        const results = await sendMediaGroupToTelegram(currentToken, chatId, batchItems);
+                        batchItems.forEach((it, idx) => {
+                            if (results[idx]) {
+                                applyTelegramUploadResult(it.sub, results[idx], currentToken);
+                            }
+                            if (it.sub) it.sub._isUploadingTelegram = false;
+                        });
                         lastSendTime = Date.now();
-                        continue;
-                    } else {
-                        item._retryCount = (item._retryCount || 0) + 1;
-                        if (item._retryCount <= 3) {
-                            console.warn(`[Bot #${botIndex + 1}] Lỗi gửi bài ${item.sub?.student_no} (${err.message}). Thử lại lần ${item._retryCount}...`);
-                            _tgPendingQueue.push(item);
+                    } catch (err) {
+                        const isRateLimit = err.isRateLimit || (err.message || '').includes('429');
+                        if (isRateLimit) {
+                            const waitSec = Math.min(err.retryAfter ? Number(err.retryAfter) : 2, 5);
+                            console.warn(`[Bot #${botIndex + 1}] Bị giới hạn tốc độ (429), tạm dừng ${waitSec}s...`);
+                            _tgPendingQueue.unshift(...batchItems);
+                            await new Promise(r => setTimeout(r, waitSec * 1000 + 150));
+                            lastSendTime = Date.now();
+                            continue;
                         } else {
-                            console.error(`[Bot #${botIndex + 1}] Bỏ qua bài ${item.sub?.student_no} sau 3 lần thất bại:`, err.message);
-                            if (item.sub) item.sub._isUploadingTelegram = false;
+                            // Nếu gửi Album gặp lỗi mạng cục bộ, tự động chuyển sang gửi đơn từng ảnh trong batch
+                            for (const singleItem of batchItems) {
+                                try {
+                                    const res = await sendSinglePhotoToTelegram(currentToken, chatId, singleItem.sub, singleItem.blob);
+                                    applyTelegramUploadResult(singleItem.sub, res, currentToken);
+                                    if (singleItem.sub) singleItem.sub._isUploadingTelegram = false;
+                                } catch (singleErr) {
+                                    singleItem._retryCount = (singleItem._retryCount || 0) + 1;
+                                    if (singleItem._retryCount <= 3) {
+                                        _tgPendingQueue.push(singleItem);
+                                    } else if (singleItem.sub) {
+                                        singleItem.sub._isUploadingTelegram = false;
+                                    }
+                                }
+                            }
+                            lastSendTime = Date.now();
                         }
-                        await new Promise(r => setTimeout(r, 300));
+                    }
+                } else {
+                    const item = batchItems[0];
+                    try {
+                        const res = await sendSinglePhotoToTelegram(currentToken, chatId, item.sub, item.blob);
+                        applyTelegramUploadResult(item.sub, res, currentToken);
+                        if (item.sub) item.sub._isUploadingTelegram = false;
+                        lastSendTime = Date.now();
+                    } catch (err) {
+                        const isRateLimit = err.isRateLimit || (err.message || '').includes('429');
+                        if (isRateLimit) {
+                            const waitSec = Math.min(err.retryAfter ? Number(err.retryAfter) : 2, 5);
+                            console.warn(`[Bot #${botIndex + 1}] Bị giới hạn tốc độ (429), tạm dừng ${waitSec}s... Các bot khác vẫn gửi bình thường.`);
+                            _tgPendingQueue.unshift(item);
+                            await new Promise(r => setTimeout(r, waitSec * 1000 + 150));
+                            lastSendTime = Date.now();
+                            continue;
+                        } else {
+                            item._retryCount = (item._retryCount || 0) + 1;
+                            if (item._retryCount <= 3) {
+                                console.warn(`[Bot #${botIndex + 1}] Lỗi gửi bài ${item.sub?.student_no} (${err.message}). Thử lại lần ${item._retryCount}...`);
+                                _tgPendingQueue.push(item);
+                            } else {
+                                console.error(`[Bot #${botIndex + 1}] Bỏ qua bài ${item.sub?.student_no} sau 3 lần thất bại:`, err.message);
+                                if (item.sub) item.sub._isUploadingTelegram = false;
+                            }
+                            await new Promise(r => setTimeout(r, 200));
+                        }
                     }
                 }
 
@@ -3739,8 +3806,14 @@ const TEMPLATE_SPECS = {
 
 function getCompatibleTemplatesForExam(exam) {
     const active = exam?.sheet_template || 'qmcv1239';
-    const allKnown = ['qmcv1239', 'bgd2025original', 'tnmaker40', 'phutho', 'bgd2', 'qm40', 'nk1846'];
+    const allKnown = ['qmcv1239', 'bgd2', 'bgd2025original', 'tnmaker40', 'phutho', 'qm40', 'nk1846'];
     const candidates = [active];
+    // Nếu đề chọn BGD 2025 Gốc, ưu tiên kiểm tra cả mẫu BGD 2 (phieu-chinh.pdf) ngay kế tiếp
+    if (active === 'bgd2025original' && window.MAU && window.MAU.bgd2) {
+        candidates.push('bgd2');
+    } else if (active === 'bgd2' && window.MAU && window.MAU.bgd2025original) {
+        candidates.push('bgd2025original');
+    }
     for (const key of allKnown) {
         if (!candidates.includes(key) && window.MAU && window.MAU[key]) {
             candidates.push(key);
@@ -3759,111 +3832,104 @@ function recognizeSheetFromGray(gray, options = {}) {
     let bestScore = -1e9;
     let lastErr = null;
 
-    // Duyệt qua tất cả các mẫu phiếu tương thích và so sánh độ khớp (confidence score)
-    for (const tplKey of candidateKeys) {
-        const tpl = (window.MAU && window.MAU[tplKey]) || null;
-        if (!tpl) continue;
+    // Duyệt qua các mẫu phiếu tương thích (Pass 1: hướng chuẩn; Pass 2: tự động xoay 90 độ nếu phiếu ngang chụp dọc hoặc ngược lại)
+    for (const allowRotate90 of [false, true]) {
+        if (allowRotate90 && bestResult && bestScore >= 140) break;
 
-        try {
-            let result = null;
-            if (options.preFound && options.preFound.origCorners && options.preFound.origCorners.length === 4) {
-                // Tái tính toán Homography H chính xác theo toạ độ mốc góc (tpl.moc) của RIÊNG mẫu phiếu này!
-                const origCorners = options.preFound.origCorners;
-                const H = window.OMR.phepChieu(tpl.moc.slice(0, 4).map(m => [m.x, m.y]), origCorners);
-                if (H) {
-                    let finalH = H;
-                    let finalDen = 40;
-                    let finalSoMoc = 4;
-                    const refined = window.OMR.tinhChinh ? window.OMR.tinhChinh(gray, H, tpl) : null;
-                    if (refined && refined.H && refined.soMoc >= 4) {
-                        finalH = refined.H;
-                        finalDen = refined.den || 40;
-                        finalSoMoc = refined.soMoc;
-                    }
-                    result = window.OMR.docPhieu(gray, finalH, tpl, finalDen);
-                    if (result) {
-                        result.H = finalH;
-                        result.soMoc = finalSoMoc;
-                        result.den = finalDen;
-                    }
-                }
-            }
-            if (!result && ['qm40', 'bgd2025original', 'phutho', 'tnmaker40', 'qmcv1239'].includes(tplKey) && window.readQMSheet) {
-                result = window.readQMSheet(gray, tpl, guideHints);
-            } else if (!result && window.OMR && window.OMR.docAnh) {
-                result = window.OMR.docAnh(gray, tpl, window.OMR.thuNho(gray, 900));
-            }
+        for (const tplKey of candidateKeys) {
+            const tpl = (window.MAU && window.MAU[tplKey]) || null;
+            if (!tpl) continue;
 
-            if (result && (result.soMoc >= 4 || result.H)) {
-                // Tính toán sai số tỉ lệ khung hình (Aspect Ratio Error) từ 4 góc phiếu
-                let ratioErr = 1.0;
-                if (result.H && tpl.moc && tpl.moc.length >= 4) {
-                    const c = tpl.moc.slice(0, 4).map(pt => window.OMR.ap(result.H, pt.x, pt.y));
-                    const w1 = Math.hypot(c[1][0] - c[0][0], c[1][1] - c[0][1]);
-                    const w2 = Math.hypot(c[2][0] - c[3][0], c[2][1] - c[3][1]);
-                    const h1 = Math.hypot(c[3][0] - c[0][0], c[3][1] - c[0][1]);
-                    const h2 = Math.hypot(c[2][0] - c[1][0], c[2][1] - c[1][1]);
-                    const avgW = (w1 + w2) / 2;
-                    const avgH = (h1 + h2) / 2;
-                    const detR = avgH / Math.max(1, avgW);
-                    const m = tpl.moc;
-                    const tplW = Math.hypot(m[1].x - m[0].x, m[1].y - m[0].y);
-                    const tplH = Math.hypot(m[3].x - m[0].x, m[3].y - m[0].y);
-                    const expR = tplH / tplW;
-                    ratioErr = Math.abs(detR - expR) / expR;
-                }
-
+            try {
+                let result = null;
                 const totalMoc = (tpl.moc && tpl.moc.length) ? tpl.moc.length : 12;
-                const soMoc = result.soMoc || 0;
-                const mocRatio = soMoc / totalMoc;
-                const sbdDigits = (result.sbd || '').replace(/\D/g, '').length;
-                const codeDigits = (result.made || '').replace(/\D/g, '').length;
-                const ansCount = (result.p1 || '').replace(/[\*\?]/g, '').length;
+                const minMocReq = Math.max(7, Math.ceil(totalMoc * 0.58));
 
-                // Tính điểm độ khớp chính xác
-                let score = 55 + Math.min(soMoc, 12) * 8;
-                if (mocRatio >= 0.60) score += 40;
-                if (codeDigits >= 2) score += 30;
-                if (sbdDigits >= 2) score += 25;
-                if (ansCount >= 2) score += 25;
-                if (tplKey === activeTpl) score += 20;
-
-                // TRỪNG PHẠT NẶNG NẾU LỆCH TỈ LỆ KHUNG HÌNH (khắc phục hoàn toàn nhận nhầm khổ đứng/ngang)
-                if (ratioErr > 0.14) {
-                    score -= 220;
-                } else if (ratioErr <= 0.06) {
-                    score += 60; // Thưởng điểm cho mẫu có tỉ lệ khung hình khớp tuyệt đối
+                if (!allowRotate90 && options.preFound && options.preFound.origCorners && options.preFound.origCorners.length === 4 && (!options.preFound.tplKey || options.preFound.tplKey === tplKey)) {
+                    // Tái tính toán Homography H chính xác theo toạ độ mốc góc (tpl.moc) của RIÊNG mẫu phiếu này!
+                    const origCorners = options.preFound.origCorners;
+                    const H = window.OMR.phepChieu(tpl.moc.slice(0, 4).map(m => [m.x, m.y]), origCorners);
+                    if (H) {
+                        const refined = window.OMR.tinhChinh ? window.OMR.tinhChinh(gray, H, tpl) : null;
+                        if (refined && refined.H && refined.soMoc >= minMocReq && (refined.soGoc || 0) >= 4) {
+                            result = window.OMR.docPhieu(gray, refined.H, tpl, refined.den || 40);
+                            if (result) {
+                                result.H = refined.H;
+                                result.soMoc = refined.soMoc;
+                                result.soGoc = refined.soGoc || 4;
+                                result.den = refined.den || 40;
+                            }
+                        }
+                    }
+                }
+                if (!result && ['qm40', 'bgd2025original', 'bgd2', 'phutho', 'tnmaker40', 'qmcv1239', 'nk1846'].includes(tplKey) && window.readQMSheet) {
+                    result = window.readQMSheet(gray, tpl, guideHints, allowRotate90);
+                }
+                if (!result && !allowRotate90 && window.OMR && window.OMR.docAnh && tpl.moc && tpl.moc[4] && tpl.moc[4].ten === 'ML') {
+                    result = window.OMR.docAnh(gray, tpl, window.OMR.thuNho(gray, 900));
                 }
 
-                if (score > bestScore) {
-                    bestScore = score;
-                    bestResult = result;
-                    matchedTplKey = tplKey;
-                }
+                if (result && (result.soMoc >= minMocReq || result.H)) {
+                    // Tính toán sai số tỉ lệ khung hình (Aspect Ratio Error) từ 4 góc phiếu
+                    let ratioErr = 1.0;
+                    if (result.H && tpl.moc && tpl.moc.length >= 4) {
+                        const c = tpl.moc.slice(0, 4).map(pt => window.OMR.ap(result.H, pt.x, pt.y));
+                        const w1 = Math.hypot(c[1][0] - c[0][0], c[1][1] - c[0][1]);
+                        const w2 = Math.hypot(c[2][0] - c[3][0], c[2][1] - c[3][1]);
+                        const h1 = Math.hypot(c[3][0] - c[0][0], c[3][1] - c[0][1]);
+                        const h2 = Math.hypot(c[2][0] - c[1][0], c[2][1] - c[1][1]);
+                        const avgW = (w1 + w2) / 2;
+                        const avgH = (h1 + h2) / 2;
+                        const detR = avgH / Math.max(1, avgW);
+                        const m = tpl.moc;
+                        const tplW = Math.hypot(m[1].x - m[0].x, m[1].y - m[0].y);
+                        const tplH = Math.hypot(m[3].x - m[0].x, m[3].y - m[0].y);
+                        const expR = tplH / tplW;
+                        ratioErr = Math.abs(detR - expR) / expR;
+                    }
 
-                // DỪNG SỚM CHỈ KHI:
-                // 1. Tỉ lệ khung hình khớp chuẩn (ratioErr <= 0.08)
-                // 2. Mẫu active có nhiều mốc nội bộ (>= 14 mốc với qmcv1239, hoặc >= 7 với tpl ít mốc)
-                // 3. mocRatio >= 0.50
-                // 4. Đọc được mã đề hoặc SBD
-                const isHighConfidenceActive = (tplKey === activeTpl) &&
-                    (ratioErr <= 0.08) &&
-                    ((soMoc >= 14) || (totalMoc <= 12 && soMoc >= 7)) &&
-                    mocRatio >= 0.50 &&
-                    (codeDigits >= 2 || sbdDigits >= 2) &&
-                    score >= 180;
+                    const soMoc = result.soMoc || 0;
+                    const mocRatio = soMoc / totalMoc;
+                    const sbdDigits = (result.sbd || '').replace(/\D/g, '').length;
+                    const codeDigits = (result.made || '').replace(/\D/g, '').length;
+                    const ansCount = (result.p1 || '').replace(/[\*\?]/g, '').length;
+                    const isActiveFamily = (tplKey === activeTpl) ||
+                        (activeTpl === 'bgd2025original' && tplKey === 'bgd2') ||
+                        (activeTpl === 'bgd2' && tplKey === 'bgd2025original');
 
-                if (isHighConfidenceActive) {
-                    break;
-                }
+                    // Điểm độ khớp dựa trên tỉ lệ phần trăm mốc định vị khớp chuẩn (mocRatio) + tỉ lệ khung hình
+                    let score = mocRatio * 140 + Math.min(soMoc, 20) * 2.5 + ((result.soGoc || 4) === 4 ? 30 : 0);
+                    if (mocRatio >= 0.85) score += 35;
+                    if (codeDigits >= 3) score += 20;
+                    else if (codeDigits >= 2) score += 10;
+                    if (sbdDigits >= 2) score += 15;
+                    if (ansCount >= 2) score += 20;
+                    if (result.doDam) score += Math.min(25, result.doDam * 30);
+                    if (isActiveFamily) score += 8;
 
-                // Nếu bất kỳ mẫu nào đạt điểm tuyệt đối xuất sắc (ratio chuẩn + soMoc cao + đọc đầy đủ)
-                if (bestScore >= 240 && ratioErr <= 0.08 && soMoc >= 8 && (codeDigits >= 2 || sbdDigits >= 2 || ansCount >= 4)) {
-                    break;
+                    // TRỪNG PHẠT NẶNG NẾU LỆCH TỈ LỆ KHUNG HÌNH (khắc phục hoàn toàn nhận nhầm khổ đứng/ngang)
+                    if (ratioErr > 0.14) {
+                        score -= 260;
+                    } else if (ratioErr <= 0.05) {
+                        score += 55; // Thưởng điểm cho mẫu có tỉ lệ khung hình khớp tuyệt đối
+                    } else if (ratioErr <= 0.09) {
+                        score += 25;
+                    }
+
+                    if (score > bestScore) {
+                        bestScore = score;
+                        bestResult = result;
+                        matchedTplKey = tplKey;
+                    }
+
+                    // Dừng sớm CHỈ KHI đạt độ khớp mốc gần như tuyệt đối (>= 88% số mốc của mẫu và sai số tỉ lệ <= 4%)
+                    if (mocRatio >= 0.88 && ratioErr <= 0.04 && soMoc >= 10) {
+                        break;
+                    }
                 }
+            } catch(err) {
+                lastErr = err;
             }
-        } catch(err) {
-            lastErr = err;
         }
     }
 
@@ -5283,29 +5349,14 @@ async function generateStampedGradedSheet(sub, rawResult) {
         }
     }
 
-    // Tạo sẵn Telegram Blob HD siêu sắc nét chuẩn 1440px (native Telegram CDN), tải siêu tốc ~130KB - 160KB
+    // Mã hóa 1 lần duy nhất giữ nguyên độ phân giải gốc 1552px siêu nét (100% sharpness),
+    // đồng thời tạo đồng bộ Binary Blob (0ms trễ, không tạo canvas thứ 2) để bắn lên Telegram tức thì!
+    const outUrl = canvas.toDataURL('image/jpeg', 0.84);
     if (sub) {
         try {
-            const tgW = 1440;
-            const tgH = Math.round(canvas.height * (tgW / canvas.width));
-            const tgCanvas = document.createElement('canvas');
-            tgCanvas.width = tgW;
-            tgCanvas.height = tgH;
-            const tgCtx = tgCanvas.getContext('2d');
-            tgCtx.imageSmoothingEnabled = true;
-            tgCtx.imageSmoothingQuality = 'high';
-            tgCtx.drawImage(canvas, 0, 0, tgW, tgH);
-            tgCanvas.toBlob((blob) => {
-                tgCanvas.width = 1;
-                tgCanvas.height = 1;
-                if (blob && sub) {
-                    sub._telegramBlob = blob;
-                }
-            }, 'image/jpeg', 0.85);
+            sub._telegramBlob = dataUrlToBlob(outUrl);
         } catch (_) {}
     }
-
-    const outUrl = canvas.toDataURL('image/jpeg', 0.88);
     canvas.width = 1;
     canvas.height = 1;
     return outUrl;
@@ -5627,16 +5678,16 @@ async function saveSubmissionToStore(sub) {
     saveSubmissionsToLocalSafe(sub.examId, state.submissions);
     updateOverviewStats();
 
-    // Save to Firestore omr_submissions (lightweight metadata) & LMS results (with compressed stampedImage)
+    // Save to Cloud omr_submissions & LMS results (CHỈ LƯU METADATA + TELEGRAM FILE ID, TUYỆT ĐỐI KHÔNG LƯU ẢNH BASE64 VÀO DATABASE)
     if (state.teacherUid) {
         try {
-            const { image_data, stamped_image, clean_image, raw_warped_image, ...cloudMeta } = sub;
+            const { image_data, stamped_image, clean_image, raw_warped_image, name_image, _telegramBlob, ...cloudMeta } = sub;
             await setDoc(doc(db, "omr_submissions", sub.id), cloudMeta);
         } catch(e) {
             console.warn("Lưu Firestore omr_submissions thất bại, đã lưu localStorage:", e);
         }
 
-        // Tự động đồng bộ sang bảng "results" của Lớp học LMS để giáo viên & PHHS xem trực tuyến
+        // Tự động đồng bộ sang bảng "results" của Lớp học LMS để giáo viên & PHHS xem trực tuyến (ảnh lấy trực tiếp qua Telegram CDN)
         try {
             await syncSubmissionToLmsResultsCollection(sub);
         } catch(syncErr) {
@@ -5725,8 +5776,7 @@ async function syncSubmissionToLmsResultsCollection(sub) {
     const studentName = sub.student_name || (sub.student_no ? `Học sinh SBD ${sub.student_no}` : 'Thí sinh OMR');
     const totalQ = (state.exam.question_count || 12) + (state.exam.part2_count || 4) + (state.exam.part3_count || 6);
 
-    const compressedStamped = await compressStampedImageForCloud(sub.stamped_image || sub.image_data || '');
-
+    // TUYỆT ĐỐI KHÔNG lưu base64 ảnh bài chấm vào Supabase DB (tiết kiệm 100% dung lượng DB, toàn bộ ảnh lưu trên Telegram + IndexedDB máy chấm)
     const resultPayload = {
         id: resultDocId,
         submissionId: sub.id,
@@ -5749,8 +5799,8 @@ async function syncSubmissionToLmsResultsCollection(sub) {
         omrPart1: sub.answers || '',
         omrPart2: sub.part2 || [],
         omrPart3: sub.part3 || [],
-        stampedImage: (sub.telegram_file_id ? '' : (compressedStamped || '')),
-        nameImage: sub.name_image || '',
+        stampedImage: '',
+        nameImage: '',
         telegramPhotoUrl: sub.telegram_photo_url || '',
         telegramFileId: sub.telegram_file_id || '',
         teacherFeedback: sub.telegram_file_id || '',
@@ -5807,7 +5857,7 @@ async function syncBatchSubmissionsToCloud(submissions) {
             const sub = queue.shift();
             if (!sub) continue;
             try {
-                const { image_data, stamped_image, clean_image, raw_warped_image, ...cloudMeta } = sub;
+                const { image_data, stamped_image, clean_image, raw_warped_image, name_image, _telegramBlob, ...cloudMeta } = sub;
                 await setDoc(doc(db, "omr_submissions", sub.id), cloudMeta);
                 await syncSubmissionToLmsResultsCollection(sub);
             } catch (err) {
@@ -6113,7 +6163,7 @@ function startAutoScanLoop() {
     stopAutoScanLoop();
     if (!state.autoScanEnabled) return;
 
-    const intervalMs = state.autoScanSpeed === 'fast' ? 320 : (state.autoScanSpeed === 'slow' ? 750 : 460);
+    const intervalMs = state.autoScanSpeed === 'turbo' ? 140 : (state.autoScanSpeed === 'fast' ? 240 : (state.autoScanSpeed === 'slow' ? 750 : 400));
 
     autoScanInterval = setInterval(async () => {
         const video = document.getElementById('cameraVideo');
@@ -6142,18 +6192,28 @@ function startAutoScanLoop() {
             const tplKey = state.exam?.sheet_template || 'qmcv1239';
             const tpl = (window.MAU && window.MAU[tplKey]) ? window.MAU[tplKey] : window.MAU.qmcv1239;
 
-            // Tìm 4 mốc đen góc phiếu ưu tiên sát 4 ô vuông định vị
+            // Tìm 4 mốc đen góc phiếu trên đa mẫu phiếu (chấm đa phiếu trực tiếp qua Camera)
             let found = null;
             let matchedTpl = tpl;
-            if (window.findQMCorners) {
-                found = window.findQMCorners(gray, tpl, info.guideHints);
-                // Nếu chưa tìm thấy theo mẫu đang chọn, tự động thử các mẫu phiếu phổ biến khác (qmcv1239, TNMaker, BGD...)
-                if (!found && window.MAU) {
-                    const fallbackKeys = ['qmcv1239', 'bgd2025original', 'tnmaker40', 'phutho'].filter(k => k !== tplKey);
-                    for (const fbKey of fallbackKeys) {
-                        if (window.MAU[fbKey]) {
-                            found = window.findQMCorners(gray, window.MAU[fbKey], info.guideHints);
-                            if (found) { matchedTpl = window.MAU[fbKey]; break; }
+            let matchedKey = tplKey;
+            if (window.findQMCorners && window.MAU) {
+                const candidateKeys = getCompatibleTemplatesForExam(state.exam);
+                let bestMocRatio = -1;
+                for (const candKey of candidateKeys) {
+                    const candTpl = window.MAU[candKey];
+                    if (!candTpl) continue;
+                    const candFound = window.findQMCorners(gray, candTpl, info.guideHints);
+                    if (candFound && candFound.refined) {
+                        const totalM = (candTpl.moc && candTpl.moc.length) ? candTpl.moc.length : 12;
+                        const mRatio = (candFound.refined.soMoc || 0) / totalM;
+                        if (mRatio > bestMocRatio) {
+                            bestMocRatio = mRatio;
+                            found = candFound;
+                            found.tplKey = candKey;
+                            matchedTpl = candTpl;
+                            matchedKey = candKey;
+                            // Dừng sớm nếu khớp >= 85% số mốc của mẫu phiếu này
+                            if (mRatio >= 0.85) break;
                         }
                     }
                 }
@@ -6184,7 +6244,7 @@ function startAutoScanLoop() {
                         : (ratio >= 1.10 && ratio <= 1.75);
 
                     const soMoc = found.refined?.soMoc || 0;
-                    if (isBigEnough && isRatioValid && (soMoc >= 5 || (soMoc >= 4 && isBigEnough))) {
+                    if (isBigEnough && isRatioValid && (soMoc >= 6 || (soMoc >= 4 && isBigEnough))) {
                         isValidSheet = true;
                     }
                 }
@@ -6201,7 +6261,7 @@ function startAutoScanLoop() {
                         const d = Math.hypot(currCorners[i].x - prev[i].x, currCorners[i].y - prev[i].y);
                         if (d > maxDrift) maxDrift = d;
                     }
-                    if (maxDrift < 40) isStable = true;
+                    if (maxDrift < 45) isStable = true;
                 }
                 state._lastDetectedCorners = currCorners;
 
@@ -6217,13 +6277,18 @@ function startAutoScanLoop() {
                 });
 
                 const statusText = document.getElementById('cameraStatusText');
+                const totalM = (matchedTpl?.moc && matchedTpl.moc.length) ? matchedTpl.moc.length : 12;
+                const soMoc = found.refined?.soMoc || 4;
+                const mocRatio = soMoc / totalM;
                 if (statusText) {
-                    const soMoc = found.refined?.soMoc || 4;
-                    statusText.innerHTML = `<span class="text-emerald-400 font-extrabold">✓ Đã khớp mẫu phiếu (${soMoc} mốc chuẩn)! Đang giữ yên để chụp...</span>`;
+                    const tplLabel = TEMPLATE_SPECS[matchedKey]?.name || matchedKey;
+                    statusText.innerHTML = `<span class="text-emerald-400 font-extrabold">✓ Khớp ${tplLabel} (${soMoc}/${totalM} mốc)! Đang chụp...</span>`;
                 }
 
-                // Yêu cầu tối thiểu 2 khung hình ổn định liên tiếp (chế độ chậm: 3)
-                const reqFrames = state.autoScanSpeed === 'slow' ? 3 : 2;
+                // Chế độ Siêu tốc (turbo) hoặc khi độ khớp mốc >= 78% ở chế độ Nhanh: chụp tức thì ngay nhịp đầu (1 frame)!
+                const reqFrames = state.autoScanSpeed === 'turbo'
+                    ? 1
+                    : (state.autoScanSpeed === 'fast' ? (mocRatio >= 0.78 ? 1 : 2) : (state.autoScanSpeed === 'slow' ? 3 : 2));
                 if (state.consecutiveCornerDetections >= reqFrames) {
                     state.consecutiveCornerDetections = 0;
                     state._lastDetectedCorners = null;
@@ -6656,9 +6721,10 @@ function triggerCameraGradedCelebration(sub) {
     if (splash) {
         clearTimeout(splash._hideTimer);
         splash.classList.remove('hidden');
+        const splashDuration = Math.min(1400, Math.max(550, (state.autoScanCooldown || 3500) - 250));
         splash._hideTimer = setTimeout(() => {
             splash.classList.add('hidden');
-        }, 1500);
+        }, splashDuration);
     }
 }
 
@@ -7528,6 +7594,215 @@ window.confirmExecuteExportExcel = function() {
 // Bí danh để tương thích với tất cả các nút "Xuất Excel" hiện tại
 window.exportResultsToExcel = window.openExportExcelModal;
 window.executeDirectExportExcel = window.confirmExecuteExportExcel;
+
+// ========================================================
+// TẢI TOÀN BỘ ẢNH BÀI ĐÃ CHẤM VỀ MÁY (.ZIP) SIÊU TỐC
+// ========================================================
+window.downloadAllGradedImagesZip = async () => {
+    if (!state.submissions || state.submissions.length === 0) {
+        if (typeof Swal !== 'undefined') {
+            Swal.fire('Chưa có bài chấm', 'Hiện chưa có bài thi nào được chấm trong đề này để tải ảnh!', 'info');
+        }
+        return;
+    }
+
+    if (typeof window.JSZip === 'undefined') {
+        if (typeof Swal !== 'undefined') {
+            Swal.fire('Lỗi thư viện', 'Thư viện đóng gói ZIP chưa sẵn sàng. Vui lòng tải lại trang!', 'error');
+        }
+        return;
+    }
+
+    // Ưu tiên lấy danh sách theo bộ lọc hiện tại nếu người dùng đang lọc lớp
+    const filterMode = state.activeTab === 'results' ? 'table' : 'inline';
+    let targetSubs = typeof getFilteredSortedSubmissions === 'function'
+        ? getFilteredSortedSubmissions(filterMode)
+        : [...state.submissions];
+
+    if (!targetSubs || targetSubs.length === 0) {
+        targetSubs = [...state.submissions];
+    }
+
+    const total = targetSubs.length;
+    let completed = 0;
+    let successCount = 0;
+
+    if (typeof Swal !== 'undefined') {
+        Swal.fire({
+            title: 'Đang tải & đóng gói ảnh bài chấm...',
+            html: `
+                <div class="space-y-3 text-center py-1">
+                    <div id="zipDownloadProgressText" class="text-xs font-bold text-slate-600 dark:text-slate-300">
+                        Đang chuẩn bị: 0/${total} ảnh...
+                    </div>
+                    <div class="w-full bg-slate-200 dark:bg-slate-700 h-2.5 rounded-full overflow-hidden">
+                        <div id="zipDownloadProgressBar" class="bg-emerald-600 h-2.5 rounded-full transition-all duration-150" style="width: 0%"></div>
+                    </div>
+                    <p class="text-[11px] text-slate-400">Hệ thống đang gom ảnh sắc nét từ bộ nhớ máy và kho bài thi Telegram...</p>
+                </div>
+            `,
+            allowOutsideClick: false,
+            allowEscapeKey: false,
+            showConfirmButton: false,
+            didOpen: () => Swal.showLoading()
+        });
+    }
+
+    const sanitizeFilePart = (str, fallback = '') => {
+        if (!str) return fallback;
+        return String(str)
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/đ/g, 'd').replace(/Đ/g, 'D')
+            .replace(/[^a-zA-Z0-9_-]+/g, '_')
+            .replace(/^_+|_+$/g, '') || fallback;
+    };
+
+    const resolveSubmissionImageBlob = async (sub) => {
+        if (!sub) return null;
+        // 1. Ưu tiên lấy ngay Binary Blob trong RAM (0ms)
+        if (sub._telegramBlob instanceof Blob && sub._telegramBlob.size > 0) {
+            return sub._telegramBlob;
+        }
+        // 2. Lấy từ DataURL trong RAM
+        const memDataUrl = sub.stamped_image || sub.image_data || (state.memoryImages && state.memoryImages[sub.id]);
+        if (memDataUrl && typeof memDataUrl === 'string' && memDataUrl.startsWith('data:image')) {
+            return dataUrlToBlob(memDataUrl);
+        }
+        // 3. Lấy từ IndexedDB trên máy chấm
+        if (sub.id && typeof getOmrImageFromDb === 'function') {
+            try {
+                const dbImg = await getOmrImageFromDb(sub.id);
+                if (dbImg && typeof dbImg === 'string' && dbImg.startsWith('data:image')) {
+                    return dataUrlToBlob(dbImg);
+                }
+            } catch (_) {}
+        }
+        // 4. Tải trực tiếp từ Telegram CDN thông qua telegram_file_id / telegram_photo_url
+        try {
+            const directUrl = await resolveTelegramPhotoDirectUrl(sub, false);
+            if (directUrl) {
+                let resp = await fetch(directUrl).catch(() => null);
+                if (!resp || !resp.ok) {
+                    const refreshedUrl = await resolveTelegramPhotoDirectUrl(sub, true);
+                    if (refreshedUrl && refreshedUrl !== directUrl) {
+                        resp = await fetch(refreshedUrl).catch(() => null);
+                    }
+                }
+                if (resp && resp.ok) {
+                    const blob = await resp.blob();
+                    if (blob && blob.size > 0) return blob;
+                }
+            }
+        } catch (_) {}
+        // 5. Fallback: đóng dấu lại từ clean_image nếu còn lưu
+        try {
+            const restamped = await reStampSubmission(sub);
+            if (restamped && typeof restamped === 'string' && restamped.startsWith('data:image')) {
+                return dataUrlToBlob(restamped);
+            }
+        } catch (_) {}
+        return null;
+    };
+
+    try {
+        const zip = new window.JSZip();
+        const usedNames = new Set();
+        const queue = targetSubs.map((sub, idx) => ({ sub, idx }));
+        const concurrency = 6;
+
+        const worker = async () => {
+            while (queue.length > 0) {
+                const item = queue.shift();
+                if (!item) continue;
+                const { sub, idx } = item;
+                const blob = await resolveSubmissionImageBlob(sub);
+                if (blob) {
+                    const stt = String(idx + 1).padStart(3, '0');
+                    const clsPart = sub.class_name ? `${sanitizeFilePart(sub.class_name)}_` : '';
+                    const sbdPart = sanitizeFilePart(sub.student_no, 'NoSBD');
+                    const namePart = sanitizeFilePart(sub.student_name, 'ThiSinh');
+                    const codePart = sanitizeFilePart(sub.code, '000');
+                    const scoreStr = (typeof sub.score === 'number' ? sub.score.toFixed(2) : String(sub.score || '0')).replace('.', '_');
+
+                    let baseName = `${stt}_${clsPart}SBD_${sbdPart}_${namePart}_Ma${codePart}_${scoreStr}d`;
+                    let fileName = `${baseName}.jpg`;
+                    let dupCounter = 2;
+                    while (usedNames.has(fileName)) {
+                        fileName = `${baseName}_${dupCounter}.jpg`;
+                        dupCounter++;
+                    }
+                    usedNames.add(fileName);
+
+                    // Dùng STORE (không nén lại JPEG) để tốc độ đóng gói ZIP nhanh gấp 10 lần!
+                    zip.file(fileName, blob, { binary: true, compression: 'STORE' });
+                    successCount++;
+                }
+
+                completed++;
+                const pText = document.getElementById('zipDownloadProgressText');
+                const pBar = document.getElementById('zipDownloadProgressBar');
+                if (pText) pText.textContent = `Đang gom ảnh: ${completed}/${total} bài (Đã lấy: ${successCount} ảnh)...`;
+                if (pBar) pBar.style.width = `${Math.round((completed / total) * 100)}%`;
+            }
+        };
+
+        const workers = [];
+        for (let i = 0; i < Math.min(concurrency, queue.length); i++) {
+            workers.push(worker());
+        }
+        await Promise.all(workers);
+
+        if (successCount === 0) {
+            if (typeof Swal !== 'undefined') {
+                Swal.fire({
+                    icon: 'warning',
+                    title: 'Không tìm thấy dữ liệu ảnh',
+                    text: 'Không tìm thấy ảnh bài chấm trong bộ nhớ thiết bị hoặc kho Telegram cho các bài thi này.',
+                    confirmButtonText: 'Đã hiểu'
+                });
+            }
+            return;
+        }
+
+        const pText = document.getElementById('zipDownloadProgressText');
+        if (pText) pText.textContent = `Đang xuất file ZIP (${successCount} ảnh)...`;
+
+        const zipBlob = await zip.generateAsync({
+            type: 'blob',
+            compression: 'STORE'
+        });
+
+        const examClean = sanitizeFilePart(state.exam?.name || 'Bai_Thi_OMR', 'Bai_Thi_OMR');
+        const dateStr = new Date().toISOString().slice(0, 10);
+        const zipFileName = `Anh_Bai_Cham_${examClean}_${successCount}bai_${dateStr}.zip`;
+
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(zipBlob);
+        link.download = zipFileName;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setTimeout(() => URL.revokeObjectURL(link.href), 3000);
+
+        if (typeof Swal !== 'undefined') {
+            Swal.fire({
+                icon: 'success',
+                title: 'Tải ảnh bài chấm thành công!',
+                html: `Đã đóng gói và tải xuống <b>${successCount}/${total}</b> ảnh bài chấm sắc nét trong file:<br><code class="text-xs font-mono text-emerald-600 dark:text-emerald-400 break-all">${zipFileName}</code>`,
+                timer: 2800,
+                showConfirmButton: true,
+                confirmButtonText: 'Tuyệt vời',
+                confirmButtonColor: '#059669'
+            });
+        }
+    } catch (err) {
+        console.error('Lỗi tải ZIP ảnh bài chấm:', err);
+        if (typeof Swal !== 'undefined') {
+            Swal.fire('Lỗi tải ảnh', 'Không thể đóng gói file ZIP: ' + (err.message || 'Lỗi không xác định'), 'error');
+        }
+    }
+};
 
 
 // ========================================================

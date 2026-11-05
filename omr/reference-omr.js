@@ -283,7 +283,13 @@ var OMR = (function () {
     if (cap.length < 4 || soGoc < 3) return null;
     var H2 = phepChieu(cap.map(function (c) { return c[0]; }), cap.map(function (c) { return c[1]; }));
     if (!H2) return null;
-    return { H: H2, soMoc: cap.length, den: den / nden };
+    for (var gIdx = 0; gIdx < 4; gIdx++) {
+      var gm = tpl.moc[gIdx], pOld = ap(H, gm.x, gm.y), pNew = ap(H2, gm.x, gm.y);
+      var ge = ap(H, gm.x + 1, gm.y), gf = ap(H, gm.x, gm.y + 1);
+      var gPxcm = (Math.hypot(ge[0] - pOld[0], ge[1] - pOld[1]) + Math.hypot(gf[0] - pOld[0], gf[1] - pOld[1])) / 2;
+      if (Math.hypot(pNew[0] - pOld[0], pNew[1] - pOld[1]) > 0.65 * gPxcm) return null;
+    }
+    return { H: H2, soMoc: cap.length, soGoc: soGoc, den: den / nden };
   }
 
   // ---------- độ nét: bề rộng mép các ô vuông đen (cm). Ảnh nét ~0,03-0,06; ảnh mờ thì lớn dần ----------
