@@ -2508,6 +2508,26 @@ export async function updateDoc(docRef, updates) {
         payload['updated_at'] = new Date().toISOString();
     }
 
+    if (table === 'results') {
+        const tgId = (updates.telegramFileId !== undefined) ? updates.telegramFileId :
+                     ((updates.teacherFeedback !== undefined) ? updates.teacherFeedback :
+                     ((updates.telegram_file_id !== undefined) ? updates.telegram_file_id : null));
+        if (tgId !== null) {
+            payload.teacher_feedback = String(tgId || '');
+            const tgUrl = (updates.telegramPhotoUrl !== undefined) ? updates.telegramPhotoUrl : (updates.telegram_photo_url || '');
+            try {
+                const { data: curRow } = await supabase.from('results').select('brief_notes').eq(pkCol, docRef.id).maybeSingle();
+                let meta = {};
+                if (curRow && curRow.brief_notes && curRow.brief_notes.startsWith('{')) {
+                    try { meta = JSON.parse(curRow.brief_notes); } catch(_) {}
+                }
+                meta.tg = String(tgId || '');
+                if (tgUrl !== undefined) meta.url = String(tgUrl || '');
+                payload.brief_notes = JSON.stringify(meta);
+            } catch(_) {}
+        }
+    }
+
     try {
         if (table === 'custom_topics') {
             const confId = docRef.id.startsWith('topic_') ? docRef.id : ('topic_' + docRef.id);
