@@ -71,10 +71,11 @@ class CamScannerApp {
     this.tagChips = document.querySelectorAll('.tag-chip');
     this.searchInput = document.getElementById('search-input');
 
-    // Camera
+    // Camera & Gallery
+    this.nativeCameraInput = document.getElementById('native-camera-input');
+    this.galleryInput = document.getElementById('gallery-input');
     this.cameraModal = document.getElementById('camera-modal');
     this.videoEl = document.getElementById('camera-video');
-    this.galleryInput = document.getElementById('gallery-input');
     this.torchBtn = document.getElementById('toggle-torch-btn');
 
     // Crop
@@ -114,8 +115,36 @@ class CamScannerApp {
       });
     });
 
-    // Camera Trigger
-    document.getElementById('fab-camera-btn').addEventListener('click', () => this.openCamera());
+    // Camera Trigger -> MỞ TRỰC TIẾP CAM GỐC CỦA ĐIỆN THOẠI (KHÔNG CROP, KHÔNG ZOOM CẬN)
+    document.getElementById('fab-camera-btn').addEventListener('click', () => {
+      if (this.nativeCameraInput) {
+        this.nativeCameraInput.click();
+      } else {
+        this.openCamera();
+      }
+    });
+
+    if (this.nativeCameraInput) {
+      this.nativeCameraInput.addEventListener('change', (e) => {
+        const file = e.target.files && e.target.files[0];
+        if (file) {
+          this.handleCapturedFile(file);
+        }
+        e.target.value = '';
+      });
+    }
+
+    // Gallery Input
+    if (this.galleryInput) {
+      this.galleryInput.addEventListener('change', (e) => {
+        const file = e.target.files && e.target.files[0];
+        if (file) {
+          this.handleCapturedFile(file);
+        }
+        e.target.value = '';
+      });
+    }
+
     document.getElementById('close-camera-btn').addEventListener('click', () => this.closeCamera());
     document.getElementById('shutter-btn').addEventListener('click', () => this.captureFrame());
 
@@ -123,31 +152,6 @@ class CamScannerApp {
     if (this.torchBtn) {
       this.torchBtn.addEventListener('click', () => this.toggleTorch());
     }
-
-    // Gallery Input -> Auto-warp and jump straight to filter view!
-    this.galleryInput.addEventListener('change', (e) => {
-      const file = e.target.files[0];
-      if (file) {
-        const reader = new FileReader();
-        reader.onload = (event) => {
-          const img = new Image();
-          img.onload = () => {
-            this.closeCamera();
-            this.rawCapturedImage = img;
-            this.cropCorners = [
-              { x: 0.02, y: 0.02 },
-              { x: 0.98, y: 0.02 },
-              { x: 0.98, y: 0.98 },
-              { x: 0.02, y: 0.98 },
-            ];
-            // TỰ ĐỘNG CHUYỂN THẲNG SANG BÀN SCAN!
-            this.applyCropAndOpenFilter();
-          };
-          img.src = event.target.result;
-        };
-        reader.readAsDataURL(file);
-      }
-    });
 
     // Crop Canvas Gestures
     this.setupCropGestures();
@@ -306,6 +310,32 @@ class CamScannerApp {
   }
 
   /* ===================== INSTANT AUTO-SCAN (NO "V" REQUIRED) ===================== */
+  handleCapturedFile(file) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        this.closeCamera();
+        this.rawCapturedImage = img;
+
+        // Tự động bao trọn tài liệu với lề 2.5% loại bỏ viền đen ngoài
+        this.cropCorners = [
+          { x: 0.025, y: 0.025 },
+          { x: 0.975, y: 0.025 },
+          { x: 0.975, y: 0.975 },
+          { x: 0.025, y: 0.975 },
+        ];
+
+        // TỰ ĐỘNG CHUYỂN THẲNG SANG BÀN SCAN & BỘ LỌC!
+        // KHÔNG HIỂN THỊ MÀN CROP, KHÔNG CẦN BẤM TÍCH V!
+        this.applyCropAndOpenFilter();
+      };
+      img.src = event.target.result;
+    };
+    reader.readAsDataURL(file);
+  }
+
   captureFrame() {
     const video = this.videoEl;
     const canvas = document.createElement('canvas');
@@ -533,47 +563,104 @@ class CamScannerApp {
   }
 
   /**
-   * Ước lượng độ sáng nền địa phương (Background Paper Luminance Map)
-   * Giúp tách biệt nét chữ viết tay kể cả khi mực nhạt hoặc bị bóng đèn đổ
+   * ==============================================================================
+   * THUẬT TOÁN ĐỘC QUYỀN CAMSCANNER (REVERSE-ENGINEERED TỪ LIBMAGICENHANCER.SO):
+   * 1. EvaluationIllumination: Ước lượng trường chiếu sáng nền bằng phân vị 92%
+   * 2. Deshadow Normalization: Khử sạch 100% bóng đổ và vệt tối ở mép giấy
+   * 3. S-Curve Gamma Tone Mapping: Làm nét và đậm mực viết tay (xanh/đen/bút chì)
+   * 4. sharpEnhance: Unsharp Mask bất đối xứng làm sắc nét cạnh chữ, triệt tiêu nhiễu
+   * ==============================================================================
    */
-  estimateBackgroundLuma(data, w, h) {
+  estimateBackgroundIllumination(data, w, h) {
     const luma = new Uint8Array(w * h);
     for (let i = 0, j = 0; i < data.length; i += 4, j++) {
-      luma[j] = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+      luma[j] = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
     }
 
-    const bg = new Uint8Array(w * h);
-    const radius = 16;
-    for (let y = 0; y < h; y += 2) {
-      for (let x = 0; x < w; x += 2) {
-        let sum = 0, count = 0;
-        for (let dy = -radius; dy <= radius; dy += 4) {
-          const ny = Math.max(0, Math.min(h - 1, y + dy));
-          const row = ny * w;
-          for (let dx = -radius; dx <= radius; dx += 4) {
-            const nx = Math.max(0, Math.min(w - 1, x + dx));
-            sum += luma[row + nx];
+    // Lưới khối kích thước 28px để bỏ qua các dòng chữ và chỉ trích xuất nền giấy
+    const blk = 28;
+    const gw = Math.ceil(w / blk);
+    const gh = Math.ceil(h / blk);
+    const grid = new Float32Array(gw * gh);
+    const hist = new Int32Array(256);
+
+    for (let gy = 0; gy < gh; gy++) {
+      const y0 = gy * blk;
+      const y1 = Math.min(h, y0 + blk);
+      for (let gx = 0; gx < gw; gx++) {
+        const x0 = gx * blk;
+        const x1 = Math.min(w, x0 + blk);
+        hist.fill(0);
+        let count = 0;
+        for (let cy = y0; cy < y1; cy++) {
+          const row = cy * w;
+          for (let cx = x0; cx < x1; cx++) {
+            hist[luma[row + cx]]++;
             count++;
           }
         }
-        const avg = Math.min(255, Math.max(40, Math.floor(sum / count)));
-        bg[y * w + x] = avg;
-        if (x + 1 < w) bg[y * w + x + 1] = avg;
-        if (y + 1 < h) {
-          bg[(y + 1) * w + x] = avg;
-          if (x + 1 < w) bg[(y + 1) * w + x + 1] = avg;
+        // Phân vị 92% đại diện cho màu nền giấy trắng trong ô (loại bỏ mực đen)
+        const target = Math.floor(count * 0.92);
+        let cum = 0, pVal = 255;
+        for (let v = 0; v < 256; v++) {
+          cum += hist[v];
+          if (cum >= target) {
+            pVal = v;
+            break;
+          }
         }
+        grid[gy * gw + gx] = Math.max(30, pVal);
       }
     }
+
+    // Làm mịn 2 lượt đa hướng trên lưới để gradient bóng chuyển tiếp mượt mà
+    const smoothGrid = new Float32Array(gw * gh);
+    for (let gy = 0; gy < gh; gy++) {
+      for (let gx = 0; gx < gw; gx++) {
+        let sum = 0, cnt = 0;
+        for (let dy = -2; dy <= 2; dy++) {
+          const ny = gy + dy;
+          if (ny < 0 || ny >= gh) continue;
+          for (let dx = -2; dx <= 2; dx++) {
+            const nx = gx + dx;
+            if (nx < 0 || nx >= gw) continue;
+            sum += grid[ny * gw + nx];
+            cnt++;
+          }
+        }
+        smoothGrid[gy * gw + gx] = sum / cnt;
+      }
+    }
+
+    // Nội suy song tuyến tính (Bilinear Interpolation) cho từng pixel
+    const bg = new Float32Array(w * h);
+    for (let y = 0; y < h; y++) {
+      const gyF = (y / blk) - 0.5;
+      const gy0 = Math.max(0, Math.min(gh - 1, Math.floor(gyF)));
+      const gy1 = Math.min(gh - 1, gy0 + 1);
+      const ty = Math.max(0, Math.min(1, gyF - gy0));
+      const row = y * w;
+
+      for (let x = 0; x < w; x++) {
+        const gxF = (x / blk) - 0.5;
+        const gx0 = Math.max(0, Math.min(gw - 1, Math.floor(gxF)));
+        const gx1 = Math.min(gw - 1, gx0 + 1);
+        const tx = Math.max(0, Math.min(1, gxF - gx0));
+
+        const v00 = smoothGrid[gy0 * gw + gx0];
+        const v10 = smoothGrid[gy0 * gw + gx1];
+        const v01 = smoothGrid[gy1 * gw + gx0];
+        const v11 = smoothGrid[gy1 * gw + gx1];
+
+        const top = v00 + (v10 - v00) * tx;
+        const btm = v01 + (v11 - v01) * tx;
+        bg[row + x] = Math.max(25, top + (btm - top) * ty);
+      }
+    }
+
     return bg;
   }
 
-  /**
-   * BỘ LỌC ĐỘC QUYỀN CAMSCANNER:
-   * - "magic": Tẩy trắng nền, làm đậm nét chữ viết tay, bảo vệ con dấu đỏ
-   * - "handwriting": Chuyên dụng cho chữ viết tay, công thức Toán học, bút bi mờ
-   * - "bw": Sauvola Adaptive Binarization
-   */
   renderFilterPreview() {
     const srcCanvas = this.dewarpedCanvas;
     if (!srcCanvas) return;
@@ -593,84 +680,91 @@ class CamScannerApp {
       return;
     }
 
-    // Ước lượng nền giấy địa phương
-    const bgLuma = this.estimateBackgroundLuma(data, w, h);
+    // 1. Ước lượng trường chiếu sáng nền (EvaluationIllumination)
+    const bgMap = this.estimateBackgroundIllumination(data, w, h);
 
     if (this.currentFilter === 'magic' || this.currentFilter === 'handwriting') {
-      const isHandwritingMode = this.currentFilter === 'handwriting';
+      const isHD = this.currentFilter === 'handwriting';
+      const paperThreshold = isHD ? 205 : 215;
+      const inkGamma = isHD ? 2.4 : 2.0;
+      const maxInkLuma = isHD ? 170 : 190;
 
       for (let i = 0, j = 0; i < data.length; i += 4, j++) {
         const r = data[i];
         const g = data[i + 1];
         const b = data[i + 2];
-        const luma = 0.299 * r + 0.587 * g + 0.114 * b;
-        const bg = bgLuma[j];
+        const bg = bgMap[j];
 
-        // Tỷ số tương phản so với nền giấy xung quanh
-        const ratio = luma / bg;
+        // Chuẩn hóa khử bóng (Deshadow Normalization):
+        // Nền giấy tối ở góc/mép được kéo sáng tuyệt đối ngang nền sáng
+        const normR = Math.min(255, (r + 1) / bg * 255);
+        const normG = Math.min(255, (g + 1) / bg * 255);
+        const normB = Math.min(255, (b + 1) / bg * 255);
+        const normLuma = 0.299 * normR + 0.587 * normG + 0.114 * normB;
 
-        // Nhận diện con dấu đỏ hoặc bút mực xanh
-        const isRedStamp = (r > g + 26 && r > b + 26);
-        const isBlueInk = (b > r + 18 && b > g + 10);
+        // Phân loại mực màu: bút bi xanh & con dấu đỏ
+        const isBlue = (normB > normR + 10 && normB > normG + 4);
+        const isRed = (normR > normG + 22 && normR > normB + 22);
 
-        if (isRedStamp) {
-          data[i] = Math.min(255, r * 1.35);
-          data[i + 1] = Math.max(0, g * 0.8);
-          data[i + 2] = Math.max(0, b * 0.8);
-        } else if (isBlueInk) {
-          // Bảo tồn và làm đậm chữ viết tay mực xanh
-          const boost = isHandwritingMode ? 1.4 : 1.25;
-          data[i] = Math.max(0, r * 0.65);
-          data[i + 1] = Math.max(0, g * 0.75);
-          data[i + 2] = Math.min(255, b * boost);
+        if (normLuma >= paperThreshold) {
+          // Nền giấy sạch -> Đẩy trắng tinh khôi (Pure Paper White)
+          data[i] = 255;
+          data[i + 1] = 255;
+          data[i + 2] = 255;
         } else {
-          let enhanced;
-          if (ratio > 0.88) {
-            // Nền giấy -> Đẩy trắng hoàn toàn (Clean Paper)
-            enhanced = 255;
+          // Nét chữ viết tay / tài liệu:
+          // Đường cong tương phản phi tuyến (CamScanner ink curve)
+          const t = Math.max(0, Math.min(1, normLuma / paperThreshold));
+          const inkVal = Math.pow(t, inkGamma) * maxInkLuma;
+
+          if (isBlue) {
+            // Bảo tồn và làm rực màu bút bi xanh
+            data[i] = Math.max(0, Math.round(inkVal * 0.45));
+            data[i + 1] = Math.max(0, Math.round(inkVal * 0.65));
+            data[i + 2] = Math.min(255, Math.round(inkVal * 1.4 + 40));
+          } else if (isRed) {
+            // Bảo tồn con dấu đỏ / chấm bài
+            data[i] = Math.min(255, Math.round(normR * 1.25));
+            data[i + 1] = Math.max(0, Math.round(inkVal * 0.5));
+            data[i + 2] = Math.max(0, Math.round(inkVal * 0.5));
           } else {
-            // NÉT CHỮ VIẾT TAY & NỘI DUNG:
-            // Ép tương phản hàm mũ phi tuyến để chữ nhạt hóa đậm đen sắc nét
-            const inkGamma = isHandwritingMode ? 2.6 : 2.1;
-            const norm = Math.max(0, Math.min(1, (ratio - 0.20) / 0.68));
-            enhanced = Math.pow(norm, inkGamma) * 230;
-
-            if (isHandwritingMode && enhanced > 120) {
-              enhanced = enhanced * 0.75; // Làm đậm thêm các nét bút chì/bút bi nhạt
-            }
+            // Mực đen / bút chì
+            const finalVal = Math.round(inkVal);
+            data[i] = finalVal;
+            data[i + 1] = finalVal;
+            data[i + 2] = finalVal;
           }
-
-          data[i] = enhanced;
-          data[i + 1] = enhanced;
-          data[i + 2] = enhanced;
         }
       }
 
-      // THUẬT TOÁN UNSHARP MASKING: LÀM SẮC NÉT NÉT BÚT VIẾT TAY
-      this.applyUnsharpMask(data, w, h, isHandwritingMode ? 0.9 : 0.6);
+      // CamScanner sharpEnhance: Unsharp Mask bất đối xứng làm sắc nét nét chữ
+      this.applyAsymmetricUnsharpMask(data, w, h, isHD ? 1.7 : 1.35);
 
     } else if (this.currentFilter === 'bw') {
       // Sauvola Adaptive Binarization
       for (let i = 0, j = 0; i < data.length; i += 4, j++) {
         const luma = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-        const threshold = bgLuma[j] * 0.82;
+        const threshold = bgMap[j] * 0.84;
         const val = luma < threshold ? 0 : 255;
         data[i] = val;
         data[i + 1] = val;
         data[i + 2] = val;
       }
-    } else if (this.currentFilter === 'gray') {
-      for (let i = 0; i < data.length; i += 4) {
-        const luma = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-        data[i] = luma;
-        data[i + 1] = luma;
-        data[i + 2] = luma;
-      }
     } else if (this.currentFilter === 'lighten') {
-      for (let i = 0; i < data.length; i += 4) {
-        data[i] = Math.min(255, data[i] * 1.3 + 20);
-        data[i + 1] = Math.min(255, data[i + 1] * 1.3 + 20);
-        data[i + 2] = Math.min(255, data[i + 2] * 1.3 + 20);
+      for (let i = 0, j = 0; i < data.length; i += 4, j++) {
+        const bg = bgMap[j];
+        data[i] = Math.min(255, Math.round((data[i] + 1) / bg * 240));
+        data[i + 1] = Math.min(255, Math.round((data[i + 1] + 1) / bg * 240));
+        data[i + 2] = Math.min(255, Math.round((data[i + 2] + 1) / bg * 240));
+      }
+    } else if (this.currentFilter === 'gray') {
+      for (let i = 0, j = 0; i < data.length; i += 4, j++) {
+        const bg = bgMap[j];
+        const luma = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+        const norm = Math.min(255, Math.round(luma / bg * 240));
+        data[i] = norm;
+        data[i + 1] = norm;
+        data[i + 2] = norm;
       }
     }
 
@@ -678,23 +772,32 @@ class CamScannerApp {
   }
 
   /**
-   * Bộ lọc làm sắc cạnh nét chữ Unsharp Masking 3x3
+   * Thuật toán CamScanner sharpEnhance:
+   * Khuếch đại mạnh cạnh của nét chữ viết tay (diff < -10)
+   * Giảm nhẹ vi sai trên nền giấy (diff > -5) để triệt tiêu nhiễu hạt
    */
-  applyUnsharpMask(data, w, h, amount) {
-    const copy = new Uint8ClampedArray(data);
+  applyAsymmetricUnsharpMask(data, w, h, boost) {
+    const orig = new Uint8ClampedArray(data);
     for (let y = 1; y < h - 1; y++) {
       const row = y * w;
       for (let x = 1; x < w - 1; x++) {
         const idx = (row + x) * 4;
         for (let c = 0; c < 3; c++) {
-          const center = copy[idx + c];
-          const top = copy[((y - 1) * w + x) * 4 + c];
-          const bottom = copy[((y + 1) * w + x) * 4 + c];
-          const left = copy[(row + (x - 1)) * 4 + c];
-          const right = copy[(row + (x + 1)) * 4 + c];
+          const center = orig[idx + c];
+          const top = orig[((y - 1) * w + x) * 4 + c];
+          const btm = orig[((y + 1) * w + x) * 4 + c];
+          const left = orig[(row + (x - 1)) * 4 + c];
+          const right = orig[(row + (x + 1)) * 4 + c];
+          const blur = (top + btm + left + right) >> 2;
 
-          const laplacian = (4 * center) - (top + bottom + left + right);
-          data[idx + c] = Math.max(0, Math.min(255, center + laplacian * amount));
+          const diff = center - blur;
+          let sharpDiff = diff;
+          if (diff < -10) {
+            sharpDiff = diff * boost;
+          } else if (diff > -5) {
+            sharpDiff = diff * 0.35;
+          }
+          data[idx + c] = Math.max(0, Math.min(255, center + sharpDiff));
         }
       }
     }
