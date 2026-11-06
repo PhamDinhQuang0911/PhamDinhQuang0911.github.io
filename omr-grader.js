@@ -1073,6 +1073,9 @@ function updateActiveExamBanner() {
             classBadgeEl.classList.add('hidden');
         }
     }
+    if (typeof renderExamAssignedClassesUI === 'function') {
+        renderExamAssignedClassesUI();
+    }
 }
 
 async function loadExamKeys(examId) {
@@ -1108,22 +1111,28 @@ async function loadExamStudents(examId) {
         if (local.length > 0) {
             list = local;
         } else {
-            // Kiểm tra lớp OMR được gán cho đề thi hoặc lớp OMR đang active
-            const linkedClassId = state.exam?.classId;
-            const allClasses = Array.isArray(state.omrClasses) ? state.omrClasses : [];
-            const linkedCls = allClasses.find(c => c.id === linkedClassId) || (typeof getActiveOmrClass === 'function' ? getActiveOmrClass() : null);
-            if (linkedCls && Array.isArray(linkedCls.students) && linkedCls.students.length > 0) {
-                list = linkedCls.students.map(st => ({
-                    id: `st_${examId}_${st.student_no}`,
-                    examId: examId,
-                    teacherId: state.teacherUid,
-                    student_no: st.student_no,
-                    name: st.name,
-                    phone: st.phone || '',
-                    note: st.note || '',
-                    class_id: linkedCls.id,
-                    class_name: linkedCls.name
-                }));
+            // Kiểm tra các lớp được gán cho đề thi này
+            const assigned = typeof getExamAssignedClasses === 'function' ? getExamAssignedClasses(state.exam) : [];
+            if (assigned.length > 0) {
+                const aggregated = [];
+                assigned.forEach(c => {
+                    (c.students || []).forEach(st => {
+                        if (st && !aggregated.some(a => String(a.student_no) === String(st.student_no))) {
+                            aggregated.push({
+                                id: `st_${examId}_${st.student_no}`,
+                                examId: examId,
+                                teacherId: state.teacherUid,
+                                student_no: st.student_no,
+                                name: st.name,
+                                phone: st.phone || '',
+                                note: st.note || '',
+                                class_id: c.id,
+                                class_name: c.name
+                            });
+                        }
+                    });
+                });
+                list = aggregated;
             } else {
                 list = [];
             }
@@ -7622,6 +7631,7 @@ window.captureCameraFrame = async (opts = {}) => {
 // 6. RESULTS TABLE, MODAL & EXPORT
 // ========================================================
 window.renderResultsTable = () => {
+    if (typeof renderExamAssignedClassesUI === "function") renderExamAssignedClassesUI();
     const tbody = document.getElementById('resultsTableBody');
     const label = document.getElementById('resultsCountLabel');
     if (!tbody) return;
@@ -8772,63 +8782,37 @@ function getDefaultOmrClasses() {
 }
 
 function syncExamStudentsToActiveOmrClass() {
+    // Tuyệt đối không tự động tạo lớp mới từ bài thi để tránh rác kho lớp!
     if (!state.exam || !Array.isArray(state.students) || state.students.length === 0) return;
+    if (!Array.isArray(state.omrClasses) || state.omrClasses.length === 0) return;
     
-    // Đảm bảo state.omrClasses là mảng, lọc bỏ các lớp mẫu demo
-    if (!Array.isArray(state.omrClasses)) state.omrClasses = [];
-    state.omrClasses = state.omrClasses.filter(c => c && c.id !== 'omr_cls_demo_12a1' && !c.isSample && !(c.name === '12A1' && (c.students || []).some(s => s.name === 'Nguyễn Văn An')));
-
-    const examClassName = (state.exam.className || state.exam.title || 'Lớp OMR').trim();
-    const examClassId = state.exam.classId || ('omr_cls_exam_' + (state.exam.id || 'current'));
-
-    // Chuẩn hóa danh sách học sinh từ state.students (loại bỏ học sinh mẫu)
-    const validStudents = state.students
-        .filter(s => s && !s.isSample && !s.id?.includes('st_demo') && !(s.name === 'Nguyễn Văn An' && s.student_no === '001'))
-        .map(s => ({
-            id: s.id || `st_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-            student_no: String(s.student_no || s.sbd || '').trim(),
-            name: String(s.name || '').trim(),
-            phone: String(s.phone || '').trim(),
-            note: String(s.note || '').trim(),
-            dob: String(s.dob || '').trim(),
-            gender: String(s.gender || '').trim(),
-            room: String(s.room || '').trim(),
-            class_name: String(s.class_name || s.class || '').trim(),
-            grade: String(s.grade || '').trim()
-        }));
-
-    if (validStudents.length === 0) return;
-
-    // Tìm lớp theo ID hoặc tên
-    let targetCls = state.omrClasses.find(c => c.id === examClassId || c.id === state.exam.classId || c.name === examClassName);
-
-    if (!targetCls) {
-        targetCls = {
-            id: examClassId,
-            teacherId: state.teacherUid,
-            name: examClassName,
-            academicYear: '2025-2026',
-            description: `Đồng bộ từ bài thi "${state.exam.title || examClassName}"`,
-            students: validStudents,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString()
-        };
-        state.omrClasses.unshift(targetCls);
-    } else {
-        targetCls.teacherId = targetCls.teacherId || state.teacherUid;
-        // Cập nhật danh sách học sinh nếu số lượng học sinh trong bài thi đầy đủ hơn
-        if (!targetCls.students || targetCls.students.length < validStudents.length) {
+    const examClassId = state.exam.classId;
+    if (!examClassId) return;
+    
+    const targetCls = state.omrClasses.find(c => c && c.id === examClassId);
+    if (targetCls && (!targetCls.students || targetCls.students.length === 0)) {
+        const validStudents = state.students
+            .filter(s => s && !s.isSample && !s.id?.includes('st_demo') && !(s.name === 'Nguyễn Văn An' && s.student_no === '001'))
+            .map(s => ({
+                id: s.id || `st_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+                student_no: String(s.student_no || s.sbd || '').trim(),
+                name: String(s.name || '').trim(),
+                phone: String(s.phone || '').trim(),
+                note: String(s.note || '').trim(),
+                dob: String(s.dob || '').trim(),
+                gender: String(s.gender || '').trim(),
+                room: String(s.room || '').trim(),
+                class_name: String(s.class_name || targetCls.name || '').trim(),
+                grade: String(s.grade || '').trim()
+            }));
+        if (validStudents.length > 0) {
             targetCls.students = validStudents;
             targetCls.updatedAt = new Date().toISOString();
+            try {
+                localStorage.setItem('omr_local_classes_' + (state.teacherUid || 'guest'), JSON.stringify(state.omrClasses));
+            } catch (_) {}
         }
     }
-
-    state.exam.classId = targetCls.id;
-    state.activeOmrClassId = targetCls.id;
-    try {
-        localStorage.setItem('omr_active_class_id_' + (state.teacherUid || 'guest'), targetCls.id);
-        localStorage.setItem('omr_local_classes_' + (state.teacherUid || 'guest'), JSON.stringify(state.omrClasses));
-    } catch (_) {}
 }
 
 function loadLocalOmrClasses() {
@@ -8900,16 +8884,15 @@ function getActiveOmrClass() {
 window.renderStudentsTab = () => {
     if (!state.omrClasses || state.omrClasses.length === 0) {
         loadLocalOmrClasses();
-    } else {
-        syncExamStudentsToActiveOmrClass();
     }
-    if (state.exam?.classId && state.omrClasses.some(c => c.id === state.exam.classId)) {
-        state.activeOmrClassId = state.exam.classId;
-    } else if (!state.activeOmrClassId && state.omrClasses.length > 0) {
+    if (!state.activeOmrClassId && Array.isArray(state.omrClasses) && state.omrClasses.length > 0) {
         state.activeOmrClassId = state.omrClasses[0].id;
     }
     window.renderOmrClassesList();
     window.renderActiveOmrClassStudents();
+    if (typeof window.renderActiveClassAssignedExams === 'function') {
+        window.renderActiveClassAssignedExams();
+    }
 };
 
 window.renderOmrClassesList = () => {
@@ -8976,6 +8959,9 @@ window.selectOmrClass = (classId) => {
     localStorage.setItem('omr_active_class_id_' + (state.teacherUid || 'guest'), classId);
     window.renderOmrClassesList();
     window.renderActiveOmrClassStudents();
+    if (typeof window.renderActiveClassAssignedExams === 'function') {
+        window.renderActiveClassAssignedExams();
+    }
 };
 
 window.openCreateOmrClassModal = () => {
@@ -12904,5 +12890,697 @@ window.shareResultToParent = async () => {
         title: 'Đã Copy tin nhắn & Tải ảnh phiếu!',
         text: 'Bạn có thể mở Zalo / Messenger và nhấn Ctrl+V để gửi ngay cho Phụ huynh học sinh.',
         confirmButtonColor: '#4f46e5'
+    });
+};
+
+
+// ========================================================
+// HỆ THỐNG QUẢN LÝ ĐỘC LẬP & HAI CHIỀU: BÀI CHẤM <---> LỚP HỌC
+// & NẠP DANH SÁCH THÍ SINH VÀO KỲ THI (KHÔNG SINH RA LỚP MỚI)
+// ========================================================
+
+function getExamAssignedClasses(exam = state.exam) {
+    if (!exam) return [];
+    const idSet = new Set();
+    if (Array.isArray(exam.classIds)) {
+        exam.classIds.forEach(id => id && idSet.add(String(id)));
+    }
+    if (exam.classId) idSet.add(String(exam.classId));
+    
+    const omrList = Array.isArray(state.omrClasses) ? state.omrClasses : [];
+    const lmsList = Array.isArray(state.lmsClasses) ? state.lmsClasses : [];
+    const allClasses = [
+        ...omrList,
+        ...lmsList.map(c => ({
+            ...c,
+            id: c.id.startsWith('lms_') ? c.id : `lms_${c.id}`,
+            isLms: true
+        }))
+    ];
+    
+    const matched = [];
+    idSet.forEach(cid => {
+        const found = allClasses.find(c => c.id === cid || c.id === cid.replace(/^lms_/, '') || (c.id.startsWith('lms_') && c.id === `lms_${cid}`));
+        if (found && !matched.some(m => m.id === found.id)) {
+            matched.push({
+                id: found.id,
+                name: found.name || 'Lớp học',
+                studentCount: Array.isArray(found.students) ? found.students.length : (found.studentCount || 0),
+                isLms: Boolean(found.isLms),
+                students: found.students || []
+            });
+        }
+    });
+    
+    // Fallback nếu exam có className mà chưa có trong idSet
+    if (matched.length === 0 && exam.className) {
+        const names = String(exam.className).split(/[,;\+]/).map(s => s.trim().replace(/^Lớp\s+/i, '')).filter(Boolean);
+        names.forEach(nm => {
+            const byName = allClasses.find(c => c.name === nm || c.name.replace(/^Lớp\s+/i, '') === nm);
+            if (byName && !matched.some(m => m.id === byName.id)) {
+                matched.push({
+                    id: byName.id,
+                    name: byName.name,
+                    studentCount: Array.isArray(byName.students) ? byName.students.length : (byName.studentCount || 0),
+                    isLms: Boolean(byName.isLms),
+                    students: byName.students || []
+                });
+            }
+        });
+    }
+    
+    return matched;
+}
+
+function getClassAssignedExams(classId = state.activeOmrClassId) {
+    if (!classId) return [];
+    const cls = (state.omrClasses || []).find(c => c.id === classId) ||
+                (state.lmsClasses || []).find(c => c.id === classId || `lms_${c.id}` === classId);
+    const clsName = cls ? (cls.name || '').trim().toLowerCase() : '';
+    const rawId = classId.replace(/^lms_/, '');
+    
+    return (state.exams || []).filter(ex => {
+        if (!ex) return false;
+        if (ex.classId === classId || ex.classId === rawId || `lms_${ex.classId}` === classId) return true;
+        if (Array.isArray(ex.classIds) && (ex.classIds.includes(classId) || ex.classIds.includes(rawId))) return true;
+        if (clsName && ex.className) {
+            const exNameLower = ex.className.toLowerCase();
+            if (exNameLower === clsName || exNameLower.includes(clsName)) return true;
+        }
+        return false;
+    });
+}
+
+function renderExamAssignedClassesUI() {
+    const exam = state.exam;
+    const chipsCont = document.getElementById('resultsAssignedClassChips');
+    const headerCont = document.getElementById('activeExamAssignedClassesContainer');
+    if (!exam) {
+        if (chipsCont) chipsCont.innerHTML = `<span class="text-xs text-slate-400 italic">Chưa chọn bài thi</span>`;
+        return;
+    }
+    
+    const assigned = getExamAssignedClasses(exam);
+    
+    // 1. Render in View 2 bar
+    if (chipsCont) {
+        if (assigned.length > 0) {
+            chipsCont.innerHTML = assigned.map(c => `
+                <button type="button" onclick="window.viewAssignedClassStudentsModal('${c.id}')" class="px-2.5 py-1 rounded-xl bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/50 dark:hover:bg-emerald-900/60 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 font-bold text-xs flex items-center gap-1.5 cursor-pointer transition-all active:scale-95 shadow-2xs" title="Bấm để xem danh sách ${c.studentCount} học sinh lớp ${c.name} kèm trạng thái nộp bài">
+                    <i class="fa-solid fa-graduation-cap text-emerald-600"></i>
+                    <span>${c.name}</span>
+                    <span class="px-1.5 py-0.2 rounded-full bg-emerald-200/80 dark:bg-emerald-800 text-[10px] tabular-nums font-mono">${c.studentCount} HS</span>
+                </button>
+            `).join('');
+        } else {
+            chipsCont.innerHTML = `<span class="text-xs text-slate-400 italic">Chưa gán lớp (Đề thi tự do)</span>`;
+        }
+    }
+    
+    // 2. Render in Header Container (Desktop & Mobile)
+    if (headerCont) {
+        if (assigned.length > 0) {
+            headerCont.innerHTML = assigned.map(c => `
+                <button type="button" onclick="event.stopPropagation(); window.viewAssignedClassStudentsModal('${c.id}')" class="px-2 py-0.5 rounded-md badge-season text-[10px] font-bold shrink-0 hover:bg-emerald-200 dark:hover:bg-emerald-800 transition-colors cursor-pointer" title="Xem danh sách lớp ${c.name}">
+                    Lớp ${c.name} (${c.studentCount} HS)
+                </button>
+            `).join('');
+        } else {
+            headerCont.innerHTML = `<button type="button" onclick="event.stopPropagation(); window.openAssignClassesToExamModal()" class="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 text-[10px] font-bold shrink-0 cursor-pointer">+ Gán lớp</button>`;
+        }
+    }
+}
+
+window.renderActiveClassAssignedExams = () => {
+    const listCont = document.getElementById('activeClassAssignedExamsList');
+    const badgeEl = document.getElementById('activeClassExamCountBadge');
+    if (!listCont) return;
+    
+    const activeCls = getActiveOmrClass();
+    if (!activeCls) {
+        listCont.innerHTML = `<div class="col-span-full py-4 text-center text-xs text-slate-400 italic">Vui lòng chọn một lớp học ở trên để xem các đề thi đã gán.</div>`;
+        if (badgeEl) badgeEl.textContent = '0 đề';
+        return;
+    }
+    
+    const assignedExams = getClassAssignedExams(activeCls.id);
+    if (badgeEl) badgeEl.textContent = `${assignedExams.length} đề`;
+    
+    if (assignedExams.length === 0) {
+        listCont.innerHTML = `
+            <div class="col-span-full p-4 rounded-xl border border-dashed border-gray-200 dark:border-[#38344D] bg-gray-50/50 dark:bg-[#1E1B29]/30 text-center space-y-1.5">
+                <p class="text-xs text-slate-500 dark:text-slate-400">Lớp "<b>${activeCls.name}</b>" chưa được gán đề thi nào.</p>
+                <div class="flex items-center justify-center gap-2 pt-1">
+                    <button type="button" onclick="window.openAssignExamsToClassModal()" class="px-2.5 py-1 rounded-xl btn-season-secondary font-bold text-xs cursor-pointer">
+                        <i class="fa-solid fa-link text-emerald-600"></i> Gán đề có sẵn
+                    </button>
+                    <button type="button" onclick="window.createExamForSelectedOmrClass()" class="px-2.5 py-1 rounded-xl btn-season-primary font-bold text-xs cursor-pointer">
+                        <i class="fa-solid fa-plus"></i> Tạo đề mới cho lớp
+                    </button>
+                </div>
+            </div>
+        `;
+        return;
+    }
+    
+    listCont.innerHTML = assignedExams.map(ex => {
+        const isCurrent = state.exam?.id === ex.id;
+        const tplKey = ex.sheet_template || 'qmcv1239';
+        const tplName = (window.MAU && window.MAU[tplKey]) ? window.MAU[tplKey].ten : tplKey;
+        
+        return `
+            <div class="p-3 rounded-xl border ${isCurrent ? 'border-emerald-500 bg-emerald-50/30 dark:bg-emerald-950/20 ring-1 ring-emerald-500/20' : 'border-gray-200 dark:border-[#38344D] bg-white dark:bg-[#1E1B29]'} flex flex-col justify-between gap-2 shadow-2xs hover:border-emerald-400 transition-all">
+                <div class="space-y-1">
+                    <div class="flex items-center justify-between gap-1.5">
+                        <span class="text-[10px] font-bold px-1.5 py-0.5 rounded badge-season font-mono uppercase">${tplName}</span>
+                        ${isCurrent ? '<span class="text-[9px] font-extrabold px-1.5 py-0.2 rounded-full bg-emerald-600 text-white">Đang chấm</span>' : ''}
+                    </div>
+                    <div class="font-extrabold text-xs text-slate-800 dark:text-white line-clamp-2" title="${ex.name}">${ex.name}</div>
+                    <div class="text-[11px] text-slate-500 dark:text-slate-400 font-medium">
+                        ${ex.question_count || 12} TN · ${ex.part2_count || 4} Đ/S · ${ex.part3_count || 6} TLN
+                    </div>
+                </div>
+                <div class="flex items-center gap-1.5 pt-1 border-t border-gray-100 dark:border-[#38344D]">
+                    <button type="button" onclick="window.selectExamAndSwitch('${ex.id}')" class="flex-1 py-1.5 px-2 rounded-lg ${isCurrent ? 'btn-season-primary' : 'btn-season-secondary'} text-[11px] font-bold flex items-center justify-center gap-1 cursor-pointer">
+                        <i class="fa-solid fa-camera"></i> <span>Mở chấm</span>
+                    </button>
+                    <button type="button" onclick="window.viewClassExamResults('${ex.id}', '${activeCls.id}')" class="py-1.5 px-2 rounded-lg btn-season-secondary text-[11px] font-bold flex items-center justify-center gap-1 cursor-pointer" title="Xem bảng điểm của lớp này">
+                        <i class="fa-solid fa-table-list text-emerald-600"></i>
+                    </button>
+                </div>
+            </div>
+        `;
+    }).join('');
+};
+
+window.viewClassExamResults = async (examId, classId) => {
+    await selectExam(examId);
+    window.switchTab('results');
+    const filter = document.getElementById('resultsClassFilter');
+    if (filter) {
+        filter.value = classId;
+        window.handleSubmissionsFilterSortChange('table');
+    }
+};
+
+window.viewAssignedClassStudentsModal = (classId) => {
+    let cls = (state.omrClasses || []).find(c => c.id === classId) ||
+              (state.lmsClasses || []).find(c => c.id === classId || `lms_${c.id}` === classId);
+    if (!cls && state.exam?.className) {
+        cls = (state.omrClasses || []).find(c => c.name === state.exam.className) ||
+              (state.lmsClasses || []).find(c => c.name === state.exam.className);
+    }
+    if (!cls) {
+        Swal.fire('Lưu ý', 'Không tìm thấy thông tin chi tiết của lớp này.', 'info');
+        return;
+    }
+    
+    window._activeViewClassId = cls.id;
+    const titleEl = document.getElementById('viewClassModalTitle');
+    const subEl = document.getElementById('viewClassModalSubtitle');
+    const searchInp = document.getElementById('viewClassStudentSearchInput');
+    if (searchInp) searchInp.value = '';
+    
+    const students = Array.isArray(cls.students) ? cls.students : [];
+    if (titleEl) titleEl.textContent = `Danh Sách Học Sinh: ${cls.name} (${students.length} học sinh)`;
+    if (subEl) subEl.textContent = `Đang đối chiếu với bài kiểm tra: "${state.exam?.name || '---'}"`;
+    
+    const submissions = Array.isArray(state.submissions) ? state.submissions : [];
+    const rosterWithStatus = students.map((st, idx) => {
+        const cleanSbd = String(st.student_no || st.sbd || '').trim().replace(/\D/g, '');
+        const numSbd = cleanSbd ? String(parseInt(cleanSbd, 10)) : '';
+        
+        const sub = submissions.find(s => {
+            const sClean = String(s.student_no || '').trim().replace(/\D/g, '');
+            if (cleanSbd && sClean && cleanSbd === sClean) return true;
+            const sNum = sClean ? String(parseInt(sClean, 10)) : '';
+            return Boolean(numSbd && sNum && numSbd === sNum);
+        });
+        
+        return {
+            stt: idx + 1,
+            student_no: st.student_no || st.sbd || '',
+            name: st.name || '',
+            room: st.room || '',
+            submission: sub || null
+        };
+    });
+    
+    window._cachedViewClassRoster = rosterWithStatus;
+    renderAssignedClassStudentsRoster(rosterWithStatus);
+    document.getElementById('viewAssignedClassStudentsModal')?.classList.remove('hidden');
+};
+
+function renderAssignedClassStudentsRoster(list) {
+    const tbody = document.getElementById('viewClassStudentsTableBody');
+    const badge = document.getElementById('viewClassModalStatsBadge');
+    if (!tbody) return;
+    
+    const gradedCount = list.filter(item => item.submission !== null).length;
+    if (badge) badge.textContent = `${gradedCount}/${list.length} đã chấm`;
+    
+    if (list.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="6" class="p-6 text-center text-slate-400 italic">Không tìm thấy học sinh nào.</td></tr>`;
+        return;
+    }
+    
+    tbody.innerHTML = list.map(item => {
+        const sub = item.submission;
+        const statusHtml = sub
+            ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300">
+                <i class="fa-solid fa-check text-[10px]"></i> Đã chấm: ${sub.total_score != null ? sub.total_score : '---'}đ
+               </span>`
+            : `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                <i class="fa-regular fa-clock text-[10px]"></i> Chưa nộp bài
+               </span>`;
+               
+        const actionHtml = sub
+            ? `<button type="button" onclick="window.closeAssignedClassStudentsModal(); window.openStudentGradedSheet('${sub.id}')" class="px-2 py-1 rounded-lg btn-season-primary text-[10px] font-bold cursor-pointer">
+                Xem bài
+               </button>`
+            : `<span class="text-slate-400 text-[11px]">---</span>`;
+            
+        return `
+            <tr class="hover:bg-slate-50/70 dark:hover:bg-[#201D2D] transition-colors">
+                <td class="p-2.5 text-center text-slate-400 font-mono">${item.stt}</td>
+                <td class="p-2.5 font-mono font-bold text-slate-800 dark:text-slate-200">${item.student_no || '---'}</td>
+                <td class="p-2.5 font-bold text-slate-900 dark:text-white">${item.name || '---'}</td>
+                <td class="p-2.5 text-center text-slate-500 font-semibold">${item.room || '---'}</td>
+                <td class="p-2.5 text-center">${statusHtml}</td>
+                <td class="p-2.5 text-center">${actionHtml}</td>
+            </tr>
+        `;
+    }).join('');
+}
+
+window.filterAssignedClassStudentsModal = () => {
+    const q = (document.getElementById('viewClassStudentSearchInput')?.value || '').trim().toLowerCase();
+    const all = window._cachedViewClassRoster || [];
+    if (!q) {
+        renderAssignedClassStudentsRoster(all);
+        return;
+    }
+    const filtered = all.filter(item =>
+        (item.name || '').toLowerCase().includes(q) ||
+        (item.student_no || '').toLowerCase().includes(q) ||
+        (item.room || '').toLowerCase().includes(q)
+    );
+    renderAssignedClassStudentsRoster(filtered);
+};
+
+window.closeAssignedClassStudentsModal = () => {
+    document.getElementById('viewAssignedClassStudentsModal')?.classList.add('hidden');
+};
+
+window.goToClassManagementFromModal = () => {
+    window.closeAssignedClassStudentsModal();
+    if (window._activeViewClassId) {
+        state.activeOmrClassId = window._activeViewClassId;
+    }
+    window.switchTab('students');
+};
+
+window.openAssignClassesToExamModal = () => {
+    if (!state.exam) {
+        Swal.fire('Lưu ý', 'Vui lòng mở một bài thi trước khi gán lớp!', 'warning');
+        return;
+    }
+    const container = document.getElementById('assignClassesChecklistContainer');
+    if (!container) return;
+    
+    const omrList = Array.isArray(state.omrClasses) ? state.omrClasses : [];
+    const lmsList = Array.isArray(state.lmsClasses) ? state.lmsClasses : [];
+    const assigned = getExamAssignedClasses(state.exam);
+    const assignedIds = new Set(assigned.map(c => c.id));
+    
+    let html = '';
+    if (omrList.length > 0) {
+        html += `<div class="font-bold text-slate-500 text-[10px] uppercase pb-1">Lớp OMR Độc Lập</div>`;
+        html += omrList.map(cls => {
+            const isChecked = assignedIds.has(cls.id);
+            const stuCount = Array.isArray(cls.students) ? cls.students.length : 0;
+            return `
+                <label class="flex items-center justify-between p-2 rounded-xl border border-gray-200 dark:border-[#38344D] bg-gray-50/70 dark:bg-[#1E1B29]/60 hover:bg-emerald-50/50 dark:hover:bg-emerald-950/20 cursor-pointer transition-colors">
+                    <div class="flex items-center gap-2">
+                        <input type="checkbox" name="assignClassChk" value="${cls.id}" data-name="${cls.name}" ${isChecked ? 'checked' : ''} class="w-4 h-4 rounded accent-emerald-600 cursor-pointer" onchange="window.updateAssignClassesSelectedCount()">
+                        <span class="font-bold text-slate-800 dark:text-slate-100">${cls.name}</span>
+                    </div>
+                    <span class="text-[10px] font-mono font-semibold text-slate-500">${stuCount} HS</span>
+                </label>
+            `;
+        }).join('');
+    }
+    
+    if (lmsList.length > 0) {
+        html += `<div class="font-bold text-slate-500 text-[10px] uppercase pt-2 pb-1">Lớp Học QMath LMS</div>`;
+        html += lmsList.map(cls => {
+            const lmsId = cls.id.startsWith('lms_') ? cls.id : `lms_${cls.id}`;
+            const isChecked = assignedIds.has(lmsId) || assignedIds.has(cls.id);
+            const stuCount = cls.studentCount || (Array.isArray(cls.students) ? cls.students.length : 0);
+            return `
+                <label class="flex items-center justify-between p-2 rounded-xl border border-gray-200 dark:border-[#38344D] bg-gray-50/70 dark:bg-[#1E1B29]/60 hover:bg-emerald-50/50 dark:hover:bg-emerald-950/20 cursor-pointer transition-colors">
+                    <div class="flex items-center gap-2">
+                        <input type="checkbox" name="assignClassChk" value="${lmsId}" data-name="${cls.name}" ${isChecked ? 'checked' : ''} class="w-4 h-4 rounded accent-emerald-600 cursor-pointer" onchange="window.updateAssignClassesSelectedCount()">
+                        <span class="font-bold text-slate-800 dark:text-slate-100">🏫 ${cls.name}</span>
+                    </div>
+                    <span class="text-[10px] font-mono font-semibold text-slate-500">${stuCount} HS</span>
+                </label>
+            `;
+        }).join('');
+    }
+    
+    if (!html) {
+        html = `<div class="text-xs text-slate-400 py-4 text-center">Chưa có lớp nào. Bấm "+ Tạo lớp mới" để tạo lớp!</div>`;
+    }
+    
+    container.innerHTML = html;
+    window.updateAssignClassesSelectedCount();
+    document.getElementById('assignClassesToExamModal')?.classList.remove('hidden');
+};
+
+window.closeAssignClassesToExamModal = () => {
+    document.getElementById('assignClassesToExamModal')?.classList.add('hidden');
+};
+
+window.updateAssignClassesSelectedCount = () => {
+    const checked = document.querySelectorAll('input[name="assignClassChk"]:checked');
+    const badge = document.getElementById('assignClassesSelectedCountText');
+    if (badge) badge.textContent = `Đã chọn: ${checked.length} lớp`;
+};
+
+window.confirmSaveAssignedClassesToExam = async () => {
+    if (!state.exam) return;
+    const checked = Array.from(document.querySelectorAll('input[name="assignClassChk"]:checked'));
+    const selectedIds = checked.map(el => el.value);
+    const selectedNames = checked.map(el => el.dataset.name || '');
+    
+    state.exam.classIds = selectedIds;
+    state.exam.classId = selectedIds[0] || '';
+    state.exam.className = selectedNames.join(', ');
+    
+    try {
+        localStorage.setItem(`omr_exam_class_${state.exam.id}`, JSON.stringify({
+            classId: state.exam.classId,
+            classIds: state.exam.classIds,
+            className: state.exam.className
+        }));
+    } catch (_) {}
+    
+    saveLocalExams(state.exams);
+    if (state.teacherUid && typeof db !== 'undefined') {
+        try {
+            setDoc(doc(db, "omr_exams", state.exam.id), {
+                classId: state.exam.classId,
+                classIds: state.exam.classIds,
+                className: state.exam.className
+            }, { merge: true });
+        } catch (_) {}
+    }
+    
+    // Nếu đề thi chưa có học sinh nào trong state.students, tự động gộp học sinh từ các lớp được gán
+    const assignedClasses = getExamAssignedClasses(state.exam);
+    if ((!state.students || state.students.length === 0) && assignedClasses.length > 0) {
+        const aggregated = [];
+        assignedClasses.forEach(c => {
+            (c.students || []).forEach(st => {
+                if (st && !aggregated.some(a => String(a.student_no) === String(st.student_no))) {
+                    aggregated.push({
+                        id: `st_${state.exam.id}_${st.student_no}`,
+                        examId: state.exam.id,
+                        teacherId: state.teacherUid,
+                        student_no: st.student_no,
+                        name: st.name,
+                        phone: st.phone || '',
+                        note: st.note || '',
+                        class_id: c.id,
+                        class_name: c.name
+                    });
+                }
+            });
+        });
+        if (aggregated.length > 0) {
+            state.students = aggregated;
+            try {
+                localStorage.setItem(`omr_students_${state.exam.id}`, JSON.stringify(aggregated));
+            } catch (_) {}
+        }
+    }
+    
+    enrichSubmissionsFromClassRoster();
+    updateActiveExamBanner();
+    renderExamAssignedClassesUI();
+    if (typeof window.renderResultsTable === 'function') window.renderResultsTable();
+    window.closeAssignClassesToExamModal();
+    
+    Swal.fire({
+        icon: 'success',
+        title: 'Đã lưu gán lớp!',
+        text: selectedIds.length > 0
+            ? `Đã gán ${selectedIds.length} lớp cho bài thi "${state.exam.name}".`
+            : `Đã hủy gán lớp (Bài thi tự do).`,
+        timer: 2000
+    });
+};
+
+window.openAssignExamsToClassModal = () => {
+    const activeCls = getActiveOmrClass();
+    if (!activeCls) {
+        Swal.fire('Lưu ý', 'Vui lòng chọn hoặc tạo lớp trước!', 'warning');
+        return;
+    }
+    const label = document.getElementById('assignExamsModalClassLabel');
+    const container = document.getElementById('assignExamsChecklistContainer');
+    if (label) label.textContent = `Chọn các bài kiểm tra gán cho lớp: "${activeCls.name}"`;
+    if (!container) return;
+    
+    const assignedExams = getClassAssignedExams(activeCls.id);
+    const assignedExamIds = new Set(assignedExams.map(e => e.id));
+    
+    const exams = state.exams || [];
+    if (exams.length === 0) {
+        container.innerHTML = `<div class="text-xs text-slate-400 py-4 text-center">Chưa có bài kiểm tra nào. Bấm "+ Tạo đề mới" để bắt đầu!</div>`;
+    } else {
+        container.innerHTML = exams.map(ex => {
+            const isChecked = assignedExamIds.has(ex.id);
+            return `
+                <label class="flex items-center justify-between p-2.5 rounded-xl border border-gray-200 dark:border-[#38344D] bg-gray-50/70 dark:bg-[#1E1B29]/60 hover:bg-emerald-50/50 dark:hover:bg-emerald-950/20 cursor-pointer transition-colors">
+                    <div class="flex items-center gap-2">
+                        <input type="checkbox" name="assignExamChk" value="${ex.id}" ${isChecked ? 'checked' : ''} class="w-4 h-4 rounded accent-emerald-600 cursor-pointer">
+                        <div>
+                            <span class="font-bold text-slate-800 dark:text-slate-100 block text-xs">${ex.name}</span>
+                            <span class="text-[10px] text-slate-400">${ex.question_count || 12} TN · ${ex.part2_count || 4} Đ/S · ${ex.part3_count || 6} TLN</span>
+                        </div>
+                    </div>
+                </label>
+            `;
+        }).join('');
+    }
+    
+    document.getElementById('assignExamsToClassModal')?.classList.remove('hidden');
+};
+
+window.closeAssignExamsToClassModal = () => {
+    document.getElementById('assignExamsToClassModal')?.classList.add('hidden');
+};
+
+window.confirmSaveAssignedExamsToClass = () => {
+    const activeCls = getActiveOmrClass();
+    if (!activeCls) return;
+    
+    const checked = Array.from(document.querySelectorAll('input[name="assignExamChk"]:checked')).map(el => el.value);
+    const checkedSet = new Set(checked);
+    
+    (state.exams || []).forEach(ex => {
+        if (!Array.isArray(ex.classIds)) ex.classIds = ex.classId ? [ex.classId] : [];
+        if (checkedSet.has(ex.id)) {
+            if (!ex.classIds.includes(activeCls.id)) ex.classIds.push(activeCls.id);
+            if (!ex.classId) ex.classId = activeCls.id;
+        } else {
+            ex.classIds = ex.classIds.filter(id => id !== activeCls.id);
+            if (ex.classId === activeCls.id) ex.classId = ex.classIds[0] || '';
+        }
+        try {
+            localStorage.setItem(`omr_exam_class_${ex.id}`, JSON.stringify({
+                classId: ex.classId,
+                classIds: ex.classIds,
+                className: ex.className
+            }));
+        } catch (_) {}
+    });
+    
+    saveLocalExams(state.exams);
+    window.renderActiveClassAssignedExams();
+    renderExamAssignedClassesUI();
+    window.closeAssignExamsToClassModal();
+    
+    Swal.fire({
+        icon: 'success',
+        title: 'Đã lưu gán đề thi!',
+        text: `Đã cập nhật danh sách đề thi gán cho lớp "${activeCls.name}".`,
+        timer: 2000
+    });
+};
+
+// ========================================================
+// LOGIC NẠP DANH SÁCH THÍ SINH VÀO BÀI THI (REQUEST 3)
+// ========================================================
+
+window.openImportExamCandidatesModal = () => {
+    if (!state.exam) {
+        Swal.fire('Lưu ý', 'Vui lòng mở một bài thi trước khi nạp danh sách thí sinh!', 'warning');
+        return;
+    }
+    const titleLabel = document.getElementById('importExamCandidateTargetTitle');
+    if (titleLabel) titleLabel.textContent = `Đang nạp vào bài thi: "${state.exam.name}"`;
+    
+    const fileInp = document.getElementById('examCandidatesFileInput');
+    const pasteArea = document.getElementById('pasteExamCandidatesTextarea');
+    const previewCont = document.getElementById('importExamCandidatesPreviewContainer');
+    if (fileInp) fileInp.value = '';
+    if (pasteArea) pasteArea.value = '';
+    if (previewCont) previewCont.classList.add('hidden');
+    
+    window._parsedExamCandidates = [];
+    document.getElementById('importExamCandidatesModal')?.classList.remove('hidden');
+};
+
+window.closeImportExamCandidatesModal = () => {
+    document.getElementById('importExamCandidatesModal')?.classList.add('hidden');
+};
+
+window.handleExamCandidatesFile = (file) => {
+    if (!file) return;
+    const reader = new FileReader();
+    const isCsv = file.name.endsWith('.csv');
+    
+    reader.onload = (e) => {
+        try {
+            let parsedRows = [];
+            if (isCsv) {
+                const text = e.target.result;
+                parsedRows = parseCsvRows(text);
+            } else {
+                if (!window.XLSX) {
+                    Swal.fire('Lỗi', 'Thư viện SheetJS chưa sẵn sàng!', 'error');
+                    return;
+                }
+                const data = new Uint8Array(e.target.result);
+                const workbook = window.XLSX.read(data, { type: 'array' });
+                const firstSheetName = workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[firstSheetName];
+                parsedRows = window.XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
+            }
+            
+            const candidates = parseRowsToStudents(parsedRows);
+            window._parsedExamCandidates = candidates;
+            renderExamCandidatesPreview(candidates);
+        } catch(err) {
+            console.error(err);
+            Swal.fire('Lỗi đọc file', 'Không thể đọc nội dung file Excel. Vui lòng kiểm tra định dạng!', 'error');
+        }
+    };
+    
+    if (isCsv) reader.readAsText(file, 'utf-8');
+    else reader.readAsArrayBuffer(file);
+};
+
+window.previewPastedExamCandidates = (text) => {
+    if (!text || !text.trim()) {
+        window._parsedExamCandidates = [];
+        document.getElementById('importExamCandidatesPreviewContainer')?.classList.add('hidden');
+        return;
+    }
+    const rows = parseCsvRows(text);
+    const candidates = parseRowsToStudents(rows);
+    window._parsedExamCandidates = candidates;
+    renderExamCandidatesPreview(candidates);
+};
+
+function renderExamCandidatesPreview(candidates) {
+    const container = document.getElementById('importExamCandidatesPreviewContainer');
+    const tbody = document.getElementById('importExamCandidatesPreviewTbody');
+    const countBadge = document.getElementById('importExamCandidatesPreviewCount');
+    if (!container || !tbody) return;
+    
+    if (!candidates || candidates.length === 0) {
+        container.classList.add('hidden');
+        return;
+    }
+    
+    container.classList.remove('hidden');
+    if (countBadge) countBadge.textContent = `Đã nhận diện: ${candidates.length} thí sinh`;
+    
+    tbody.innerHTML = candidates.slice(0, 50).map(c => `
+        <tr class="hover:bg-slate-50 dark:hover:bg-[#262335]">
+            <td class="p-2 font-mono font-bold text-center text-slate-800 dark:text-slate-100">${c.student_no}</td>
+            <td class="p-2 font-bold text-slate-900 dark:text-white">${c.name}</td>
+            <td class="p-2 font-semibold text-center text-slate-600 dark:text-slate-300">${c.room || '---'}</td>
+            <td class="p-2 font-bold text-center text-emerald-600 dark:text-emerald-400">${c.class_name || '---'}</td>
+            <td class="p-2 text-slate-500 font-semibold">${c.note || c.phone || '---'}</td>
+        </tr>
+    `).join('') + (candidates.length > 50 ? `<tr><td colspan="5" class="p-2 text-center text-slate-400 italic">...và ${candidates.length - 50} thí sinh khác</td></tr>` : '');
+}
+
+window.confirmApplyExamCandidates = async () => {
+    const candidates = window._parsedExamCandidates || [];
+    if (candidates.length === 0) {
+        Swal.fire('Chưa có dữ liệu', 'Vui lòng chọn file Excel hoặc dán danh sách thí sinh trước!', 'warning');
+        return;
+    }
+    if (!state.exam) {
+        Swal.fire('Lỗi', 'Không tìm thấy bài thi hiện tại!', 'error');
+        return;
+    }
+    
+    const mode = document.querySelector('input[name="importExamCandidatesMode"]:checked')?.value || 'replace';
+    
+    const formatted = candidates.map(c => ({
+        id: c.id || `st_${state.exam.id}_${c.student_no}`,
+        examId: state.exam.id,
+        teacherId: state.teacherUid,
+        student_no: String(c.student_no || '').trim(),
+        name: String(c.name || '').trim(),
+        room: String(c.room || '').trim(),
+        class_name: String(c.class_name || state.exam.className || '').trim(),
+        phone: String(c.phone || '').trim(),
+        note: String(c.note || '').trim(),
+        dob: String(c.dob || '').trim(),
+        gender: String(c.gender || '').trim()
+    }));
+    
+    // Gán vào state.students của đề thi này
+    if (mode === 'replace' || !Array.isArray(state.students)) {
+        state.students = formatted;
+    } else {
+        const existingNos = new Set((state.students || []).map(s => String(s.student_no).trim()));
+        const newOnes = formatted.filter(s => !existingNos.has(s.student_no));
+        state.students = [...(state.students || []), ...newOnes];
+    }
+    
+    try {
+        localStorage.setItem(`omr_students_${state.exam.id}`, JSON.stringify(state.students));
+    } catch (_) {}
+    
+    if (state.teacherUid && typeof db !== 'undefined') {
+        for (const s of formatted) {
+            try { setDoc(doc(db, "omr_students", s.id), s); } catch(e) {}
+        }
+    }
+    
+    // TUYỆT ĐỐI KHÔNG TẠO LỚP MỚI TRONG state.omrClasses!
+    
+    enrichSubmissionsFromClassRoster();
+    syncSubmissionClassFilterOptions();
+    renderInlineSubmissionsList();
+    if (typeof window.renderResultsTable === 'function') window.renderResultsTable();
+    updateOverviewStats();
+    
+    window.closeImportExamCandidatesModal();
+    
+    Swal.fire({
+        icon: 'success',
+        title: 'Nạp danh sách thí sinh thành công!',
+        text: `Đã nạp ${formatted.length} thí sinh vào bài thi "${state.exam.name}". (Không tạo lớp mới trong kho lớp)`,
+        timer: 2500
     });
 };

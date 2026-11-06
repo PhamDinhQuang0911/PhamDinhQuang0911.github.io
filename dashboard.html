@@ -4333,10 +4333,10 @@
                             </div>
                             <div class="min-w-0">
                                 <div class="font-extrabold text-xs sm:text-sm text-gray-800 flex items-center gap-2 flex-wrap">
-                                    <span>Lưu Trữ Ảnh Telegram OMR (8 Bot)</span>
+                                    <span>Lưu Trữ Ảnh Telegram OMR (Đa Bot &amp; Đa Kênh)</span>
                                     <span id="badgeTelegramStatus" class="text-[10px] px-2 py-0.5 rounded-full font-bold bg-gray-100 text-slate-600 border border-gray-200">Chưa cấu hình</span>
                                 </div>
-                                <p class="text-[11px] text-slate-600 truncate mt-0.5">Tự động tải ảnh bài chấm OMR lên Kênh Telegram qua 8 Bot xoay vòng</p>
+                                <p class="text-[11px] text-slate-600 truncate mt-0.5">Tự động điều phối tải ảnh OMR song song lên các Kênh Telegram qua Đa Bot</p>
                             </div>
                         </div>
                         <div class="flex items-center gap-2 shrink-0 ml-2">
@@ -4361,11 +4361,16 @@
                         </label>
 
                         <div>
-                            <label class="block font-bold text-gray-700 text-[11px] mb-1">
-                                ID Kênh / Chat ID Telegram (*):
-                            </label>
-                            <input type="text" id="dashTgConfigChatId" placeholder="VD: -1001234567890 hoặc @kenh_omr_qmath" class="w-full px-3 py-2 rounded-xl border border-gray-300 bg-white outline-none font-mono text-xs text-gray-800 focus:border-sky-500 focus:ring-2 focus:ring-sky-100">
-                            <span class="text-[10px] text-slate-400 mt-1 block">Lưu ý: Bạn phải thêm tất cả các Bot làm <b>Quản trị viên (Admin)</b> của Kênh Telegram để Bot có quyền đăng ảnh!</span>
+                            <div class="flex items-center justify-between mb-1">
+                                <label class="block font-bold text-gray-700 text-[11px]">
+                                    Danh sách ID Kênh Telegram (1 hoặc nhiều kênh tương ứng với các Bot, mỗi kênh 1 dòng):
+                                </label>
+                                <span id="dashTgChatCountBadge" class="text-[10px] font-mono text-emerald-600 font-bold">1 kênh</span>
+                            </div>
+                            <textarea id="dashTgConfigChatId" rows="3" placeholder="Nhập 1 hoặc nhiều ID Kênh / Username (@ten_kenh hoặc -100...), mỗi dòng 1 kênh.&#10;Ví dụ:&#10;@kho_video_qmath_2026_1&#10;@kho_video_qmath_2026_2&#10;...&#10;@kho_video_qmath_2026_11" class="w-full px-3 py-2 rounded-xl border border-gray-300 bg-white outline-none font-mono text-xs text-gray-800 focus:border-sky-500 focus:ring-2 focus:ring-sky-100" oninput="window.updateDashTgChatCountBadge()"></textarea>
+                            <span class="text-[10px] text-slate-500 mt-1 block">
+                                💡 <b>Cơ chế điều phối song song:</b> Nếu có 11 Bot và 11 Kênh, Bot 1 gửi vào Kênh 1, Bot 2 gửi vào Kênh 2... Gửi 110 ảnh chỉ trong 2-3 giây không bao giờ bị nghẽn! (Nếu chỉ nhập 1 kênh, tất cả bot gửi chung vào kênh đó).
+                            </span>
                         </div>
 
                         <div>
@@ -24280,6 +24285,19 @@ function renderTagFilterUI() {
             updateAiModalBadges();
         };
 
+        window.updateDashTgChatCountBadge = () => {
+            const txt = document.getElementById('dashTgConfigChatId')?.value || '';
+            const channels = txt.split('\n').map(c => c.trim()).filter(Boolean);
+            const badge = document.getElementById('dashTgChatCountBadge');
+            if (badge) {
+                badge.textContent = `${channels.length} kênh`;
+                badge.className = channels.length > 0
+                    ? 'text-[10px] font-mono text-emerald-600 font-bold'
+                    : 'text-[10px] font-mono text-slate-400 font-bold';
+            }
+            updateAiModalBadges();
+        };
+
         window.openAIConfigModal = async () => {
             if (!window.requirePermission('ai.manage', 'Quản lý API AI')) return;
             window.toggleModal('aiConfigModal', true);
@@ -24313,7 +24331,7 @@ function renderTagFilterUI() {
 
                 // Nạp cấu hình Kênh Telegram OMR
                 try {
-                    let tgData = { enabled: false, chatId: '', botTokens: [] };
+                    let tgData = { enabled: false, chatId: '', chatIds: [], botTokens: [] };
                     const rawTg = localStorage.getItem('omr_telegram_storage_config') || localStorage.getItem('qmath_telegram_config');
                     if (rawTg) tgData = { ...tgData, ...JSON.parse(rawTg) };
                     const tgSnap = await getDoc(doc(db, "configurations", "telegram_storage"));
@@ -24324,9 +24342,13 @@ function renderTagFilterUI() {
                     const txtChat = document.getElementById('dashTgConfigChatId');
                     const txtTokens = document.getElementById('dashTgConfigTokens');
                     if (chk) chk.checked = Boolean(tgData.enabled);
-                    if (txtChat) txtChat.value = tgData.chatId || '';
+                    let chatIds = Array.isArray(tgData.chatIds) && tgData.chatIds.length > 0
+                        ? tgData.chatIds
+                        : (tgData.chatId ? tgData.chatId.split('\n').map(s => s.trim()).filter(Boolean) : []);
+                    if (txtChat) txtChat.value = chatIds.join('\n');
                     if (txtTokens) txtTokens.value = (tgData.botTokens || []).join('\n');
                     window.updateDashTgBotCountBadge();
+                    window.updateDashTgChatCountBadge();
                 } catch(eTg) { console.warn("Lỗi nạp config Telegram:", eTg); }
 
                 updateAiModalBadges();
@@ -24356,15 +24378,16 @@ function renderTagFilterUI() {
             const txtTokens = document.getElementById('dashTgConfigTokens');
 
             const enabled = Boolean(chk?.checked);
-            const chatId = (txtChat?.value || '').trim();
+            const rawChat = (txtChat?.value || '').trim();
+            const chatIds = rawChat.split('\n').map(c => c.trim()).filter(Boolean);
             const rawTokens = (txtTokens?.value || '').split('\n').map(t => t.trim()).filter(Boolean);
 
-            if (enabled && (!chatId || rawTokens.length === 0)) {
-                safeDashAlert('Thiếu thông tin', 'Vui lòng nhập Chat/Channel ID và ít nhất 1 mã Bot Token trước khi bật!', 'warning');
+            if (enabled && (chatIds.length === 0 || rawTokens.length === 0)) {
+                safeDashAlert('Thiếu thông tin', 'Vui lòng nhập ít nhất 1 ID Kênh Telegram và ít nhất 1 mã Bot Token trước khi bật!', 'warning');
                 return;
             }
 
-            const tgConfig = { enabled, chatId, botTokens: rawTokens };
+            const tgConfig = { enabled, chatId: chatIds.join('\n'), chatIds: chatIds, botTokens: rawTokens };
             try {
                 localStorage.setItem('omr_telegram_storage_config', JSON.stringify(tgConfig));
                 localStorage.setItem('qmath_telegram_config', JSON.stringify(tgConfig));
@@ -24380,7 +24403,7 @@ function renderTagFilterUI() {
                 icon: 'success',
                 title: 'Đã lưu cấu hình Kênh Telegram!',
                 text: enabled
-                    ? `Đã kích hoạt xoay vòng ${rawTokens.length} Bot Telegram lưu ảnh bài chấm OMR!`
+                    ? `Đã kích hoạt điều phối ${rawTokens.length} Bot và ${chatIds.length} Kênh Telegram OMR!`
                     : 'Đã tắt tính năng tự động lưu ảnh lên Telegram.',
                 timer: 2000,
                 showConfirmButton: false
@@ -24391,25 +24414,26 @@ function renderTagFilterUI() {
             const txtChat = document.getElementById('dashTgConfigChatId');
             const txtTokens = document.getElementById('dashTgConfigTokens');
 
-            const chatId = (txtChat?.value || '').trim();
+            const rawChat = (txtChat?.value || '').trim();
+            const chatIds = rawChat.split('\n').map(c => c.trim()).filter(Boolean);
             const rawTokens = (txtTokens?.value || '').split('\n').map(t => t.trim()).filter(Boolean);
 
-            if (!chatId || rawTokens.length === 0) {
-                safeDashAlert('Thiếu thông tin', 'Vui lòng nhập ID Kênh và ít nhất 1 mã Bot Token để kiểm tra kết nối!', 'warning');
+            if (chatIds.length === 0 || rawTokens.length === 0) {
+                safeDashAlert('Thiếu thông tin', 'Vui lòng nhập ít nhất 1 ID Kênh và ít nhất 1 mã Bot Token để kiểm tra kết nối!', 'warning');
                 return;
             }
 
             if (typeof Swal !== 'undefined' && Swal && Swal.fire) {
                 Swal.fire({
                     title: 'Đang kiểm tra kết nối Telegram...',
-                    html: `Đang gửi ảnh kiểm tra qua <b>${rawTokens.length} bot</b>... Vui lòng chờ vài giây!`,
+                    html: `Đang gửi ảnh kiểm tra qua <b>${rawTokens.length} bot</b> và <b>${chatIds.length} kênh</b>... Vui lòng chờ vài giây!`,
                     allowOutsideClick: false,
                     didOpen: () => {
                         if (Swal.showLoading) Swal.showLoading();
                     }
                 });
             } else if (window.showNotification) {
-                window.showNotification(`Đang gửi ảnh kiểm tra qua ${rawTokens.length} bot Telegram...`, 'info');
+                window.showNotification(`Đang gửi ảnh kiểm tra qua ${rawTokens.length} bot và ${chatIds.length} kênh Telegram...`, 'info');
             }
 
             try {
@@ -24435,9 +24459,10 @@ function renderTagFilterUI() {
                 const blob = new Blob([u8arr], { type: 'image/jpeg' });
 
                 const token = rawTokens[0];
+                const channel = chatIds[0];
                 const fd = new FormData();
-                fd.append('chat_id', chatId);
-                fd.append('caption', `✅ Kết nối Kênh Telegram thành công từ QMath Dashboard API Settings!\n🤖 Sử dụng Bot: ${token.split(':')[0]}...\n👥 Tổng số Bot: ${rawTokens.length} bot\n⏰ Thời gian: ${new Date().toLocaleString('vi-VN')}`);
+                fd.append('chat_id', channel);
+                fd.append('caption', `✅ Kết nối Telegram thành công từ QMath Dashboard API Settings!\n🤖 Bot: ${token.split(':')[0]}...\n👥 Tổng số Bot: ${rawTokens.length} bot\n📡 Kênh nhận test: ${channel} (Tổng: ${chatIds.length} kênh)\n⏰ Thời gian: ${new Date().toLocaleString('vi-VN')}`);
                 fd.append('photo', blob, 'test_dashboard.jpg');
 
                 const resp = await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, {
@@ -24450,7 +24475,7 @@ function renderTagFilterUI() {
                     safeDashAlert({
                         icon: 'success',
                         title: '🎉 Kết nối thành công!',
-                        html: `Bot đã gửi ảnh test lên Kênh Telegram <b>${chatId}</b> thành công! Hãy mở Kênh Telegram để kiểm tra.`,
+                        html: `Bot đã gửi ảnh test lên Kênh Telegram <b>${channel}</b> thành công! Hãy mở Kênh Telegram để kiểm tra.<br><span class="text-xs text-slate-500 mt-2 block">(Hệ thống đã nhận diện ${rawTokens.length} Bot và ${chatIds.length} Kênh).</span>`,
                         confirmButtonText: 'Tuyệt vời',
                         confirmButtonColor: '#0ea5e9'
                     });
@@ -24458,8 +24483,17 @@ function renderTagFilterUI() {
                     safeDashAlert({
                         icon: 'error',
                         title: 'Lỗi gửi ảnh Telegram',
-                        html: `Telegram báo lỗi: <br><code class="text-rose-500 font-bold">${resJson.description || 'Không rõ lỗi'}</code><br><br><span class="text-xs text-slate-500">Gợi ý: Hãy đảm bảo bạn đã thêm Bot vào Kênh và cấp quyền <b>Admin (Đăng bài)</b> cho Bot!</span>`
+                        html: `Telegram báo lỗi với kênh <b>${channel}</b>: <br><code class="text-rose-500 font-bold">${resJson.description || 'Không rõ lỗi'}</code><br><br><span class="text-xs text-slate-500">Gợi ý: Hãy đảm bảo bạn đã thêm Bot vào Kênh và cấp quyền <b>Admin (Đăng bài)</b> cho Bot!</span>`
                     });
+                }
+            } catch (err) {
+                safeDashAlert({
+                    icon: 'error',
+                    title: 'Lỗi kết nối mạng',
+                    html: `Không thể kết nối đến Telegram API: <br><code>${err.message || err}</code>`
+                });
+            }
+        };
                 }
             } catch (err) {
                 safeDashAlert({
