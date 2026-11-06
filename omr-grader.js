@@ -151,9 +151,13 @@ preloadBrandLogo('./apple-touch-icon.png');
 
 function initTeacherUI() {
     const nameEl = document.getElementById('userDisplayName');
+    const deskNameEl = document.getElementById('sidebarTeacherName');
+    const deskEmailEl = document.getElementById('sidebarTeacherEmail');
     const avatarEl = document.getElementById('userAvatar');
     const name = state.user.displayName || state.user.name || state.user.email || 'Giáo viên';
     if (nameEl) nameEl.textContent = name;
+    if (deskNameEl) deskNameEl.textContent = name;
+    if (deskEmailEl) deskEmailEl.textContent = state.user.email || state.teacherUid || '';
     if (avatarEl) {
         const initial = name.trim().charAt(0).toUpperCase() || 'G';
         avatarEl.textContent = initial;
@@ -203,7 +207,7 @@ window.toggleDarkMode = () => {
     localStorage.setItem('theme', isDark ? 'dark' : 'light');
     localStorage.setItem('qmath_theme', isDark ? 'dark' : 'light');
     const icon = document.getElementById('themeIcon');
-    if (icon) icon.className = isDark ? 'fa-solid fa-sun text-amber-400' : 'fa-solid fa-moon text-slate-600';
+    if (icon) icon.className = isDark ? 'fa-solid fa-sun' : 'fa-solid fa-moon';
 };
 
 // Initialize Theme
@@ -214,7 +218,7 @@ window.toggleDarkMode = () => {
         document.documentElement.classList.add('dark');
         document.body?.classList.add('night');
         const icon = document.getElementById('themeIcon');
-        if (icon) icon.className = 'fa-solid fa-sun text-amber-400';
+        if (icon) icon.className = 'fa-solid fa-sun';
     }
 })();
 
@@ -588,7 +592,7 @@ async function loadTeacherExams() {
                 const snapOmr = await getDocs(qOmr);
                 omrLoaded = snapOmr.docs
                     .map(d => ({ id: d.id, ...d.data() }))
-                    .filter(e => !e.isDeleted && !localDeletedIds.has(e.id) && (!e.teacherId || e.teacherId === state.teacherUid));
+                    .filter(e => !e.isDeleted && !localDeletedIds.has(e.id) && e.teacherId === state.teacherUid);
                 omrSnapSuccess = true;
             } catch(e) {
                 console.warn("Firestore omr_exams failed:", e);
@@ -598,27 +602,29 @@ async function loadTeacherExams() {
             try {
                 const qCls = query(collection(db, "omr_local_classes"), where("teacherId", "==", state.teacherUid));
                 const snapCls = await getDocs(qCls);
-                if (snapCls && snapCls.docs.length > 0) {
+                if (snapCls) {
                     const cloudClasses = snapCls.docs
                         .map(d => ({ id: d.id, ...d.data() }))
-                        .filter(c => c && (!c.teacherId || c.teacherId === state.teacherUid) && c.id !== 'omr_cls_demo_12a1' && !c.isSample && !(c.name === '12A1' && (c.students || []).some(s => s.name === 'Nguyễn Văn An')));
-                    if (cloudClasses.length > 0) {
-                        const localCls = Array.isArray(state.omrClasses) ? state.omrClasses : [];
-                        cloudClasses.forEach(cCls => {
-                            const existIdx = localCls.findIndex(l => l.id === cCls.id);
-                            if (existIdx >= 0) {
-                                if ((cCls.students || []).length >= (localCls[existIdx].students || []).length) {
-                                    localCls[existIdx] = cCls;
-                                }
-                            } else {
-                                localCls.push(cCls);
+                        .filter(c => c && c.teacherId === state.teacherUid && c.id !== 'omr_cls_demo_12a1' && !c.isSample && !(c.name === '12A1' && (c.students || []).some(s => s.name === 'Nguyễn Văn An')));
+                    const localCls = (Array.isArray(state.omrClasses) ? state.omrClasses : []).filter(c => {
+                        if (!c || c.teacherId !== state.teacherUid) return false;
+                        if (state.teacherUid !== 'toPSzoUgYqduYdZrzj8QjARQoOW2' && ['S5aAJLYvwE2eh1asSG1a', 'omr_cls_1793885500258', 'omr_cls_1793807838725'].includes(c.id)) return false;
+                        return true;
+                    });
+                    cloudClasses.forEach(cCls => {
+                        const existIdx = localCls.findIndex(l => l.id === cCls.id);
+                        if (existIdx >= 0) {
+                            if ((cCls.students || []).length >= (localCls[existIdx].students || []).length) {
+                                localCls[existIdx] = cCls;
                             }
-                        });
-                        state.omrClasses = localCls;
-                        try {
-                            localStorage.setItem('omr_local_classes_' + (state.teacherUid || 'guest'), JSON.stringify(state.omrClasses));
-                        } catch (_) {}
-                    }
+                        } else {
+                            localCls.push(cCls);
+                        }
+                    });
+                    state.omrClasses = localCls;
+                    try {
+                        localStorage.setItem('omr_local_classes_' + (state.teacherUid || 'guest'), JSON.stringify(state.omrClasses));
+                    } catch (_) {}
                 }
             } catch(e) {
                 console.warn("Sync cloud omr_local_classes failed:", e);
@@ -691,7 +697,7 @@ async function loadTeacherExams() {
                     arr.forEach(locEx => {
                         if (!locEx || !locEx.id) return;
                         if (locEx.isDeleted || localDeletedIds.has(locEx.id)) return;
-                        if (locEx.teacherId && locEx.teacherId !== state.teacherUid) return;
+                        if (locEx.teacherId !== state.teacherUid) return;
                         if (omrLoaded.some(x => x.id === locEx.id)) {
                             keptLocal.push(locEx);
                         } else if (locEx._isLocalDraft) {
@@ -703,7 +709,7 @@ async function loadTeacherExams() {
                 } else {
                     // Khi đang offline mất mạng: nạp từ cache cục bộ của đúng GV này
                     arr.forEach(locEx => {
-                        if (locEx && locEx.id && !locEx.isLmsExam && !locEx.isDeleted && !localDeletedIds.has(locEx.id) && (!locEx.teacherId || locEx.teacherId === state.teacherUid) && !omrLoaded.some(x => x.id === locEx.id)) {
+                        if (locEx && locEx.id && !locEx.isLmsExam && !locEx.isDeleted && !localDeletedIds.has(locEx.id) && locEx.teacherId === state.teacherUid && !omrLoaded.some(x => x.id === locEx.id)) {
                             omrLoaded.push(locEx);
                         }
                     });
@@ -2671,7 +2677,7 @@ function renderInlineSubmissionsList() {
             }).catch(()=>{});
         }
 
-        const scoreColorClass = 'bg-emerald-600 dark:bg-emerald-500';
+        const scoreColorClass = 'btn-season-primary';
 
         return `
             <div class="swipe-item relative overflow-hidden select-none border-b border-gray-100 dark:border-[#38344D]/50 last:border-b-0" data-sub-id="${s.id}">
@@ -2692,13 +2698,13 @@ function renderInlineSubmissionsList() {
                         <!-- Trường hợp 1: Có tên trong danh sách lớp -> Hiển thị tên to, đậm, rõ nét -->
                         <div class="flex items-center gap-1.5 min-w-0">
                             <span class="font-extrabold text-xs sm:text-sm text-slate-900 dark:text-white truncate">${s.student_name}</span>
-                            ${s.class_name ? `<span class="px-1.5 py-0.2 rounded bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold border border-emerald-200/70 dark:border-emerald-800/60 shrink-0">${s.class_name}</span>${s.room ? `<span class="px-1.5 py-0.2 rounded bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 text-[10px] font-bold border border-indigo-200/70 dark:border-indigo-800/60 shrink-0 inline-flex items-center gap-0.5"><i class="fa-solid fa-door-open text-[8px]"></i>${s.room}</span>` : ''}` : ''}
+                            ${s.class_name ? `<span class="px-1.5 py-0.2 rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-[10px] font-bold border border-slate-200 dark:border-slate-700 shrink-0">${s.class_name}</span>${s.room ? `<span class="px-1.5 py-0.2 rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-[10px] font-bold border border-slate-200 dark:border-slate-700 shrink-0 inline-flex items-center gap-0.5"><i class="fa-solid fa-door-open text-[8px]"></i>${s.room}</span>` : ''}` : ''}
                         </div>
                         <div class="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400 font-mono mt-0.5 flex-wrap">
                             <span>SBD: <b class="text-slate-800 dark:text-slate-200 font-bold">${s.student_no || '--'}</b></span>
                             <span>·</span>
                             <span>Mã: <b class="text-slate-800 dark:text-slate-200 font-bold">${s.code || '--'}</b></span>
-                            <span id="subStorageStatus_${s.id}">${(s.telegram_photo_url || s.telegram_file_id) ? `<span class="text-emerald-500 text-[10px] inline-flex items-center gap-0.5" title="Đã sao lưu an toàn"><i class="fa-solid fa-circle-check"></i></span>` : ''}</span>
+                            <span id="subStorageStatus_${s.id}">${(s.telegram_photo_url || s.telegram_file_id) ? `<span class="text-slate-500 dark:text-slate-400 text-[10px] inline-flex items-center gap-0.5" title="Đã sao lưu an toàn"><i class="fa-solid fa-circle-check"></i></span>` : ''}</span>
                             ${unknownCodeBadge}
                             ${dupeBadge}
                         </div>
@@ -2716,11 +2722,11 @@ function renderInlineSubmissionsList() {
                                     <span>SBD: <b class="text-slate-900 dark:text-white font-extrabold">${s.student_no || '--'}</b></span>
                                     <span>·</span>
                                     <span>Mã: <b class="text-slate-900 dark:text-white font-extrabold">${s.code || '--'}</b></span>
-                                    <span id="subStorageStatus_${s.id}">${(s.telegram_photo_url || s.telegram_file_id) ? `<span class="text-emerald-500 text-[10px] inline-flex items-center gap-0.5" title="Đã sao lưu an toàn"><i class="fa-solid fa-circle-check"></i></span>` : ''}</span>
+                                    <span id="subStorageStatus_${s.id}">${(s.telegram_photo_url || s.telegram_file_id) ? `<span class="text-slate-500 dark:text-slate-400 text-[10px] inline-flex items-center gap-0.5" title="Đã sao lưu an toàn"><i class="fa-solid fa-circle-check"></i></span>` : ''}</span>
                                     ${unknownCodeBadge}
                                     ${dupeBadge}
                                 </div>
-                                <div class="text-[10px] font-semibold text-amber-600 dark:text-amber-400 flex items-center gap-1 mt-0.5 truncate">
+                                <div class="text-[10px] font-semibold text-slate-500 dark:text-slate-400 flex items-center gap-1 mt-0.5 truncate">
                                     <i class="fa-solid fa-pencil text-[9px] shrink-0"></i>
                                     <span class="truncate">Chưa gán tên</span>
                                 </div>
@@ -3087,7 +3093,7 @@ function updateOverviewStats() {
             recentCont.innerHTML = recent.map(s => `
                 <div class="py-2.5 flex items-center justify-between">
                     <div class="flex items-center gap-3">
-                        <div class="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 font-mono font-bold text-xs flex items-center justify-center">
+                        <div class="px-2.5 h-8 rounded-xl bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 font-mono font-bold text-xs flex items-center justify-center">
                             ${s.student_no || '---'}
                         </div>
                         <div>
@@ -3096,7 +3102,7 @@ function updateOverviewStats() {
                         </div>
                     </div>
                     <div class="text-right">
-                        <span class="text-sm font-black text-emerald-600 dark:text-emerald-400 font-mono">${Number(s.score).toFixed(2)}đ</span>
+                        <span class="text-sm font-black text-slate-900 dark:text-white font-mono">${Number(s.score).toFixed(2)}đ</span>
                         <div class="text-[10px] text-slate-400">${new Date(s.createdAt).toLocaleTimeString('vi-VN', {hour:'2-digit', minute:'2-digit'})}</div>
                     </div>
                 </div>
@@ -6992,8 +6998,8 @@ window.renderResultsTable = () => {
             <td class="p-3">
                 <div class="font-bold text-slate-900 dark:text-white flex items-center gap-2 flex-wrap">
                     <span>${displayName}</span>
-                    ${s.class_name ? `<span class="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 text-[10px] font-bold border border-emerald-200/70 dark:border-emerald-800/60">${s.class_name}</span>` : ''}
-                    ${s.room ? `<span class="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 text-[10px] font-bold border border-indigo-200/70 dark:border-indigo-800/60 inline-flex items-center gap-1" title="Phòng thi"><i class="fa-solid fa-door-open text-[9px]"></i>${s.room}</span>` : ''}
+                    ${s.class_name ? `<span class="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 text-[10px] font-bold border border-slate-200 dark:border-slate-700">${s.class_name}</span>` : ''}
+                    ${s.room ? `<span class="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 text-[10px] font-bold border border-slate-200 dark:border-slate-700 inline-flex items-center gap-1" title="Phòng thi"><i class="fa-solid fa-door-open text-[9px]"></i>${s.room}</span>` : ''}
                     ${s.name_image ? `<img src="${s.name_image}" class="h-5 max-w-[90px] object-contain border border-slate-200 dark:border-slate-700 rounded bg-white" title="Chữ viết tay gốc">` : ''}
                 </div>
             </td>
@@ -7006,12 +7012,12 @@ window.renderResultsTable = () => {
             <td class="p-3 text-center font-mono text-slate-600 dark:text-slate-400 hidden md:table-cell">${(s.part1_score ?? 0).toFixed(2)}</td>
             <td class="p-3 text-center font-mono text-slate-600 dark:text-slate-400 hidden md:table-cell">${(s.part2_score ?? 0).toFixed(2)}</td>
             <td class="p-3 text-center font-mono text-slate-600 dark:text-slate-400 hidden md:table-cell">${(s.part3_score ?? 0).toFixed(2)}</td>
-            <td class="p-3 text-center font-mono font-black ${(s.is_unknown_code || !resolveKeyForCode(s.code)) ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'} text-sm">${(s.score ?? 0).toFixed(2)}</td>
+            <td class="p-3 text-center font-mono font-black ${(s.is_unknown_code || !resolveKeyForCode(s.code)) ? 'text-rose-600 dark:text-rose-400' : 'text-slate-900 dark:text-white'} text-sm">${(s.score ?? 0).toFixed(2)}</td>
             <td class="p-3 text-center text-slate-400 text-[11px]">${new Date(s.createdAt).toLocaleTimeString('vi-VN', {hour:'2-digit', minute:'2-digit', day:'2-digit', month:'2-digit'})}</td>
             <td class="p-3 text-center">
                 <div class="flex items-center justify-center gap-1.5">
                     <span id="resStorageStatus_${s.id}">${(s.telegram_photo_url || s.telegram_file_id) ? `
-                    <span class="w-8 h-8 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 flex items-center justify-center border border-emerald-200 dark:border-emerald-800/60" title="Đã lưu ảnh bài chấm an toàn">
+                    <span class="w-8 h-8 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 flex items-center justify-center border border-slate-200 dark:border-slate-700" title="Đã lưu ảnh bài chấm an toàn">
                         <i class="fa-solid fa-circle-check text-sm"></i>
                     </span>` : ''}</span>
                     <button type="button" onclick="window.quickAssignStudentToSubmission('${s.id}')" class="w-8 h-8 rounded-xl btn-season-secondary flex items-center justify-center cursor-pointer" title="Gán tên / SBD học sinh cho phiếu này">
@@ -8127,6 +8133,7 @@ function syncExamStudentsToActiveOmrClass() {
     if (!targetCls) {
         targetCls = {
             id: examClassId,
+            teacherId: state.teacherUid,
             name: examClassName,
             academicYear: '2025-2026',
             description: `Đồng bộ từ bài thi "${state.exam.title || examClassName}"`,
@@ -8136,6 +8143,7 @@ function syncExamStudentsToActiveOmrClass() {
         };
         state.omrClasses.unshift(targetCls);
     } else {
+        targetCls.teacherId = targetCls.teacherId || state.teacherUid;
         // Cập nhật danh sách học sinh nếu số lượng học sinh trong bài thi đầy đủ hơn
         if (!targetCls.students || targetCls.students.length < validStudents.length) {
             targetCls.students = validStudents;
@@ -8162,7 +8170,13 @@ function loadLocalOmrClasses() {
         }
         if (Array.isArray(classes)) {
             // Lọc bỏ triệt để lớp mẫu 12A1 / demo và lớp của giáo viên khác
-            classes = classes.filter(c => c && (!c.teacherId || c.teacherId === state.teacherUid) && c.id !== 'omr_cls_demo_12a1' && !c.isSample && !(c.name === '12A1' && (c.students || []).some(s => s.name === 'Nguyễn Văn An')));
+            classes = classes.filter(c => {
+                if (!c || c.id === 'omr_cls_demo_12a1' || c.isSample) return false;
+                if (c.name === '12A1' && (c.students || []).some(s => s.name === 'Nguyễn Văn An')) return false;
+                if (c.teacherId && c.teacherId !== state.teacherUid) return false;
+                if (state.teacherUid !== 'toPSzoUgYqduYdZrzj8QjARQoOW2' && ['S5aAJLYvwE2eh1asSG1a', 'omr_cls_1793885500258', 'omr_cls_1793807838725'].includes(c.id)) return false;
+                return true;
+            });
         } else {
             classes = [];
         }
@@ -8241,12 +8255,12 @@ window.renderOmrClassesList = () => {
         const isActive = cls.id === state.activeOmrClassId;
         const studentCount = Array.isArray(cls.students) ? cls.students.length : 0;
         const activeClassStr = isActive
-            ? 'btn-season-primary shadow-sm font-bold border-2 border-emerald-400/80 scale-[1.02]'
-            : 'bg-gray-100 hover:bg-gray-200 dark:bg-[#1E1B29] dark:hover:bg-[#2D2A3D] text-slate-700 dark:text-slate-300 border border-gray-200 dark:border-[#38344D] font-semibold';
+            ? 'btn-season-primary font-bold'
+            : 'btn-season-secondary font-semibold';
 
         return `
             <button type="button" onclick="window.selectOmrClass('${cls.id}')" class="px-3 py-2 rounded-xl text-xs flex items-center gap-2 shrink-0 transition-all cursor-pointer ${activeClassStr}">
-                <i class="fa-solid fa-graduation-cap ${isActive ? 'text-white' : 'text-emerald-500'}"></i>
+                <i class="fa-solid fa-graduation-cap"></i>
                 <span class="truncate max-w-[140px]">${cls.name || 'Lớp OMR'}</span>
                 <span class="px-1.5 py-0.5 rounded-full text-[10px] ${isActive ? 'bg-black/25 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'} font-bold tabular-nums">
                     ${studentCount} HS
@@ -8254,7 +8268,7 @@ window.renderOmrClassesList = () => {
             </button>
         `;
     }).join('') + `
-        <button type="button" onclick="window.openCreateOmrClassModal()" class="px-3 py-2 rounded-xl text-xs font-bold bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 flex items-center gap-1.5 shrink-0 transition-colors cursor-pointer" title="Tạo thêm lớp OMR độc lập">
+        <button type="button" onclick="window.openCreateOmrClassModal()" class="px-3 py-2 rounded-xl text-xs font-bold btn-season-secondary flex items-center gap-1.5 shrink-0 cursor-pointer" title="Tạo thêm lớp OMR độc lập">
             <i class="fa-solid fa-plus"></i>
             <span>Thêm lớp</span>
         </button>
@@ -8450,7 +8464,7 @@ window.renderActiveOmrClassStudents = () => {
             
             let filterHtml = `
                 <span class="text-xs font-bold text-slate-500 dark:text-slate-400 flex items-center gap-1 mr-1">
-                    <i class="fa-solid fa-filter text-[10px] text-emerald-500"></i> Lọc lớp:
+                    <i class="fa-solid fa-filter text-[10px] text-slate-400"></i> Lọc lớp:
                 </span>
                 <button type="button" onclick="window.setActiveSubClassFilter('')" class="px-2.5 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer ${allBtnActive ? 'btn-season-primary' : 'btn-season-secondary'}">
                     Tất cả (${allClassStudents.length})
@@ -8536,15 +8550,15 @@ window.renderActiveOmrClassStudents = () => {
         });
 
         const statusBadge = sub
-            ? `<span class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 inline-flex items-center gap-1 shadow-2xs"><i class="fa-solid fa-circle-check"></i> Đã chấm: ${(Number(sub.score) || 0).toFixed(2)}đ</span>`
-            : `<span class="px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400">Chưa có bài</span>`;
+            ? `<span class="px-2.5 py-1 rounded-xl text-[10px] font-bold bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 inline-flex items-center gap-1"><i class="fa-solid fa-circle-check"></i> Đã chấm: ${(Number(sub.score) || 0).toFixed(2)}đ</span>`
+            : `<span class="px-2 py-0.5 rounded-xl text-[10px] font-medium bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400">Chưa có bài</span>`;
 
         const roomBadge = roomVal
-            ? `<span class="px-2.5 py-1 rounded-xl bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 font-bold text-xs border border-indigo-200/70 dark:border-indigo-800/60 inline-flex items-center gap-1 shadow-2xs"><i class="fa-solid fa-door-open text-[10px] text-indigo-500"></i> ${roomVal}</span>`
+            ? `<span class="px-2.5 py-1 rounded-xl bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 font-semibold text-xs border border-slate-200 dark:border-slate-700 inline-flex items-center gap-1"><i class="fa-solid fa-door-open text-[10px] text-slate-400"></i> ${roomVal}</span>`
             : `<span class="text-slate-400 italic text-[11px]">---</span>`;
 
         const classBadge = classVal
-            ? `<span class="px-2.5 py-1 rounded-xl bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 font-bold text-xs border border-emerald-200/70 dark:border-emerald-800/60 inline-flex items-center gap-1 shadow-2xs"><i class="fa-solid fa-graduation-cap text-[10px] text-emerald-500"></i> ${classVal}</span>`
+            ? `<span class="px-2.5 py-1 rounded-xl bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 font-semibold text-xs border border-slate-200 dark:border-slate-700 inline-flex items-center gap-1"><i class="fa-solid fa-graduation-cap text-[10px] text-slate-400"></i> ${classVal}</span>`
             : (s.grade ? `<span class="px-2 py-0.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 font-semibold text-xs">${s.grade}</span>` : `<span class="text-slate-400">---</span>`);
 
         const subInfo = [s.dob, s.gender].filter(Boolean).join(' · ');
@@ -11891,18 +11905,18 @@ window.renderLmsExamPickerList = () => {
                         ${item.name}
                     </h5>
                     <div class="flex items-center gap-1 shrink-0">
-                        ${gradedCount > 0 ? `<button type="button" onclick="event.stopPropagation(); window.clearExamSubmissions('${item.id}')" class="px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-emerald-100 hover:bg-rose-100 text-emerald-800 hover:text-rose-700 dark:bg-emerald-950 dark:hover:bg-rose-950/60 dark:text-emerald-300 dark:hover:text-rose-300 border border-emerald-300/60 dark:border-emerald-700 transition-colors cursor-pointer" title="Bấm để xóa sạch ${gradedCount} bài đã chấm (chấm lại)">✓ Đã chấm ${gradedCount} bài <i class="fa-solid fa-rotate-left text-[9px] ml-1"></i></button>` : ''}
-                        ${isCurrent ? '<span class="px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-emerald-600 text-white">Đang chọn</span>' : ''}
+                        ${gradedCount > 0 ? `<button type="button" onclick="event.stopPropagation(); window.clearExamSubmissions('${item.id}')" class="px-2 py-0.5 rounded-xl text-[10px] font-bold btn-season-secondary cursor-pointer" title="Bấm để xóa sạch ${gradedCount} bài đã chấm (chấm lại)">✓ Đã chấm ${gradedCount} bài <i class="fa-solid fa-rotate-left text-[9px] ml-1"></i></button>` : ''}
+                        ${isCurrent ? '<span class="px-2 py-0.5 rounded-lg text-[10px] font-extrabold btn-season-primary">Đang chọn</span>' : ''}
                     </div>
                 </div>
 
                 <!-- Dòng 2: Thông tin cấu trúc + Mã đề OMR + Nút chọn gọn gàng -->
                 <div class="flex items-center justify-between gap-2 pt-1 border-t border-gray-100 dark:border-[#38344D]/70 text-[11px] text-slate-500 dark:text-slate-400">
                     <div class="flex items-center flex-wrap gap-x-2 gap-y-1 min-w-0">
-                        <span class="px-1.5 py-0.5 rounded text-[10px] font-bold ${item.isLmsExam ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300' : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300'}">${item.isLmsExam ? 'Kho đề LMS' : 'Đề tự tạo'}</span>
+                        <span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">${item.isLmsExam ? 'Kho đề LMS' : 'Đề tự tạo'}</span>
                         <span><b>${item.question_count || 12}</b> TN · <b>${item.part2_count || 4}</b> Đ/S · <b>${item.part3_count || 6}</b> TLN</span>
-                        <span class="px-1.5 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 font-mono font-bold text-[10px]">Mã: ${omrCode}</span>
-                        ${item.className ? `<span class="text-emerald-600 dark:text-emerald-400 font-bold truncate">• ${item.className}</span>` : ''}
+                        <span class="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 font-mono font-bold text-[10px]">Mã: ${omrCode}</span>
+                        ${item.className ? `<span class="text-slate-600 dark:text-slate-300 font-bold truncate">• ${item.className}</span>` : ''}
                     </div>
                     <div class="flex items-center gap-1.5 shrink-0">
                         ${!item.isLmsExam ? `

@@ -14,7 +14,7 @@
  * (network-first) nhưng nên tăng khi đổi styles.css/utils.js để chắc chắn.
  */
 
-const VERSION = 'qmath-v137-omr-clean-isolation';
+const VERSION = 'qmath-v138-omr-flat-clean-strict';
 const STATIC_CACHE = `${VERSION}-static`;
 const PAGE_CACHE = `${VERSION}-pages`;
 const CDN_CACHE = `${VERSION}-cdn`;
@@ -100,7 +100,7 @@ self.addEventListener('fetch', (event) => {
   // 3. File code adapter DB Supabase & core utils: luôn NETWORK-FIRST để không bao giờ bị lệch phiên bản module
   if (url.origin === self.location.origin && (url.pathname.includes('omr-grader') || url.pathname.includes('/omr/') || url.pathname.includes('supabase-db-compat') || url.pathname.includes('supabase-client') || url.pathname.includes('supabase.esm') || url.pathname.includes('live-tracker') || url.pathname.includes('utils.js'))) {
     event.respondWith(
-      fetch(req)
+      fetch(req, { cache: 'no-cache' })
         .then((res) => {
           const copy = res.clone();
           caches.open(STATIC_CACHE).then((c) => c.put(req, copy));
