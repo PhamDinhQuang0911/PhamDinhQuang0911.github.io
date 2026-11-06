@@ -420,6 +420,14 @@ function computeOmrExam4DigitCode(id) {
 }
 window.computeOmrExam4DigitCode = computeOmrExam4DigitCode;
 
+function parseSafeScorePoint(val, defaultVal = 0.5) {
+    if (val === undefined || val === null || val === '') return defaultVal;
+    const str = String(val).trim().replace(',', '.');
+    const num = parseFloat(str);
+    return isNaN(num) ? defaultVal : num;
+}
+window.parseSafeScorePoint = parseSafeScorePoint;
+
 function normalizeLmsExam(raw) {
     const qList = Array.isArray(raw.questions) ? raw.questions : [];
     const mcCount = qList.filter(q => q && (q.type === 'mc' || !q.type)).length;
@@ -445,9 +453,9 @@ function normalizeLmsExam(raw) {
         question_count: mcCount > 0 ? mcCount : (raw.question_count || 12),
         part2_count: tfCount > 0 ? tfCount : (raw.part2_count || 4),
         part3_count: shortCount > 0 ? shortCount : (raw.part3_count || 6),
-        part1_point: raw.part1_point || 0.25,
+        part1_point: parseSafeScorePoint(raw.part1_point, 0.25),
         part2_points: raw.part2_points || [0.1, 0.25, 0.5, 1.0],
-        part3_point: raw.part3_point || 0.5,
+        part3_point: parseSafeScorePoint(raw.part3_point, 0.5),
         omrCode,
         codes,
         questions: qList,
@@ -748,10 +756,10 @@ async function loadTeacherExams() {
                     question_count: 12,
                     part2_count: 4,
                     part3_count: 6,
-                    part1_point: p1Point,
-        part2_points: [0.1, 0.25, 0.5, 1.0],
-        part3_point: p3Point,
-        folderId: folderId,
+                    part1_point: 0.25,
+                    part2_points: [0.1, 0.25, 0.5, 1.0],
+                    part3_point: 0.5,
+                    folderId: null,
                     codes: [r.examCode || '0101', '101', '102'],
                     classId: r.classId || '',
                     className: r.className || '',
@@ -970,6 +978,8 @@ async function selectExam(examId) {
         } catch(e) {}
     }
 
+    exam.part1_point = parseSafeScorePoint(exam.part1_point, 0.25);
+    exam.part3_point = parseSafeScorePoint(exam.part3_point, 0.5);
     state.exam = exam;
     localStorage.setItem('omr_last_exam_id_' + state.teacherUid, exam.id);
 
@@ -5022,9 +5032,9 @@ function calculateExamScore(code, studentP1, studentP2, studentP3) {
             isUnknownCode: true
         };
     }
-    const p1Pt = state.exam?.part1_point ?? 0.25;
+    const p1Pt = parseSafeScorePoint(state.exam?.part1_point, 0.25);
     const p2Pts = state.exam?.part2_points || [0.1, 0.25, 0.5, 1.0];
-    const p3Pt = state.exam?.part3_point ?? 0.5;
+    const p3Pt = parseSafeScorePoint(state.exam?.part3_point, 0.5);
 
     // Part I
     let p1Correct = 0;
@@ -5974,11 +5984,12 @@ async function generateStampedGradedSheet(sub, rawResult) {
                 if (!hasValidKey) {
                     ctx.fillText(`✗ ${sAns || 'Trống'} (Chưa có đáp án)`, bx + bw / 2, by + bh / 2);
                 } else if (isP3Override) {
-                    ctx.fillText(`★ Đã sửa: ${sAns || '---'} (+${isMatch ? (state.exam?.part3_point ?? 0.5) : 0}đ)`, bx + bw / 2, by + bh / 2);
+                    const p3PtStamp = parseSafeScorePoint(state.exam?.part3_point, 0.5);
+                    ctx.fillText(`★ Đã sửa: ${sAns || '---'} (+${isMatch ? p3PtStamp : 0}đ)`, bx + bw / 2, by + bh / 2);
                 } else if (isP3Bonus) {
-                    ctx.fillText(`★ Cho điểm: ${sAns || '---'} (+${state.exam?.part3_point ?? 0.5}đ)`, bx + bw / 2, by + bh / 2);
+                    ctx.fillText(`★ Cho điểm: ${sAns || '---'} (+${parseSafeScorePoint(state.exam?.part3_point, 0.5)}đ)`, bx + bw / 2, by + bh / 2);
                 } else if (isMatch) {
-                    ctx.fillText(`✓ ${sAns || '---'} (+${state.exam?.part3_point ?? 0.5}đ)`, bx + bw / 2, by + bh / 2);
+                    ctx.fillText(`✓ ${sAns || '---'} (+${parseSafeScorePoint(state.exam?.part3_point, 0.5)}đ)`, bx + bw / 2, by + bh / 2);
                 } else {
                     ctx.fillText(`✗ ${sAns || 'Trống'} (Đ/A: ${kAns || '---'})`, bx + bw / 2, by + bh / 2);
                 }
@@ -6138,7 +6149,8 @@ function renderSvgOverlay(rawResult, code) {
                 const bg = isMatch ? '#ecfdf5' : '#fef2f2';
                 const stroke = isMatch ? '#10b981' : '#ef4444';
                 const textCol = isMatch ? '#065f46' : '#991b1b';
-                const label = isMatch ? `✓ ${sAns || '---'} (+${state.exam?.part3_point ?? 0.5}đ)` : `✗ ${sAns || 'Trống'} (Đ/A: ${kAns || '---'})`;
+                const p3PtSvg = parseSafeScorePoint(state.exam?.part3_point, 0.5);
+                const label = isMatch ? `✓ ${sAns || '---'} (+${p3PtSvg}đ)` : `✗ ${sAns || 'Trống'} (Đ/A: ${kAns || '---'})`;
                 marks += `
                     <g>
                         <rect x="${bx}" y="${by}" width="150" height="34" rx="8" fill="${bg}" stroke="${stroke}" stroke-width="1.5" />
@@ -11159,10 +11171,10 @@ window.confirmCreateExam = async () => {
     const tpl = document.getElementById('newExamTemplate')?.value || 'qmcv1239';
     const codes = (document.getElementById('newExamCodes')?.value || '101, 102').split(',').map(s => s.trim()).filter(Boolean);
     const p1Count = parseInt(document.getElementById('newExamCountP1')?.value) || 12;
-    const p1Point = parseFloat(document.getElementById('newExamPointP1')?.value) || 0.25;
+    const p1Point = parseSafeScorePoint(document.getElementById('newExamPointP1')?.value, 0.25);
     const p2Count = parseInt(document.getElementById('newExamCountP2')?.value) || 4;
     const p3Count = parseInt(document.getElementById('newExamCountP3')?.value) || 6;
-    const p3Point = parseFloat(document.getElementById('newExamPointP3')?.value) || 0.5;
+    const p3Point = parseSafeScorePoint(document.getElementById('newExamPointP3')?.value, 0.5);
     const omrClassId = document.getElementById('newExamOmrClassId')?.value || '';
     const folderId = document.getElementById('newExamFolderSelect')?.value || state.currentFolderId || null;
 
@@ -11212,9 +11224,9 @@ window.confirmCreateExam = async () => {
         question_count: p1Count,
         part2_count: p2Count,
         part3_count: p3Count,
-        part1_point: 0.25,
+        part1_point: p1Point,
         part2_points: [0.1, 0.25, 0.5, 1.0],
-        part3_point: 0.5,
+        part3_point: p3Point,
         codes,
         classId: attachedClass ? attachedClass.id : null,
         className: attachedClass ? attachedClass.name : null,
@@ -11279,16 +11291,16 @@ setTimeout(() => {
 window.calcExamScorePreview = (mode = 'create') => {
     const prefix = mode === 'create' ? 'newExam' : 'editExam';
     const p1Count = parseInt(document.getElementById(`${prefix}CountP1`)?.value) || 0;
-    const p1Pt = parseFloat(document.getElementById(`${prefix}PointP1`)?.value) || 0;
+    const p1Pt = parseSafeScorePoint(document.getElementById(`${prefix}PointP1`)?.value, 0.25);
     const p2Count = parseInt(document.getElementById(`${prefix}CountP2`)?.value) || 0;
     const p2MaxPt = 1.0; // Barem Bộ GD: tối đa 1.0đ cho mỗi câu 4 ý
     const p3Count = parseInt(document.getElementById(`${prefix}CountP3`)?.value) || 0;
-    const p3Pt = parseFloat(document.getElementById(`${prefix}PointP3`)?.value) || 0;
+    const p3Pt = parseSafeScorePoint(document.getElementById(`${prefix}PointP3`)?.value, 0.5);
 
-    const p1Total = p1Count * p1Pt;
-    const p2Total = p2Count * p2MaxPt;
-    const p3Total = p3Count * p3Pt;
-    const total = p1Total + p2Total + p3Total;
+    const p1Total = Math.round(p1Count * p1Pt * 100) / 100;
+    const p2Total = Math.round(p2Count * p2MaxPt * 100) / 100;
+    const p3Total = Math.round(p3Count * p3Pt * 100) / 100;
+    const total = Math.round((p1Total + p2Total + p3Total) * 100) / 100;
 
     const badge = document.getElementById(`${prefix}ScoreBadge`);
     const warnBox = document.getElementById(`${prefix}ScoreWarnBox`);
@@ -11836,10 +11848,10 @@ window.confirmSaveExamSettings = async () => {
     state.exam.sheet_template = newSheetTemplate;
     state.exam.codes = (document.getElementById('editExamCodes')?.value || '101').split(',').map(s => s.trim()).filter(Boolean);
     state.exam.question_count = parseInt(document.getElementById('editExamCountP1')?.value) || 12;
-    state.exam.part1_point = parseFloat(document.getElementById('editExamPointP1')?.value) || 0.25;
+    state.exam.part1_point = parseSafeScorePoint(document.getElementById('editExamPointP1')?.value, 0.25);
     state.exam.part2_count = parseInt(document.getElementById('editExamCountP2')?.value) || 4;
     state.exam.part3_count = parseInt(document.getElementById('editExamCountP3')?.value) || 6;
-    state.exam.part3_point = parseFloat(document.getElementById('editExamPointP3')?.value) || 0.5;
+    state.exam.part3_point = parseSafeScorePoint(document.getElementById('editExamPointP3')?.value, 0.5);
     state.exam.folderId = document.getElementById('editExamFolderSelect')?.value || null;
 
     saveLocalExams(state.exams);
