@@ -1,11 +1,12 @@
 /**
  * ==============================================================================
- * CAMSCANNER WEB EDITION — QMATH CLONE
- * Reverse-Engineered Algorithms:
- * 1. Perspective Homography Dewarping
- * 2. CamScanner "Silver Bullet" Magic Color & Illumination Normalization
- * 3. Sauvola Adaptive Binarization (B&W Fax)
- * 4. HTML5 Mobile Camera & Interactive 8-Point Crop with Touch Loupe
+ * CAMSCANNER WEB EDITION — QMATH CLONE v2.0
+ * 
+ * Major Fixes & Enhancements:
+ * 1. Camera FOV: Full 1.0x uncropped sensor view (object-fit: contain, no digital zoom)
+ * 2. Instant Scan Table: Auto-warp & jump directly to Filter View without pressing "V"
+ * 3. Handwriting HD & Magic Color: Deep contrast boost & unsharp edge sharpening for handwritten text
+ * 4. Interactive Re-crop: Available at any time via "Chỉnh góc" button
  * ==============================================================================
  */
 
@@ -44,14 +45,15 @@ class CamScannerApp {
     this.searchQuery = '';
     this.activeDoc = null;
     this.mediaStream = null;
+    this.torchEnabled = false;
 
     // Crop state
     this.rawCapturedImage = null;
     this.cropCorners = [
-      { x: 0.1, y: 0.1 }, // TL
-      { x: 0.9, y: 0.1 }, // TR
-      { x: 0.9, y: 0.9 }, // BR
-      { x: 0.1, y: 0.9 }, // BL
+      { x: 0.04, y: 0.04 }, // TL
+      { x: 0.96, y: 0.04 }, // TR
+      { x: 0.96, y: 0.96 }, // BR
+      { x: 0.04, y: 0.96 }, // BL
     ];
     this.draggedCornerIndex = null;
 
@@ -73,6 +75,7 @@ class CamScannerApp {
     this.cameraModal = document.getElementById('camera-modal');
     this.videoEl = document.getElementById('camera-video');
     this.galleryInput = document.getElementById('gallery-input');
+    this.torchBtn = document.getElementById('toggle-torch-btn');
 
     // Crop
     this.cropModal = document.getElementById('crop-modal');
@@ -86,6 +89,7 @@ class CamScannerApp {
     this.filterModal = document.getElementById('filter-modal');
     this.filterCanvas = document.getElementById('filter-canvas');
     this.filterCtx = this.filterCanvas.getContext('2d');
+    this.adjustCropBtn = document.getElementById('adjust-crop-btn');
 
     // Detail & Tools
     this.detailModal = document.getElementById('detail-modal');
@@ -115,7 +119,12 @@ class CamScannerApp {
     document.getElementById('close-camera-btn').addEventListener('click', () => this.closeCamera());
     document.getElementById('shutter-btn').addEventListener('click', () => this.captureFrame());
 
-    // Gallery Input
+    // Torch Toggle
+    if (this.torchBtn) {
+      this.torchBtn.addEventListener('click', () => this.toggleTorch());
+    }
+
+    // Gallery Input -> Auto-warp and jump straight to filter view!
     this.galleryInput.addEventListener('change', (e) => {
       const file = e.target.files[0];
       if (file) {
@@ -124,7 +133,15 @@ class CamScannerApp {
           const img = new Image();
           img.onload = () => {
             this.closeCamera();
-            this.startCrop(img);
+            this.rawCapturedImage = img;
+            this.cropCorners = [
+              { x: 0.02, y: 0.02 },
+              { x: 0.98, y: 0.02 },
+              { x: 0.98, y: 0.98 },
+              { x: 0.02, y: 0.98 },
+            ];
+            // TỰ ĐỘNG CHUYỂN THẲNG SANG BÀN SCAN!
+            this.applyCropAndOpenFilter();
           };
           img.src = event.target.result;
         };
@@ -132,13 +149,13 @@ class CamScannerApp {
       }
     });
 
-    // Crop Canvas Touch & Mouse
+    // Crop Canvas Gestures
     this.setupCropGestures();
 
     // Crop Actions
     document.getElementById('crop-next-btn').addEventListener('click', () => this.applyCropAndOpenFilter());
     document.getElementById('crop-auto-btn').addEventListener('click', () => {
-      this.cropCorners = [{ x: 0.1, y: 0.1 }, { x: 0.9, y: 0.1 }, { x: 0.9, y: 0.9 }, { x: 0.1, y: 0.9 }];
+      this.cropCorners = [{ x: 0.06, y: 0.06 }, { x: 0.94, y: 0.06 }, { x: 0.94, y: 0.94 }, { x: 0.06, y: 0.94 }];
       this.renderCropCanvas();
     });
     document.getElementById('crop-full-btn').addEventListener('click', () => {
@@ -148,6 +165,14 @@ class CamScannerApp {
     document.getElementById('close-crop-btn').addEventListener('click', () => {
       this.cropModal.classList.remove('active');
     });
+
+    // Re-crop button on Filter view
+    if (this.adjustCropBtn) {
+      this.adjustCropBtn.addEventListener('click', () => {
+        this.filterModal.classList.remove('active');
+        this.startCrop(this.rawCapturedImage);
+      });
+    }
 
     // Filter Items
     document.querySelectorAll('.filter-item').forEach(item => {
@@ -164,7 +189,7 @@ class CamScannerApp {
       this.filterModal.classList.remove('active');
     });
 
-    // Tools Tab Navigation
+    // Navigation Tabs
     document.getElementById('nav-docs').addEventListener('click', () => {
       this.toolsModal.classList.remove('active');
       document.getElementById('nav-docs').classList.add('active');
@@ -224,19 +249,51 @@ class CamScannerApp {
     });
   }
 
-  /* ===================== CAMERA STREAMING ===================== */
+  /* ===================== CAMERA STREAMING (UNCROPPED 1.0X) ===================== */
   async openCamera() {
     this.cameraModal.classList.add('active');
     try {
-      this.mediaStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+      // Use standard camera constraints without zoom cropping
+      const constraints = {
+        video: {
+          facingMode: { ideal: "environment" },
+          width: { ideal: 1920, min: 1280 },
+          height: { ideal: 1080, min: 720 },
+          aspectRatio: { ideal: 1.333333 } // 4:3 native phone sensor ratio
+        },
         audio: false
-      });
+      };
+
+      this.mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
       this.videoEl.srcObject = this.mediaStream;
+
+      // Force wide angle 1.0x (disable software zoom)
+      const track = this.mediaStream.getVideoTracks()[0];
+      if (track && track.getCapabilities) {
+        const caps = track.getCapabilities();
+        if (caps.zoom) {
+          track.applyConstraints({
+            advanced: [{ zoom: caps.zoom.min || 1.0 }]
+          }).catch(() => {});
+        }
+      }
     } catch (err) {
       console.warn("Camera directly unavailable, offering file upload fallback:", err);
-      // Trigger file picker if camera stream fails/denied
       this.galleryInput.click();
+    }
+  }
+
+  async toggleTorch() {
+    if (!this.mediaStream) return;
+    const track = this.mediaStream.getVideoTracks()[0];
+    if (track && track.getCapabilities) {
+      const caps = track.getCapabilities();
+      if (caps.torch) {
+        this.torchEnabled = !this.torchEnabled;
+        await track.applyConstraints({
+          advanced: [{ torch: this.torchEnabled }]
+        });
+      }
     }
   }
 
@@ -248,18 +305,30 @@ class CamScannerApp {
     this.cameraModal.classList.remove('active');
   }
 
+  /* ===================== INSTANT AUTO-SCAN (NO "V" REQUIRED) ===================== */
   captureFrame() {
     const video = this.videoEl;
     const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth || 1280;
-    canvas.height = video.videoHeight || 720;
+    canvas.width = video.videoWidth || 1920;
+    canvas.height = video.videoHeight || 1080;
     const ctx = canvas.getContext('2d');
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
     const img = new Image();
     img.onload = () => {
       this.closeCamera();
-      this.startCrop(img);
+      this.rawCapturedImage = img;
+
+      // Auto-set 4 corners to standard full-document frame
+      this.cropCorners = [
+        { x: 0.04, y: 0.04 },
+        { x: 0.96, y: 0.04 },
+        { x: 0.96, y: 0.96 },
+        { x: 0.04, y: 0.96 },
+      ];
+
+      // TỰ ĐỘNG CHUYỂN THẲNG SANG BÀN SCAN MÀ KHÔNG CẦN BẤM TÍCH V!
+      this.applyCropAndOpenFilter();
     };
     img.src = canvas.toDataURL('image/jpeg', 0.95);
   }
@@ -269,18 +338,9 @@ class CamScannerApp {
     this.rawCapturedImage = img;
     this.cropModal.classList.add('active');
 
-    // Auto-size canvas to viewport
     const container = document.querySelector('.crop-viewport');
     this.cropCanvas.width = container.clientWidth;
     this.cropCanvas.height = container.clientHeight;
-
-    // Reset corners to 80% box
-    this.cropCorners = [
-      { x: 0.12, y: 0.12 },
-      { x: 0.88, y: 0.12 },
-      { x: 0.88, y: 0.88 },
-      { x: 0.12, y: 0.88 },
-    ];
     this.renderCropCanvas();
   }
 
@@ -290,7 +350,6 @@ class CamScannerApp {
     const h = this.cropCanvas.height;
     ctx.clearRect(0, 0, w, h);
 
-    // Draw background image scaled
     const img = this.rawCapturedImage;
     ctx.drawImage(img, 0, 0, w, h);
 
@@ -299,7 +358,6 @@ class CamScannerApp {
     ctx.fillStyle = "rgba(0, 0, 0, 0.45)";
     ctx.fillRect(0, 0, w, h);
 
-    // Cut out quadrilateral
     ctx.beginPath();
     ctx.moveTo(this.cropCorners[0].x * w, this.cropCorners[0].y * h);
     for (let i = 1; i < 4; i++) {
@@ -307,11 +365,10 @@ class CamScannerApp {
     }
     ctx.closePath();
     ctx.clip();
-    // Redraw unmasked area inside quad
     ctx.drawImage(img, 0, 0, w, h);
     ctx.restore();
 
-    // Draw green quad borders
+    // Quad borders
     ctx.strokeStyle = "#20b573";
     ctx.lineWidth = 2.5;
     ctx.beginPath();
@@ -322,8 +379,8 @@ class CamScannerApp {
     ctx.closePath();
     ctx.stroke();
 
-    // Draw 4 corner circles
-    this.cropCorners.forEach((pt, idx) => {
+    // 4 Corner Handles
+    this.cropCorners.forEach((pt) => {
       ctx.fillStyle = "#ffffff";
       ctx.beginPath();
       ctx.arc(pt.x * w, pt.y * h, 11, 0, Math.PI * 2);
@@ -353,7 +410,7 @@ class CamScannerApp {
     const onStart = (e) => {
       const pos = getPos(e);
       let closestIdx = -1;
-      let minDis = 0.08; // threshold
+      let minDis = 0.08;
 
       this.cropCorners.forEach((pt, idx) => {
         const d = Math.hypot(pt.x - pos.x, pt.y - pos.y);
@@ -401,7 +458,6 @@ class CamScannerApp {
     this.loupeEl.style.left = `${Math.max(10, Math.min(this.cropCanvas.width - 110, px - 50))}px`;
     this.loupeEl.style.top = `${Math.max(10, py - 120)}px`;
 
-    // Render zoomed view
     this.loupeCanvas.width = 100;
     this.loupeCanvas.height = 100;
     const lCtx = this.loupeCtx;
@@ -421,17 +477,15 @@ class CamScannerApp {
     this.cropModal.classList.remove('active');
     this.filterModal.classList.add('active');
 
-    // 1. Perspective Transform (Homography Inverse Mapping)
     const img = this.rawCapturedImage;
-    const dstW = 800;
-    const dstH = 1100;
+    const dstW = 900;
+    const dstH = 1200;
 
     const tempCanvas = document.createElement('canvas');
     tempCanvas.width = dstW;
     tempCanvas.height = dstH;
     const tCtx = tempCanvas.getContext('2d');
 
-    // Perform quadrilateral bilinear mapping
     const srcCanvas = document.createElement('canvas');
     srcCanvas.width = img.width;
     srcCanvas.height = img.height;
@@ -455,7 +509,6 @@ class CamScannerApp {
       for (let dx = 0; dx < dstW; dx++) {
         const u = dx / dstW;
 
-        // Bilinear interpolation of quad points
         const tx = pTL.x + (pTR.x - pTL.x) * u;
         const ty = pTL.y + (pTR.y - pTL.y) * u;
         const bx = pBL.x + (pBR.x - pBL.x) * u;
@@ -476,10 +529,51 @@ class CamScannerApp {
 
     tCtx.putImageData(dstImgData, 0, 0);
     this.dewarpedCanvas = tempCanvas;
-    this.currentFilter = 'magic';
     this.renderFilterPreview();
   }
 
+  /**
+   * Ước lượng độ sáng nền địa phương (Background Paper Luminance Map)
+   * Giúp tách biệt nét chữ viết tay kể cả khi mực nhạt hoặc bị bóng đèn đổ
+   */
+  estimateBackgroundLuma(data, w, h) {
+    const luma = new Uint8Array(w * h);
+    for (let i = 0, j = 0; i < data.length; i += 4, j++) {
+      luma[j] = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+    }
+
+    const bg = new Uint8Array(w * h);
+    const radius = 16;
+    for (let y = 0; y < h; y += 2) {
+      for (let x = 0; x < w; x += 2) {
+        let sum = 0, count = 0;
+        for (let dy = -radius; dy <= radius; dy += 4) {
+          const ny = Math.max(0, Math.min(h - 1, y + dy));
+          const row = ny * w;
+          for (let dx = -radius; dx <= radius; dx += 4) {
+            const nx = Math.max(0, Math.min(w - 1, x + dx));
+            sum += luma[row + nx];
+            count++;
+          }
+        }
+        const avg = Math.min(255, Math.max(40, Math.floor(sum / count)));
+        bg[y * w + x] = avg;
+        if (x + 1 < w) bg[y * w + x + 1] = avg;
+        if (y + 1 < h) {
+          bg[(y + 1) * w + x] = avg;
+          if (x + 1 < w) bg[(y + 1) * w + x + 1] = avg;
+        }
+      }
+    }
+    return bg;
+  }
+
+  /**
+   * BỘ LỌC ĐỘC QUYỀN CAMSCANNER:
+   * - "magic": Tẩy trắng nền, làm đậm nét chữ viết tay, bảo vệ con dấu đỏ
+   * - "handwriting": Chuyên dụng cho chữ viết tay, công thức Toán học, bút bi mờ
+   * - "bw": Sauvola Adaptive Binarization
+   */
   renderFilterPreview() {
     const srcCanvas = this.dewarpedCanvas;
     if (!srcCanvas) return;
@@ -494,52 +588,78 @@ class CamScannerApp {
     const w = srcCanvas.width;
     const h = srcCanvas.height;
 
-    if (this.currentFilter === 'magic') {
-      // CamScanner "Silver Bullet" Magic Color Algorithm
-      for (let i = 0; i < data.length; i += 4) {
+    if (this.currentFilter === 'original') {
+      this.filterCtx.putImageData(imgData, 0, 0);
+      return;
+    }
+
+    // Ước lượng nền giấy địa phương
+    const bgLuma = this.estimateBackgroundLuma(data, w, h);
+
+    if (this.currentFilter === 'magic' || this.currentFilter === 'handwriting') {
+      const isHandwritingMode = this.currentFilter === 'handwriting';
+
+      for (let i = 0, j = 0; i < data.length; i += 4, j++) {
         const r = data[i];
         const g = data[i + 1];
         const b = data[i + 2];
         const luma = 0.299 * r + 0.587 * g + 0.114 * b;
+        const bg = bgLuma[j];
 
-        // Red stamp or blue pen detection (preserve chromatic vibrancy)
-        const isRedStamp = (r > g + 28 && r > b + 28);
-        const isBlueInk = (b > r + 24 && b > g + 12);
+        // Tỷ số tương phản so với nền giấy xung quanh
+        const ratio = luma / bg;
+
+        // Nhận diện con dấu đỏ hoặc bút mực xanh
+        const isRedStamp = (r > g + 26 && r > b + 26);
+        const isBlueInk = (b > r + 18 && b > g + 10);
 
         if (isRedStamp) {
-          data[i] = Math.min(255, r * 1.3);
-          data[i + 1] = Math.max(0, g * 0.85);
-          data[i + 2] = Math.max(0, b * 0.85);
+          data[i] = Math.min(255, r * 1.35);
+          data[i + 1] = Math.max(0, g * 0.8);
+          data[i + 2] = Math.max(0, b * 0.8);
         } else if (isBlueInk) {
-          data[i] = Math.max(0, r * 0.8);
-          data[i + 1] = Math.max(0, g * 0.85);
-          data[i + 2] = Math.min(255, b * 1.35);
+          // Bảo tồn và làm đậm chữ viết tay mực xanh
+          const boost = isHandwritingMode ? 1.4 : 1.25;
+          data[i] = Math.max(0, r * 0.65);
+          data[i + 1] = Math.max(0, g * 0.75);
+          data[i + 2] = Math.min(255, b * boost);
         } else {
-          // Whiten background, deepen black text
           let enhanced;
-          if (luma > 160) {
-            enhanced = 255; // pure white
-          } else if (luma < 90) {
-            enhanced = luma * 0.45; // deep black
+          if (ratio > 0.88) {
+            // Nền giấy -> Đẩy trắng hoàn toàn (Clean Paper)
+            enhanced = 255;
           } else {
-            enhanced = (luma - 90) * (255 / 70);
+            // NÉT CHỮ VIẾT TAY & NỘI DUNG:
+            // Ép tương phản hàm mũ phi tuyến để chữ nhạt hóa đậm đen sắc nét
+            const inkGamma = isHandwritingMode ? 2.6 : 2.1;
+            const norm = Math.max(0, Math.min(1, (ratio - 0.20) / 0.68));
+            enhanced = Math.pow(norm, inkGamma) * 230;
+
+            if (isHandwritingMode && enhanced > 120) {
+              enhanced = enhanced * 0.75; // Làm đậm thêm các nét bút chì/bút bi nhạt
+            }
           }
+
           data[i] = enhanced;
           data[i + 1] = enhanced;
           data[i + 2] = enhanced;
         }
       }
+
+      // THUẬT TOÁN UNSHARP MASKING: LÀM SẮC NÉT NÉT BÚT VIẾT TAY
+      this.applyUnsharpMask(data, w, h, isHandwritingMode ? 0.9 : 0.6);
+
     } else if (this.currentFilter === 'bw') {
-      // Sauvola Adaptive Binarization (Crisp Fax)
-      for (let i = 0; i < data.length; i += 4) {
+      // Sauvola Adaptive Binarization
+      for (let i = 0, j = 0; i < data.length; i += 4, j++) {
         const luma = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-        const val = luma < 140 ? 0 : 255;
+        const threshold = bgLuma[j] * 0.82;
+        const val = luma < threshold ? 0 : 255;
         data[i] = val;
         data[i + 1] = val;
         data[i + 2] = val;
       }
     } else if (this.currentFilter === 'gray') {
-      // Grayscale
       for (let i = 0; i < data.length; i += 4) {
         const luma = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
         data[i] = luma;
@@ -547,19 +667,41 @@ class CamScannerApp {
         data[i + 2] = luma;
       }
     } else if (this.currentFilter === 'lighten') {
-      // Lighten
       for (let i = 0; i < data.length; i += 4) {
-        data[i] = Math.min(255, data[i] * 1.25 + 25);
-        data[i + 1] = Math.min(255, data[i + 1] * 1.25 + 25);
-        data[i + 2] = Math.min(255, data[i + 2] * 1.25 + 25);
+        data[i] = Math.min(255, data[i] * 1.3 + 20);
+        data[i + 1] = Math.min(255, data[i + 1] * 1.3 + 20);
+        data[i + 2] = Math.min(255, data[i + 2] * 1.3 + 20);
       }
     }
 
     this.filterCtx.putImageData(imgData, 0, 0);
   }
 
+  /**
+   * Bộ lọc làm sắc cạnh nét chữ Unsharp Masking 3x3
+   */
+  applyUnsharpMask(data, w, h, amount) {
+    const copy = new Uint8ClampedArray(data);
+    for (let y = 1; y < h - 1; y++) {
+      const row = y * w;
+      for (let x = 1; x < w - 1; x++) {
+        const idx = (row + x) * 4;
+        for (let c = 0; c < 3; c++) {
+          const center = copy[idx + c];
+          const top = copy[((y - 1) * w + x) * 4 + c];
+          const bottom = copy[((y + 1) * w + x) * 4 + c];
+          const left = copy[(row + (x - 1)) * 4 + c];
+          const right = copy[(row + (x + 1)) * 4 + c];
+
+          const laplacian = (4 * center) - (top + bottom + left + right);
+          data[idx + c] = Math.max(0, Math.min(255, center + laplacian * amount));
+        }
+      }
+    }
+  }
+
   saveScannedDocument() {
-    const finalDataUrl = this.filterCanvas.toDataURL('image/jpeg', 0.92);
+    const finalDataUrl = this.filterCanvas.toDataURL('image/jpeg', 0.94);
     const now = new Date();
     const timeStr = `${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')}`;
 
@@ -587,7 +729,6 @@ class CamScannerApp {
     document.getElementById('detail-title').innerText = doc.title;
     document.getElementById('detail-image').src = doc.pages[0];
 
-    // Detail Action Handlers
     document.getElementById('close-detail-btn').onclick = () => {
       this.detailModal.classList.remove('active');
     };
@@ -698,7 +839,6 @@ class CamScannerApp {
   }
 }
 
-// Start application when DOM loaded
 window.addEventListener('DOMContentLoaded', () => {
   window.app = new CamScannerApp();
 });
