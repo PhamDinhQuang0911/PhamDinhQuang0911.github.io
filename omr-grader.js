@@ -38,10 +38,19 @@ window.omrState = {
 
 const state = window.omrState;
 
-// Preload local OMR classes from storage immediately
-try {
-    loadLocalOmrClasses();
-} catch(e) {}
+function resetTeacherSessionState() {
+    state.exams = [];
+    state.lmsExams = [];
+    state.lmsClasses = [];
+    state.omrClasses = [];
+    state.activeOmrClassId = null;
+    state.exam = null;
+    state.keys = {};
+    state.students = [];
+    state.submissions = [];
+    state.lastSubmission = null;
+    state.gradedCountsByExam = {};
+}
 
 // ========================================================
 // 1. AUTHENTICATION & LMS USER INTEGRATION
@@ -56,6 +65,8 @@ onAuthStateChanged(auth, async (user) => {
                 if (u && (u.uid || u.email)) {
                     state.user = u;
                     state.teacherUid = u.uid || u.email;
+                    resetTeacherSessionState();
+                    loadLocalOmrClasses();
                     initTeacherUI();
                     await loadTeacherExams();
                     return;
@@ -68,7 +79,7 @@ onAuthStateChanged(auth, async (user) => {
             title: 'Chưa đăng nhập QMath LMS',
             text: 'Vui lòng đăng nhập tài khoản giáo viên để sử dụng tính năng Chấm thi OMR!',
             confirmButtonText: 'Đến trang đăng nhập',
-            confirmButtonColor: '#10b981'
+            confirmButtonColor: '#059669'
         }).then(() => {
             window.location.href = 'index.html?redirect=omr-grader.html';
         });
@@ -77,6 +88,8 @@ onAuthStateChanged(auth, async (user) => {
 
     state.user = user;
     state.teacherUid = user.uid;
+    resetTeacherSessionState();
+    loadLocalOmrClasses();
     initTeacherUI();
     await loadTeacherExams();
 });
@@ -575,20 +588,20 @@ async function loadTeacherExams() {
                 const snapOmr = await getDocs(qOmr);
                 omrLoaded = snapOmr.docs
                     .map(d => ({ id: d.id, ...d.data() }))
-                    .filter(e => !e.isDeleted && !localDeletedIds.has(e.id));
+                    .filter(e => !e.isDeleted && !localDeletedIds.has(e.id) && (!e.teacherId || e.teacherId === state.teacherUid));
                 omrSnapSuccess = true;
             } catch(e) {
                 console.warn("Firestore omr_exams failed:", e);
             }
 
-            // Đồng bộ danh sách Lớp OMR từ Cloud
+            // Đồng bộ danh sách Lớp OMR từ Cloud (chỉ của giáo viên đang đăng nhập)
             try {
                 const qCls = query(collection(db, "omr_local_classes"), where("teacherId", "==", state.teacherUid));
                 const snapCls = await getDocs(qCls);
                 if (snapCls && snapCls.docs.length > 0) {
                     const cloudClasses = snapCls.docs
                         .map(d => ({ id: d.id, ...d.data() }))
-                        .filter(c => c && c.id !== 'omr_cls_demo_12a1' && !c.isSample && !(c.name === '12A1' && (c.students || []).some(s => s.name === 'Nguyễn Văn An')));
+                        .filter(c => c && (!c.teacherId || c.teacherId === state.teacherUid) && c.id !== 'omr_cls_demo_12a1' && !c.isSample && !(c.name === '12A1' && (c.students || []).some(s => s.name === 'Nguyễn Văn An')));
                     if (cloudClasses.length > 0) {
                         const localCls = Array.isArray(state.omrClasses) ? state.omrClasses : [];
                         cloudClasses.forEach(cCls => {
@@ -603,7 +616,7 @@ async function loadTeacherExams() {
                         });
                         state.omrClasses = localCls;
                         try {
-                            localStorage.setItem('omr_local_classes', JSON.stringify(state.omrClasses));
+                            localStorage.setItem('omr_local_classes_' + (state.teacherUid || 'guest'), JSON.stringify(state.omrClasses));
                         } catch (_) {}
                     }
                 }
@@ -611,20 +624,25 @@ async function loadTeacherExams() {
                 console.warn("Sync cloud omr_local_classes failed:", e);
             }
 
-            // 2. Try loading LMS exams collection (sorted newest first, up to 300)
+            // 2. Try loading LMS exams collection (ONLY belonging to the logged-in teacher)
+            const isOwnLmsExam = (ex) => {
+                if (!ex || ex.isDeleted || !(ex.title || ex.name) || localDeletedIds.has(ex.id)) return false;
+                const owner = ex.teacherId || ex.teacher_id || ex.authorId || ex.createdBy || '';
+                return owner === state.teacherUid;
+            };
             try {
-                const qLms = query(collection(db, "exams"), orderBy("createdAt", "desc"), limit(300));
+                const qLms = query(collection(db, "exams"), where("teacherId", "==", state.teacherUid), orderBy("createdAt", "desc"), limit(300));
                 const snapLms = await getDocs(qLms);
                 lmsLoaded = snapLms.docs
                     .map(d => ({ id: d.id, ...d.data() }))
-                    .filter(e => !e.isDeleted && (e.title || e.name) && !localDeletedIds.has(e.id));
+                    .filter(isOwnLmsExam);
                 lmsSnapSuccess = true;
             } catch(e) {
                 try {
-                    const snapLms2 = await getDocs(query(collection(db, "exams"), limit(300)));
+                    const snapLms2 = await getDocs(query(collection(db, "exams"), where("teacherId", "==", state.teacherUid), limit(300)));
                     lmsLoaded = snapLms2.docs
                         .map(d => ({ id: d.id, ...d.data() }))
-                        .filter(ex => !ex.isDeleted && (ex.title || ex.name) && !localDeletedIds.has(ex.id));
+                        .filter(isOwnLmsExam);
                     lmsSnapSuccess = true;
                 } catch(e2) {
                     console.warn("Firestore exams query failed:", e2);
@@ -635,22 +653,26 @@ async function loadTeacherExams() {
             omrResultsRows = [];
         }
 
-        // 3. Check localStorage cache for LMS exams (from dashboard.html)
-        const uid = state.teacherUid || localStorage.getItem('last_active_uid') || '';
-        const cachedBankExams = localStorage.getItem(`bank_exams_${uid}_own`) || localStorage.getItem(`bank_exams_${uid}_shared`);
+        // 3. Check localStorage cache for LMS exams (ONLY own exams of current teacher)
+        const uid = state.teacherUid || '';
+        const cachedBankExams = uid ? localStorage.getItem(`bank_exams_${uid}_own`) : null;
         if (cachedBankExams) {
             try {
-                const parsedCached = JSON.parse(cachedBankExams) || [];
+                const parsedCached = (JSON.parse(cachedBankExams) || []).filter(ce => {
+                    if (!ce || !ce.id || ce.isDeleted || localDeletedIds.has(ce.id)) return false;
+                    const owner = ce.teacherId || ce.teacher_id || ce.authorId || ce.createdBy || uid;
+                    return owner === uid;
+                });
                 if (lmsSnapSuccess) {
                     // Khi đã kết nối Cloud thành công, loại bỏ các đề đã bị xóa trên thiết bị khác khỏi cache
-                    const cleanCached = parsedCached.filter(ce => ce && ce.id && !ce.isDeleted && !localDeletedIds.has(ce.id) && lmsLoaded.some(l => l.id === ce.id));
+                    const cleanCached = parsedCached.filter(ce => lmsLoaded.some(l => l.id === ce.id));
                     if (cleanCached.length !== parsedCached.length) {
                         try { localStorage.setItem(`bank_exams_${uid}_own`, JSON.stringify(cleanCached)); } catch (_) {}
                     }
                 } else {
                     // Chỉ thêm từ cache cục bộ khi đang offline mất mạng
                     parsedCached.forEach(ce => {
-                        if (ce && !ce.isDeleted && ce.title && !localDeletedIds.has(ce.id) && !lmsLoaded.some(l => l.id === ce.id)) {
+                        if (ce.title && !lmsLoaded.some(l => l.id === ce.id)) {
                             lmsLoaded.push(ce);
                         }
                     });
@@ -658,44 +680,36 @@ async function loadTeacherExams() {
             } catch(e) {}
         }
 
-        // 4. Merge with localStorage omr_exams (đồng bộ đa thiết bị: KHÔNG hồi sinh đề đã bị xóa trên Cloud)
-        const candidateKeys = new Set([
-            'omr_exams_' + (state.teacherUid || 'guest'),
-            'omr_exams_guest'
-        ]);
-        for (let i = 0; i < localStorage.length; i++) {
-            const k = localStorage.key(i);
-            if (k && k.startsWith('omr_exams_')) candidateKeys.add(k);
-        }
-        candidateKeys.forEach(k => {
-            try {
-                const arr = JSON.parse(localStorage.getItem(k) || '[]');
-                if (Array.isArray(arr)) {
-                    if (omrSnapSuccess) {
-                        // Nếu đã đồng bộ Cloud thành công: chỉ giữ lại đề còn tồn tại trên Cloud hoặc đề nháp offline cục bộ
-                        const keptLocal = [];
-                        arr.forEach(locEx => {
-                            if (!locEx || !locEx.id) return;
-                            if (locEx.isDeleted || localDeletedIds.has(locEx.id)) return;
-                            if (omrLoaded.some(x => x.id === locEx.id)) {
-                                keptLocal.push(locEx);
-                            } else if (locEx._isLocalDraft) {
-                                omrLoaded.push(locEx);
-                                keptLocal.push(locEx);
-                            }
-                        });
-                        localStorage.setItem(k, JSON.stringify(keptLocal));
-                    } else {
-                        // Khi đang offline mất mạng: nạp từ cache cục bộ nhưng bỏ qua các đề đã nằm trong danh sách đã xóa
-                        arr.forEach(locEx => {
-                            if (locEx && locEx.id && !locEx.isLmsExam && !locEx.isDeleted && !localDeletedIds.has(locEx.id) && !omrLoaded.some(x => x.id === locEx.id)) {
-                                omrLoaded.push(locEx);
-                            }
-                        });
-                    }
+        // 4. Merge with localStorage omr_exams (CHỈ lấy đúng kho đề của giáo viên đang đăng nhập)
+        const ownExamKey = 'omr_exams_' + (state.teacherUid || 'guest');
+        try {
+            const arr = JSON.parse(localStorage.getItem(ownExamKey) || '[]');
+            if (Array.isArray(arr)) {
+                if (omrSnapSuccess) {
+                    // Nếu đã đồng bộ Cloud thành công: chỉ giữ lại đề còn tồn tại trên Cloud hoặc đề nháp offline cục bộ của đúng GV này
+                    const keptLocal = [];
+                    arr.forEach(locEx => {
+                        if (!locEx || !locEx.id) return;
+                        if (locEx.isDeleted || localDeletedIds.has(locEx.id)) return;
+                        if (locEx.teacherId && locEx.teacherId !== state.teacherUid) return;
+                        if (omrLoaded.some(x => x.id === locEx.id)) {
+                            keptLocal.push(locEx);
+                        } else if (locEx._isLocalDraft) {
+                            omrLoaded.push(locEx);
+                            keptLocal.push(locEx);
+                        }
+                    });
+                    localStorage.setItem(ownExamKey, JSON.stringify(keptLocal));
+                } else {
+                    // Khi đang offline mất mạng: nạp từ cache cục bộ của đúng GV này
+                    arr.forEach(locEx => {
+                        if (locEx && locEx.id && !locEx.isLmsExam && !locEx.isDeleted && !localDeletedIds.has(locEx.id) && (!locEx.teacherId || locEx.teacherId === state.teacherUid) && !omrLoaded.some(x => x.id === locEx.id)) {
+                            omrLoaded.push(locEx);
+                        }
+                    });
                 }
-            } catch(e) {}
-        });
+            }
+        } catch(e) {}
 
         // Normalize LMS exams
         state.lmsExams = lmsLoaded.map(e => normalizeLmsExam(e));
@@ -713,6 +727,7 @@ async function loadTeacherExams() {
         // 5. Reconstruct any exam that has graded OMR submissions in Supabase results or localStorage
         state.gradedCountsByExam = {};
         omrResultsRows.forEach(r => {
+            if (r.teacherId && r.teacherId !== state.teacherUid) return;
             const exId = r.examId || r.exam_id;
             if (!exId) return;
             state.gradedCountsByExam[exId] = (state.gradedCountsByExam[exId] || 0) + 1;
@@ -740,14 +755,15 @@ async function loadTeacherExams() {
             }
         });
 
-        // Also check localStorage omr_submissions_* counts
+        // Also check localStorage omr_submissions_* counts (only for exams owned by current teacher)
         for (let i = 0; i < localStorage.length; i++) {
             const k = localStorage.key(i);
             if (k && k.startsWith('omr_submissions_')) {
                 const exId = k.slice('omr_submissions_'.length);
+                if (!seenIds.has(exId)) continue;
                 try {
-                    const subs = JSON.parse(localStorage.getItem(k) || '[]');
-                    if (Array.isArray(subs) && subs.length > 0) {
+                    const subs = (JSON.parse(localStorage.getItem(k) || '[]') || []).filter(s => !s.teacherId || s.teacherId === state.teacherUid);
+                    if (subs.length > 0) {
                         state.gradedCountsByExam[exId] = Math.max(state.gradedCountsByExam[exId] || 0, subs.length);
                     }
                 } catch(e) {}
@@ -951,10 +967,11 @@ async function selectExam(examId) {
     state.exam = exam;
     localStorage.setItem('omr_last_exam_id_' + state.teacherUid, exam.id);
 
-    // Nạp NGAY LẬP TỨC 0ms danh sách bài chấm từ localStorage để UI hiển thị tức thì, không giật lag
+    // Nạp NGAY LẬP TỨC 0ms danh sách bài chấm từ localStorage (chỉ của giáo viên hiện tại)
     try {
-        const cachedSubs = JSON.parse(localStorage.getItem(`omr_submissions_${exam.id}`) || '[]');
-        if (Array.isArray(cachedSubs) && cachedSubs.length > 0) {
+        const cachedSubs = (JSON.parse(localStorage.getItem(`omr_submissions_${exam.id}`) || '[]') || [])
+            .filter(s => !s.teacherId || s.teacherId === state.teacherUid);
+        if (cachedSubs.length > 0) {
             state.submissions = cachedSubs;
             if (state.gradedCountsByExam) state.gradedCountsByExam[exam.id] = cachedSubs.length;
         } else {
@@ -2128,11 +2145,11 @@ window.toggleSheetViewMode = function() {
 async function loadExamSubmissions(examId) {
     let list = [];
 
-    // 1. Nạp từ localStorage trước (0ms latency, bảo toàn 100% tất cả các bài chấm)
+    // 1. Nạp từ localStorage trước (0ms latency, chỉ lấy bài của giáo viên hiện tại)
     try {
         const localList = JSON.parse(localStorage.getItem(`omr_submissions_${examId}`) || '[]');
         if (Array.isArray(localList)) {
-            list = [...localList];
+            list = localList.filter(s => !s.teacherId || s.teacherId === state.teacherUid);
         }
     } catch(e) {}
 
@@ -2180,10 +2197,12 @@ async function loadExamSubmissions(examId) {
 async function fetchSubmissionsFromCloud(examId, list) {
     if (!state.teacherUid || typeof db === 'undefined') return;
 
-    // Đồng bộ và khôi phục bài chấm từ bảng results trên Supabase (Bảo toàn 100% tất cả các bài, kể cả trùng SBD)
+    // Đồng bộ và khôi phục bài chấm từ bảng results trên Supabase (chỉ của giáo viên hiện tại)
     try {
         const resSnap = await getDocs(query(collection(db, "results"), where("examId", "==", examId)));
-        const cloudDocs = (resSnap.docs || []).map(docSnap => ({ id: docSnap.id, ...docSnap.data() }));
+        const cloudDocs = (resSnap.docs || [])
+            .map(docSnap => ({ id: docSnap.id, ...docSnap.data() }))
+            .filter(d => !d.teacherId || d.teacherId === state.teacherUid);
 
         const cloudIdSet = new Set(cloudDocs.map(d => String(d.id)));
         const cloudSubIdSet = new Set(cloudDocs.map(d => String(d.id).replace(`omr_${examId}_`, '')));
@@ -2652,9 +2671,7 @@ function renderInlineSubmissionsList() {
             }).catch(()=>{});
         }
 
-        const scoreColorClass = scoreNum >= 8 
-            ? 'bg-emerald-600 dark:bg-emerald-500' 
-            : (scoreNum >= 5 ? 'bg-sky-600 dark:bg-sky-500' : 'bg-rose-600 dark:bg-rose-500');
+        const scoreColorClass = 'bg-emerald-600 dark:bg-emerald-500';
 
         return `
             <div class="swipe-item relative overflow-hidden select-none border-b border-gray-100 dark:border-[#38344D]/50 last:border-b-0" data-sub-id="${s.id}">
@@ -3405,14 +3422,14 @@ window.handleFilesSelected = async (files) => {
                     ${state.telegramConfig?.enabled ? `<div class="text-xs text-emerald-600 dark:text-emerald-400 font-semibold flex items-center justify-center gap-1.5"><i class="fa-solid fa-cloud-arrow-up"></i> Kho bài thi: Đang lưu <b>${successCount}</b> bài chấm an toàn.</div>` : ''}
                     ${failCount > 0 ? `<p class="text-rose-500 font-semibold text-xs">⚠️ Có ${failCount}/${fileList.length} ảnh không nhận diện được (đã đưa vào Hàng đợi xử lý lại bên dưới).</p>` : ''}
                     <div class="pt-2">
-                        <button type="button" onclick="window.copyClassSummaryToZalo(); Swal.close();" class="w-full py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xs shadow-md flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-95">
+                        <button type="button" onclick="window.copyClassSummaryToZalo(); Swal.close();" class="w-full py-2.5 px-4 rounded-xl btn-season-primary font-bold text-xs flex items-center justify-center gap-2 cursor-pointer">
                             <i class="fa-solid fa-share-nodes"></i> Sao chép Bảng điểm gửi Zalo Lớp ngay
                         </button>
                     </div>
                 </div>
             `,
             confirmButtonText: 'Xem danh sách điểm',
-            confirmButtonColor: '#10b981'
+            confirmButtonColor: '#059669'
         });
     } else {
         Swal.fire({
@@ -3461,13 +3478,13 @@ function renderBatchFailedQueue() {
                     </div>
                 </div>
                 <div class="flex items-center gap-1.5 shrink-0">
-                    <button type="button" onclick="window.previewFailedBatchImage(${idx})" class="px-2.5 py-1 text-xs font-semibold rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 transition-colors cursor-pointer" title="Xem ảnh">
-                        <i class="fa-solid fa-eye mr-1"></i>Xem
+                    <button type="button" onclick="window.previewFailedBatchImage(${idx})" class="px-2.5 py-1.5 text-xs font-semibold rounded-xl btn-season-secondary flex items-center gap-1 cursor-pointer" title="Xem ảnh">
+                        <i class="fa-solid fa-eye"></i>Xem
                     </button>
-                    <button type="button" onclick="window.openManualGradingForFailed(${idx})" class="px-3 py-1.5 text-xs font-bold rounded-lg bg-amber-500 hover:bg-amber-600 text-white shadow-2xs transition-all active:scale-95 flex items-center gap-1 cursor-pointer" title="Nhập SBD, mã đề và câu trả lời thủ công">
+                    <button type="button" onclick="window.openManualGradingForFailed(${idx})" class="px-3 py-1.5 text-xs font-bold rounded-xl btn-season-primary flex items-center gap-1 cursor-pointer" title="Nhập SBD, mã đề và câu trả lời thủ công">
                         <i class="fa-solid fa-pen-to-square"></i> Chấm thủ công
                     </button>
-                    <button type="button" onclick="window.removeFailedBatchItem(${idx})" class="w-6 h-6 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 flex items-center justify-center transition-colors cursor-pointer" title="Bỏ qua ảnh này">
+                    <button type="button" onclick="window.removeFailedBatchItem(${idx})" class="w-7 h-7 rounded-xl btn-season-secondary flex items-center justify-center cursor-pointer" title="Bỏ qua ảnh này">
                         <i class="fa-solid fa-xmark text-xs"></i>
                     </button>
                 </div>
@@ -6997,19 +7014,19 @@ window.renderResultsTable = () => {
                     <span class="w-8 h-8 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 flex items-center justify-center border border-emerald-200 dark:border-emerald-800/60" title="Đã lưu ảnh bài chấm an toàn">
                         <i class="fa-solid fa-circle-check text-sm"></i>
                     </span>` : ''}</span>
-                    <button type="button" onclick="window.quickAssignStudentToSubmission('${s.id}')" class="w-8 h-8 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 flex items-center justify-center transition-all active:scale-95 cursor-pointer" title="Gán tên / SBD học sinh cho phiếu này">
-                        <i class="fa-solid fa-user-pen text-xs text-emerald-600 dark:text-emerald-400"></i>
+                    <button type="button" onclick="window.quickAssignStudentToSubmission('${s.id}')" class="w-8 h-8 rounded-xl btn-season-secondary flex items-center justify-center cursor-pointer" title="Gán tên / SBD học sinh cho phiếu này">
+                        <i class="fa-solid fa-user-pen text-xs"></i>
                     </button>
-                    <button type="button" onclick="window.viewSubmissionDetail('${s.id}')" class="w-8 h-8 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 flex items-center justify-center transition-all active:scale-95 cursor-pointer" title="Xem chi tiết phiếu chấm">
-                        <i class="fa-solid fa-eye text-xs text-emerald-600 dark:text-emerald-400"></i>
+                    <button type="button" onclick="window.viewSubmissionDetail('${s.id}')" class="w-8 h-8 rounded-xl btn-season-secondary flex items-center justify-center cursor-pointer" title="Xem chi tiết phiếu chấm">
+                        <i class="fa-solid fa-eye text-xs"></i>
                     </button>
-                    <button type="button" onclick="window.downloadSubmissionById('${s.id}')" class="w-8 h-8 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 flex items-center justify-center transition-all active:scale-95 cursor-pointer" title="Tải ảnh phiếu đã chấm">
-                        <i class="fa-solid fa-download text-xs text-emerald-600 dark:text-emerald-400"></i>
+                    <button type="button" onclick="window.downloadSubmissionById('${s.id}')" class="w-8 h-8 rounded-xl btn-season-secondary flex items-center justify-center cursor-pointer" title="Tải ảnh phiếu đã chấm">
+                        <i class="fa-solid fa-download text-xs"></i>
                     </button>
-                    <button type="button" onclick="window.openSendParentModal('${s.id}')" class="w-8 h-8 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 flex items-center justify-center transition-all active:scale-95 cursor-pointer" title="Gửi kết quả & phiếu chấm cho Phụ huynh (PHHS)">
-                        <i class="fa-solid fa-paper-plane text-xs text-emerald-600 dark:text-emerald-400"></i>
+                    <button type="button" onclick="window.openSendParentModal('${s.id}')" class="w-8 h-8 rounded-xl btn-season-secondary flex items-center justify-center cursor-pointer" title="Gửi kết quả & phiếu chấm cho Phụ huynh (PHHS)">
+                        <i class="fa-solid fa-paper-plane text-xs"></i>
                     </button>
-                    <button type="button" onclick="window.deleteSubmission('${s.id}')" class="w-8 h-8 rounded-xl bg-slate-100 hover:bg-rose-100 dark:bg-slate-800 dark:hover:bg-rose-950/40 text-rose-500 hover:text-rose-600 flex items-center justify-center transition-all active:scale-95 cursor-pointer" title="Xóa kết quả này">
+                    <button type="button" onclick="window.deleteSubmission('${s.id}')" class="w-8 h-8 rounded-xl btn-season-secondary flex items-center justify-center cursor-pointer" title="Xóa kết quả này">
                         <i class="fa-solid fa-trash text-xs"></i>
                     </button>
                 </div>
@@ -8129,21 +8146,23 @@ function syncExamStudentsToActiveOmrClass() {
     state.exam.classId = targetCls.id;
     state.activeOmrClassId = targetCls.id;
     try {
-        localStorage.setItem('omr_active_class_id', targetCls.id);
-        localStorage.setItem('omr_local_classes', JSON.stringify(state.omrClasses));
+        localStorage.setItem('omr_active_class_id_' + (state.teacherUid || 'guest'), targetCls.id);
+        localStorage.setItem('omr_local_classes_' + (state.teacherUid || 'guest'), JSON.stringify(state.omrClasses));
     } catch (_) {}
 }
 
 function loadLocalOmrClasses() {
+    const clsKey = 'omr_local_classes_' + (state.teacherUid || 'guest');
+    const activeClsKey = 'omr_active_class_id_' + (state.teacherUid || 'guest');
     try {
-        const raw = localStorage.getItem('omr_local_classes');
+        const raw = localStorage.getItem(clsKey);
         let classes = [];
         if (raw) {
             classes = JSON.parse(raw);
         }
         if (Array.isArray(classes)) {
-            // Lọc bỏ triệt để lớp mẫu 12A1 / demo
-            classes = classes.filter(c => c && c.id !== 'omr_cls_demo_12a1' && !c.isSample && !(c.name === '12A1' && (c.students || []).some(s => s.name === 'Nguyễn Văn An')));
+            // Lọc bỏ triệt để lớp mẫu 12A1 / demo và lớp của giáo viên khác
+            classes = classes.filter(c => c && (!c.teacherId || c.teacherId === state.teacherUid) && c.id !== 'omr_cls_demo_12a1' && !c.isSample && !(c.name === '12A1' && (c.students || []).some(s => s.name === 'Nguyễn Văn An')));
         } else {
             classes = [];
         }
@@ -8152,7 +8171,7 @@ function loadLocalOmrClasses() {
         // Tự động đồng bộ từ học sinh của bài thi hiện tại nếu có
         syncExamStudentsToActiveOmrClass();
 
-        const savedActiveId = localStorage.getItem('omr_active_class_id');
+        const savedActiveId = localStorage.getItem(activeClsKey);
         const found = state.omrClasses.find(c => c.id === savedActiveId);
         state.activeOmrClassId = found ? found.id : (state.omrClasses[0]?.id || null);
     } catch(e) {
@@ -8165,9 +8184,9 @@ function loadLocalOmrClasses() {
 }
 
 function saveLocalOmrClasses(classes) {
-    state.omrClasses = classes || [];
+    state.omrClasses = (classes || []).map(c => ({ ...c, teacherId: c.teacherId || state.teacherUid }));
     try {
-        localStorage.setItem('omr_local_classes', JSON.stringify(state.omrClasses));
+        localStorage.setItem('omr_local_classes_' + (state.teacherUid || 'guest'), JSON.stringify(state.omrClasses));
     } catch(e) {}
     try {
         enrichSubmissionsFromClassRoster();
@@ -8268,7 +8287,7 @@ window.renderOmrClassesList = () => {
 window.selectOmrClass = (classId) => {
     state.activeOmrClassId = classId;
     state.activeSubClassFilter = '';
-    localStorage.setItem('omr_active_class_id', classId);
+    localStorage.setItem('omr_active_class_id_' + (state.teacherUid || 'guest'), classId);
     window.renderOmrClassesList();
     window.renderActiveOmrClassStudents();
 };
@@ -8433,7 +8452,7 @@ window.renderActiveOmrClassStudents = () => {
                 <span class="text-xs font-bold text-slate-500 dark:text-slate-400 flex items-center gap-1 mr-1">
                     <i class="fa-solid fa-filter text-[10px] text-emerald-500"></i> Lọc lớp:
                 </span>
-                <button type="button" onclick="window.setActiveSubClassFilter('')" class="px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${allBtnActive ? 'bg-emerald-600 text-white shadow-xs' : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700'}">
+                <button type="button" onclick="window.setActiveSubClassFilter('')" class="px-2.5 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer ${allBtnActive ? 'btn-season-primary' : 'btn-season-secondary'}">
                     Tất cả (${allClassStudents.length})
                 </button>
             `;
@@ -8441,7 +8460,7 @@ window.renderActiveOmrClassStudents = () => {
             subClasses.forEach(sc => {
                 const isSelected = activeFilter === sc;
                 filterHtml += `
-                    <button type="button" onclick="window.setActiveSubClassFilter('${sc}')" class="px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${isSelected ? 'bg-indigo-600 text-white shadow-xs' : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700'}">
+                    <button type="button" onclick="window.setActiveSubClassFilter('${sc}')" class="px-2.5 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer ${isSelected ? 'btn-season-primary' : 'btn-season-secondary'}">
                         ${sc} (${subClassCounts[sc]})
                     </button>
                 `;
@@ -8549,10 +8568,10 @@ window.renderActiveOmrClassStudents = () => {
                 <td class="p-3 text-center">${statusBadge}</td>
                 <td class="p-3 text-center">
                     <div class="flex items-center justify-center gap-1">
-                        <button type="button" onclick="window.openAddSingleStudentModal(${idx})" class="w-7 h-7 rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-[#1E1B29] dark:hover:bg-[#2D2A3D] text-slate-600 dark:text-slate-300 flex items-center justify-center text-xs transition-colors cursor-pointer" title="Sửa học sinh">
+                        <button type="button" onclick="window.openAddSingleStudentModal(${idx})" class="w-7 h-7 rounded-xl btn-season-secondary flex items-center justify-center text-xs cursor-pointer" title="Sửa học sinh">
                             <i class="fa-solid fa-pen"></i>
                         </button>
-                        <button type="button" onclick="window.deleteSingleStudent(${idx})" class="w-7 h-7 rounded-lg bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 text-rose-600 flex items-center justify-center text-xs transition-colors cursor-pointer" title="Xóa học sinh">
+                        <button type="button" onclick="window.deleteSingleStudent(${idx})" class="w-7 h-7 rounded-xl btn-season-secondary flex items-center justify-center text-xs cursor-pointer" title="Xóa học sinh">
                             <i class="fa-solid fa-trash-can"></i>
                         </button>
                     </div>
@@ -9932,35 +9951,32 @@ async function fetchTeacherLmsClasses(forceRefresh = false) {
     if (!forceRefresh && Array.isArray(state.lmsClasses) && state.lmsClasses.length > 0) return state.lmsClasses;
     let classes = [];
 
-    // 1. Kiểm tra cache từ dashboard để lấy ngay tức thì (0ms)
+    // 1. Kiểm tra cache của đúng giáo viên đang đăng nhập
     try {
-        const cacheKeys = ['cached_classes_me', `cached_classes_${state.teacherUid}`, 'cached_classes_all', 'allClassesData'];
-        for (const k of cacheKeys) {
-            const raw = localStorage.getItem(k);
+        if (state.teacherUid) {
+            const raw = localStorage.getItem(`cached_classes_${state.teacherUid}`);
             if (raw) {
                 const parsed = JSON.parse(raw);
                 if (Array.isArray(parsed) && parsed.length > 0) {
-                    classes = parsed;
-                    break;
+                    classes = parsed.filter(c => c && !c.isDeleted && (c.teacherId === state.teacherUid || c.teacher_id === state.teacherUid));
                 }
             }
         }
     } catch (_) {}
 
-    // 2. Tải trực tiếp từ cơ sở dữ liệu Firebase / Supabase
+    // 2. Tải trực tiếp từ cơ sở dữ liệu Firebase / Supabase (chỉ của giáo viên hiện tại)
     if (classes.length === 0 || forceRefresh) {
         try {
-            if (typeof db !== 'undefined') {
-                if (state.teacherUid) {
-                    const qClasses = query(collection(db, "classes"), where("teacherId", "==", state.teacherUid));
-                    const snap = await getDocs(qClasses);
-                    const fetched = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(c => !c.isDeleted);
-                    if (fetched.length > 0) classes = fetched;
-                }
-                if (classes.length === 0) {
-                    const snapAll = await getDocs(query(collection(db, "classes"), limit(100)));
-                    classes = snapAll.docs.map(d => ({ id: d.id, ...d.data() })).filter(c => !c.isDeleted);
-                }
+            if (typeof db !== 'undefined' && state.teacherUid) {
+                const qClasses = query(collection(db, "classes"), where("teacherId", "==", state.teacherUid));
+                const snap = await getDocs(qClasses);
+                const fetched = snap.docs
+                    .map(d => ({ id: d.id, ...d.data() }))
+                    .filter(c => !c.isDeleted && (c.teacherId === state.teacherUid || c.teacher_id === state.teacherUid));
+                classes = fetched;
+                try {
+                    localStorage.setItem(`cached_classes_${state.teacherUid}`, JSON.stringify(classes));
+                } catch (_) {}
             }
         } catch(e) {
             console.warn("Lỗi tải danh sách lớp LMS từ DB:", e);
@@ -10310,10 +10326,10 @@ window.renderExamsListTab = () => {
                 </div>
                 <div class="flex items-center gap-1.5">
                     ${!e.isLmsExam ? `
-                    <button type="button" onclick="event.stopPropagation(); window.deleteExam('${e.id}')" class="w-7 h-7 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg text-xs font-bold flex items-center justify-center transition-colors" title="Xóa bài thi này">
+                    <button type="button" onclick="event.stopPropagation(); window.deleteExam('${e.id}')" class="w-7 h-7 rounded-xl btn-season-secondary text-xs font-bold flex items-center justify-center" title="Xóa bài thi này">
                         <i class="fa-solid fa-trash"></i>
                     </button>` : ''}
-                    <span class="px-2.5 py-1 rounded-lg ${isCurrent ? 'bg-gray-100 dark:bg-[#1E1B29] text-slate-600 dark:text-slate-300' : 'btn-season-primary'} text-[11px] font-bold">
+                    <span class="px-2.5 py-1 rounded-xl ${isCurrent ? 'btn-season-secondary' : 'btn-season-primary'} text-[11px] font-bold">
                         ${isCurrent ? 'Mở quét' : 'Chọn chấm →'}
                     </span>
                 </div>
@@ -10811,8 +10827,7 @@ window.recalculateAllSubmissionsScore = async () => {
                             score: s.score,
                             part1_score: s.part1_score,
                             part2_score: s.part2_score,
-                            part3_score: s.part3_score,
-                            stamped_image: s.stamped_image || s.image_data || null
+                            part3_score: s.part3_score
                         });
                     } catch (_) {}
                 }
@@ -11517,13 +11532,10 @@ state.currentFolderId = null; // null = root
 
 async function loadFolders() {
     let fList = [];
-    if (typeof storage !== 'undefined' && storage.getFolders) {
-        fList = await storage.getFolders();
-    } else {
-        const raw = localStorage.getItem('bank_folders') || localStorage.getItem('omr_standalone_folders');
-        if (raw) {
-            try { fList = JSON.parse(raw); } catch(_) {}
-        }
+    const folderKey = 'omr_folders_' + (state.teacherUid || 'guest');
+    const raw = localStorage.getItem(folderKey);
+    if (raw) {
+        try { fList = JSON.parse(raw); } catch(_) {}
     }
     if (!Array.isArray(fList) || fList.length === 0) {
         fList = [
@@ -11566,11 +11578,8 @@ window.createNewExamFolder = async () => {
         createdAt: new Date().toISOString()
     };
     state.folders.push(newFolder);
-    if (typeof storage !== 'undefined' && storage.saveFolders) {
-        await storage.saveFolders(state.folders);
-    } else {
-        localStorage.setItem('bank_folders', JSON.stringify(state.folders));
-    }
+    const folderKey = 'omr_folders_' + (state.teacherUid || 'guest');
+    localStorage.setItem(folderKey, JSON.stringify(state.folders));
     window.renderExamPickerList();
     Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: `Đã tạo thư mục "${newFolder.name}"`, showConfirmButton: false, timer: 2000 });
 };
@@ -11755,16 +11764,16 @@ window.renderExamPickerList = () => {
 
                                 <div class="flex items-center justify-between gap-2 pt-2 border-t border-gray-100 dark:border-[#38344D]/70 text-[11px]">
                                     <div class="flex items-center gap-2">
-                                        <button type="button" onclick="event.stopPropagation(); window.moveExamToFolder('${item.id}')" class="px-2 py-1 rounded-lg bg-gray-100 hover:bg-amber-50 dark:bg-[#1E1B29] dark:hover:bg-amber-950/50 text-slate-600 dark:text-slate-300 hover:text-amber-600 text-[11px] font-bold flex items-center gap-1 transition-colors cursor-pointer border border-gray-200 dark:border-[#38344D]" title="Chuyển sang thư mục khác">
-                                            <i class="fa-solid fa-folder-tree text-amber-500"></i>
+                                        <button type="button" onclick="event.stopPropagation(); window.moveExamToFolder('${item.id}')" class="px-2.5 py-1 rounded-xl btn-season-secondary text-[11px] font-bold flex items-center gap-1 cursor-pointer" title="Chuyển sang thư mục khác">
+                                            <i class="fa-solid fa-folder-tree"></i>
                                             <span>Chuyển thư mục</span>
                                         </button>
-                                        <button type="button" onclick="event.stopPropagation(); window.deleteExam('${item.id}')" class="w-7 h-7 rounded-lg bg-gray-100 hover:bg-rose-50 dark:bg-[#1E1B29] dark:hover:bg-rose-950/50 text-slate-400 hover:text-rose-600 flex items-center justify-center text-xs active:scale-95 transition-all cursor-pointer border border-gray-200 dark:border-[#38344D]" title="Xóa đề thi này">
+                                        <button type="button" onclick="event.stopPropagation(); window.deleteExam('${item.id}')" class="w-7 h-7 rounded-xl btn-season-secondary flex items-center justify-center text-xs cursor-pointer" title="Xóa đề thi này">
                                             <i class="fa-solid fa-trash-can"></i>
                                         </button>
                                     </div>
 
-                                    <button type="button" onclick="window.selectExamForGrading('${item.id}')" class="px-3.5 py-1.5 rounded-xl ${isCurrent ? 'bg-gray-100 dark:bg-[#1E1B29] text-slate-700 dark:text-slate-300' : 'btn-season-primary'} text-xs font-bold flex items-center gap-1.5 cursor-pointer">
+                                    <button type="button" onclick="window.selectExamForGrading('${item.id}')" class="px-3.5 py-1.5 rounded-xl ${isCurrent ? 'btn-season-secondary' : 'btn-season-primary'} text-xs font-bold flex items-center gap-1.5 cursor-pointer">
                                         <span>${isCurrent ? 'Nạp lại' : 'Chọn chấm'}</span>
                                         <i class="fa-solid fa-arrow-right text-[10px]"></i>
                                     </button>
@@ -11806,14 +11815,14 @@ window.openLmsExamPickerModal = async () => {
         });
     }
 
-    // Nếu danh sách đề LMS đang trống, thử tải lại từ Firestore exams
+    // Nếu danh sách đề LMS đang trống, thử tải lại từ Firestore exams (chỉ của giáo viên đang đăng nhập)
     const lmsItems = (state.exams || []).filter(e => e.isLmsExam);
     if (lmsItems.length === 0 && state.teacherUid) {
         try {
-            const snapLms = await getDocs(query(collection(db, "exams"), orderBy("createdAt", "desc"), limit(300)));
+            const snapLms = await getDocs(query(collection(db, "exams"), where("teacherId", "==", state.teacherUid), orderBy("createdAt", "desc"), limit(300)));
             const loaded = snapLms.docs
                 .map(d => ({ id: d.id, ...d.data() }))
-                .filter(e => !e.isDeleted && (e.title || e.name))
+                .filter(e => !e.isDeleted && (e.title || e.name) && (e.teacherId === state.teacherUid || e.teacher_id === state.teacherUid || e.authorId === state.teacherUid))
                 .map(e => normalizeLmsExam(e));
             loaded.forEach(ne => {
                 if (!state.exams.some(x => x.id === ne.id)) state.exams.push(ne);
@@ -11897,11 +11906,11 @@ window.renderLmsExamPickerList = () => {
                     </div>
                     <div class="flex items-center gap-1.5 shrink-0">
                         ${!item.isLmsExam ? `
-                        <button type="button" onclick="event.stopPropagation(); window.deleteExam('${item.id}')" class="w-7 h-7 rounded-lg bg-gray-100 hover:bg-rose-50 dark:bg-[#1E1B29] dark:hover:bg-rose-950/50 text-slate-400 hover:text-rose-600 flex items-center justify-center text-xs active:scale-95 transition-all cursor-pointer border border-gray-200 dark:border-[#38344D]" title="Xóa đề thi này">
+                        <button type="button" onclick="event.stopPropagation(); window.deleteExam('${item.id}')" class="w-7 h-7 rounded-xl btn-season-secondary flex items-center justify-center text-xs cursor-pointer" title="Xóa đề thi này">
                             <i class="fa-solid fa-trash-can"></i>
                         </button>
                         ` : ''}
-                        <span class="px-2.5 py-1 rounded-lg ${isCurrent ? 'bg-gray-100 dark:bg-[#1E1B29] text-slate-700 dark:text-slate-300' : 'btn-season-primary'} text-[11px] font-bold shrink-0 flex items-center gap-1">
+                        <span class="px-2.5 py-1 rounded-xl ${isCurrent ? 'btn-season-secondary' : 'btn-season-primary'} text-[11px] font-bold shrink-0 flex items-center gap-1">
                             <span>${isCurrent ? 'Nạp lại' : 'Chọn chấm'}</span>
                             <i class="fa-solid fa-arrow-right text-[10px]"></i>
                         </span>
