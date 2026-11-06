@@ -3,7 +3,7 @@ import {
     getFirestore, doc, getDoc, setDoc, updateDoc, collection, query, where, getDocs, addDoc, deleteDoc,
     limit, orderBy, includeQuestions, getOrCreateParentWatchToken,
     enableMultiTabIndexedDbPersistence
-} from "./supabase-db-compat.js?v=20261105_v133";
+} from "./supabase-db-compat.js?v=20261106_v145";
 
 if (typeof window !== 'undefined') {
     window.showToast = window.showToast || function(msg, icon) {
@@ -1837,7 +1837,7 @@ function broadcastTelegramPoolActivity(isActive = true) {
         [`active_${tier}`]: isActive ? (now + leaseMs) : 0,
         [`uid_${tier}`]: state.teacherUid,
         updatedAt: new Date().toISOString()
-    }, { merge: true }).catch(() => {});
+    }).catch(() => {});
 }
 
 async function checkHigherPriorityContentionDelayMs() {
@@ -1888,10 +1888,18 @@ async function sendSinglePhotoToTelegram(token, chatId, sub, photoInput) {
     formData.append('caption', `📝 [${examName}]\n👤 ${sbdText}${nameText}${codeText}${scoreText}\n⏰ ${new Date().toLocaleString('vi-VN')}`);
     formData.append('photo', photoBlob, `omr_${sub.id || Date.now()}.jpg`);
 
-    const resp = await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, {
-        method: 'POST',
-        body: formData
-    });
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timeoutId = controller ? setTimeout(() => controller.abort(), 35000) : null;
+    let resp;
+    try {
+        resp = await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, {
+            method: 'POST',
+            body: formData,
+            signal: controller ? controller.signal : undefined
+        });
+    } finally {
+        if (timeoutId) clearTimeout(timeoutId);
+    }
     const resData = await resp.json().catch(() => ({ ok: false, error_code: resp.status, description: `HTTP ${resp.status}` }));
     if (!resData.ok) {
         const err = new Error(resData.description || 'sendPhoto failed');
@@ -1901,6 +1909,9 @@ async function sendSinglePhotoToTelegram(token, chatId, sub, photoInput) {
         }
         if (err.errorCode === 429) {
             err.isRateLimit = true;
+        }
+        if (/chat not found|peer_id_invalid/i.test(err.message)) {
+            err.isChatNotFound = true;
         }
         if (err.errorCode === 403 || (err.errorCode === 400 && /chat not found|not a member|have no rights|channel_private|peer_id_invalid|bot was kicked/i.test(err.message))) {
             err.isChatForbidden = true;
@@ -1982,10 +1993,18 @@ async function sendMediaGroupToTelegram(token, chatId, items, botNumber = 1) {
 
     formData.append('media', JSON.stringify(mediaList));
 
-    const resp = await fetch(`https://api.telegram.org/bot${token}/sendMediaGroup`, {
-        method: 'POST',
-        body: formData
-    });
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timeoutId = controller ? setTimeout(() => controller.abort(), 35000) : null;
+    let resp;
+    try {
+        resp = await fetch(`https://api.telegram.org/bot${token}/sendMediaGroup`, {
+            method: 'POST',
+            body: formData,
+            signal: controller ? controller.signal : undefined
+        });
+    } finally {
+        if (timeoutId) clearTimeout(timeoutId);
+    }
     const resData = await resp.json().catch(() => ({ ok: false, error_code: resp.status, description: `HTTP ${resp.status}` }));
     if (!resData.ok) {
         const err = new Error(resData.description || 'sendMediaGroup failed');
@@ -1995,6 +2014,9 @@ async function sendMediaGroupToTelegram(token, chatId, items, botNumber = 1) {
         }
         if (err.errorCode === 429) {
             err.isRateLimit = true;
+        }
+        if (/chat not found|peer_id_invalid/i.test(err.message)) {
+            err.isChatNotFound = true;
         }
         if (err.errorCode === 403 || (err.errorCode === 400 && /chat not found|not a member|have no rights|channel_private|peer_id_invalid|bot was kicked/i.test(err.message))) {
             err.isChatForbidden = true;
@@ -2096,6 +2118,7 @@ const _activeBotWorkers = new Set();
 const _tgInFlightSubIds = new Set();
 const _chatCooldownUntil = new Map();
 const _forbiddenBotChatPairs = new Set(); // Lưu các cặp "botIndex::chatId" bị lỗi 403/400 để không bao giờ gọi lặp lại
+const _invalidChatIds = new Set();        // Lưu các chatId bị báo "chat not found" (chưa tạo kênh) để mọi Bot tự động bỏ qua ngay
 const _unhealthyBotIndices = new Set();   // Lưu các botIndex không có bất kỳ Kênh hợp lệ nào
 let roundRobinBotIndex = 0;
 let _tgCooldownNoticeSec = 0;
@@ -2125,13 +2148,17 @@ function markChatCooldown(chatId, botIndex, waitSec) {
 }
 
 function isBotChatPairForbidden(botIndex, chatId) {
-    return _forbiddenBotChatPairs.has(`${botIndex}::${String(chatId || '').trim()}`);
+    const clean = String(chatId || '').trim();
+    return _invalidChatIds.has(clean) || _forbiddenBotChatPairs.has(`${botIndex}::${clean}`);
 }
 
-function markBotChatPairForbidden(botIndex, chatId) {
+function markBotChatPairForbidden(botIndex, chatId, isChatNotFound = false) {
     const clean = String(chatId || '').trim();
     if (!clean) return;
     _forbiddenBotChatPairs.add(`${botIndex}::${clean}`);
+    if (isChatNotFound) {
+        _invalidChatIds.add(clean);
+    }
 }
 
 // Chọn Kênh đích chuẩn xác cho Bot #botIndex:
@@ -2316,10 +2343,12 @@ async function triggerProcessTelegramBatches(options = {}) {
 
                 updateTelegramUploadPill(false);
 
-                // Kiểm tra nhường luồng ưu tiên nếu có Super Admin đang chấm cùng lúc
-                const contentionWaitMs = await checkHigherPriorityContentionDelayMs();
-                if (contentionWaitMs > 0) {
-                    await new Promise(r => setTimeout(r, contentionWaitMs));
+                // Kiểm tra nhường luồng ưu tiên nếu có Super Admin đang chấm cùng lúc (Super Admin bỏ qua await để bắn fetch tức thì 0ms!)
+                if (policy.tier !== 'super_admin') {
+                    const contentionWaitMs = await checkHigherPriorityContentionDelayMs();
+                    if (contentionWaitMs > 0) {
+                        await new Promise(r => setTimeout(r, contentionWaitMs));
+                    }
                 }
 
                 let allHaveBlobs = true;
@@ -2423,8 +2452,13 @@ async function triggerProcessTelegramBatches(options = {}) {
                                 continue;
                             } else if (err.isChatForbidden) {
                                 // Lỗi 403 Forbidden hoặc 400 Chat Not Found trên cặp (Bot #botIndex, targetChatId):
-                                // Khóa ngay cặp này để KHÔNG BAO GIỜ gọi lặp lại gây bão lỗi 403/400 trên Console!
-                                markBotChatPairForbidden(botIndex, targetChatId);
+                                // Khóa ngay cặp/kênh lỗi này, sau đó kiểm tra xem Bot #botIndex còn Kênh hợp lệ nào khác (VD Kênh chính @kho_video_qmath_2026) không!
+                                markBotChatPairForbidden(botIndex, targetChatId, Boolean(err.isChatNotFound));
+                                const nextAvailable = pickBestTelegramChatId(botIndex, true);
+                                if (nextAvailable && nextAvailable.chatId) {
+                                    console.warn(`[Telegram Pool] Kênh ${targetChatId} chưa khả dụng (${err.message}) -> Bot #${botIndex + 1} tự động chuyển sang Kênh hợp lệ ${nextAvailable.chatId}!`);
+                                    continue;
+                                }
                                 console.warn(`[Telegram Pool] Bot #${botIndex + 1} chưa được cấp quyền trên Kênh ${targetChatId} (${err.message}) -> Tự động chuyển tải sang các Bot còn lại!`);
                                 _unhealthyBotIndices.add(botIndex);
                                 _tgPendingQueue.unshift(...validBatchItems);
@@ -2479,7 +2513,11 @@ async function triggerProcessTelegramBatches(options = {}) {
                                 updateTelegramUploadPill(false);
                                 continue;
                             } else if (err.isChatForbidden) {
-                                markBotChatPairForbidden(botIndex, targetChatId);
+                                markBotChatPairForbidden(botIndex, targetChatId, Boolean(err.isChatNotFound));
+                                const nextAvailable = pickBestTelegramChatId(botIndex, true);
+                                if (nextAvailable && nextAvailable.chatId) {
+                                    continue;
+                                }
                                 _unhealthyBotIndices.add(botIndex);
                                 _tgPendingQueue.unshift(item);
                                 setTimeout(() => triggerProcessTelegramBatches(), 30);
@@ -2591,6 +2629,7 @@ async function dispatchChunkToTelegram(items, options = {}) {
         if (_tgInFlightSubIds.has(sub.id) && _tgPendingQueue.some(q => q.sub && q.sub.id === sub.id)) {
             continue;
         }
+        delete sub._inBatchAlbumBuffer;
         sub._isUploadingTelegram = true;
         _tgInFlightSubIds.add(sub.id);
         _tgPendingQueue.push(item);
@@ -2619,13 +2658,14 @@ let _autoResumeTgTimer = null;
 function scheduleAutoResumeTelegramUploads(delayMs = 1000) {
     if (_autoResumeTgTimer) clearTimeout(_autoResumeTgTimer);
     _autoResumeTgTimer = setTimeout(() => {
-        if (!state.telegramConfig?.enabled) return;
+        if (!state.telegramConfig?.enabled || state._isBatchGrading) return;
         const tokens = (state.telegramConfig?.botTokens || []).filter(Boolean);
         if (tokens.length === 0 || !state.telegramConfig?.chatId) return;
         const pendingSubs = (state.submissions || []).filter(s =>
             !s.telegram_photo_url &&
             !s.telegram_file_id &&
             !_tgInFlightSubIds.has(s.id) &&
+            !s._inBatchAlbumBuffer &&
             !s._noLocalImageAvailable
         );
         if (pendingSubs.length > 0) {
@@ -2707,6 +2747,7 @@ window.updateStorageStatusBadges = updateStorageStatusBadges;
 
 // QUÉT VÀ LƯU BÙ CÁC BÀI THI CÒN THIẾU VÀO KHO BÀI THI (TỰ ĐỘNG HOẶC BẤM NÚT LƯU BÙ)
 window.retryUploadMissingToTelegram = async function(silent = false) {
+    if (silent && state._isBatchGrading) return;
     if (!state.telegramConfig?.enabled) {
         if (!silent && typeof Swal !== 'undefined') Swal.fire('Thông báo', 'Tính năng lưu vào kho bài thi (Telegram) chưa được bật trong Cài đặt lưu trữ!', 'info');
         return;
@@ -4351,19 +4392,21 @@ window.handleFilesSelected = async (files) => {
                 // - Nếu đợt chấm có 33 bài / 11 Bot -> mỗi Bot nhận 3 bài (cứ 3 bài là bắn ngay lên Kênh 1..11)!
                 // - Nếu đợt chấm có >= 110 bài / 11 Bot -> mỗi Bot nhận 10 bài (cứ 10 bài là bắn ngay lên Kênh 1..11)!
                 if (state.telegramConfig?.enabled) {
+                    sub._inBatchAlbumBuffer = true;
                     pendingAlbumBuffer.push({
                         sub,
                         blob: sub._telegramBlob,
                         imgDataUrl: sub.stamped_image || sub.image_data
                     });
 
+                    const healthyBotsCount = Math.max(1, configuredBotsCount - _unhealthyBotIndices.size);
                     const filesLeftAfterThis = fileList.length - (i + 1);
                     const totalUndispatched = pendingAlbumBuffer.length + filesLeftAfterThis;
                     let targetChunkForNextBot = MAX_TELEGRAM_ALBUM_SIZE;
 
-                    if (totalUndispatched <= configuredBotsCount * MAX_TELEGRAM_ALBUM_SIZE) {
+                    if (totalUndispatched <= healthyBotsCount * MAX_TELEGRAM_ALBUM_SIZE) {
                         if (botsLeftInCurrentWave <= 0 || botsLeftInCurrentWave > totalUndispatched) {
-                            botsLeftInCurrentWave = Math.min(configuredBotsCount, Math.max(1, totalUndispatched));
+                            botsLeftInCurrentWave = Math.min(healthyBotsCount, Math.max(1, totalUndispatched));
                         }
                         targetChunkForNextBot = Math.min(
                             MAX_TELEGRAM_ALBUM_SIZE,
@@ -4376,8 +4419,8 @@ window.handleFilesSelected = async (files) => {
                         botsLeftInCurrentWave = Math.max(1, botsLeftInCurrentWave - 1);
                         scheduleSaveSubmissionsLocal();
                         dispatchChunkToTelegram(botChunk, { singleBotChunk: true });
-                        // Nhường 25ms để trình duyệt đẩy ngay gói tin xuống card mạng trước khi chấm bài tiếp theo
-                        await new Promise(r => setTimeout(r, 25));
+                        // Nhường luồng để trình duyệt đẩy gói tin xuống card mạng song song ngay trong lúc đang chấm
+                        await new Promise(r => setTimeout(r, 15));
                     }
                 }
             }
@@ -4878,6 +4921,9 @@ function getCompatibleTemplatesForExam(exam) {
 }
 
 function recognizeSheetFromGray(gray, options = {}) {
+    if (window.OMR && window.OMR.khuBong) {
+        window.OMR.khuBong(gray);
+    }
     const candidateKeys = getCompatibleTemplatesForExam(state.exam);
     const guideHints = options.guideHints || null;
     const activeTpl = state.exam?.sheet_template || 'qmcv1239';
@@ -5007,39 +5053,7 @@ function recognizeSheetFromGray(gray, options = {}) {
     const dst = outData.data;
     const gw = gray.w, gh = gray.h, gd = gray.d;
 
-    // Tự động cân bằng tương phản, làm sạch nền giấy trắng tinh & LÀM ĐẬM CHỮ IN SẮC NÉT (Laser-Print Document LUT)
-    const lut = new Uint8Array(256);
-    let sumLow = 0, countLow = 0, sumHigh = 0, countHigh = 0;
-    const sampleStep = Math.max(1, (gd.length / 600) | 0);
-    for (let i = 0; i < gd.length; i += sampleStep) {
-        const v = gd[i];
-        if (v > 148) { sumHigh += v; countHigh++; }
-        else if (v < 115) { sumLow += v; countLow++; }
-    }
-    // Ngưỡng giấy trắng thu gọn xuống 0.945 để loại bỏ hoàn toàn bóng mờ/ám xám của camera điện thoại
-    const whitePt = countHigh > 20 ? Math.min(232, Math.max(165, (sumHigh / countHigh) * 0.945)) : 190;
-    // Ngưỡng mực đen mở rộng lên 1.15 để kéo toàn bộ nét chữ in mảnh/nhạt về màu đen đậm
-    const blackPt = countLow > 20 ? Math.max(24, Math.min(98, (sumLow / countLow) * 1.15)) : 58;
-    const range = Math.max(1, whitePt - blackPt);
-    for (let i = 0; i < 256; i++) {
-        if (i >= whitePt) {
-            lut[i] = 255;
-        } else if (i <= blackPt) {
-            lut[i] = 0;
-        } else {
-            const t = (i - blackPt) / range;
-            // Đường cong Gamma S-Curve chuyên dụng cho văn bản in:
-            // Các điểm ảnh chữ in xám nhạt (t < 0.74) được nén mạnh về vùng đen đậm (gamma 1.72), giúp chữ in và số báo danh nổi bật rõ nét!
-            if (t < 0.74) {
-                lut[i] = Math.round(Math.pow(t / 0.74, 1.72) * 168);
-            } else {
-                lut[i] = Math.min(255, Math.round(168 + ((t - 0.74) / 0.26) * 87));
-            }
-        }
-    }
-
     // Nhân ma trận composite M = H * target một lần duy nhất ngoài vòng lặp
-    // Triệt tiêu hoàn toàn 2.66 triệu lần gọi hàm ap() và phép cấp phát mảng [x, y]
     const H = bestResult.H;
     const m0 = H[0]*target[0] + H[1]*target[3] + H[2]*target[6];
     const m1 = H[0]*target[1] + H[1]*target[4] + H[2]*target[7];
@@ -5062,7 +5076,6 @@ function recognizeSheetFromGray(gray, options = {}) {
             const sImg = options.sourceImg;
             const nw = sImg.naturalWidth || sImg.videoWidth || sImg.width || 1000;
             const nh = sImg.naturalHeight || sImg.videoHeight || sImg.height || 1400;
-            // Chuẩn hóa kích thước lấy mẫu quang học tối đa 2400px (siêu nét cho cả ảnh tải lên và Camera trực tiếp)
             const optScale = Math.min(1, 2400 / Math.max(nw, nh));
             optW = Math.max(1, Math.round(nw * optScale));
             optH = Math.max(1, Math.round(nh * optScale));
@@ -5077,17 +5090,30 @@ function recognizeSheetFromGray(gray, options = {}) {
             optCanvas.width = 1;
             optCanvas.height = 1;
 
-            const baseScale = options.sourceScale || 1;
-            const k = optScale / baseScale;
-            const ox = (options.sourceSx || 0) * optScale;
-            const oy = (options.sourceSy || 0) * optScale;
-
-            m0_opt = k * m0 + ox * m6;
-            m1_opt = k * m1 + ox * m7;
-            m2_opt = k * m2 + ox * m8;
-            m3_opt = k * m3 + oy * m6;
-            m4_opt = k * m4 + oy * m7;
-            m5_opt = k * m5 + oy * m8;
+            const sxRaw = options.sourceSx || 0;
+            const syRaw = options.sourceSy || 0;
+            if (sxRaw === 0 && syRaw === 0) {
+                // Tỉ lệ độc lập kX, kY tuyệt đối giữa ma trận gray (gw x gh) và ảnh quang học (optW x optH) -> sai số 0.00px!
+                const kX = optW / Math.max(1, gw);
+                const kY = optH / Math.max(1, gh);
+                m0_opt = kX * m0;
+                m1_opt = kX * m1;
+                m2_opt = kX * m2;
+                m3_opt = kY * m3;
+                m4_opt = kY * m4;
+                m5_opt = kY * m5;
+            } else {
+                const baseScale = options.sourceScale || 1;
+                const k = optScale / baseScale;
+                const ox = sxRaw * optScale;
+                const oy = syRaw * optScale;
+                m0_opt = k * m0 + ox * m6;
+                m1_opt = k * m1 + ox * m7;
+                m2_opt = k * m2 + ox * m8;
+                m3_opt = k * m3 + oy * m6;
+                m4_opt = k * m4 + oy * m7;
+                m5_opt = k * m5 + oy * m8;
+            }
         } catch (_) {
             optPixels = null;
         }
@@ -5098,14 +5124,17 @@ function recognizeSheetFromGray(gray, options = {}) {
             optH = sCanvas.height;
             const sCtx = sCanvas.getContext('2d', { willReadFrequently: true });
             optPixels = sCtx.getImageData(0, 0, optW, optH).data;
+            const kX = optW / Math.max(1, gw);
+            const kY = optH / Math.max(1, gh);
+            m0_opt = kX * m0; m1_opt = kX * m1; m2_opt = kX * m2;
+            m3_opt = kY * m3; m4_opt = kY * m4; m5_opt = kY * m5;
         } catch (_) {
             optPixels = null;
         }
     }
 
     if (optPixels) {
-        // Nội suy song tuyến tính (Bilinear Sub-Pixel Interpolation) kết hợp LUT làm đậm chữ in,
-        // loại bỏ hoàn toàn răng cưa và đứt nét trên các chữ in nhỏ ("Câu 1..40", "A B C D", "0..9")
+        // Nội suy song tuyến tính (Bilinear Sub-Pixel Interpolation) giữ nguyên dải động gốc trước khi khử bóng cục bộ
         const maxOptX = optW - 2;
         const maxOptY = optH - 2;
         const strideOpt = optW << 2;
@@ -5117,7 +5146,7 @@ function recognizeSheetFromGray(gray, options = {}) {
             for (let x = 0; x < rectW; x++) {
                 const invW = 1.0 / (m6 * x + w0);
                 const fx = (m0_opt * x + x0) * invW;
-                const fy = (m3_opt * y + y0) * invW;
+                const fy = (m3_opt * x + y0) * invW;
                 const ix = fx | 0;
                 const iy = fy | 0;
                 const idx = rowOff + (x << 2);
@@ -5133,28 +5162,23 @@ function recognizeSheetFromGray(gray, options = {}) {
                     const sIdxD = sIdx + strideOpt;
                     const sIdxDR = sIdxD + 4;
 
-                    const rVal = (optPixels[sIdx] * w00 + optPixels[sIdxR] * w10 + optPixels[sIdxD] * w01 + optPixels[sIdxDR] * w11 + 0.5) | 0;
-                    const gVal = (optPixels[sIdx + 1] * w00 + optPixels[sIdxR + 1] * w10 + optPixels[sIdxD + 1] * w01 + optPixels[sIdxDR + 1] * w11 + 0.5) | 0;
-                    const bVal = (optPixels[sIdx + 2] * w00 + optPixels[sIdxR + 2] * w10 + optPixels[sIdxD + 2] * w01 + optPixels[sIdxDR + 2] * w11 + 0.5) | 0;
-
-                    dst[idx] = lut[rVal];
-                    dst[idx + 1] = lut[gVal];
-                    dst[idx + 2] = lut[bVal];
+                    dst[idx] = (optPixels[sIdx] * w00 + optPixels[sIdxR] * w10 + optPixels[sIdxD] * w01 + optPixels[sIdxDR] * w11 + 0.5) | 0;
+                    dst[idx + 1] = (optPixels[sIdx + 1] * w00 + optPixels[sIdxR + 1] * w10 + optPixels[sIdxD + 1] * w01 + optPixels[sIdxDR + 1] * w11 + 0.5) | 0;
+                    dst[idx + 2] = (optPixels[sIdx + 2] * w00 + optPixels[sIdxR + 2] * w10 + optPixels[sIdxD + 2] * w01 + optPixels[sIdxDR + 2] * w11 + 0.5) | 0;
                 } else if (ix >= 0 && iy >= 0 && ix < optW && iy < optH) {
                     const sIdx = (iy * optW + ix) << 2;
-                    dst[idx] = lut[optPixels[sIdx]];
-                    dst[idx + 1] = lut[optPixels[sIdx + 1]];
-                    dst[idx + 2] = lut[optPixels[sIdx + 2]];
+                    dst[idx] = optPixels[sIdx];
+                    dst[idx + 1] = optPixels[sIdx + 1];
+                    dst[idx + 2] = optPixels[sIdx + 2];
                 } else {
-                    dst[idx] = 255;
-                    dst[idx + 1] = 255;
-                    dst[idx + 2] = 255;
+                    dst[idx] = 248;
+                    dst[idx + 1] = 248;
+                    dst[idx + 2] = 248;
                 }
                 dst[idx + 3] = 255;
             }
         }
     } else {
-        // Dự phòng: Nội suy song tuyến tính từ bộ đệm xám gd
         const maxGx = gw - 2;
         const maxGy = gh - 2;
         for (let y = 0; y < outH; y++) {
@@ -5168,7 +5192,7 @@ function recognizeSheetFromGray(gray, options = {}) {
                 const fy = (m3 * x + y0) * invW;
                 const ix = fx | 0;
                 const iy = fy | 0;
-                let rawVal = 255;
+                let rawVal = 248;
                 if (ix >= 0 && iy >= 0 && ix <= maxGx && iy <= maxGy) {
                     const wx = fx - ix;
                     const wy = fy - iy;
@@ -5182,62 +5206,168 @@ function recognizeSheetFromGray(gray, options = {}) {
                 } else if (ix >= 0 && iy >= 0 && ix < gw && iy < gh) {
                     rawVal = gd[iy * gw + ix];
                 }
-                const val = lut[rawVal];
                 const idx = rowOff + (x << 2);
-                dst[idx] = val;
-                dst[idx + 1] = val;
-                dst[idx + 2] = val;
+                dst[idx] = rawVal;
+                dst[idx + 1] = rawVal;
+                dst[idx + 2] = rawVal;
                 dst[idx + 3] = 255;
             }
         }
     }
 
-    // BỘ LỌC TĂNG CƯỜNG ĐỘ SẮC NÉT & LÀM ĐẬM NÉT CHỮ IN (2D UNSHARP MASK + TEXT STROKE BOLDENING):
-    // Phát hiện mọi cạnh chữ in, số báo danh, đường kẻ bảng và chữ viết tay có độ sáng thấp hơn nền giấy xung quanh,
-    // tự động khắc sâu độ tương phản cạnh (Unsharp 2.25x) và bồi đậm nét chữ mảnh để sắc nét như bản in Laser 600 DPI!
+    // BỘ LỌC QUÉT TÀI LIỆU CAMSCANNER 2D (ADAPTIVE LOCAL ILLUMINATION DIVISION & SHADOW REMOVAL):
+    // 1. Ước lượng mặt phẳng chiếu sáng cục bộ 2D (lưới khối 32x32px, phân vị 85% + giãn cực đại 3x3 + làm mượt 2 nhịp)
+    // 2. Khử sạch bóng râm điện thoại/bàn tay mà không làm cháy sáng vùng giấy ngoài nắng
+    // 3. Giữ nguyên độ sắc nét của chữ in, vòng tròn trắc nghiệm và vết bút chì tự nhiên
     {
         const totalPx = rectW * outH;
         const lumBuf = new Uint8Array(totalPx);
         for (let p = 0, idx = 0; p < totalPx; p++, idx += 4) {
             lumBuf[p] = (dst[idx] * 77 + dst[idx + 1] * 150 + dst[idx + 2] * 29) >> 8;
         }
+
+        const B = 32;
+        const gridW = Math.ceil(rectW / B);
+        const gridH = Math.ceil(outH / B);
+        const bgGrid = new Float32Array(gridW * gridH);
+        const hist = new Int32Array(256);
+
+        for (let by = 0; by < gridH; by++) {
+            const y0 = by * B;
+            const y1 = Math.min(outH, y0 + B);
+            for (let bx = 0; bx < gridW; bx++) {
+                const x0 = bx * B;
+                const x1 = Math.min(rectW, x0 + B);
+                hist.fill(0);
+                let cnt = 0;
+                for (let y = y0; y < y1; y += 2) {
+                    const row = y * rectW;
+                    for (let x = x0; x < x1; x += 2) {
+                        hist[lumBuf[row + x]]++;
+                        cnt++;
+                    }
+                }
+                const targetCnt = (cnt * 0.15) | 0;
+                let acc = 0, p85 = 225;
+                for (let v = 255; v >= 0; v--) {
+                    acc += hist[v];
+                    if (acc > targetCnt) { p85 = v; break; }
+                }
+                bgGrid[by * gridW + bx] = Math.max(85, p85);
+            }
+        }
+
+        // 3x3 Max-Dilation để các ô mốc đen hoặc chữ đậm không kéo thấp nền giấy cục bộ
+        const bgDil = new Float32Array(gridW * gridH);
+        for (let by = 0; by < gridH; by++) {
+            for (let bx = 0; bx < gridW; bx++) {
+                let mx = 0;
+                for (let dy = -1; dy <= 1; dy++) {
+                    const ny = by + dy < 0 ? 0 : (by + dy >= gridH ? gridH - 1 : by + dy);
+                    for (let dx = -1; dx <= 1; dx++) {
+                        const nx = bx + dx < 0 ? 0 : (bx + dx >= gridW ? gridW - 1 : bx + dx);
+                        const val = bgGrid[ny * gridW + nx];
+                        if (val > mx) mx = val;
+                    }
+                }
+                bgDil[by * gridW + bx] = mx;
+            }
+        }
+
+        // 2-Pass 3x3 Box Blur tạo mặt phẳng ánh sáng mềm mại, không để lại viền chuyển vùng bóng râm
+        const bgTmp = new Float32Array(gridW * gridH);
+        const bgSmooth = new Float32Array(gridW * gridH);
+        const blurPass = (srcG, dstG) => {
+            for (let by = 0; by < gridH; by++) {
+                for (let bx = 0; bx < gridW; bx++) {
+                    let s = 0;
+                    for (let dy = -1; dy <= 1; dy++) {
+                        const ny = by + dy < 0 ? 0 : (by + dy >= gridH ? gridH - 1 : by + dy);
+                        for (let dx = -1; dx <= 1; dx++) {
+                            const nx = bx + dx < 0 ? 0 : (bx + dx >= gridW ? gridW - 1 : bx + dx);
+                            s += srcG[ny * gridW + nx];
+                        }
+                    }
+                    dstG[by * gridW + bx] = s / 9;
+                }
+            }
+        };
+        blurPass(bgDil, bgTmp);
+        blurPass(bgTmp, bgSmooth);
+
+        const invB = 1 / B;
+        const maxBx = gridW - 1;
+        const maxBy = gridH - 1;
         const maxY = outH - 1;
         const maxX = rectW - 1;
-        for (let y = 1; y < maxY; y++) {
-            let p = y * rectW + 1;
+
+        for (let y = 0; y < outH; y++) {
+            const fy = (y + 0.5) * invB - 0.5;
+            let by0 = fy < 0 ? 0 : (fy | 0);
+            if (by0 >= maxBy) by0 = maxBy > 0 ? maxBy - 1 : 0;
+            const by1 = by0 < maxBy ? by0 + 1 : by0;
+            const wy = fy - by0 < 0 ? 0 : (fy - by0 > 1 ? 1 : fy - by0);
+            const r0 = by0 * gridW;
+            const r1 = by1 * gridW;
+            const isInnerY = y > 0 && y < maxY;
+
+            let p = y * rectW;
             let idx = p << 2;
-            for (let x = 1; x < maxX; x++, p++, idx += 4) {
+            for (let x = 0; x < rectW; x++, p++, idx += 4) {
+                const fx = (x + 0.5) * invB - 0.5;
+                let bx0 = fx < 0 ? 0 : (fx | 0);
+                if (bx0 >= maxBx) bx0 = maxBx > 0 ? maxBx - 1 : 0;
+                const bx1 = bx0 < maxBx ? bx0 + 1 : bx0;
+                const wx = fx - bx0 < 0 ? 0 : (fx - bx0 > 1 ? 1 : fx - bx0);
+
+                const bg0 = bgSmooth[r0 + bx0] * (1 - wx) + bgSmooth[r0 + bx1] * wx;
+                const bg1 = bgSmooth[r1 + bx0] * (1 - wx) + bgSmooth[r1 + bx1] * wx;
+                const bg = bg0 * (1 - wy) + bg1 * wy;
+                const invBg = 246 / bg;
+
                 const c = lumBuf[p];
-                const nTop = lumBuf[p - rectW];
-                const nBot = lumBuf[p + rectW];
-                const nLeft = lumBuf[p - 1];
-                const nRight = lumBuf[p + 1];
-                const crossSum = nTop + nBot + nLeft + nRight;
-                const diagSum = lumBuf[p - rectW - 1] + lumBuf[p - rectW + 1] + lumBuf[p + rectW - 1] + lumBuf[p + rectW + 1];
-                const localAvg = (crossSum + diagSum) >> 3;
-                const diff = c - localAvg;
+                const normY = c * invBg;
 
-                if (diff < -2 || c < 188) {
-                    // Điểm ảnh thuộc nét chữ in / số / khung bảng / vết tô:
-                    // Tìm điểm tối nhất trong 4 láng giềng sát cạnh để bồi đậm nét chữ mảnh bị mờ do camera
-                    let min4 = nTop < nBot ? nTop : nBot;
-                    if (nLeft < min4) min4 = nLeft;
-                    if (nRight < min4) min4 = nRight;
-                    const boldShift = min4 < c ? ((c - min4) * 0.28) : 0;
-                    const edgeBoost = diff < 0 ? (diff * 2.25) : (diff * 0.7);
-                    const delta = Math.round(edgeBoost - boldShift);
+                let diff = 0;
+                if (isInnerY && x > 0 && x < maxX) {
+                    const crossSum = lumBuf[p - rectW] + lumBuf[p + rectW] + lumBuf[p - 1] + lumBuf[p + 1];
+                    const diagSum = lumBuf[p - rectW - 1] + lumBuf[p - rectW + 1] + lumBuf[p + rectW - 1] + lumBuf[p + rectW + 1];
+                    const localAvg = (crossSum + diagSum) * 0.125;
+                    diff = (c - localAvg) * invBg;
+                }
 
-                    let r = dst[idx] + delta;
-                    let g = dst[idx + 1] + delta;
-                    let b = dst[idx + 2] + delta;
-                    dst[idx] = r < 0 ? 0 : (r > 255 ? 255 : r);
-                    dst[idx + 1] = g < 0 ? 0 : (g > 255 ? 255 : g);
-                    dst[idx + 2] = b < 0 ? 0 : (b > 255 ? 255 : b);
-                } else if (c > 202 && diff >= -1) {
-                    // Nền giấy trắng sát cạnh chữ: làm sạch tuyệt đối về trắng 255 để triệt tiêu bóng nhòe quanh chữ
-                    dst[idx] = 255;
-                    dst[idx + 1] = 255;
-                    dst[idx + 2] = 255;
+                if (normY >= 230 && diff >= -3.2) {
+                    // Vùng nền giấy trắng (cả vùng sáng và vùng vừa được khử bóng điện thoại):
+                    // Đưa về màu giấy trắng dịu tự nhiên (246..252), khử sạch ám vàng/xám của bóng đổ mà không gây chói lóa!
+                    const wVal = normY >= 246 ? 252 : ((246 + (normY - 230) * 0.375) | 0);
+                    dst[idx] = wVal;
+                    dst[idx + 1] = wVal;
+                    dst[idx + 2] = wVal;
+                } else {
+                    // Vùng nét chữ in, khung bảng, vòng tròn đáp án và vết bút chì:
+                    // Áp dụng đường cong tương phản tự nhiên kết hợp làm nét cạnh nhẹ nhàng
+                    let baseY;
+                    if (normY <= 42) {
+                        baseY = normY * 0.55;
+                    } else if (normY < 185) {
+                        const t = (normY - 42) / 143;
+                        baseY = 23 + Math.pow(t, 1.28) * 149;
+                    } else {
+                        const t = Math.min(1, (normY - 185) / 45);
+                        baseY = 172 + t * 74;
+                    }
+                    const edgeBoost = diff < 0 ? Math.max(-36, diff * 1.35) : Math.min(18, diff * 0.45);
+                    const targetY = Math.max(0, Math.min(250, Math.round(baseY + edgeBoost)));
+
+                    // Pha 80% sắc độ trung tính + 20% màu gốc đã bù sáng để nét bút bi xanh/đỏ giữ màu nhẹ tự nhiên mà không bị ám màu bóng râm
+                    const scaleCol = c > 8 ? (targetY / c) : 0;
+                    const rCol = Math.min(252, (dst[idx] * scaleCol) | 0);
+                    const gCol = Math.min(252, (dst[idx + 1] * scaleCol) | 0);
+                    const bCol = Math.min(252, (dst[idx + 2] * scaleCol) | 0);
+
+                    dst[idx] = (targetY * 4 + rCol) / 5 | 0;
+                    dst[idx + 1] = (targetY * 4 + gCol) / 5 | 0;
+                    dst[idx + 2] = (targetY * 4 + bCol) / 5 | 0;
                 }
             }
         }
@@ -7449,10 +7579,16 @@ function startAutoScanLoop() {
         try {
             state.isAutoScanning = true;
 
-            // Cắt đúng vùng khung ngắm đang hiển thị trên màn hình (maxDim 880px <= 1000px để không bị thuNho chia đôi)
+            // Chụp đồng bộ 1 khung hình gốc duy nhất (hiResCanvas 1850px) tại t = 0ms và trích xuất testCanvas (880px) từ chính khung hình đó
+            // Triệt tiêu 100% độ lệch thời gian 60ms giữa lúc nhận diện góc và lúc cắt ảnh đóng dấu khi tay giáo viên di chuyển!
             const info = getVideoViewportInfo(video, guide);
-            const testCanvas = drawVideoRegionToCanvas(video, info.sx, info.sy, info.sw, info.sh, 880);
+            const hiResCanvas = drawVideoRegionToCanvas(video, info.sx, info.sy, info.sw, info.sh, 1850);
+            const testScale = Math.min(1, 880 / Math.max(hiResCanvas.width, hiResCanvas.height));
+            const testCanvas = document.createElement('canvas');
+            testCanvas.width = Math.max(1, Math.round(hiResCanvas.width * testScale));
+            testCanvas.height = Math.max(1, Math.round(hiResCanvas.height * testScale));
             const tCtx = testCanvas.getContext('2d', { willReadFrequently: true });
+            tCtx.drawImage(hiResCanvas, 0, 0, testCanvas.width, testCanvas.height);
             const gray = window.OMR.xam(tCtx.getImageData(0, 0, testCanvas.width, testCanvas.height));
 
             const tplKey = state.exam?.sheet_template || 'qmcv1239';
@@ -7562,13 +7698,19 @@ function startAutoScanLoop() {
                     await window.captureCameraFrame({
                         preCaptured: {
                             canvas: testCanvas,
+                            hiResCanvas,
                             gray,
                             found,
                             guideHints: info.guideHints
                         }
                     });
+                } else {
+                    hiResCanvas.width = 1;
+                    hiResCanvas.height = 1;
                 }
             } else {
+                hiResCanvas.width = 1;
+                hiResCanvas.height = 1;
                 state.consecutiveCornerDetections = 0;
                 state._lastDetectedCorners = null;
                 document.querySelectorAll('.camera-corner-bracket').forEach(b => {
@@ -8090,7 +8232,18 @@ window.captureCameraFrame = async (opts = {}) => {
         const candidates = [];
         const tempCanvasesToFree = [];
 
-        const hiResViewportCanvas = drawVideoRegionToCanvas(video, info.sx, info.sy, info.sw, info.sh, 2200);
+        const deriveDetectionCanvas = (hiCanvas, maxDim) => {
+            const sc = Math.min(1, maxDim / Math.max(1, hiCanvas.width, hiCanvas.height));
+            const c = document.createElement('canvas');
+            c.width = Math.max(1, Math.round(hiCanvas.width * sc));
+            c.height = Math.max(1, Math.round(hiCanvas.height * sc));
+            c.getContext('2d', { willReadFrequently: true }).drawImage(hiCanvas, 0, 0, c.width, c.height);
+            return c;
+        };
+
+        const hiResViewportCanvas = (opts && opts.preCaptured && opts.preCaptured.hiResCanvas && opts.preCaptured.hiResCanvas.width > 10)
+            ? opts.preCaptured.hiResCanvas
+            : drawVideoRegionToCanvas(video, info.sx, info.sy, info.sw, info.sh, 2000);
         tempCanvasesToFree.push(hiResViewportCanvas);
 
         if (opts && opts.preCaptured && opts.preCaptured.gray) {
@@ -8109,8 +8262,8 @@ window.captureCameraFrame = async (opts = {}) => {
             });
         }
 
-        // Ưu tiên 1: Vùng khung ngắm hiển thị trên màn hình (nhận diện ở 960px, trích xuất ảnh nét từ hiResViewportCanvas 2200px)
-        const viewportCanvas = drawVideoRegionToCanvas(video, info.sx, info.sy, info.sw, info.sh, 960);
+        // Ưu tiên 1: Vùng khung ngắm hiển thị trên màn hình (trích xuất đồng bộ từ cùng 1 khung hình hiResViewportCanvas)
+        const viewportCanvas = deriveDetectionCanvas(hiResViewportCanvas, 960);
         tempCanvasesToFree.push(viewportCanvas);
         candidates.push({
             label: 'viewport',
@@ -8127,8 +8280,8 @@ window.captureCameraFrame = async (opts = {}) => {
         // Ưu tiên 2: Vùng cắt sát khung 4 ô định vị (#cameraA4Guide + 14% lề)
         if (info.guideCrop) {
             const gc = info.guideCrop;
-            const guideCanvas = drawVideoRegionToCanvas(video, gc.sx, gc.sy, gc.sw, gc.sh, 960);
-            const hiResGuideCanvas = drawVideoRegionToCanvas(video, gc.sx, gc.sy, gc.sw, gc.sh, 2200);
+            const hiResGuideCanvas = drawVideoRegionToCanvas(video, gc.sx, gc.sy, gc.sw, gc.sh, 2000);
+            const guideCanvas = deriveDetectionCanvas(hiResGuideCanvas, 960);
             tempCanvasesToFree.push(guideCanvas, hiResGuideCanvas);
             candidates.push({
                 label: 'guide-crop',
@@ -8145,8 +8298,8 @@ window.captureCameraFrame = async (opts = {}) => {
         // Ưu tiên 3: Toàn khung cảm biến camera
         const fullW = video.videoWidth || 1280;
         const fullH = video.videoHeight || 960;
-        const fullCanvas = drawVideoRegionToCanvas(video, 0, 0, fullW, fullH, 980);
-        const hiResFullCanvas = drawVideoRegionToCanvas(video, 0, 0, fullW, fullH, 2200);
+        const hiResFullCanvas = drawVideoRegionToCanvas(video, 0, 0, fullW, fullH, 2000);
+        const fullCanvas = deriveDetectionCanvas(hiResFullCanvas, 980);
         tempCanvasesToFree.push(fullCanvas, hiResFullCanvas);
         candidates.push({
             label: 'full-sensor',

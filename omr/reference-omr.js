@@ -16,11 +16,95 @@
 var OMR = (function () {
   'use strict';
 
-  // ---------- ảnh xám ----------
+  // ---------- ảnh xám & khử bóng cục bộ 2D (CamScanner Illumination Normalization) ----------
   function xam(img) {
     var s = img.data, n = img.width * img.height, d = new Uint8Array(n);
     for (var i = 0, j = 0; i < n; i++, j += 4) d[i] = (s[j] * 77 + s[j + 1] * 150 + s[j + 2] * 29) >> 8;
     return { w: img.width, h: img.height, d: d };
+  }
+
+  var _kbHist = new Int32Array(256);
+  function khuBong(G) {
+    if (!G || !G.d || G._daKhuBong) return G;
+    var w = G.w, h = G.h, d = G.d;
+    if (w < 64 || h < 64) return G;
+    var B = Math.max(20, Math.round(Math.min(w, h) / 22));
+    var gw = Math.ceil(w / B), gh = Math.ceil(h / B);
+    var grid = new Float32Array(gw * gh);
+    var step = B >= 28 ? 2 : 1, bx, by, x, y;
+    for (by = 0; by < gh; by++) {
+      var y0 = by * B, y1 = Math.min(h, y0 + B);
+      for (bx = 0; bx < gw; bx++) {
+        var x0 = bx * B, x1 = Math.min(w, x0 + B), cnt = 0;
+        _kbHist.fill(0);
+        for (y = y0; y < y1; y += step) {
+          var row = y * w;
+          for (x = x0; x < x1; x += step) { _kbHist[d[row + x]]++; cnt++; }
+        }
+        var target = (cnt * 0.16) | 0, acc = 0, p84 = 220;
+        for (var v = 255; v >= 0; v--) {
+          acc += _kbHist[v];
+          if (acc > target) { p84 = v; break; }
+        }
+        grid[by * gw + bx] = Math.max(80, p84);
+      }
+    }
+    // 3x3 max-dilation để các mốc vuông đen hoặc vùng chữ đậm không kéo tụt nền giấy cục bộ
+    var dil = new Float32Array(gw * gh);
+    for (by = 0; by < gh; by++) {
+      for (bx = 0; bx < gw; bx++) {
+        var mx = 0;
+        for (var dy = -1; dy <= 1; dy++) {
+          var ny = by + dy; if (ny < 0) ny = 0; else if (ny >= gh) ny = gh - 1;
+          for (var dx = -1; dx <= 1; dx++) {
+            var nx = bx + dx; if (nx < 0) nx = 0; else if (nx >= gw) nx = gw - 1;
+            var val = grid[ny * gw + nx];
+            if (val > mx) mx = val;
+          }
+        }
+        dil[by * gw + bx] = mx;
+      }
+    }
+    // 3x3 box blur làm mượt mặt phẳng chiếu sáng
+    var sm = new Float32Array(gw * gh);
+    for (by = 0; by < gh; by++) {
+      for (bx = 0; bx < gw; bx++) {
+        var sum = 0;
+        for (var dy2 = -1; dy2 <= 1; dy2++) {
+          var ny2 = by + dy2; if (ny2 < 0) ny2 = 0; else if (ny2 >= gh) ny2 = gh - 1;
+          for (var dx2 = -1; dx2 <= 1; dx2++) {
+            var nx2 = bx + dx2; if (nx2 < 0) nx2 = 0; else if (nx2 >= gw) nx2 = gw - 1;
+            sum += dil[ny2 * gw + nx2];
+          }
+        }
+        sm[by * gw + bx] = sum / 9;
+      }
+    }
+    // Nội suy song tuyến tính nền giấy bg(x,y) và chuẩn hoá độ sáng về nền giấy chuẩn 240
+    var invB = 1 / B, maxBx = gw - 1, maxBy = gh - 1;
+    for (y = 0; y < h; y++) {
+      var fy = (y + 0.5) * invB - 0.5;
+      var by0 = fy < 0 ? 0 : (fy | 0);
+      if (by0 >= maxBy) { by0 = maxBy > 0 ? maxBy - 1 : 0; }
+      var by1 = by0 < maxBy ? by0 + 1 : by0;
+      var wy = fy - by0; if (wy < 0) wy = 0; else if (wy > 1) wy = 1;
+      var r0 = by0 * gw, r1 = by1 * gw, rowOff = y * w;
+      for (x = 0; x < w; x++) {
+        var fx = (x + 0.5) * invB - 0.5;
+        var bx0 = fx < 0 ? 0 : (fx | 0);
+        if (bx0 >= maxBx) { bx0 = maxBx > 0 ? maxBx - 1 : 0; }
+        var bx1 = bx0 < maxBx ? bx0 + 1 : bx0;
+        var wx = fx - bx0; if (wx < 0) wx = 0; else if (wx > 1) wx = 1;
+        var bg0 = sm[r0 + bx0] * (1 - wx) + sm[r0 + bx1] * wx;
+        var bg1 = sm[r1 + bx0] * (1 - wx) + sm[r1 + bx1] * wx;
+        var bg = bg0 * (1 - wy) + bg1 * wy;
+        var pxVal = d[rowOff + x];
+        var norm = ((pxVal * 240) / bg + 0.5) | 0;
+        d[rowOff + x] = norm > 255 ? 255 : norm;
+      }
+    }
+    G._daKhuBong = true;
+    return G;
   }
 
   // ---------- đại số ----------
@@ -247,49 +331,102 @@ var OMR = (function () {
     return { H: H2, soMoc: tot.nk, xoay: Math.round(tot.xoay * 180 / Math.PI), pxcm: tot.pxcm, goc: goc };
   }
 
-  // ---------- tinh chỉnh mốc trên ảnh đủ phân giải ----------
+  // ---------- tinh chỉnh mốc trên ảnh đủ phân giải (có loại bỏ mốc nhiễu / bóng che bằng sai số chiếu lại) ----------
+  function timTamMoc(d, w, h, c, canh, pxcm, banKinhTim) {
+    var cx = c[0], cy = c[1], ok = false, tb = 0;
+    for (var lan = 0; lan < 4; lan++) {
+      var le = lan === 0 ? banKinhTim * pxcm : 0.13 * pxcm, R = canh / 2 + le;
+      var x0 = Math.max(0, Math.round(cx - R)), x1 = Math.min(w - 1, Math.round(cx + R));
+      var y0 = Math.max(0, Math.round(cy - R)), y1 = Math.min(h - 1, Math.round(cy + R));
+      if (x1 - x0 < 4 || y1 - y0 < 4) { ok = false; break; }
+      var mn = 255, mx = 0, x, y, v;
+      for (y = y0; y <= y1; y++) for (x = x0; x <= x1; x++) { v = d[y * w + x]; if (v < mn) mn = v; if (v > mx) mx = v; }
+      if (mx - mn < 34) { ok = false; break; }
+      var ng = (mn + mx) / 2, n = 0, sx = 0, sy = 0, sv = 0;
+      for (y = y0; y <= y1; y++) for (x = x0; x <= x1; x++) {
+        v = d[y * w + x];
+        if (v < ng) { n++; sx += x; sy += y; sv += v; }
+      }
+      if (!n) { ok = false; break; }
+      cx = sx / n; cy = sy / n; tb = sv / n;
+      var tl = n / (canh * canh);
+      ok = tl > 0.48 && tl < Math.min(1.72, Math.max(1.45, Math.pow((canh + 3) / canh, 2)));
+    }
+    if (!ok || Math.hypot(cx - c[0], cy - c[1]) >= (banKinhTim + 0.13) * pxcm) return null;
+    return { cx: cx, cy: cy, tb: tb };
+  }
+
   function tinhChinh(G, H, tpl) {
-    var w = G.w, h = G.h, d = G.d, cap = [], den = 0, nden = 0, soGoc = 0;
-    for (var i = 0; i < tpl.moc.length; i++) {
+    var w = G.w, h = G.h, d = G.d, items = [], i;
+    for (i = 0; i < tpl.moc.length; i++) {
       var m = tpl.moc[i], c = ap(H, m.x, m.y), e = ap(H, m.x + 1, m.y), f = ap(H, m.x, m.y + 1);
       var pxcm = (Math.hypot(e[0] - c[0], e[1] - c[1]) + Math.hypot(f[0] - c[0], f[1] - c[1])) / 2;
-      var canh = m.s * pxcm, cx = c[0], cy = c[1], ok = false, tb = 0;
-      for (var lan = 0; lan < 4; lan++) {
-        var le = lan === 0 ? 0.32 * pxcm : 0.13 * pxcm, R = canh / 2 + le;
-        var x0 = Math.max(0, Math.round(cx - R)), x1 = Math.min(w - 1, Math.round(cx + R));
-        var y0 = Math.max(0, Math.round(cy - R)), y1 = Math.min(h - 1, Math.round(cy + R));
-        if (x1 - x0 < 4 || y1 - y0 < 4) { ok = false; break; }
-        var mn = 255, mx = 0, x, y, v;
-        for (y = y0; y <= y1; y++) for (x = x0; x <= x1; x++) { v = d[y * w + x]; if (v < mn) mn = v; if (v > mx) mx = v; }
-        if (mx - mn < 40) { ok = false; break; }
-        var ng = (mn + mx) / 2, n = 0, sx = 0, sy = 0, sv = 0;
-        for (y = y0; y <= y1; y++) for (x = x0; x <= x1; x++) {
-          v = d[y * w + x];
-          if (v < ng) { n++; sx += x; sy += y; sv += v; }
-        }
-        if (!n) { ok = false; break; }
-        cx = sx / n; cy = sy / n; tb = sv / n;
-        var tl = n / (canh * canh);
-        // ô nhỏ trên ảnh nhỏ (cạnh ~10 px, vd. ảnh scan phiếu 40 câu ngang, ô S1 sát nét kẻ lưới): viền mờ + nét kẻ bên cạnh
-        // làm tỉ lệ đen vượt 1,45 (đo được 1,453) → cho thêm ~1,5 px viền quanh ô, tối đa 1,7 (tay / bóng che kín ô ~4 vẫn bị loại);
-        // ô cỡ vừa / lớn vẫn giữ giới hạn 1,45
-        ok = tl > 0.5 && tl < Math.min(1.7, Math.max(1.45, Math.pow((canh + 3) / canh, 2)));
-      }
-      if (ok && Math.hypot(cx - c[0], cy - c[1]) < 0.45 * pxcm) {
-        cap.push([[m.x, m.y], [cx, cy]]); den += tb; nden++;
-        if (i < 4) soGoc++;
+      var kq = timTamMoc(d, w, h, c, m.s * pxcm, pxcm, 0.34);
+      if (kq) {
+        items.push({ idx: i, m: m, pt: [kq.cx, kq.cy], tb: kq.tb, pxcm: pxcm });
       }
     }
-    if (cap.length < 4 || soGoc < 3) return null;
-    var H2 = phepChieu(cap.map(function (c) { return c[0]; }), cap.map(function (c) { return c[1]; }));
+    var soGoc = 0;
+    for (i = 0; i < items.length; i++) if (items[i].idx < 4) soGoc++;
+    if (items.length < 4 || soGoc < 3) return null;
+
+    var H2 = phepChieu(items.map(function (it) { return [it.m.x, it.m.y]; }), items.map(function (it) { return it.pt; }));
     if (!H2) return null;
+
+    // Loại bỏ lặp các mốc ngoại lai (vd. 1 mốc góc/cạnh nhảy nhầm vào bóng đen hoặc phím bàn phím)
+    for (var iter = 0; iter < 4 && items.length > 6; iter++) {
+      var maxErr = 0, worstIdx = -1;
+      for (i = 0; i < items.length; i++) {
+        var pred = ap(H2, items[i].m.x, items[i].m.y);
+        var errCm = Math.hypot(pred[0] - items[i].pt[0], pred[1] - items[i].pt[1]) / items[i].pxcm;
+        if (errCm > maxErr) { maxErr = errCm; worstIdx = i; }
+      }
+      if (maxErr <= 0.16 || worstIdx < 0) break;
+      var nextItems = items.slice(0, worstIdx).concat(items.slice(worstIdx + 1));
+      var nextH2 = phepChieu(nextItems.map(function (it) { return [it.m.x, it.m.y]; }), nextItems.map(function (it) { return it.pt; }));
+      if (!nextH2) break;
+      items = nextItems;
+      H2 = nextH2;
+    }
+
+    // Dò lại các mốc bị thiếu/loại bỏ bằng ma trận H2 đã sạch nhiễu trong bán kính hẹp
+    var matchedIdx = {};
+    for (i = 0; i < items.length; i++) matchedIdx[items[i].idx] = true;
+    var added = false;
+    for (i = 0; i < tpl.moc.length; i++) {
+      if (matchedIdx[i]) continue;
+      var m2 = tpl.moc[i], c2 = ap(H2, m2.x, m2.y), e2 = ap(H2, m2.x + 1, m2.y), f2 = ap(H2, m2.x, m2.y + 1);
+      var pxcm2 = (Math.hypot(e2[0] - c2[0], e2[1] - c2[1]) + Math.hypot(f2[0] - c2[0], f2[1] - c2[1])) / 2;
+      var kq2 = timTamMoc(d, w, h, c2, m2.s * pxcm2, pxcm2, 0.20);
+      if (kq2 && Math.hypot(kq2.cx - c2[0], kq2.cy - c2[1]) < 0.18 * pxcm2) {
+        items.push({ idx: i, m: m2, pt: [kq2.cx, kq2.cy], tb: kq2.tb, pxcm: pxcm2 });
+        added = true;
+      }
+    }
+    if (added) {
+      var H3 = phepChieu(items.map(function (it) { return [it.m.x, it.m.y]; }), items.map(function (it) { return it.pt; }));
+      if (H3) H2 = H3;
+    }
+
+    var den = 0; soGoc = 0;
+    for (i = 0; i < items.length; i++) {
+      den += items[i].tb;
+      if (items[i].idx < 4) soGoc++;
+    }
+    // Nếu >= 65% tổng số mốc trên toàn mặt phiếu khớp phẳng tuyệt đối (ít nhất 8 mốc) và >= 3 góc chuẩn,
+    // góc thứ 4 (nếu bị bóng tay che khuất) đã được neo cứng chính xác qua mặt phẳng Homography
+    if (soGoc === 3 && items.length >= Math.max(8, Math.ceil(tpl.moc.length * 0.65))) {
+      soGoc = 4;
+    }
+    if (items.length < 4 || soGoc < 3) return null;
+
     for (var gIdx = 0; gIdx < 4; gIdx++) {
       var gm = tpl.moc[gIdx], pOld = ap(H, gm.x, gm.y), pNew = ap(H2, gm.x, gm.y);
       var ge = ap(H, gm.x + 1, gm.y), gf = ap(H, gm.x, gm.y + 1);
       var gPxcm = (Math.hypot(ge[0] - pOld[0], ge[1] - pOld[1]) + Math.hypot(gf[0] - pOld[0], gf[1] - pOld[1])) / 2;
-      if (Math.hypot(pNew[0] - pOld[0], pNew[1] - pOld[1]) > 0.65 * gPxcm) return null;
+      if (Math.hypot(pNew[0] - pOld[0], pNew[1] - pOld[1]) > 0.78 * gPxcm) return null;
     }
-    return { H: H2, soMoc: cap.length, soGoc: soGoc, den: den / nden };
+    return { H: H2, soMoc: items.length, soGoc: soGoc, den: den / items.length };
   }
 
   // ---------- độ nét: bề rộng mép các ô vuông đen (cm). Ảnh nét ~0,03-0,06; ảnh mờ thì lớn dần ----------
@@ -628,7 +765,7 @@ var OMR = (function () {
   }
 
   return {
-    timKhoi: timKhoi, doNet: doNet, xam: xam, phepChieu: phepChieu, ap: ap, tiLe: tiLe, timMoc: timMoc, tinhChinh: tinhChinh,
+    timKhoi: timKhoi, doNet: doNet, xam: xam, khuBong: khuBong, phepChieu: phepChieu, ap: ap, tiLe: tiLe, timMoc: timMoc, tinhChinh: tinhChinh,
     docPhieu: docPhieu, doCacO: doCacO, kiemChe: kiemChe, quyetDinh: quyetDinh, bauChon: bauChon, doO: doO, chon: chon, nan: nan, docAnh: docAnh, thuNho: thuNho
   };
 })();

@@ -41,6 +41,7 @@
   }
 
   window.findQMCorners=function(gray,tpl=MAU.qm40,guideHints=null){
+    if(OMR.khuBong)OMR.khuBong(gray);
     const small=OMR.thuNho(gray,1000),g=small.g;
     const minDim=Math.min(g.w,g.h);
     const allBlocks=OMR.timKhoi(g).filter(b=>b.c>minDim*0.0072&&b.c<minDim*0.075);
