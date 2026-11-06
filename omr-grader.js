@@ -1212,6 +1212,21 @@ async function deleteOmrImageFromDb(key) {
 // ========================================================
 let tgBotRoundRobinIndex = 0;
 
+function getConfiguredTelegramChatIds() {
+    const rawList = [];
+    if (Array.isArray(state.telegramConfig?.chatIds)) {
+        rawList.push(...state.telegramConfig.chatIds);
+    }
+    if (state.telegramConfig?.chatId) {
+        const parts = String(state.telegramConfig.chatId)
+            .split(/[\n,;|\s]+/)
+            .map(s => s.trim())
+            .filter(Boolean);
+        rawList.push(...parts);
+    }
+    return [...new Set(rawList.map(c => String(c).trim()).filter(Boolean))];
+}
+
 function getNextTelegramBotToken() {
     const tokens = (state.telegramConfig?.botTokens || []).map(t => String(t || '').trim()).filter(Boolean);
     if (tokens.length === 0) return null;
@@ -1223,17 +1238,39 @@ function getNextTelegramBotToken() {
 function updateTelegramStatusIndicator() {
     const el = document.getElementById('tgActiveIndicator');
     if (!el) return;
-    const isEnabled = Boolean(state.telegramConfig?.enabled && (state.telegramConfig?.botTokens || []).length > 0 && state.telegramConfig?.chatId);
+    const chatIds = getConfiguredTelegramChatIds();
+    const isEnabled = Boolean(state.telegramConfig?.enabled && (state.telegramConfig?.botTokens || []).length > 0 && chatIds.length > 0);
     if (isEnabled) {
         const botCount = (state.telegramConfig.botTokens || []).length;
         el.className = 'w-2 h-2 rounded-full bg-emerald-500 animate-pulse';
-        el.title = `Đang bật lưu Telegram (${botCount} bot)`;
+        el.title = `Đang bật lưu Telegram (${botCount} bot • ${chatIds.length} kênh/chat đích)`;
     } else {
         el.className = 'w-2 h-2 rounded-full bg-slate-300 dark:bg-slate-600';
         el.title = 'Chưa bật lưu Telegram';
     }
 }
 window.updateTelegramStatusIndicator = updateTelegramStatusIndicator;
+
+window.updateTgChatCountBadge = function() {
+    const txt = document.getElementById('tgConfigChatId')?.value || '';
+    const chatIds = txt.split(/[\n,;|\s]+/).map(s => s.trim()).filter(Boolean);
+    const badge = document.getElementById('tgChatCountBadge');
+    if (!badge) return;
+    const hasPrivate = chatIds.some(c => !c.startsWith('-') && /^\d+$/.test(c));
+    if (chatIds.length === 0) {
+        badge.textContent = '0 kênh';
+        badge.className = 'text-[10px] font-mono text-slate-400 font-bold';
+    } else if (hasPrivate || chatIds.length >= 3) {
+        badge.textContent = hasPrivate ? `${chatIds.length} đích (Đã mở khóa Đa luồng Siêu tốc)` : `${chatIds.length} kênh song song (Siêu tốc)`;
+        badge.className = 'text-[10px] font-mono text-emerald-600 dark:text-emerald-400 font-bold';
+    } else if (chatIds.length === 1) {
+        badge.textContent = '1 kênh (~20 ảnh/phút - Nên thêm Kênh/Chat riêng)';
+        badge.className = 'text-[10px] font-mono text-amber-600 dark:text-amber-400 font-bold';
+    } else {
+        badge.textContent = `${chatIds.length} kênh song song`;
+        badge.className = 'text-[10px] font-mono text-sky-600 dark:text-sky-400 font-bold';
+    }
+};
 
 window.openTelegramConfigModal = function() {
     const modal = document.getElementById('telegramConfigModal');
@@ -1245,15 +1282,17 @@ window.openTelegramConfigModal = function() {
     const modeSingle = document.getElementById('tgModeSingle');
 
     if (chk) chk.checked = Boolean(state.telegramConfig?.enabled);
-    if (txtChat) txtChat.value = state.telegramConfig?.chatId || '';
+    const chatIds = getConfiguredTelegramChatIds();
+    if (txtChat) txtChat.value = chatIds.join('\n') || state.telegramConfig?.chatId || '';
     if (txtTokens) txtTokens.value = (state.telegramConfig?.botTokens || []).join('\n');
-    if (state.telegramConfig?.sendMode === 'media_group') {
-        if (modeAlbum) modeAlbum.checked = true;
-    } else {
+    if (state.telegramConfig?.sendMode === 'parallel_single') {
         if (modeSingle) modeSingle.checked = true;
+    } else {
+        if (modeAlbum) modeAlbum.checked = true;
     }
 
     window.updateTgBotCountBadge();
+    if (typeof window.updateTgChatCountBadge === 'function') window.updateTgChatCountBadge();
     modal.classList.remove('hidden');
 };
 
@@ -1273,6 +1312,109 @@ window.updateTgBotCountBadge = function() {
     }
 };
 
+window.autoDetectTelegramChatIds = async function() {
+    const txtTokens = document.getElementById('tgConfigTokens');
+    const txtChat = document.getElementById('tgConfigChatId');
+    const rawTokens = (txtTokens?.value || '').split('\n').map(t => t.trim()).filter(Boolean);
+
+    if (rawTokens.length === 0) {
+        Swal.fire('Chưa có Bot Token', 'Vui lòng dán danh sách mã Bot Token vào ô bên dưới trước khi bấm quét tự động!', 'warning');
+        return;
+    }
+
+    Swal.fire({
+        title: 'Đang quét Kênh & Luồng Chat từ các Bot...',
+        html: `Đang kết nối tới <b>${rawTokens.length} Bot</b> để tìm tất cả Kênh (Channel), Nhóm (Group) và Hộp thoại riêng (Private Chat)...`,
+        allowOutsideClick: false,
+        didOpen: () => Swal.showLoading()
+    });
+
+    const discoveredChats = new Map(); // id -> { id, title, type }
+    const botProfiles = [];
+
+    await Promise.allSettled(rawTokens.map(async (tok, idx) => {
+        try {
+            const [meResp, upResp] = await Promise.all([
+                fetch(`https://api.telegram.org/bot${tok}/getMe`).then(r => r.json()).catch(() => null),
+                fetch(`https://api.telegram.org/bot${tok}/getUpdates?limit=100`).then(r => r.json()).catch(() => null)
+            ]);
+            if (meResp && meResp.ok && meResp.result) {
+                botProfiles.push({
+                    index: idx + 1,
+                    username: meResp.result.username,
+                    name: meResp.result.first_name
+                });
+            }
+            if (upResp && upResp.ok && Array.isArray(upResp.result)) {
+                upResp.result.forEach(u => {
+                    const chat = u.message?.chat || u.channel_post?.chat || u.my_chat_member?.chat || u.edited_message?.chat || u.edited_channel_post?.chat;
+                    if (chat && chat.id) {
+                        const cid = String(chat.id);
+                        const title = chat.title || [chat.first_name, chat.last_name].filter(Boolean).join(' ') || chat.username || cid;
+                        discoveredChats.set(cid, {
+                            id: cid,
+                            title,
+                            type: chat.type || (cid.startsWith('-') ? 'channel' : 'private')
+                        });
+                    }
+                });
+            }
+        } catch (_) {}
+    }));
+
+    botProfiles.sort((a, b) => a.index - b.index);
+
+    const existingIds = (txtChat?.value || '').split(/[\n,;|\s]+/).map(s => s.trim()).filter(Boolean);
+    const mergedSet = new Set(existingIds);
+    discoveredChats.forEach((_, cid) => mergedSet.add(cid));
+
+    if (txtChat && mergedSet.size > 0) {
+        txtChat.value = [...mergedSet].join('\n');
+        if (typeof window.updateTgChatCountBadge === 'function') window.updateTgChatCountBadge();
+    }
+
+    const foundListHtml = discoveredChats.size > 0
+        ? [...discoveredChats.values()].map(c => {
+            const isPriv = c.type === 'private' || (!c.id.startsWith('-') && /^\d+$/.test(c.id));
+            return `<div class="flex items-center justify-between gap-2 p-2 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-xs">
+                <span class="font-bold text-slate-800 dark:text-slate-100 truncate">${isPriv ? '🚀 Chat riêng:' : '📢 Kênh/Nhóm:'} ${c.title}</span>
+                <code class="font-mono font-bold text-emerald-700 dark:text-emerald-300 shrink-0">${c.id}</code>
+            </div>`;
+        }).join('')
+        : `<div class="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-200 text-xs">
+            Chưa tìm thấy tin nhắn mới trong bộ nhớ đệm của Bot. Bạn có thể bấm vào các Bot bên dưới rồi bấm <b>Start (/start)</b> hoặc gửi 1 tin nhắn bất kỳ vào Kênh mới rồi bấm Quét lại!
+        </div>`;
+
+    const botLinksHtml = botProfiles.length > 0
+        ? `<div class="mt-3 text-left">
+            <div class="text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1.5">Danh sách ${botProfiles.length} Bot của bạn (Bấm để mở Bot & bấm Start mở khóa 11 luồng riêng):</div>
+            <div class="grid grid-cols-2 sm:grid-cols-3 gap-1.5 max-h-36 overflow-y-auto p-1">
+                ${botProfiles.map(b => `<a href="https://t.me/${b.username}?start=omr" target="_blank" class="px-2 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-sky-50 dark:hover:bg-sky-950/50 border border-slate-200 dark:border-slate-700 text-[11px] font-semibold text-sky-600 dark:text-sky-400 truncate block">🤖 #${b.index} @${b.username}</a>`).join('')}
+            </div>
+        </div>`
+        : '';
+
+    Swal.fire({
+        icon: discoveredChats.size > 0 ? 'success' : 'info',
+        title: discoveredChats.size > 0 ? `🎉 Đã tìm thấy ${discoveredChats.size} Kênh / Luồng Chat!` : 'Hướng dẫn mở khóa 11 luồng gửi đồng thời',
+        html: `
+            <div class="text-left space-y-2.5 text-xs">
+                <div class="space-y-1.5">${foundListHtml}</div>
+                <div class="p-2.5 rounded-xl bg-sky-50 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-800 text-slate-700 dark:text-slate-200 leading-relaxed text-[11px]">
+                    💡 <b>Vì sao cần nhiều Kênh hoặc Chat Riêng?</b><br>
+                    Telegram giới hạn mỗi <b>1 Kênh chung</b> chỉ nhận tối đa <b>20 ảnh/phút</b> (dù có 11 Bot cùng gửi vào 1 Kênh thì Kênh đó vẫn chặn ở ảnh thứ 20).<br>
+                    • <b>Cách 1 (Nhanh nhất):</b> Bấm mở các Bot bên dưới -> bấm <b>Start</b> -> bấm lại nút Quét này để thêm <b>ID Chat Riêng</b> (11 Bot = 11 phòng chat riêng độc lập, bắn 110 ảnh trong 2 giây!).<br>
+                    • <b>Cách 2:</b> Tạo 3–5 Kênh Telegram, thêm các Bot làm Admin và điền các ID Kênh vào ô Chat ID (mỗi dòng 1 ID Kênh).
+                </div>
+                ${botLinksHtml}
+            </div>
+        `,
+        confirmButtonText: 'Đã hiểu & Áp dụng',
+        confirmButtonColor: '#059669',
+        width: '560px'
+    });
+};
+
 window.saveTelegramConfig = function() {
     const chk = document.getElementById('tgConfigEnabled');
     const txtChat = document.getElementById('tgConfigChatId');
@@ -1280,19 +1422,25 @@ window.saveTelegramConfig = function() {
     const isAlbum = document.getElementById('tgModeAlbum')?.checked;
 
     const enabled = Boolean(chk?.checked);
-    const chatId = (txtChat?.value || '').trim();
+    const rawChatIds = (txtChat?.value || '')
+        .split(/[\n,;|\s]+/)
+        .map(s => s.trim())
+        .filter(Boolean);
+    const uniqueChatIds = [...new Set(rawChatIds)];
+    const chatId = uniqueChatIds.join('\n');
     const rawTokens = (txtTokens?.value || '').split('\n').map(t => t.trim()).filter(Boolean);
 
-    if (enabled && (!chatId || rawTokens.length === 0)) {
-        Swal.fire('Thiếu thông tin', 'Vui lòng nhập Chat/Channel ID và ít nhất 1 mã Bot Token trước khi bật tính năng!', 'warning');
+    if (enabled && (uniqueChatIds.length === 0 || rawTokens.length === 0)) {
+        Swal.fire('Thiếu thông tin', 'Vui lòng nhập ít nhất 1 Chat/Channel ID và 1 mã Bot Token trước khi bật tính năng!', 'warning');
         return;
     }
 
     state.telegramConfig = {
         enabled,
         chatId,
+        chatIds: uniqueChatIds,
         botTokens: rawTokens,
-        sendMode: isAlbum ? 'media_group' : 'parallel_single'
+        sendMode: isAlbum === false ? 'parallel_single' : 'media_group'
     };
 
     try {
@@ -1308,6 +1456,7 @@ window.saveTelegramConfig = function() {
             id: 'telegram_storage',
             enabled: state.telegramConfig.enabled,
             chatId: state.telegramConfig.chatId,
+            chatIds: state.telegramConfig.chatIds,
             botTokens: state.telegramConfig.botTokens,
             sendMode: state.telegramConfig.sendMode
         }).catch(err => console.warn("Lỗi lưu cấu hình Telegram lên Cloud:", err));
@@ -1316,11 +1465,14 @@ window.saveTelegramConfig = function() {
     updateTelegramStatusIndicator();
     window.closeTelegramConfigModal();
 
+    // Nếu đang có các bài chờ lưu bù, kích hoạt chạy ngay với cấu hình mới
+    scheduleAutoResumeTelegramUploads(300);
+
     Swal.fire({
         icon: 'success',
         title: 'Đã lưu cấu hình Telegram!',
         text: enabled
-            ? `Hệ thống đã sẵn sàng với ${rawTokens.length} bot nén ảnh thông minh (~75KB) và tải lên siêu tốc!`
+            ? `Hệ thống đã sẵn sàng với ${rawTokens.length} Bot × ${uniqueChatIds.length} Kênh/Chat đích (Gom Album 10 ảnh/tin siêu tốc)!`
             : 'Đã tắt tính năng tự động lưu ảnh lên Telegram.',
         timer: 2000,
         showConfirmButton: false
@@ -1554,6 +1706,7 @@ function applyTelegramUploadResult(sub, res, token) {
     sub.telegram_msg_id = messageId;
     sub.telegram_bot_token = token;
     delete sub._isUploadingTelegram;
+    delete sub._telegramBlob;
     _tgInFlightSubIds.delete(sub.id);
 
     const idx = (state.submissions || []).findIndex(s => s.id === sub.id);
@@ -1563,6 +1716,7 @@ function applyTelegramUploadResult(sub, res, token) {
         state.submissions[idx].telegram_msg_id = messageId;
         state.submissions[idx].telegram_bot_token = token;
         delete state.submissions[idx]._isUploadingTelegram;
+        delete state.submissions[idx]._telegramBlob;
     }
 
     // Lưu ngay trạng thái telegram_file_id xuống localStorage (debounce 250ms) để thoát trang không bao giờ mất tiến độ
@@ -1604,16 +1758,68 @@ function applyTelegramUploadResult(sub, res, token) {
 }
 
 // ========================================================
-// BỘ ĐIỀU PHỐI TẢI LÊN TELEGRAM ĐA BOT SONG SONG × ALBUM 10 ẢNH/TIN
+// BỘ ĐIỀU PHỐI TẢI LÊN TELEGRAM ĐA BOT SONG SONG × ĐA LUỒNG CHAT × ALBUM 10 ẢNH/TIN
 // 11 Bot × 10 Ảnh/Album = 110 bài/đợt gửi song song
+// Tự động phân tải Đa Kênh (Multi-Channel Sharding) hoặc Chat riêng 1-1 với từng Bot để phá bỏ hoàn toàn giới hạn 20 ảnh/phút của 1 Kênh đơn lẻ!
 // ========================================================
 const MAX_TELEGRAM_ALBUM_SIZE = 10; // Chuẩn tối đa của Telegram Bot API sendMediaGroup (2..10 ảnh/album)
 let _tgPendingQueue = [];
 const _activeBotWorkers = new Set(); // Tập hợp các botIndex đang chạy thực tế
 const _tgInFlightSubIds = new Set(); // Tập hợp các sub.id đang nằm trong hàng đợi hoặc đang tải thực tế
+const _chatCooldownUntil = new Map(); // Lưu thời điểm hết hạn 429 của từng đích nhận: key = chatId (với Kênh -100...) hoặc `${chatId}::bot_${botIndex}` (với Chat cá nhân > 0)
 let roundRobinBotIndex = 0;
 let _tgCooldownNoticeSec = 0;
 if (typeof window !== 'undefined') { window._roundRobinBotIndex = window._roundRobinBotIndex || 0; }
+
+function getChatCooldownKey(chatId, botIndex) {
+    const clean = String(chatId || '').trim();
+    // Nếu là ID cá nhân (số dương, không bắt đầu bằng '-' hay '@'), mỗi Bot có 1 phòng chat 1-1 độc lập với giáo viên!
+    if (/^\d+$/.test(clean)) {
+        return `${clean}::bot_${botIndex}`;
+    }
+    // Nếu là Kênh/Nhóm (-100... hoặc @channel), giới hạn tốc độ của Telegram tính chung trên toàn Kênh đó
+    return clean;
+}
+
+function getChatCooldownRemainingMs(chatId, botIndex) {
+    const key = getChatCooldownKey(chatId, botIndex);
+    const until = _chatCooldownUntil.get(key) || 0;
+    return Math.max(0, until - Date.now());
+}
+
+function markChatCooldown(chatId, botIndex, waitSec) {
+    const key = getChatCooldownKey(chatId, botIndex);
+    const until = Date.now() + waitSec * 1000 + 350;
+    const prev = _chatCooldownUntil.get(key) || 0;
+    if (until > prev) {
+        _chatCooldownUntil.set(key, until);
+    }
+}
+
+function pickBestTelegramChatId(botIndex, preferredShift = 0) {
+    const chatIds = getConfiguredTelegramChatIds();
+    if (chatIds.length === 0) return { chatId: '', waitMs: 0 };
+
+    // Ưu tiên chọn Kênh/Chat được phân công cho Bot này mà KHÔNG bị 429 cooldown
+    for (let s = 0; s < chatIds.length; s++) {
+        const candidate = chatIds[(botIndex + preferredShift + s) % chatIds.length];
+        if (getChatCooldownRemainingMs(candidate, botIndex) === 0) {
+            return { chatId: candidate, waitMs: 0 };
+        }
+    }
+
+    // Nếu tất cả các Kênh đã cấu hình đều đang vướng 429 cooldown, chọn Kênh sắp mở băng thông sớm nhất
+    let bestChat = chatIds[botIndex % chatIds.length];
+    let minWaitMs = getChatCooldownRemainingMs(bestChat, botIndex);
+    for (const candidate of chatIds) {
+        const w = getChatCooldownRemainingMs(candidate, botIndex);
+        if (w < minWaitMs) {
+            minWaitMs = w;
+            bestChat = candidate;
+        }
+    }
+    return { chatId: bestChat, waitMs: minWaitMs };
+}
 
 function updateTelegramUploadPill(isFinished = false) {
     let pill = document.getElementById('tgUploadPill');
@@ -1655,8 +1861,8 @@ function updateTelegramUploadPill(isFinished = false) {
     const botCount = tokens.length || 1;
     const activeCount = Math.max(1, _activeBotWorkers.size);
     if (textEl) {
-        if (_tgCooldownNoticeSec > 0 && _activeBotWorkers.size <= 1) {
-            textEl.textContent = `Đang lưu: ${savedSubs}/${totalSubs} bài (chờ mở băng thông Kênh ${_tgCooldownNoticeSec}s)...`;
+        if (_tgCooldownNoticeSec > 0) {
+            textEl.textContent = `Đang lưu: ${savedSubs}/${totalSubs} bài (chờ Kênh mở băng thông ${_tgCooldownNoticeSec}s — thêm Kênh phụ để gửi 0s)...`;
         } else {
             textEl.textContent = `Đang lưu vào kho bài thi: ${savedSubs}/${totalSubs} bài (${activeCount}/${botCount} bot × 10 ảnh/tin)...`;
         }
@@ -1666,9 +1872,9 @@ function updateTelegramUploadPill(isFinished = false) {
 async function triggerProcessTelegramBatches() {
     if (!state.telegramConfig?.enabled) return;
     const tokens = (state.telegramConfig?.botTokens || []).map(t => String(t || '').trim()).filter(Boolean);
-    const chatId = state.telegramConfig?.chatId;
+    const chatIds = getConfiguredTelegramChatIds();
 
-    if (tokens.length === 0 || !chatId) return;
+    if (tokens.length === 0 || chatIds.length === 0) return;
 
     if (_tgPendingQueue.length === 0) {
         if (_activeBotWorkers.size === 0) {
@@ -1698,9 +1904,9 @@ async function triggerProcessTelegramBatches() {
                 } catch (_) {}
             }
             if (raw && typeof raw === 'string' && raw.startsWith('data:image')) {
-                b = dataUrlToBlob(raw);
+                b = await compressSheetForTelegramBlob(raw, 960, 0.76);
             } else if (raw) {
-                b = await compressSheetForTelegramBlob(raw, 1440, 0.80);
+                b = await compressSheetForTelegramBlob(raw, 960, 0.76);
             }
             if (it.sub && b) it.sub._telegramBlob = b;
         }
@@ -1710,22 +1916,26 @@ async function triggerProcessTelegramBatches() {
 
     const runBotWorker = async (token, botIndex, staggerOrder = 0) => {
         let lastSendTime = 0;
-        const MIN_BOT_INTERVAL = 120;
+        const MIN_BOT_INTERVAL = 80;
         let isFirstBatch = true;
 
         try {
             while (state.telegramConfig?.enabled) {
                 if (_tgPendingQueue.length === 0) {
-                    await new Promise(r => setTimeout(r, 180));
+                    if (state._isBatchGrading) {
+                        // Khi đang chấm bài, bài sẽ được đẩy vào theo từng cụm 10 ảnh nên thoát worker rảnh ngay để tránh giữ vòng lặp chờ
+                        break;
+                    }
+                    await new Promise(r => setTimeout(r, 150));
                     if (_tgPendingQueue.length === 0) {
                         break;
                     }
                     continue;
                 }
 
-                // Nếu chỉ có 1 bài lẻ vừa rơi vào hàng đợi (không phải đang chấm hàng loạt), chờ nhẹ 120ms xem có bài tiếp theo đi cùng không
+                // Nếu chỉ có 1 bài lẻ vừa rơi vào hàng đợi (không phải đang chấm hàng loạt), chờ nhẹ 100ms xem có bài tiếp theo đi cùng không
                 if (_tgPendingQueue.length === 1 && !state._isBatchGrading) {
-                    await new Promise(r => setTimeout(r, 120));
+                    await new Promise(r => setTimeout(r, 100));
                 }
 
                 // Mỗi Bot lấy tối đa 10 ảnh/tin nhắn Album (11 Bot song song = 110 ảnh/đợt)
@@ -1735,20 +1945,21 @@ async function triggerProcessTelegramBatches() {
 
                 updateTelegramUploadPill(false);
 
-                // Giãn cách khởi hành nhẹ (160ms) giữa các bot xuất phát cùng đợt để Kênh Telegram không bị dội burst 429
-                if (isFirstBatch && staggerOrder > 0) {
-                    isFirstBatch = false;
-                    await new Promise(r => setTimeout(r, staggerOrder * 160));
+                // Đường truyền Tức thì (Fast-Path): Nếu cả 10 ảnh trong Album đã có sẵn Binary Blob (_telegramBlob tạo ngay lúc chấm),
+                // KHÔNG gọi await trung gian để lệnh fetch() được đẩy xuống luồng mạng C++ của trình duyệt ngay ở мили-giây bài thứ 10 chấm xong!
+                let allHaveBlobs = true;
+                for (let k = 0; k < batchItems.length; k++) {
+                    const b = batchItems[k].blob || batchItems[k].sub?._telegramBlob;
+                    if (b) {
+                        batchItems[k].blob = b;
+                    } else {
+                        allHaveBlobs = false;
+                    }
                 }
-                isFirstBatch = false;
-
-                const now = Date.now();
-                const diff = now - lastSendTime;
-                if (diff < MIN_BOT_INTERVAL) {
-                    await new Promise(r => setTimeout(r, MIN_BOT_INTERVAL - diff));
+                if (!allHaveBlobs) {
+                    await Promise.all(batchItems.map(ensureItemBlob));
                 }
 
-                await Promise.all(batchItems.map(ensureItemBlob));
                 const validBatchItems = batchItems.filter(it => Boolean(it.blob));
                 if (validBatchItems.length === 0) {
                     batchItems.forEach(it => {
@@ -1760,89 +1971,134 @@ async function triggerProcessTelegramBatches() {
                     continue;
                 }
 
-                let currentToken = token;
+                // Chỉ giãn cách rất nhẹ (60ms) nếu nhiều Bot xuất phát vào CÙNG 1 Kênh đơn lẻ cùng lúc
+                if (isFirstBatch && staggerOrder > 0) {
+                    isFirstBatch = false;
+                    const delayMs = getConfiguredTelegramChatIds().length > 1 ? (staggerOrder * 25) : (staggerOrder * 90);
+                    await new Promise(r => setTimeout(r, delayMs));
+                }
+                isFirstBatch = false;
 
-                if (validBatchItems.length >= 2) {
-                    try {
-                        const results = await sendMediaGroupToTelegram(currentToken, chatId, validBatchItems, botIndex + 1);
+                const now = Date.now();
+                const diff = now - lastSendTime;
+                if (lastSendTime > 0 && diff < MIN_BOT_INTERVAL) {
+                    await new Promise(r => setTimeout(r, MIN_BOT_INTERVAL - diff));
+                }
+
+                const currentToken = token;
+
+                // Vòng lặp gửi thông minh cho gói 10 ảnh hiện tại:
+                // Tự động chuyển sang Kênh phụ / Chat riêng ngay trong 0ms nếu Kênh chính báo đầy băng thông (429),
+                // và GIỮ NGUYÊN gói 10 ảnh trong tay Bot này (không đẩy ngược vào _tgPendingQueue trước khi ngủ để chống bão 429 dây chuyền)!
+                let batchCompleted = false;
+                let shiftAttempt = 0;
+
+                while (!batchCompleted && state.telegramConfig?.enabled) {
+                    const { chatId: targetChatId, waitMs } = pickBestTelegramChatId(botIndex, shiftAttempt);
+                    if (!targetChatId) break;
+
+                    if (waitMs > 0) {
+                        const waitSec = Math.ceil(waitMs / 1000);
+                        _tgCooldownNoticeSec = waitSec;
+                        updateTelegramUploadPill(false);
+                        await new Promise(r => setTimeout(r, waitMs));
                         _tgCooldownNoticeSec = 0;
-                        validBatchItems.forEach((it, idx) => {
-                            if (results[idx]) {
-                                applyTelegramUploadResult(it.sub, results[idx], currentToken);
-                            } else if (it.sub) {
-                                delete it.sub._isUploadingTelegram;
-                                _tgInFlightSubIds.delete(it.sub.id);
-                            }
-                        });
-                        lastSendTime = Date.now();
-                    } catch (err) {
-                        const isRateLimit = err.isRateLimit || (err.message || '').includes('429');
-                        if (isRateLimit) {
-                            const waitSec = Math.min(Math.max(Number(err.retryAfter) || 4, 2), 35);
-                            _tgCooldownNoticeSec = waitSec;
-                            console.warn(`[Bot #${botIndex + 1}] Kênh Telegram báo giới hạn tốc độ (429), chờ ${waitSec}s rồi gửi tiếp Album ${validBatchItems.length} ảnh...`);
-                            _tgPendingQueue.unshift(...validBatchItems);
-                            updateTelegramUploadPill(false);
-                            await new Promise(r => setTimeout(r, waitSec * 1000 + 250));
+                    }
+
+                    if (validBatchItems.length >= 2) {
+                        try {
+                            const results = await sendMediaGroupToTelegram(currentToken, targetChatId, validBatchItems, botIndex + 1);
                             _tgCooldownNoticeSec = 0;
+                            validBatchItems.forEach((it, idx) => {
+                                if (results[idx]) {
+                                    applyTelegramUploadResult(it.sub, results[idx], currentToken);
+                                } else if (it.sub) {
+                                    delete it.sub._isUploadingTelegram;
+                                    _tgInFlightSubIds.delete(it.sub.id);
+                                }
+                            });
                             lastSendTime = Date.now();
-                            continue;
-                        } else {
-                            // Nếu gửi Album gặp lỗi mạng cục bộ, tự động chuyển sang gửi đơn từng ảnh trong batch
-                            for (const singleItem of validBatchItems) {
-                                try {
-                                    const res = await sendSinglePhotoToTelegram(currentToken, chatId, singleItem.sub, singleItem.blob);
-                                    applyTelegramUploadResult(singleItem.sub, res, currentToken);
-                                } catch (singleErr) {
-                                    const isSingle429 = singleErr.isRateLimit || (singleErr.message || '').includes('429');
-                                    singleItem._retryCount = (singleItem._retryCount || 0) + 1;
-                                    if (isSingle429 || singleItem._retryCount <= 4) {
-                                        _tgPendingQueue.push(singleItem);
-                                        if (isSingle429) {
-                                            const wSec = Math.min(Math.max(Number(singleErr.retryAfter) || 4, 2), 30);
-                                            await new Promise(r => setTimeout(r, wSec * 1000));
+                            batchCompleted = true;
+                        } catch (err) {
+                            const isRateLimit = err.isRateLimit || (err.message || '').includes('429');
+                            if (isRateLimit) {
+                                const waitSec = Math.min(Math.max(Number(err.retryAfter) || 5, 2), 38);
+                                markChatCooldown(targetChatId, botIndex, waitSec);
+                                shiftAttempt++;
+                                const nextChoice = pickBestTelegramChatId(botIndex, shiftAttempt);
+                                if (nextChoice.waitMs === 0 && nextChoice.chatId && nextChoice.chatId !== targetChatId) {
+                                    console.log(`[Bot #${botIndex + 1}] Kênh ${targetChatId} chạm ngưỡng 20 ảnh/phút -> Chuyển tức thì (0ms) sang luồng ${nextChoice.chatId}!`);
+                                    continue;
+                                }
+                                _tgCooldownNoticeSec = Math.ceil(nextChoice.waitMs / 1000) || waitSec;
+                                console.warn(`[Bot #${botIndex + 1}] Kênh ${targetChatId} báo giới hạn tốc độ (429), chờ ${_tgCooldownNoticeSec}s rồi bắn tiếp Album ${validBatchItems.length} ảnh...`);
+                                updateTelegramUploadPill(false);
+                                continue;
+                            } else {
+                                // Nếu gửi Album gặp lỗi mạng cục bộ hoặc bot chưa vào 1 kênh phụ, thử kênh khác hoặc gửi đơn từng ảnh
+                                if (shiftAttempt + 1 < getConfiguredTelegramChatIds().length) {
+                                    shiftAttempt++;
+                                    continue;
+                                }
+                                for (const singleItem of validBatchItems) {
+                                    try {
+                                        const res = await sendSinglePhotoToTelegram(currentToken, targetChatId, singleItem.sub, singleItem.blob);
+                                        applyTelegramUploadResult(singleItem.sub, res, currentToken);
+                                    } catch (singleErr) {
+                                        const isSingle429 = singleErr.isRateLimit || (singleErr.message || '').includes('429');
+                                        singleItem._retryCount = (singleItem._retryCount || 0) + 1;
+                                        if (isSingle429 || singleItem._retryCount <= 4) {
+                                            if (isSingle429) {
+                                                const wSec = Math.min(Math.max(Number(singleErr.retryAfter) || 5, 2), 35);
+                                                markChatCooldown(targetChatId, botIndex, wSec);
+                                            }
+                                            _tgPendingQueue.push(singleItem);
+                                        } else if (singleItem.sub) {
+                                            delete singleItem.sub._isUploadingTelegram;
+                                            _tgInFlightSubIds.delete(singleItem.sub.id);
                                         }
-                                    } else if (singleItem.sub) {
-                                        delete singleItem.sub._isUploadingTelegram;
-                                        _tgInFlightSubIds.delete(singleItem.sub.id);
                                     }
                                 }
+                                lastSendTime = Date.now();
+                                batchCompleted = true;
                             }
-                            lastSendTime = Date.now();
                         }
-                    }
-                } else {
-                    const item = validBatchItems[0];
-                    try {
-                        const res = await sendSinglePhotoToTelegram(currentToken, chatId, item.sub, item.blob);
-                        _tgCooldownNoticeSec = 0;
-                        applyTelegramUploadResult(item.sub, res, currentToken);
-                        lastSendTime = Date.now();
-                    } catch (err) {
-                        const isRateLimit = err.isRateLimit || (err.message || '').includes('429');
-                        if (isRateLimit) {
-                            const waitSec = Math.min(Math.max(Number(err.retryAfter) || 4, 2), 35);
-                            _tgCooldownNoticeSec = waitSec;
-                            console.warn(`[Bot #${botIndex + 1}] Bị giới hạn tốc độ (429), chờ ${waitSec}s...`);
-                            _tgPendingQueue.unshift(item);
-                            updateTelegramUploadPill(false);
-                            await new Promise(r => setTimeout(r, waitSec * 1000 + 250));
+                    } else {
+                        const item = validBatchItems[0];
+                        try {
+                            const res = await sendSinglePhotoToTelegram(currentToken, targetChatId, item.sub, item.blob);
                             _tgCooldownNoticeSec = 0;
+                            applyTelegramUploadResult(item.sub, res, currentToken);
                             lastSendTime = Date.now();
-                            continue;
-                        } else {
-                            item._retryCount = (item._retryCount || 0) + 1;
-                            if (item._retryCount <= 4) {
-                                console.warn(`[Bot #${botIndex + 1}] Lỗi gửi bài ${item.sub?.student_no} (${err.message}). Thử lại lần ${item._retryCount}...`);
-                                _tgPendingQueue.push(item);
+                            batchCompleted = true;
+                        } catch (err) {
+                            const isRateLimit = err.isRateLimit || (err.message || '').includes('429');
+                            if (isRateLimit) {
+                                const waitSec = Math.min(Math.max(Number(err.retryAfter) || 5, 2), 38);
+                                markChatCooldown(targetChatId, botIndex, waitSec);
+                                shiftAttempt++;
+                                const nextChoice = pickBestTelegramChatId(botIndex, shiftAttempt);
+                                if (nextChoice.waitMs === 0 && nextChoice.chatId && nextChoice.chatId !== targetChatId) {
+                                    continue;
+                                }
+                                _tgCooldownNoticeSec = Math.ceil(nextChoice.waitMs / 1000) || waitSec;
+                                updateTelegramUploadPill(false);
+                                continue;
                             } else {
-                                console.error(`[Bot #${botIndex + 1}] Bỏ qua bài ${item.sub?.student_no} sau 4 lần thất bại:`, err.message);
-                                if (item.sub) {
+                                if (shiftAttempt + 1 < getConfiguredTelegramChatIds().length) {
+                                    shiftAttempt++;
+                                    continue;
+                                }
+                                item._retryCount = (item._retryCount || 0) + 1;
+                                if (item._retryCount <= 4) {
+                                    _tgPendingQueue.push(item);
+                                } else if (item.sub) {
                                     delete item.sub._isUploadingTelegram;
                                     _tgInFlightSubIds.delete(item.sub.id);
                                 }
+                                await new Promise(r => setTimeout(r, 200));
+                                batchCompleted = true;
                             }
-                            await new Promise(r => setTimeout(r, 250));
                         }
                     }
                 }
@@ -1854,7 +2110,7 @@ async function triggerProcessTelegramBatches() {
             _activeBotWorkers.delete(botIndex);
             // Nếu trong lúc bot vừa thoát mà có thêm bài mới vào hàng đợi, đánh thức lại ngay
             if (_tgPendingQueue.length > 0 && state.telegramConfig?.enabled) {
-                setTimeout(() => triggerProcessTelegramBatches(), 50);
+                setTimeout(() => triggerProcessTelegramBatches(), 40);
             } else if (_activeBotWorkers.size === 0) {
                 updateTelegramUploadPill(true);
                 updateStorageStatusBadges();
@@ -2125,14 +2381,18 @@ async function resolveTelegramPhotoDirectUrl(sub, forceRefresh = false) {
                 }
             } catch (_) {}
         }
-        const token = sub.telegram_bot_token || tokens[0];
-        if (token) {
+        const candidateTokens = sub.telegram_bot_token
+            ? [sub.telegram_bot_token, ...tokens.filter(t => t !== sub.telegram_bot_token)]
+            : tokens;
+        for (const token of candidateTokens) {
+            if (!token) continue;
             try {
                 const resp = await fetch(`https://api.telegram.org/bot${token}/getFile?file_id=${sub.telegram_file_id}`);
                 const data = await resp.json();
                 if (data.ok && data.result?.file_path) {
                     const freshUrl = `https://api.telegram.org/file/bot${token}/${data.result.file_path}`;
                     sub.telegram_photo_url = freshUrl;
+                    sub.telegram_bot_token = token;
                     saveSubmissionsToLocalSafe(sub.examId || state.exam?.id, state.submissions);
                     return freshUrl;
                 }
@@ -2165,17 +2425,17 @@ window.testTelegramConnection = async function() {
     const txtChat = document.getElementById('tgConfigChatId');
     const txtTokens = document.getElementById('tgConfigTokens');
 
-    const chatId = (txtChat?.value || '').trim();
+    const chatIds = parseTelegramChatIds(txtChat?.value || '');
     const rawTokens = (txtTokens?.value || '').split('\n').map(t => t.trim()).filter(Boolean);
 
-    if (!chatId || rawTokens.length === 0) {
-        Swal.fire('Thiếu thông tin', 'Vui lòng nhập ID Kênh và ít nhất 1 mã Bot Token để kiểm tra kết nối!', 'warning');
+    if (chatIds.length === 0 || rawTokens.length === 0) {
+        Swal.fire('Thiếu thông tin', 'Vui lòng nhập ít nhất 1 ID Kênh/Chat và 1 mã Bot Token để kiểm tra kết nối!', 'warning');
         return;
     }
 
     Swal.fire({
         title: 'Đang kiểm tra kết nối Telegram...',
-        html: `Đang gửi ảnh kiểm tra nén siêu nhẹ qua <b>${rawTokens.length} bot</b> song song... Vui lòng chờ vài giây!`,
+        html: `Đang gửi ảnh kiểm tra nén siêu nhẹ qua <b>${rawTokens.length} bot</b> vào <b>${chatIds.length} luồng Kênh/Chat</b> song song...`,
         allowOutsideClick: false,
         didOpen: () => {
             Swal.showLoading();
@@ -2194,15 +2454,16 @@ window.testTelegramConnection = async function() {
         ctx.fillText('🚀 QMATH LMS - OMR TEST PHOTO', 50, 100);
         ctx.font = '18px sans-serif';
         ctx.fillText(`Kiểm tra kết nối thành công: ${new Date().toLocaleString('vi-VN')}`, 50, 150);
-        ctx.fillText(`Tổng số bot kiểm tra: ${rawTokens.length} bot`, 50, 190);
+        ctx.fillText(`Tổng số bot: ${rawTokens.length} bot × ${chatIds.length} luồng Kênh/Chat`, 50, 190);
         const testDataUrl = cvs.toDataURL('image/jpeg', 0.85);
         const blob = dataUrlToBlob(testDataUrl);
 
-        // Kiểm tra song song tất cả các bot để xác định rõ bot nào được cấp quyền Admin
+        // Kiểm tra song song tất cả các bot, chia đều qua danh sách Kênh/Chat
         const checkResults = await Promise.allSettled(rawTokens.map(async (tok, idx) => {
+            const targetChat = chatIds[idx % chatIds.length];
             const fd = new FormData();
-            fd.append('chat_id', chatId);
-            fd.append('caption', `✅ Bot #${idx + 1} (${tok.slice(0, 8)}...) kiểm tra kết nối thành công lúc ${new Date().toLocaleTimeString('vi-VN')}!`);
+            fd.append('chat_id', targetChat);
+            fd.append('caption', `✅ Bot #${idx + 1} (${tok.slice(0, 8)}...) kết nối luồng ${targetChat} thành công lúc ${new Date().toLocaleTimeString('vi-VN')}!`);
             fd.append('photo', blob, `test_bot_${idx + 1}.jpg`);
 
             const resp = await fetch(`https://api.telegram.org/bot${tok}/sendPhoto`, {
@@ -2211,9 +2472,9 @@ window.testTelegramConnection = async function() {
             });
             const resJson = await resp.json();
             if (!resJson.ok) {
-                throw new Error(resJson.description || 'Lỗi gửi tin nhắn');
+                throw new Error(`Bot #${idx + 1} -> ${targetChat}: ${resJson.description || 'Lỗi gửi tin nhắn'}`);
             }
-            return { botIndex: idx + 1, tokenPrefix: tok.slice(0, 8), ok: true };
+            return { botIndex: idx + 1, chatId: targetChat, tokenPrefix: tok.slice(0, 8), ok: true };
         }));
 
         const successList = checkResults.filter(r => r.status === 'fulfilled');
@@ -2223,16 +2484,16 @@ window.testTelegramConnection = async function() {
             Swal.fire({
                 icon: 'success',
                 title: '🎉 Kết nối 100% thành công!',
-                html: `Cả <b>${rawTokens.length} bot</b> đều gửi ảnh test thành công lên Kênh Telegram <b>${chatId}</b>!<br><br><span class="text-xs text-slate-500">Tất cả bot đều đã là Admin và sẵn sàng chia tải chấm bài siêu tốc!</span>`,
+                html: `Cả <b>${rawTokens.length} bot</b> đều gửi ảnh test thành công qua <b>${chatIds.length} luồng Kênh/Chat</b>!<br><br><span class="text-xs text-slate-500">Sẵn sàng bắn song song Album 10 ảnh/tin siêu tốc khi chấm bài!</span>`,
                 confirmButtonText: 'Tuyệt vời',
                 confirmButtonColor: '#0ea5e9'
             });
         } else if (successList.length > 0) {
-            const failMsgs = failList.map((f, i) => `• Bot ${f.reason?.message?.includes('bot is not a member') ? 'chưa được thêm làm Admin' : f.reason?.message}`).join('<br>');
+            const failMsgs = failList.map(f => `• ${f.reason?.message || 'Lỗi kết nối'}`).join('<br>');
             Swal.fire({
                 icon: 'warning',
                 title: `Có ${successList.length}/${rawTokens.length} bot thành công!`,
-                html: `Đã có <b>${successList.length} bot</b> kết nối tốt. Tuy nhiên có <b>${failList.length} bot</b> gặp lỗi:<br><br><div class="text-left text-xs text-rose-500 bg-rose-50 dark:bg-rose-950/40 p-2.5 rounded-xl font-mono">${failMsgs}</div><br><span class="text-xs text-slate-500">Mẹo: Hãy đảm bảo bạn đã thêm <b>tất cả các Bot</b> làm Quản trị viên (Admin) của Kênh Telegram nhé!</span>`,
+                html: `Đã có <b>${successList.length} bot</b> kết nối tốt. Tuy nhiên có <b>${failList.length} bot</b> gặp lỗi:<br><br><div class="text-left text-xs text-rose-500 bg-rose-50 dark:bg-rose-950/40 p-2.5 rounded-xl font-mono">${failMsgs}</div><br><span class="text-xs text-slate-500">Mẹo: Nếu dùng Kênh (-100...), hãy thêm đủ các Bot làm Admin Kênh. Nếu dùng ID cá nhân (số dương), hãy bấm <b>/start</b> với Bot đó!</span>`,
                 confirmButtonColor: '#0ea5e9'
             });
         } else {
@@ -2240,7 +2501,7 @@ window.testTelegramConnection = async function() {
             Swal.fire({
                 icon: 'error',
                 title: 'Tất cả các Bot đều không gửi được ảnh',
-                html: `Telegram báo lỗi: <br><code class="text-rose-500 font-bold">${firstErr}</code><br><br><span class="text-xs text-slate-500">Gợi ý: Hãy đảm bảo Chat/Kênh ID <b>${chatId}</b> là chính xác và bạn đã thêm Bot vào Kênh với quyền <b>Quản trị viên (Admin - Đăng bài)</b>!</span>`
+                html: `Telegram báo lỗi: <br><code class="text-rose-500 font-bold">${firstErr}</code><br><br><span class="text-xs text-slate-500">Gợi ý: Hãy bấm nút <b>🔍 Tự động quét Kênh & Mở khóa 11 luồng</b> ngay phía trên để lấy đúng ID!</span>`
             });
         }
     } catch (err) {
@@ -3472,11 +3733,16 @@ window.handleFilesSelected = async (files) => {
         if (progressPercent) progressPercent.textContent = `${i + 1}/${fileList.length} (${pct}%)`;
         if (progressFill) progressFill.style.width = `${pct}%`;
         if (progressLabel) {
-            progressLabel.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Đang chấm phiếu ${i + 1}/${fileList.length}...`;
+            if (state.telegramConfig?.enabled && (_activeBotWorkers.size > 0 || pendingAlbumBuffer.length > 0)) {
+                const savedCountNow = (state.submissions || []).filter(s => s.telegram_photo_url || s.telegram_file_id).length;
+                progressLabel.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Đang chấm phiếu ${i + 1}/${fileList.length} • <span class="text-sky-600 dark:text-sky-400">Kho Telegram: ${savedCountNow} bài (${Math.max(1, _activeBotWorkers.size)} bot đang gửi...)</span>`;
+            } else {
+                progressLabel.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Đang chấm phiếu ${i + 1}/${fileList.length}...`;
+            }
         }
 
-        // Nhường 1 nhịp UI rất ngắn để thanh tiến trình mượt mà
-        await new Promise(r => setTimeout(r, 6));
+        // Nhường 1 nhịp UI rất ngắn để thanh tiến trình mượt mà và luồng mạng gửi ảnh song song không bị nghẽn
+        await new Promise(r => setTimeout(r, 8));
 
         try {
             const sub = await processSingleSheet(file, {
@@ -3491,6 +3757,16 @@ window.handleFilesSelected = async (files) => {
                 batchScores.push(Number(sub.score) || 0);
                 batchSubmissions.push(sub);
 
+                // Giải phóng chuỗi Base64 khổng lồ (~1MB/bài) trong RAM của các bài đã chấm trước đó (đã lưu an toàn vào IndexedDB và tạo sẵn _telegramBlob)
+                // để chấm 200-500 bài liên tục hoàn toàn không bao giờ bị treo đơ RAM trình duyệt!
+                if (batchSubmissions.length > 2) {
+                    const olderSub = batchSubmissions[batchSubmissions.length - 3];
+                    if (olderSub && olderSub.id) {
+                        olderSub.image_data = '';
+                        olderSub.stamped_image = '';
+                    }
+                }
+
                 // Đưa ngay bài vừa chấm vào state.submissions để thanh tiến trình Telegram cập nhật thời gian thực và bảo toàn khi thoát trang
                 const existingIdx = state.submissions.findIndex(s => s.id === sub.id);
                 if (existingIdx !== -1) {
@@ -3502,7 +3778,7 @@ window.handleFilesSelected = async (files) => {
                     state.gradedCountsByExam[state.exam.id] = state.submissions.length;
                 }
 
-                // Gom đủ 1 Album (10 ảnh/1 Bot) là bắn ngay 1 tin nhắn Album qua Bot tiếp theo trong lúc vẫn đang chấm tiếp!
+                // Gom đủ 1 Album (10 ảnh/1 Bot) là bắn NGAY LẬP TỨC 1 tin nhắn Album qua Bot tiếp theo trong lúc vẫn đang chấm tiếp!
                 if (state.telegramConfig?.enabled) {
                     pendingAlbumBuffer.push({
                         sub,
@@ -3510,8 +3786,11 @@ window.handleFilesSelected = async (files) => {
                         imgDataUrl: sub.stamped_image || sub.image_data
                     });
                     if (pendingAlbumBuffer.length >= MAX_TELEGRAM_ALBUM_SIZE) {
-                        saveSubmissionsToLocalSafe(state.exam?.id, state.submissions);
-                        dispatchChunkToTelegram(pendingAlbumBuffer.splice(0, MAX_TELEGRAM_ALBUM_SIZE));
+                        const albumTen = pendingAlbumBuffer.splice(0, MAX_TELEGRAM_ALBUM_SIZE);
+                        scheduleSaveSubmissionsLocal();
+                        dispatchChunkToTelegram(albumTen);
+                        // Nhường 35ms để trình duyệt đẩy ngay gói tin Multipart 10 ảnh xuống card mạng trước khi chấm bài thứ 11
+                        await new Promise(r => setTimeout(r, 35));
                     }
                 }
             }
@@ -3919,15 +4198,9 @@ async function processSingleSheet(source, options = {}) {
         createdAt: new Date().toISOString()
     };
 
-    // Lưu ảnh nắn phẳng sạch vào IndexedDB để tái đóng dấu chính xác khi cập nhật đáp án
-    if (rawResult.rectifiedImage) {
-        if (options.deferSave) {
-            setTimeout(() => {
-                saveOmrImageToDb(submission.id + '_clean', rawResult.rectifiedImage);
-            }, 60);
-        } else {
-            saveOmrImageToDb(submission.id + '_clean', rawResult.rectifiedImage);
-        }
+    // Lưu ảnh nắn phẳng sạch vào IndexedDB khi quét lẻ (khi chấm hàng loạt, reStampSubmission tự cắt header từ ảnh đóng dấu nên không cần ghi kép 2 lần)
+    if (rawResult.rectifiedImage && !options.deferSave) {
+        saveOmrImageToDb(submission.id + '_clean', rawResult.rectifiedImage);
     }
 
     // Tự động làm phẳng phiếu và đóng dấu điểm số trang nhã kèm Logo QMath LMS
@@ -4291,7 +4564,8 @@ function recognizeSheetFromGray(gray, options = {}) {
         part3Text: bestResult.p3 || [],
         calibrated: true,
         rectifiedCanvas: outCanvas,
-        rectifiedImage: outCanvas.toDataURL('image/jpeg', 0.88),
+        // Khi chấm hàng loạt (deferSave: true), generateStampedGradedSheet vẽ trực tiếp từ outCanvas nên bỏ qua bước toDataURL thừa (~60ms/bài)
+        rectifiedImage: options.deferSave ? '' : outCanvas.toDataURL('image/jpeg', 0.88),
         uncertain: bestResult.nghi || [],
         H: bestResult.H,
         template: tpl,
@@ -5544,13 +5818,25 @@ async function generateStampedGradedSheet(sub, rawResult) {
         }
     }
 
-    // Mã hóa 1 lần duy nhất giữ nguyên độ phân giải gốc 1552px siêu nét (100% sharpness),
-    // đồng thời tạo đồng bộ Binary Blob (0ms trễ, không tạo canvas thứ 2) để bắn lên Telegram tức thì!
+    // Mã hóa bản lưu cục bộ (1552px) cho IndexedDB, đồng thời tạo riêng Binary Blob 960px (~75KB/ảnh = ~750KB/Album 10 ảnh,
+    // nhẹ hơn 5 lần so với 3.8MB trước đây và khớp chuẩn hiển thị 1280px của Telegram) để bắn Album 10 ảnh lên Telegram tức thì!
     const outUrl = canvas.toDataURL('image/jpeg', 0.78);
     if (sub) {
         try {
-            sub._telegramBlob = dataUrlToBlob(outUrl);
-        } catch (_) {}
+            const tgW = 960;
+            const tgH = Math.max(1, Math.round((canvas.height * tgW) / canvas.width));
+            const tgCvs = window._sharedTgCompressCanvas || (window._sharedTgCompressCanvas = document.createElement('canvas'));
+            tgCvs.width = tgW;
+            tgCvs.height = tgH;
+            const tgCtx = tgCvs.getContext('2d');
+            tgCtx.drawImage(canvas, 0, 0, tgW, tgH);
+            const tgUrl = tgCvs.toDataURL('image/jpeg', 0.75);
+            sub._telegramBlob = dataUrlToBlob(tgUrl);
+        } catch (_) {
+            try {
+                sub._telegramBlob = dataUrlToBlob(outUrl);
+            } catch (_2) {}
+        }
     }
     canvas.width = 1;
     canvas.height = 1;
