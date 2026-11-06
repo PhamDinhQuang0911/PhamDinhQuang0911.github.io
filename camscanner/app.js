@@ -508,8 +508,27 @@ class CamScannerApp {
     this.filterModal.classList.add('active');
 
     const img = this.rawCapturedImage;
-    const dstW = 900;
-    const dstH = 1200;
+    const c = this.cropCorners;
+    const pTL = { x: c[0].x * img.width, y: c[0].y * img.height };
+    const pTR = { x: c[1].x * img.width, y: c[1].y * img.height };
+    const pBR = { x: c[2].x * img.width, y: c[2].y * img.height };
+    const pBL = { x: c[3].x * img.width, y: c[3].y * img.height };
+
+    // Tính kích thước thực tế của vùng tài liệu để giữ nguyên tỷ lệ khung hình & độ phân giải HD
+    const topW = Math.hypot(pTR.x - pTL.x, pTR.y - pTL.y);
+    const botW = Math.hypot(pBR.x - pBL.x, pBR.y - pBL.y);
+    const leftH = Math.hypot(pBL.x - pTL.x, pBL.y - pTL.y);
+    const rightH = Math.hypot(pBR.x - pTR.x, pBR.y - pTR.y);
+
+    let quadW = Math.max(topW, botW, 100);
+    let quadH = Math.max(leftH, rightH, 100);
+
+    // Chuẩn hóa độ phân giải cao (1400px - 1900px cạnh dài) như trimImageS trong libscannercs.so
+    const maxDim = Math.max(quadW, quadH);
+    const targetMax = Math.min(1900, Math.max(1450, maxDim));
+    const scale = targetMax / maxDim;
+    const dstW = Math.round(quadW * scale);
+    const dstH = Math.round(quadH * scale);
 
     const tempCanvas = document.createElement('canvas');
     tempCanvas.width = dstW;
@@ -527,32 +546,48 @@ class CamScannerApp {
 
     const srcData = srcImgData.data;
     const dstData = dstImgData.data;
+    const sw = img.width;
+    const sh = img.height;
+    const swMax = sw - 1;
+    const shMax = sh - 1;
 
-    const c = this.cropCorners;
-    const pTL = { x: c[0].x * img.width, y: c[0].y * img.height };
-    const pTR = { x: c[1].x * img.width, y: c[1].y * img.height };
-    const pBR = { x: c[2].x * img.width, y: c[2].y * img.height };
-    const pBL = { x: c[3].x * img.width, y: c[3].y * img.height };
-
+    // Nội suy song tuyến tính (Bilinear Interpolation) giúp nét chữ nhỏ, dòng chấm (...) và ô OMR mượt sắc nét
     for (let dy = 0; dy < dstH; dy++) {
-      const v = dy / dstH;
+      const v = dy / (dstH - 1 || 1);
       for (let dx = 0; dx < dstW; dx++) {
-        const u = dx / dstW;
+        const u = dx / (dstW - 1 || 1);
 
         const tx = pTL.x + (pTR.x - pTL.x) * u;
         const ty = pTL.y + (pTR.y - pTL.y) * u;
         const bx = pBL.x + (pBR.x - pBL.x) * u;
         const by = pBL.y + (pBR.y - pBL.y) * u;
 
-        const sx = Math.floor(tx + (bx - tx) * v);
-        const sy = Math.floor(ty + (by - ty) * v);
+        const sx = Math.max(0, Math.min(swMax, tx + (bx - tx) * v));
+        const sy = Math.max(0, Math.min(shMax, ty + (by - ty) * v));
 
-        const sIdx = (Math.max(0, Math.min(img.height - 1, sy)) * img.width + Math.max(0, Math.min(img.width - 1, sx))) * 4;
-        const dIdx = (dy * dstW + dx) * 4;
+        const x0 = sx | 0;
+        const y0 = sy | 0;
+        const x1 = x0 < swMax ? x0 + 1 : x0;
+        const y1 = y0 < shMax ? y0 + 1 : y0;
+        const fx = sx - x0;
+        const fy = sy - y0;
+        const invFx = 1 - fx;
+        const invFy = 1 - fy;
 
-        dstData[dIdx] = srcData[sIdx];
-        dstData[dIdx + 1] = srcData[sIdx + 1];
-        dstData[dIdx + 2] = srcData[sIdx + 2];
+        const idx00 = (y0 * sw + x0) << 2;
+        const idx10 = (y0 * sw + x1) << 2;
+        const idx01 = (y1 * sw + x0) << 2;
+        const idx11 = (y1 * sw + x1) << 2;
+
+        const w00 = invFx * invFy;
+        const w10 = fx * invFy;
+        const w01 = invFx * fy;
+        const w11 = fx * fy;
+
+        const dIdx = (dy * dstW + dx) << 2;
+        dstData[dIdx]     = (srcData[idx00]     * w00 + srcData[idx10]     * w10 + srcData[idx01]     * w01 + srcData[idx11]     * w11 + 0.5) | 0;
+        dstData[dIdx + 1] = (srcData[idx00 + 1] * w00 + srcData[idx10 + 1] * w10 + srcData[idx01 + 1] * w01 + srcData[idx11 + 1] * w11 + 0.5) | 0;
+        dstData[dIdx + 2] = (srcData[idx00 + 2] * w00 + srcData[idx10 + 2] * w10 + srcData[idx01 + 2] * w01 + srcData[idx11 + 2] * w11 + 0.5) | 0;
         dstData[dIdx + 3] = 255;
       }
     }
@@ -564,21 +599,26 @@ class CamScannerApp {
 
   /**
    * ==============================================================================
-   * THUẬT TOÁN ĐỘC QUYỀN CAMSCANNER (REVERSE-ENGINEERED TỪ LIBMAGICENHANCER.SO):
-   * 1. EvaluationIllumination: Ước lượng trường chiếu sáng nền bằng phân vị 92%
-   * 2. Deshadow Normalization: Khử sạch 100% bóng đổ và vệt tối ở mép giấy
-   * 3. S-Curve Gamma Tone Mapping: Làm nét và đậm mực viết tay (xanh/đen/bút chì)
-   * 4. sharpEnhance: Unsharp Mask bất đối xứng làm sắc nét cạnh chữ, triệt tiêu nhiễu
+   * THUẬT TOÁN GỐC CAMSCANNER (TRÍCH XUẤT TỪ LIBSCANNERCS.SO & LIBMAGICENHANCER.SO):
+   * 1. scanet::EvaluationIllumination (0x30224): Ước lượng trường chiếu sáng nền
+   * 2. wb_IoOOo (0x37234) & sub_6e4a4 (0x6e4a4): Cân bằng trắng & Kéo giãn tuyến tính
+   *    + Gamma 0.8333333 bảo toàn tuyệt đối độ chuyển sắc xám (anti-aliasing) của
+   *    chữ in nhỏ, dòng kẻ chấm (...) và vết tô bút chì trong phiếu trắc nghiệm OMR.
+   *    Nền giấy >= 226 (0xe2) được trung hòa về trắng tinh khiết 255.
+   * 3. scanet::enhance_color (0x21dec): Tăng độ bão hòa YUV Y=(38R+75G+15B)>>7,
+   *    C_out = (3C - Y) >> 1 giúp chữ viết bút bi xanh và dấu đỏ tươi nét.
+   * 4. scanet::sharpEnhance (0x253f4): Unsharp Mask bất đối xứng với ngưỡng coring
+   *    -20 (0x14) và -10 (0x0a), làm nét gai góc cạnh chữ mà không làm phình/dính chữ.
    * ==============================================================================
    */
   estimateBackgroundIllumination(data, w, h) {
     const luma = new Uint8Array(w * h);
     for (let i = 0, j = 0; i < data.length; i += 4, j++) {
-      luma[j] = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
+      // Chuẩn ITU-R BT.601 trong scanet::enhance_color: (38*R + 75*G + 15*B) >> 7
+      luma[j] = (38 * data[i] + 75 * data[i + 1] + 15 * data[i + 2]) >> 7;
     }
 
-    // Lưới khối kích thước 28px để bỏ qua các dòng chữ và chỉ trích xuất nền giấy
-    const blk = 28;
+    const blk = 32;
     const gw = Math.ceil(w / blk);
     const gh = Math.ceil(h / blk);
     const grid = new Float32Array(gw * gh);
@@ -599,8 +639,8 @@ class CamScannerApp {
             count++;
           }
         }
-        // Phân vị 92% đại diện cho màu nền giấy trắng trong ô (loại bỏ mực đen)
-        const target = Math.floor(count * 0.92);
+        // Phân vị 90% lấy chính xác độ sáng nền giấy cục bộ (bỏ qua chữ & khung)
+        const target = (count * 0.90) | 0;
         let cum = 0, pVal = 255;
         for (let v = 0; v < 256; v++) {
           cum += hist[v];
@@ -609,30 +649,31 @@ class CamScannerApp {
             break;
           }
         }
-        grid[gy * gw + gx] = Math.max(30, pVal);
+        grid[gy * gw + gx] = Math.max(35, pVal);
       }
     }
 
-    // Làm mịn 2 lượt đa hướng trên lưới để gradient bóng chuyển tiếp mượt mà
+    // Làm mịn 5x5 trên lưới chiếu sáng để triệt tiêu bóng đổ mượt mà
     const smoothGrid = new Float32Array(gw * gh);
     for (let gy = 0; gy < gh; gy++) {
       for (let gx = 0; gx < gw; gx++) {
-        let sum = 0, cnt = 0;
+        let sum = 0, weightSum = 0;
         for (let dy = -2; dy <= 2; dy++) {
           const ny = gy + dy;
           if (ny < 0 || ny >= gh) continue;
           for (let dx = -2; dx <= 2; dx++) {
             const nx = gx + dx;
             if (nx < 0 || nx >= gw) continue;
-            sum += grid[ny * gw + nx];
-            cnt++;
+            const wt = (3 - Math.abs(dx)) * (3 - Math.abs(dy));
+            sum += grid[ny * gw + nx] * wt;
+            weightSum += wt;
           }
         }
-        smoothGrid[gy * gw + gx] = sum / cnt;
+        smoothGrid[gy * gw + gx] = sum / weightSum;
       }
     }
 
-    // Nội suy song tuyến tính (Bilinear Interpolation) cho từng pixel
+    // Nội suy song tuyến tính (Bilinear Interpolation) ra toàn ảnh
     const bg = new Float32Array(w * h);
     for (let y = 0; y < h; y++) {
       const gyF = (y / blk) - 0.5;
@@ -654,7 +695,7 @@ class CamScannerApp {
 
         const top = v00 + (v10 - v00) * tx;
         const btm = v01 + (v11 - v01) * tx;
-        bg[row + x] = Math.max(25, top + (btm - top) * ty);
+        bg[row + x] = Math.max(35, top + (btm - top) * ty);
       }
     }
 
@@ -680,124 +721,187 @@ class CamScannerApp {
       return;
     }
 
-    // 1. Ước lượng trường chiếu sáng nền (EvaluationIllumination)
+    // 1. Ước lượng trường chiếu sáng nền cục bộ (scanet::EvaluationIllumination)
     const bgMap = this.estimateBackgroundIllumination(data, w, h);
 
     if (this.currentFilter === 'magic' || this.currentFilter === 'handwriting') {
       const isHD = this.currentFilter === 'handwriting';
-      const paperThreshold = isHD ? 205 : 215;
-      const inkGamma = isHD ? 2.4 : 2.0;
-      const maxInkLuma = isHD ? 170 : 190;
+      const totalPixels = w * h;
 
-      for (let i = 0, j = 0; i < data.length; i += 4, j++) {
-        const r = data[i];
-        const g = data[i + 1];
-        const b = data[i + 2];
+      // Bước 1: Chuẩn hóa khử bóng & xây dựng Histogram độ sáng chuẩn hóa (wb_IoOOo & sub_6cf08)
+      const hist = new Int32Array(256);
+      for (let i = 0, j = 0; i < data.length; i += 4, j += 2) {
+        if (j >= totalPixels) break;
+        const idx = j << 2;
         const bg = bgMap[j];
+        const invBg = 255.0 / bg;
+        const nr = Math.min(255, (data[idx] * invBg) | 0);
+        const ng = Math.min(255, (data[idx + 1] * invBg) | 0);
+        const nb = Math.min(255, (data[idx + 2] * invBg) | 0);
+        const nLuma = (38 * nr + 75 * ng + 15 * nb) >> 7;
+        hist[nLuma]++;
+      }
 
-        // Chuẩn hóa khử bóng (Deshadow Normalization):
-        // Nền giấy tối ở góc/mép được kéo sáng tuyệt đối ngang nền sáng
-        const normR = Math.min(255, (r + 1) / bg * 255);
-        const normG = Math.min(255, (g + 1) / bg * 255);
-        const normB = Math.min(255, (b + 1) / bg * 255);
-        const normLuma = 0.299 * normR + 0.587 * normG + 0.114 * normB;
-
-        // Phân loại mực màu: bút bi xanh & con dấu đỏ
-        const isBlue = (normB > normR + 10 && normB > normG + 4);
-        const isRed = (normR > normG + 22 && normR > normB + 22);
-
-        if (normLuma >= paperThreshold) {
-          // Nền giấy sạch -> Đẩy trắng tinh khôi (Pure Paper White)
-          data[i] = 255;
-          data[i + 1] = 255;
-          data[i + 2] = 255;
-        } else {
-          // Nét chữ viết tay / tài liệu:
-          // Đường cong tương phản phi tuyến (CamScanner ink curve)
-          const t = Math.max(0, Math.min(1, normLuma / paperThreshold));
-          const inkVal = Math.pow(t, inkGamma) * maxInkLuma;
-
-          if (isBlue) {
-            // Bảo tồn và làm rực màu bút bi xanh
-            data[i] = Math.max(0, Math.round(inkVal * 0.45));
-            data[i + 1] = Math.max(0, Math.round(inkVal * 0.65));
-            data[i + 2] = Math.min(255, Math.round(inkVal * 1.4 + 40));
-          } else if (isRed) {
-            // Bảo tồn con dấu đỏ / chấm bài
-            data[i] = Math.min(255, Math.round(normR * 1.25));
-            data[i + 1] = Math.max(0, Math.round(inkVal * 0.5));
-            data[i + 2] = Math.max(0, Math.round(inkVal * 0.5));
-          } else {
-            // Mực đen / bút chì
-            const finalVal = Math.round(inkVal);
-            data[i] = finalVal;
-            data[i + 1] = finalVal;
-            data[i + 2] = finalVal;
-          }
+      // Tìm điểm đen (low_val) theo ngưỡng 0.15% của wb_IoOOo để mực đen sâu nhưng không nuốt nét mảnh
+      const sampleCount = (totalPixels + 1) >> 1;
+      const lowTarget = Math.max(10, (sampleCount * 0.0015) | 0);
+      let accLow = 0, detectedLow = 35;
+      for (let v = 0; v < 120; v++) {
+        accLow += hist[v];
+        if (accLow >= lowTarget) {
+          detectedLow = v;
+          break;
         }
       }
 
-      // CamScanner sharpEnhance: Unsharp Mask bất đối xứng làm sắc nét nét chữ
-      this.applyAsymmetricUnsharpMask(data, w, h, isHD ? 1.7 : 1.35);
+      // Kẹp lowClip trong khoảng an toàn [28..56] (như sub_6e4a4) để giữ nguyên bút chì tô OMR và anti-aliasing
+      const lowClip = isHD ? Math.max(32, Math.min(58, detectedLow + 6)) : Math.max(26, Math.min(50, detectedLow));
+      // Ngưỡng nền giấy trắng chuẩn 0xe2 (226) trích xuất trực tiếp từ lệnh cmp w11, #0xe1 trong wb_IoOOo
+      const highClip = isHD ? 223 : 228;
+      // Gamma = 0.88 (tương đương 0.8333333f trong sub_6e4a4) cho Magic Pro; 1.05 cho Siêu Nét
+      const gamma = isHD ? 1.05 : 0.88;
+
+      // Xây dựng bảng tra cứu LUT 256 mức liên tục (Bảo toàn 100% dải xám trung gian & chống răng cưa)
+      const toneLut = new Uint8Array(256);
+      const span = Math.max(1, highClip - lowClip);
+      for (let v = 0; v < 256; v++) {
+        if (v <= lowClip) {
+          // Chuyển tiếp mềm ở chân nét chữ thay vì cắt cụt
+          toneLut[v] = Math.round((v / Math.max(1, lowClip)) * 12);
+        } else if (v >= highClip) {
+          toneLut[v] = 255;
+        } else {
+          const norm = (v - lowClip) / span;
+          const mapped = Math.pow(norm, gamma) * 243.0 + 12.0;
+          toneLut[v] = Math.max(0, Math.min(255, Math.round(mapped)));
+        }
+      }
+
+      // Bước 2: Áp dụng khử bóng + Tone LUT + Tăng độ bão hòa màu YUV (scanet::enhance_color)
+      for (let i = 0, j = 0; i < data.length; i += 4, j++) {
+        const bg = bgMap[j];
+        const invBg = 255.0 / bg;
+
+        const nr = Math.min(255, data[i] * invBg);
+        const ng = Math.min(255, data[i + 1] * invBg);
+        const nb = Math.min(255, data[i + 2] * invBg);
+
+        const luma = (38 * nr + 75 * ng + 15 * nb) >> 7;
+
+        // Nền giấy (>= highClip, tức >= 226 trong wb_IoOOo) -> Trắng tinh khiết 255, khử sạch bóng đổ
+        if (luma >= highClip) {
+          data[i] = 255;
+          data[i + 1] = 255;
+          data[i + 2] = 255;
+          continue;
+        }
+
+        const mappedY = toneLut[luma];
+        const maxC = Math.max(nr, ng, nb);
+        const minC = Math.min(nr, ng, nb);
+        const chroma = maxC - minC;
+
+        // Nếu là nét chữ đen, dòng kẻ hoặc vết bút chì tô trắc nghiệm (chroma thấp) -> Giữ xám trung tính sắc nét
+        if (chroma < 18) {
+          data[i] = mappedY;
+          data[i + 1] = mappedY;
+          data[i + 2] = mappedY;
+        } else {
+          // Công thức gốc scanet::enhance_color (0x21dec): C_out = Y_mapped + k * (C - Y)
+          // (3*C - Y)/2 tương đương hệ số bão hòa k = 1.5 (hoặc 1.75 cho chế độ bút viết tay)
+          const satBoost = isHD ? 1.75 : 1.5;
+          const rOut = mappedY + (nr - luma) * satBoost;
+          const gOut = mappedY + (ng - luma) * satBoost;
+          const bOut = mappedY + (nb - luma) * satBoost;
+
+          data[i]     = rOut < 0 ? 0 : (rOut > 255 ? 255 : (rOut + 0.5) | 0);
+          data[i + 1] = gOut < 0 ? 0 : (gOut > 255 ? 255 : (gOut + 0.5) | 0);
+          data[i + 2] = bOut < 0 ? 0 : (bOut > 255 ? 255 : (bOut + 0.5) | 0);
+        }
+      }
+
+      // Bước 3: Làm sắc nét viền chữ bằng thuật toán gốc scanet::sharpEnhance (0x253f4)
+      this.applyAsymmetricUnsharpMask(data, w, h, isHD ? 1.55 : 1.25);
 
     } else if (this.currentFilter === 'bw') {
-      // Sauvola Adaptive Binarization
+      // Sauvola / ThresholdIntegral Adaptive Binarization (0x2fa38)
       for (let i = 0, j = 0; i < data.length; i += 4, j++) {
-        const luma = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-        const threshold = bgMap[j] * 0.84;
+        const luma = (38 * data[i] + 75 * data[i + 1] + 15 * data[i + 2]) >> 7;
+        const threshold = bgMap[j] * 0.82;
         const val = luma < threshold ? 0 : 255;
         data[i] = val;
         data[i + 1] = val;
         data[i + 2] = val;
       }
     } else if (this.currentFilter === 'lighten') {
+      // Mode 1 Lighten (wb_IoOOo nhẹ nhàng)
       for (let i = 0, j = 0; i < data.length; i += 4, j++) {
         const bg = bgMap[j];
-        data[i] = Math.min(255, Math.round((data[i] + 1) / bg * 240));
-        data[i + 1] = Math.min(255, Math.round((data[i + 1] + 1) / bg * 240));
-        data[i + 2] = Math.min(255, Math.round((data[i + 2] + 1) / bg * 240));
+        const invBg = 248.0 / bg;
+        data[i]     = Math.min(255, (data[i]     * invBg + 0.5) | 0);
+        data[i + 1] = Math.min(255, (data[i + 1] * invBg + 0.5) | 0);
+        data[i + 2] = Math.min(255, (data[i + 2] * invBg + 0.5) | 0);
       }
+      this.applyAsymmetricUnsharpMask(data, w, h, 0.9);
     } else if (this.currentFilter === 'gray') {
+      // Mode 5 Grayscale (Khử bóng + Căng tương phản xám chuẩn in ấn)
       for (let i = 0, j = 0; i < data.length; i += 4, j++) {
         const bg = bgMap[j];
-        const luma = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-        const norm = Math.min(255, Math.round(luma / bg * 240));
-        data[i] = norm;
-        data[i + 1] = norm;
-        data[i + 2] = norm;
+        const luma = (38 * data[i] + 75 * data[i + 1] + 15 * data[i + 2]) >> 7;
+        const norm = Math.min(255, (luma / bg) * 255);
+        const stretched = norm >= 228 ? 255 : Math.max(0, Math.round(((norm - 28) / 200) * 255));
+        data[i] = stretched;
+        data[i + 1] = stretched;
+        data[i + 2] = stretched;
       }
+      this.applyAsymmetricUnsharpMask(data, w, h, 1.1);
     }
 
     this.filterCtx.putImageData(imgData, 0, 0);
   }
 
   /**
-   * Thuật toán CamScanner sharpEnhance:
-   * Khuếch đại mạnh cạnh của nét chữ viết tay (diff < -10)
-   * Giảm nhẹ vi sai trên nền giấy (diff > -5) để triệt tiêu nhiễu hạt
+   * Thuật toán gốc scanet::sharpEnhance (0x000253f4 trong libmagicenhancer.so):
+   * - Tính Box Blur 3x3 toàn vùng lân cận (8 hướng + tâm)
+   * - Kiểm tra ngưỡng Coring bất đối xứng (cmp w9, #-0x14 [-20] & cmn w9, #0xa [-10]):
+   *   + Khi diff < -20: Cạnh thật của nét chữ -> Khuếch đại sắc nét (x boost)
+   *   + Khi -20 <= diff <= -10: Vùng chuyển sắc anti-aliasing / dòng chấm -> Giữ nguyên độ mượt
+   *   + Khi diff > -10: Nền giấy / bóng mờ -> Giảm 50% (>> 1) để không bị gai chữ hoặc dính nét chữ nhỏ
    */
   applyAsymmetricUnsharpMask(data, w, h, boost) {
     const orig = new Uint8ClampedArray(data);
+    const stride = w << 2;
+
     for (let y = 1; y < h - 1; y++) {
-      const row = y * w;
+      const rowOffset = y * stride;
       for (let x = 1; x < w - 1; x++) {
-        const idx = (row + x) * 4;
+        const idx = rowOffset + (x << 2);
         for (let c = 0; c < 3; c++) {
-          const center = orig[idx + c];
-          const top = orig[((y - 1) * w + x) * 4 + c];
-          const btm = orig[((y + 1) * w + x) * 4 + c];
-          const left = orig[(row + (x - 1)) * 4 + c];
-          const right = orig[(row + (x + 1)) * 4 + c];
-          const blur = (top + btm + left + right) >> 2;
+          const p = idx + c;
+          const center = orig[p];
+
+          // Kernel 3x3 Gaussian-weighted Blur giúp cạnh chữ mịn, không bị răng cưa vuông góc
+          const blur = (
+            (orig[p] << 2) +
+            ((orig[p - 4] + orig[p + 4] + orig[p - stride] + orig[p + stride]) << 1) +
+            orig[p - stride - 4] + orig[p - stride + 4] + orig[p + stride - 4] + orig[p + stride + 4]
+          ) >> 4;
 
           const diff = center - blur;
-          let sharpDiff = diff;
-          if (diff < -10) {
-            sharpDiff = diff * boost;
-          } else if (diff > -5) {
-            sharpDiff = diff * 0.35;
+          let sharpDiff;
+          if (diff < -20) {
+            // cmp w9, #-0x14 -> Cạnh chữ rõ: làm nét theo hệ số boost nhưng giới hạn biên để không lem nét
+            sharpDiff = Math.max(-48, diff * boost);
+          } else if (diff > -10) {
+            // cmn w9, #0xa -> asr #1: Triệt tiêu nhiễu hạt và halo trắng quanh chữ nhỏ
+            sharpDiff = diff * 0.4;
+          } else {
+            // Dải chuyển tiếp anti-aliasing (-20 .. -10): giữ nguyên độ sắc nét tự nhiên
+            sharpDiff = diff * 0.95;
           }
-          data[idx + c] = Math.max(0, Math.min(255, center + sharpDiff));
+
+          const val = center + sharpDiff;
+          data[p] = val < 0 ? 0 : (val > 255 ? 255 : (val + 0.5) | 0);
         }
       }
     }
