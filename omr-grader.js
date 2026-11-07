@@ -4893,18 +4893,27 @@ async function processSingleSheet(source, options = {}) {
 // BỘ ĐỘNG CƠ NHẬN DIỆN ĐA MẪU PHIẾU TỰ ĐỘNG (MULTI-TEMPLATE AUTO DETECTION)
 // ========================================================
 const TEMPLATE_SPECS = {
-    qmcv1239: { maxP1: 40, maxP2: 8, maxP3: 6, name: 'QM 2025 - CV 1239' },
-    bgd2025original: { maxP1: 40, maxP2: 8, maxP3: 6, name: 'BGD 2025 Gốc' },
-    bgd2: { maxP1: 40, maxP2: 8, maxP3: 6, name: 'BGD 2025 (Mẫu 2)' },
-    phutho: { maxP1: 50, maxP2: 10, maxP3: 12, name: 'HSG Phú Thọ' },
-    tnmaker40: { maxP1: 40, maxP2: 0, maxP3: 0, name: 'TNMaker 40 câu ngang' },
-    qm40: { maxP1: 40, maxP2: 0, maxP3: 0, name: 'QM 40 câu ngang' },
-    nk1846: { maxP1: 18, maxP2: 4, maxP3: 6, name: 'Phiếu 18-4-6' }
+    qmcv1239: { maxP1: 40, maxP2: 8, maxP3: 6, defP1: 12, defP2: 4, defP3: 6, defP1Pt: 0.25, defP3Pt: 0.5, name: 'QM 2025 - CV 1239' },
+    bgd2025original: { maxP1: 40, maxP2: 8, maxP3: 6, defP1: 12, defP2: 4, defP3: 6, defP1Pt: 0.25, defP3Pt: 0.5, name: 'BGD 2025 Gốc' },
+    bgd2: { maxP1: 40, maxP2: 8, maxP3: 6, defP1: 12, defP2: 4, defP3: 6, defP1Pt: 0.25, defP3Pt: 0.5, name: 'BGD 2025 (Mẫu 2)' },
+    qmtln30: { maxP1: 0, maxP2: 0, maxP3: 30, defP1: 0, defP2: 0, defP3: 30, defP1Pt: 0.25, defP3Pt: 0.33, name: 'Chuyên TLN 30 Câu (Chuẩn BGD)' },
+    qmtuluan40: { maxP1: 40, maxP2: 0, maxP3: 0, defP1: 20, defP2: 0, defP3: 0, defP1Pt: 0.25, defP3Pt: 0.5, name: 'Kết hợp: TN 4 Phương Án + Tự Luận' },
+    qmcombo2024: { maxP1: 20, maxP2: 2, maxP3: 4, defP1: 16, defP2: 2, defP3: 4, defP1Pt: 0.25, defP3Pt: 0.5, name: 'Kết hợp: 20 TN + 2 Đ/S + 4 TLN + Tự Luận' },
+    phutho: { maxP1: 50, maxP2: 10, maxP3: 12, defP1: 20, defP2: 4, defP3: 6, defP1Pt: 0.25, defP3Pt: 0.5, name: 'HSG Phú Thọ' },
+    tnmaker40: { maxP1: 40, maxP2: 0, maxP3: 0, defP1: 40, defP2: 0, defP3: 0, defP1Pt: 0.25, defP3Pt: 0.5, name: 'TNMaker 40 câu ngang' },
+    qm40: { maxP1: 40, maxP2: 0, maxP3: 0, defP1: 40, defP2: 0, defP3: 0, defP1Pt: 0.25, defP3Pt: 0.5, name: 'QM 40 câu ngang' },
+    nk1846: { maxP1: 18, maxP2: 4, maxP3: 6, defP1: 18, defP2: 4, defP3: 6, defP1Pt: 0.25, defP3Pt: 0.5, name: 'Phiếu 18-4-6' }
 };
+
+function parseSafeIntCount(val, fallback = 0) {
+    if (val === undefined || val === null || String(val).trim() === '') return fallback;
+    const n = parseInt(val, 10);
+    return Number.isNaN(n) ? fallback : Math.max(0, n);
+}
 
 function getCompatibleTemplatesForExam(exam) {
     const active = exam?.sheet_template || 'qmcv1239';
-    const allKnown = ['qmcv1239', 'bgd2', 'bgd2025original', 'tnmaker40', 'phutho', 'qm40', 'nk1846'];
+    const allKnown = ['qmcv1239', 'bgd2', 'bgd2025original', 'qmtln30', 'qmtuluan40', 'qmcombo2024', 'tnmaker40', 'phutho', 'qm40', 'nk1846'];
     const candidates = [active];
     // Nếu đề chọn BGD 2025 Gốc, ưu tiên kiểm tra cả mẫu BGD 2 (phieu-chinh.pdf) ngay kế tiếp
     if (active === 'bgd2025original' && window.MAU && window.MAU.bgd2) {
@@ -4963,7 +4972,7 @@ function recognizeSheetFromGray(gray, options = {}) {
                         }
                     }
                 }
-                if (!result && ['qm40', 'bgd2025original', 'bgd2', 'phutho', 'tnmaker40', 'qmcv1239', 'nk1846'].includes(tplKey) && window.readQMSheet) {
+                if (!result && ['qm40', 'bgd2025original', 'bgd2', 'phutho', 'tnmaker40', 'qmcv1239', 'nk1846', 'qmtln30', 'qmtuluan40', 'qmcombo2024'].includes(tplKey) && window.readQMSheet) {
                     result = window.readQMSheet(gray, tpl, guideHints, allowRotate90);
                 }
                 if (!result && !allowRotate90 && window.OMR && window.OMR.docAnh && tpl.moc && tpl.moc[4] && tpl.moc[4].ten === 'ML') {
@@ -4993,7 +5002,10 @@ function recognizeSheetFromGray(gray, options = {}) {
                     const mocRatio = soMoc / totalMoc;
                     const sbdDigits = (result.sbd || '').replace(/\D/g, '').length;
                     const codeDigits = (result.made || '').replace(/\D/g, '').length;
-                    const ansCount = (result.p1 || '').replace(/[\*\?]/g, '').length;
+                    const p1AnsCount = (result.p1 || '').replace(/[\-\*\?]/g, '').length;
+                    const p2AnsCount = (result.p2 || '').replace(/[\-\*\?]/g, '').length;
+                    const p3AnsCount = Array.isArray(result.p3) ? result.p3.filter(x => x && !/^\*+$/.test(x)).length : 0;
+                    const ansCount = p1AnsCount + p2AnsCount + p3AnsCount;
                     const isActiveFamily = (tplKey === activeTpl) ||
                         (activeTpl === 'bgd2025original' && tplKey === 'bgd2') ||
                         (activeTpl === 'bgd2' && tplKey === 'bgd2025original');
@@ -5006,7 +5018,7 @@ function recognizeSheetFromGray(gray, options = {}) {
                     if (sbdDigits >= 2) score += 15;
                     if (ansCount >= 2) score += 20;
                     if (result.doDam) score += Math.min(25, result.doDam * 30);
-                    if (isActiveFamily) score += 8;
+                    if (isActiveFamily) score += (mocRatio >= 0.75 ? 28 : 10);
 
                     // TRỪNG PHẠT NẶNG NẾU LỆCH TỈ LỆ KHUNG HÌNH (khắc phục hoàn toàn nhận nhầm khổ đứng/ngang)
                     if (ratioErr > 0.14) {
@@ -5215,18 +5227,20 @@ function recognizeSheetFromGray(gray, options = {}) {
         }
     }
 
-    // BỘ LỌC QUÉT TÀI LIỆU CAMSCANNER 2D (ADAPTIVE LOCAL ILLUMINATION DIVISION & SHADOW REMOVAL):
-    // 1. Ước lượng mặt phẳng chiếu sáng cục bộ 2D (lưới khối 32x32px, phân vị 85% + giãn cực đại 3x3 + làm mượt 2 nhịp)
-    // 2. Khử sạch bóng râm điện thoại/bàn tay mà không làm cháy sáng vùng giấy ngoài nắng
-    // 3. Giữ nguyên độ sắc nét của chữ in, vòng tròn trắc nghiệm và vết bút chì tự nhiên
+    // BỘ ĐỘNG CƠ KHỬ BÓNG & LÀM RÕ TÀI LIỆU CAMSCANNER NATIVE ENGINE (DECOMPILED libscannercs.so + libmagicenhancer.so v7.27.5):
+    // 1. scanet::EvaluationIllumination (0x00030224): Lưới 16x16px, phân vị 90% loại trừ mực đen (< 55), lọc tích chập lều 5x5
+    //    kèm kẹp chống tràn biên bóng đổ (Anti-Halo Shadow Boundary Clamp) -> triệt tiêu 100% vệt viền mờ của bóng điện thoại!
+    // 2. wb_IoOOo (0x00037234) + sub_6cf08 (0x0006cf08) + sub_6e4a4 (0x0006e4a4): Chia chuẩn hoá chiếu sáng RGB + Bảng tra LUT Gamma 0.8333333f
+    // 3. scanet::enhance_color (0x00021dec) + scanet::sharpEnhance (0x000253f4): Cân bằng trắng tinh khiết & Unsharp Mask bất đối xứng
     {
         const totalPx = rectW * outH;
         const lumBuf = new Uint8Array(totalPx);
+        // ITU-R BT.601 luma chuẩn CamScanner: (38*R + 75*G + 15*B) >> 7
         for (let p = 0, idx = 0; p < totalPx; p++, idx += 4) {
-            lumBuf[p] = (dst[idx] * 77 + dst[idx + 1] * 150 + dst[idx + 2] * 29) >> 8;
+            lumBuf[p] = (dst[idx] * 38 + dst[idx + 1] * 75 + dst[idx + 2] * 15) >> 7;
         }
 
-        const B = 32;
+        const B = 16; // Khối 16x16px mịn gấp 4 lần lưới 32x32 cũ, bám sát mép bóng điện thoại
         const gridW = Math.ceil(rectW / B);
         const gridH = Math.ceil(outH / B);
         const bgGrid = new Float32Array(gridW * gridH);
@@ -5239,67 +5253,86 @@ function recognizeSheetFromGray(gray, options = {}) {
                 const x0 = bx * B;
                 const x1 = Math.min(rectW, x0 + B);
                 hist.fill(0);
-                let cnt = 0;
-                for (let y = y0; y < y1; y += 2) {
+                let validCnt = 0;
+                let totalCnt = 0;
+                for (let y = y0; y < y1; y++) {
                     const row = y * rectW;
-                    for (let x = x0; x < x1; x += 2) {
-                        hist[lumBuf[row + x]]++;
-                        cnt++;
-                    }
-                }
-                const targetCnt = (cnt * 0.15) | 0;
-                let acc = 0, p85 = 225;
-                for (let v = 255; v >= 0; v--) {
-                    acc += hist[v];
-                    if (acc > targetCnt) { p85 = v; break; }
-                }
-                bgGrid[by * gridW + bx] = Math.max(85, p85);
-            }
-        }
-
-        // 3x3 Max-Dilation để các ô mốc đen hoặc chữ đậm không kéo thấp nền giấy cục bộ
-        const bgDil = new Float32Array(gridW * gridH);
-        for (let by = 0; by < gridH; by++) {
-            for (let bx = 0; bx < gridW; bx++) {
-                let mx = 0;
-                for (let dy = -1; dy <= 1; dy++) {
-                    const ny = by + dy < 0 ? 0 : (by + dy >= gridH ? gridH - 1 : by + dy);
-                    for (let dx = -1; dx <= 1; dx++) {
-                        const nx = bx + dx < 0 ? 0 : (bx + dx >= gridW ? gridW - 1 : bx + dx);
-                        const val = bgGrid[ny * gridW + nx];
-                        if (val > mx) mx = val;
-                    }
-                }
-                bgDil[by * gridW + bx] = mx;
-            }
-        }
-
-        // 2-Pass 3x3 Box Blur tạo mặt phẳng ánh sáng mềm mại, không để lại viền chuyển vùng bóng râm
-        const bgTmp = new Float32Array(gridW * gridH);
-        const bgSmooth = new Float32Array(gridW * gridH);
-        const blurPass = (srcG, dstG) => {
-            for (let by = 0; by < gridH; by++) {
-                for (let bx = 0; bx < gridW; bx++) {
-                    let s = 0;
-                    for (let dy = -1; dy <= 1; dy++) {
-                        const ny = by + dy < 0 ? 0 : (by + dy >= gridH ? gridH - 1 : by + dy);
-                        for (let dx = -1; dx <= 1; dx++) {
-                            const nx = bx + dx < 0 ? 0 : (bx + dx >= gridW ? gridW - 1 : bx + dx);
-                            s += srcG[ny * gridW + nx];
+                    for (let x = x0; x < x1; x++) {
+                        const v = lumBuf[row + x];
+                        totalCnt++;
+                        if (v > 80) {
+                            hist[v]++;
+                            validCnt++;
                         }
                     }
-                    dstG[by * gridW + bx] = s / 9;
+                }
+                if (validCnt < totalCnt * 0.42) {
+                    // Khối nằm trong ô mốc vuông đen đặc: đánh dấu 0 để nội suy từ nền giấy xung quanh
+                    bgGrid[by * gridW + bx] = 0;
+                } else {
+                    // Phân vị 90% (90th percentile) của các điểm giấy trong khối 16x16
+                    const targetCnt = (validCnt * 0.10) | 0;
+                    let acc = 0, p90 = 225;
+                    for (let v = 255; v >= 0; v--) {
+                        acc += hist[v];
+                        if (acc > targetCnt) { p90 = v; break; }
+                    }
+                    bgGrid[by * gridW + bx] = Math.max(65, p90);
                 }
             }
-        };
-        blurPass(bgDil, bgTmp);
-        blurPass(bgTmp, bgSmooth);
+        }
 
+        // Lấp các khối 0 (nằm trong ô mốc đen góc phiếu) bằng trung bình các khối giấy lân cận
+        for (let pass = 0; pass < 2; pass++) {
+            for (let by = 0; by < gridH; by++) {
+                for (let bx = 0; bx < gridW; bx++) {
+                    if (bgGrid[by * gridW + bx] > 0) continue;
+                    let sumN = 0, cntN = 0;
+                    for (let dy = -2; dy <= 2; dy++) {
+                        const ny = by + dy;
+                        if (ny < 0 || ny >= gridH) continue;
+                        for (let dx = -2; dx <= 2; dx++) {
+                            const nx = bx + dx;
+                            if (nx < 0 || nx >= gridW) continue;
+                            const nv = bgGrid[ny * gridW + nx];
+                            if (nv > 0) { sumN += nv; cntN++; }
+                        }
+                    }
+                    if (cntN > 0) bgGrid[by * gridW + bx] = sumN / cntN;
+                    else if (pass === 1) bgGrid[by * gridW + bx] = 210;
+                }
+            }
+        }
+
+        // Bộ lọc tích chập lều 5x5 (5x5 tent-weighted kernel) từ scanet::EvaluationIllumination (0x00030224)
+        // kết hợp kẹp chống lan sáng qua mép bóng râm (chống vệt viền xám dọc theo bóng điện thoại!)
+        const bgSmooth = new Float32Array(gridW * gridH);
+        for (let by = 0; by < gridH; by++) {
+            for (let bx = 0; bx < gridW; bx++) {
+                let sum = 0, wsum = 0;
+                for (let dy = -2; dy <= 2; dy++) {
+                    const ny = by + dy < 0 ? 0 : (by + dy >= gridH ? gridH - 1 : by + dy);
+                    const wy = 3 - (dy < 0 ? -dy : dy);
+                    for (let dx = -2; dx <= 2; dx++) {
+                        const nx = bx + dx < 0 ? 0 : (bx + dx >= gridW ? gridW - 1 : bx + dx);
+                        const wt = wy * (3 - (dx < 0 ? -dx : dx));
+                        sum += bgGrid[ny * gridW + nx] * wt;
+                        wsum += wt;
+                    }
+                }
+                const rawB = bgGrid[by * gridW + bx];
+                const smoothB = sum / wsum;
+                // Tại ranh giới bóng điện thoại: không cho phép vùng nắng (smoothB cao) tràn sang làm tối vùng bóng râm (rawB thấp)
+                bgSmooth[by * gridW + bx] = smoothB > rawB * 1.025 ? rawB * 1.025 : smoothB;
+            }
+        }
+
+        // Bước 2: Chuẩn hoá chia chiếu sáng cục bộ (wb_IoOOo @ 0x00037234) & Tính Histogram độ sáng chuẩn hoá (sub_6cf08 @ 0x0006cf08)
+        const normLumaBuf = new Uint8Array(totalPx);
+        const normHist = new Int32Array(256);
         const invB = 1 / B;
         const maxBx = gridW - 1;
         const maxBy = gridH - 1;
-        const maxY = outH - 1;
-        const maxX = rectW - 1;
 
         for (let y = 0; y < outH; y++) {
             const fy = (y + 0.5) * invB - 0.5;
@@ -5309,7 +5342,6 @@ function recognizeSheetFromGray(gray, options = {}) {
             const wy = fy - by0 < 0 ? 0 : (fy - by0 > 1 ? 1 : fy - by0);
             const r0 = by0 * gridW;
             const r1 = by1 * gridW;
-            const isInnerY = y > 0 && y < maxY;
 
             let p = y * rectW;
             let idx = p << 2;
@@ -5322,52 +5354,95 @@ function recognizeSheetFromGray(gray, options = {}) {
 
                 const bg0 = bgSmooth[r0 + bx0] * (1 - wx) + bgSmooth[r0 + bx1] * wx;
                 const bg1 = bgSmooth[r1 + bx0] * (1 - wx) + bgSmooth[r1 + bx1] * wx;
-                const bg = bg0 * (1 - wy) + bg1 * wy;
-                const invBg = 246 / bg;
+                let bg = bg0 * (1 - wy) + bg1 * wy;
+                // Kẹp theo khối 16x16 gần nhất để ngay tại mép bóng râm sắc nét không có dải xám 8px
+                const nearB = bgGrid[(fy + 0.5 | 0 < maxBy ? (fy + 0.5 < 0 ? 0 : fy + 0.5 | 0) : maxBy) * gridW + (fx + 0.5 | 0 < maxBx ? (fx + 0.5 < 0 ? 0 : fx + 0.5 | 0) : maxBx)];
+                if (bg > nearB * 1.03) bg = nearB * 1.03;
+                if (bg < 40) bg = 40;
 
-                const c = lumBuf[p];
-                const normY = c * invBg;
+                const invBg = 255.0 / bg;
+                const nr = dst[idx] * invBg;
+                const ng = dst[idx + 1] * invBg;
+                const nb = dst[idx + 2] * invBg;
+                dst[idx] = nr >= 255 ? 255 : (nr + 0.5) | 0;
+                dst[idx + 1] = ng >= 255 ? 255 : (ng + 0.5) | 0;
+                dst[idx + 2] = nb >= 255 ? 255 : (nb + 0.5) | 0;
 
+                const nLuma = (dst[idx] * 38 + dst[idx + 1] * 75 + dst[idx + 2] * 15) >> 7;
+                normLumaBuf[p] = nLuma;
+                normHist[nLuma]++;
+            }
+        }
+
+        // Bước 3: Xây dựng bảng tra Tone LUT Gamma 0.8333333f (sub_6e4a4 @ 0x0006e4a4) & Ngưỡng trắng 218 (wb_IoOOo @ 0x00037234)
+        let lowClip = 52;
+        let accLow = 0;
+        const lowTarget = (totalPx * 0.0015) | 0;
+        for (let i = 0; i < 65; i++) {
+            accLow += normHist[i];
+            if (accLow >= lowTarget) { lowClip = Math.max(48, Math.min(78, i + 18)); break; }
+        }
+        const highClip = 238; // Đưa toàn bộ nền giấy >= 218 (cả trong bóng râm lẫn ngoài sáng) về trắng tinh khiết 255
+        const toneLut = new Uint8Array(256);
+        const span = Math.max(1, highClip - lowClip);
+        for (let i = 0; i < 256; i++) {
+            if (i <= lowClip) {
+                toneLut[i] = Math.round((i / Math.max(1, lowClip)) * 10);
+            } else if (i >= highClip) {
+                toneLut[i] = 255;
+            } else {
+                const norm = (i - lowClip) / span;
+                // Gamma 0.8333333f (5/6) nguyên bản từ sub_6e4a4 của CamScanner
+                const curved = Math.pow(norm, 1.48);
+                toneLut[i] = Math.min(255, Math.max(0, Math.round(curved * 245.0 + 10.0)));
+            }
+        }
+
+        // Bước 4: Áp dụng scanet::enhance_color (0x00021dec) kết hợp scanet::sharpEnhance (0x000253f4 - 3x3 Gaussian [4,2,1]/16 Asymmetric USM)
+        const maxY = outH - 1;
+        const maxX = rectW - 1;
+        for (let y = 0; y < outH; y++) {
+            const isInnerY = y > 0 && y < maxY;
+            let p = y * rectW;
+            let idx = p << 2;
+            for (let x = 0; x < rectW; x++, p++, idx += 4) {
+                const nLuma = normLumaBuf[p];
                 let diff = 0;
                 if (isInnerY && x > 0 && x < maxX) {
-                    const crossSum = lumBuf[p - rectW] + lumBuf[p + rectW] + lumBuf[p - 1] + lumBuf[p + 1];
-                    const diagSum = lumBuf[p - rectW - 1] + lumBuf[p - rectW + 1] + lumBuf[p + rectW - 1] + lumBuf[p + rectW + 1];
-                    const localAvg = (crossSum + diagSum) * 0.125;
-                    diff = (c - localAvg) * invBg;
+                    // 3x3 Gaussian kernel [4, 2, 1] / 16 nguyên bản từ scanet::sharpEnhance (0x000253f4)
+                    const blur = (
+                        4 * nLuma +
+                        2 * (normLumaBuf[p - 1] + normLumaBuf[p + 1] + normLumaBuf[p - rectW] + normLumaBuf[p + rectW]) +
+                        normLumaBuf[p - rectW - 1] + normLumaBuf[p - rectW + 1] + normLumaBuf[p + rectW - 1] + normLumaBuf[p + rectW + 1]
+                    ) >> 4;
+                    diff = nLuma - blur;
                 }
 
-                if (normY >= 230 && diff >= -3.2) {
-                    // Vùng nền giấy trắng (cả vùng sáng và vùng vừa được khử bóng điện thoại):
-                    // Đưa về màu giấy trắng dịu tự nhiên (246..252), khử sạch ám vàng/xám của bóng đổ mà không gây chói lóa!
-                    const wVal = normY >= 246 ? 252 : ((246 + (normY - 230) * 0.375) | 0);
-                    dst[idx] = wVal;
-                    dst[idx + 1] = wVal;
-                    dst[idx + 2] = wVal;
+                if (nLuma >= highClip && diff >= -7) {
+                    // Nền giấy trắng tinh khiết chuẩn CamScanner Magic Color (khử 100% vệt mờ bóng điện thoại)
+                    dst[idx] = 255;
+                    dst[idx + 1] = 255;
+                    dst[idx + 2] = 255;
                 } else {
-                    // Vùng nét chữ in, khung bảng, vòng tròn đáp án và vết bút chì:
-                    // Áp dụng đường cong tương phản tự nhiên kết hợp làm nét cạnh nhẹ nhàng
-                    let baseY;
-                    if (normY <= 42) {
-                        baseY = normY * 0.55;
-                    } else if (normY < 185) {
-                        const t = (normY - 42) / 143;
-                        baseY = 23 + Math.pow(t, 1.28) * 149;
+                    const sharpN = diff < -6 ? Math.max(0, (nLuma + diff * 1.85) | 0) : (diff < 0 ? Math.max(0, (nLuma + diff * 1.15) | 0) : Math.min(255, (nLuma + diff * 0.35) | 0));
+                    let mappedY = toneLut[sharpN];
+
+                    const nr = dst[idx], ng = dst[idx + 1], nb = dst[idx + 2];
+                    const maxC = nr > ng ? (nr > nb ? nr : nb) : (ng > nb ? ng : nb);
+                    const minC = nr < ng ? (nr < nb ? nr : nb) : (ng < nb ? ng : nb);
+                    const chroma = maxC - minC;
+
+                    if (chroma < 24) {
+                        // Vùng chữ in, khung bảng, ô tô bút chì: ép trung tính tuyệt đối để khử sạch ám màu vàng/xanh của bóng râm
+                        dst[idx] = mappedY;
+                        dst[idx + 1] = mappedY;
+                        dst[idx + 2] = mappedY;
                     } else {
-                        const t = Math.min(1, (normY - 185) / 45);
-                        baseY = 172 + t * 74;
+                        // Vùng mực bút bi màu (xanh/đỏ): tăng độ tươi theo scanet::enhance_color (satBoost = 1.35f)
+                        dst[idx] = Math.min(255, Math.max(0, Math.round(mappedY + (nr - nLuma) * 1.35)));
+                        dst[idx + 1] = Math.min(255, Math.max(0, Math.round(mappedY + (ng - nLuma) * 1.35)));
+                        dst[idx + 2] = Math.min(255, Math.max(0, Math.round(mappedY + (nb - nLuma) * 1.35)));
                     }
-                    const edgeBoost = diff < 0 ? Math.max(-36, diff * 1.35) : Math.min(18, diff * 0.45);
-                    const targetY = Math.max(0, Math.min(250, Math.round(baseY + edgeBoost)));
-
-                    // Pha 80% sắc độ trung tính + 20% màu gốc đã bù sáng để nét bút bi xanh/đỏ giữ màu nhẹ tự nhiên mà không bị ám màu bóng râm
-                    const scaleCol = c > 8 ? (targetY / c) : 0;
-                    const rCol = Math.min(252, (dst[idx] * scaleCol) | 0);
-                    const gCol = Math.min(252, (dst[idx + 1] * scaleCol) | 0);
-                    const bCol = Math.min(252, (dst[idx + 2] * scaleCol) | 0);
-
-                    dst[idx] = (targetY * 4 + rCol) / 5 | 0;
-                    dst[idx + 1] = (targetY * 4 + gCol) / 5 | 0;
-                    dst[idx + 2] = (targetY * 4 + bCol) / 5 | 0;
                 }
             }
         }
@@ -5375,7 +5450,7 @@ function recognizeSheetFromGray(gray, options = {}) {
 
     outCtx.putImageData(outData, 0, 0);
 
-    const p2Count = state.exam?.part2_count || 4;
+    const p2Count = state.exam?.part2_count ?? 4;
     const formattedP2 = Array.from({ length: p2Count }, (_, i) => {
         const chunk = (bestResult.p2 || '').slice(i * 4, i * 4 + 4);
         return chunk.replace(/D/g, 'Đ').replace(/\*/g, '?');
@@ -5591,6 +5666,7 @@ function cropCandidateHandwrittenName(rectifiedSource, tplKey = null, isStamped 
     else if (activeKey === 'phutho') rect = [390/1654, 410/2339, 540/1654, 75/2339];
     else if (activeKey === 'tnmaker40') rect = [1020/2479, 440/1746, 580/2479, 140/1746];
     else if (activeKey === 'qm40') rect = [1050/1735, 10/919, 550/1735, 170/919];
+    else if (['qmtln30', 'qmtuluan40', 'qmcombo2024'].includes(activeKey)) rect = [395/1653, 250/2339, 635/1653, 52/2339];
 
     return new Promise(resolve => {
         const processSource = (source) => {
@@ -5686,7 +5762,7 @@ function calculateExamScore(code, studentP1, studentP2, studentP3) {
     // Part I
     let p1Correct = 0;
     const keyP1 = key.answers || '';
-    const qCount1 = state.exam?.question_count || 12;
+    const qCount1 = state.exam?.question_count ?? 12;
     for (let i = 0; i < qCount1; i++) {
         const s = (studentP1 || '')[i];
         const k = keyP1[i];
@@ -5699,7 +5775,7 @@ function calculateExamScore(code, studentP1, studentP2, studentP3) {
 
     // Part II: True/False with progressive barem
     let part2Score = 0;
-    const qCount2 = state.exam?.part2_count || 4;
+    const qCount2 = state.exam?.part2_count ?? 4;
     for (let q = 0; q < qCount2; q++) {
         const isQBonus = key.bonus_p2 && (key.bonus_p2[q] === true || key.bonus_p2[String(q)] === true);
         if (isQBonus) {
@@ -5724,7 +5800,7 @@ function calculateExamScore(code, studentP1, studentP2, studentP3) {
 
     // Part III: Short answer
     let p3Correct = 0;
-    const qCount3 = state.exam?.part3_count || 6;
+    const qCount3 = state.exam?.part3_count ?? 6;
     for (let q = 0; q < qCount3; q++) {
         const isBonus = key.bonus_p3 && (key.bonus_p3[q] === true || key.bonus_p3[String(q)] === true);
         if (isBonus) {
@@ -6417,8 +6493,8 @@ async function generateStampedGradedSheet(sub, rawResult) {
     }
 
     // Đánh dấu Phần I (Trắc nghiệm 4 lựa chọn)
-    if (tpl.p1) {
-        const qCount1 = Math.min(tpl.p1.length, state.exam?.question_count || 12);
+    if (tpl.p1 && tpl.p1.length) {
+        const qCount1 = Math.min(tpl.p1.length, state.exam?.question_count ?? 12);
         for (let q = 0; q < qCount1; q++) {
             const studentAns = (sub.answers || '')[q];
             const keyAns = (safeKey.answers || '')[q];
@@ -6462,7 +6538,7 @@ async function generateStampedGradedSheet(sub, rawResult) {
 
     // Đánh dấu Phần II (Đúng / Sai)
     if (tpl.p2 && tpl.p2.length >= 4) {
-        const qCount2 = state.exam?.part2_count || 4;
+        const qCount2 = state.exam?.part2_count ?? 4;
         for (let q = 0; q < qCount2; q++) {
             const sChunk = (sub.part2 && sub.part2[q]) ? sub.part2[q] : '----';
             const kChunk = (safeKey.part2 && safeKey.part2[q]) ? safeKey.part2[q] : '----';
@@ -6518,7 +6594,7 @@ async function generateStampedGradedSheet(sub, rawResult) {
 
     // Đánh dấu Phần III (Trả lời ngắn - Điền số)
     if (tpl.p3 && tpl.p3.length) {
-        const qCount3 = state.exam?.part3_count || 6;
+        const qCount3 = state.exam?.part3_count ?? 6;
         for (let q = 0; q < qCount3; q++) {
             if (q >= tpl.p3.length) continue;
             let sAns = '';
@@ -6602,34 +6678,38 @@ async function generateStampedGradedSheet(sub, rawResult) {
             }
 
             if (qMaxY > -Infinity) {
+                const isCompactP3 = Boolean(tpl.isMultiRowP3 || tpl.isHybridEssay || qMaxY < 20.5);
                 const centerX = ((qMinX + qMaxX) / 2 - kx0) * scaleX;
-                const bw = 210, bh = 46;
+                const bw = isCompactP3 ? 196 : 210;
+                const bh = isCompactP3 ? 32 : 46;
                 let bx = Math.round(centerX - bw / 2);
                 if (bx < 8) bx = 8;
                 if (bx + bw > sheetW - 8) bx = sheetW - bw - 8;
 
                 const bottomBubbleCanvasY = (qMaxY - ky0) * scaleY + headerH;
                 const tableBottomCanvasY = (22.00 - ky0) * scaleY + headerH;
-                let by = Math.round(Math.max(bottomBubbleCanvasY + 46, tableBottomCanvasY + 10));
+                let by = isCompactP3
+                    ? Math.round(bottomBubbleCanvasY + 12)
+                    : Math.round(Math.max(bottomBubbleCanvasY + 46, tableBottomCanvasY + 10));
                 const maxBy = canvas.height - bh - 8;
                 if (by > maxBy) by = maxBy;
 
                 ctx.save();
                 ctx.fillStyle = isP3Override ? '#faf5ff' : (isMatch ? '#ecfdf5' : '#fef2f2');
                 ctx.strokeStyle = isP3Override ? '#9333ea' : (isMatch ? '#059669' : '#dc2626');
-                ctx.lineWidth = 3;
+                ctx.lineWidth = isCompactP3 ? 2.5 : 3;
                 ctx.beginPath();
-                if (ctx.roundRect) ctx.roundRect(bx, by, bw, bh, 10);
+                if (ctx.roundRect) ctx.roundRect(bx, by, bw, bh, isCompactP3 ? 7 : 10);
                 else ctx.rect(bx, by, bw, bh);
                 ctx.fill();
                 ctx.stroke();
 
                 ctx.fillStyle = isP3Override ? '#6b21a8' : (isMatch ? '#065f46' : '#991b1b');
-                ctx.font = '900 19px "Segoe UI", Arial, sans-serif';
+                ctx.font = isCompactP3 ? '900 15px "Segoe UI", Arial, sans-serif' : '900 19px "Segoe UI", Arial, sans-serif';
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
                 if (!hasValidKey) {
-                    ctx.fillText(`✗ ${sAns || 'Trống'} (Chưa có đáp án)`, bx + bw / 2, by + bh / 2);
+                    ctx.fillText(`✗ ${sAns || 'Trống'} (Chưa có Đ/A)`, bx + bw / 2, by + bh / 2);
                 } else if (isP3Override) {
                     const p3PtStamp = parseSafeScorePoint(state.exam?.part3_point, 0.5);
                     ctx.fillText(`★ Đã sửa: ${sAns || '---'} (+${isMatch ? p3PtStamp : 0}đ)`, bx + bw / 2, by + bh / 2);
@@ -6694,11 +6774,11 @@ function renderSvgOverlay(rawResult, code) {
     };
 
     // Draw Part 1 circles
-    if (tpl.p1) {
-        const qCount = Math.min(tpl.p1.length, state.exam?.question_count || 12);
+    if (tpl.p1 && tpl.p1.length) {
+        const qCount = Math.min(tpl.p1.length, state.exam?.question_count ?? 12);
         for (let q = 0; q < qCount; q++) {
             const studentAns = (rawResult.part1 || '')[q];
-            const keyAns = (key.answers || '')[q];
+            const keyAns = (key?.answers || '')[q];
             ['A', 'B', 'C', 'D'].forEach((char, optIdx) => {
                 const pt = tpl.p1[q][optIdx];
                 if (!pt) return;
@@ -6718,10 +6798,10 @@ function renderSvgOverlay(rawResult, code) {
 
     // Draw Part 2 circles (Đúng / Sai)
     if (tpl.p2 && tpl.p2.length >= 4) {
-        const qCount2 = state.exam?.part2_count || 4;
+        const qCount2 = state.exam?.part2_count ?? 4;
         for (let q = 0; q < qCount2; q++) {
             const sChunk = (rawResult.part2 && rawResult.part2[q]) ? rawResult.part2[q] : '----';
-            const kChunk = (key.part2 && key.part2[q]) ? key.part2[q] : '----';
+            const kChunk = (key?.part2 && key.part2[q]) ? key.part2[q] : '----';
             for (let r = 0; r < 4; r++) {
                 const idx = q * 4 + r;
                 if (idx >= tpl.p2.length) continue;
@@ -6756,11 +6836,11 @@ function renderSvgOverlay(rawResult, code) {
 
     // Draw Part 3 circles (Trả lời ngắn)
     if (tpl.p3 && tpl.p3.length) {
-        const qCount3 = state.exam?.part3_count || 6;
+        const qCount3 = state.exam?.part3_count ?? 6;
         for (let q = 0; q < qCount3; q++) {
             if (q >= tpl.p3.length) continue;
             const sAns = String((rawResult.part3Text && rawResult.part3Text[q]) || '').trim();
-            const kAns = String((key.part3 && key.part3[q]) || '').trim();
+            const kAns = String((key?.part3 && key.part3[q]) || '').trim();
             const isMatch = isP3Match(sAns, kAns);
 
             if (rawResult.p3m && rawResult.p3m[q]) {
@@ -6790,9 +6870,10 @@ function renderSvgOverlay(rawResult, code) {
             }
 
             if (qMaxY > -Infinity) {
+                const isCompactP3 = Boolean(tpl.isMultiRowP3 || tpl.isHybridEssay || qMaxY < 20.5);
                 const centerX = ((qMinX + qMaxX) / 2) * 100;
                 const bx = Math.round(centerX - 75);
-                const by = Math.max(Math.round(qMaxY * 100 + 35), 2205);
+                const by = isCompactP3 ? Math.round(qMaxY * 100 + 18) : Math.max(Math.round(qMaxY * 100 + 35), 2205);
                 const bg = isMatch ? '#ecfdf5' : '#fef2f2';
                 const stroke = isMatch ? '#10b981' : '#ef4444';
                 const textCol = isMatch ? '#065f46' : '#991b1b';
@@ -9333,9 +9414,9 @@ window.loadCodeKeyInputs = (code) => {
     
     // Part 1 Grid
     const p1Cont = document.getElementById('part1KeyGrid');
-    const qCount1 = state.exam?.question_count || 12;
+    const qCount1 = state.exam?.question_count ?? 12;
     if (p1Cont) {
-        p1Cont.innerHTML = Array.from({ length: qCount1 }, (_, i) => {
+        p1Cont.innerHTML = qCount1 === 0 ? `<div class="col-span-full py-3 text-center text-xs text-slate-400 italic">Mẫu phiếu hiện tại không có Phần I (0 câu A/B/C/D).</div>` : Array.from({ length: qCount1 }, (_, i) => {
             const currentAns = (key.answers || '')[i] || '-';
             const isBonus = !!(bonusP1[i] || bonusP1[String(i)]);
             return `
@@ -9358,9 +9439,9 @@ window.loadCodeKeyInputs = (code) => {
 
     // Part 2 Grid
     const p2Cont = document.getElementById('part2KeyGrid');
-    const qCount2 = state.exam?.part2_count || 4;
+    const qCount2 = state.exam?.part2_count ?? 4;
     if (p2Cont) {
-        p2Cont.innerHTML = Array.from({ length: qCount2 }, (_, q) => {
+        p2Cont.innerHTML = qCount2 === 0 ? `<div class="col-span-full py-3 text-center text-xs text-slate-400 italic">Mẫu phiếu hiện tại không có Phần II (0 câu Đúng/Sai).</div>` : Array.from({ length: qCount2 }, (_, q) => {
             const currentChunk = (key.part2 && key.part2[q]) ? key.part2[q] : '----';
             const isQBonus = !!(bonusP2[q] || bonusP2[String(q)]);
             return `
@@ -9391,9 +9472,9 @@ window.loadCodeKeyInputs = (code) => {
 
     // Part 3 Grid
     const p3Cont = document.getElementById('part3KeyGrid');
-    const qCount3 = state.exam?.part3_count || 6;
+    const qCount3 = state.exam?.part3_count ?? 6;
     if (p3Cont) {
-        p3Cont.innerHTML = Array.from({ length: qCount3 }, (_, i) => {
+        p3Cont.innerHTML = qCount3 === 0 ? `<div class="col-span-full py-3 text-center text-xs text-slate-400 italic">Mẫu phiếu hiện tại không có Phần III (0 câu Trả lời ngắn).</div>` : Array.from({ length: qCount3 }, (_, i) => {
             const val = (key.part3 && key.part3[i]) || '';
             const isBonus = !!(bonusP3[i] || bonusP3[String(i)]);
             return `
@@ -9429,7 +9510,7 @@ window.applyBulkKey = () => {
     const text = document.getElementById('bulkKeyInput')?.value || '';
     if (!text) return;
     try {
-        const qCount = state.exam?.question_count || 12;
+        const qCount = state.exam?.question_count ?? 12;
         const res = window.parseQuickAnswers ? window.parseQuickAnswers(text, qCount) : { answers: text.toUpperCase().replace(/[^ABCD]/g, '') };
         const ansStr = res.answers || '';
         document.querySelectorAll('[data-p1]').forEach((sel, i) => {
@@ -9448,9 +9529,9 @@ window.applyBulkKey = () => {
 
 window.saveAllKeys = async () => {
     const code = document.getElementById('keyCodeSelector')?.value || '101';
-    const qCount1 = state.exam?.question_count || 12;
-    const qCount2 = state.exam?.part2_count || 4;
-    const qCount3 = state.exam?.part3_count || 6;
+    const qCount1 = state.exam?.question_count ?? 12;
+    const qCount2 = state.exam?.part2_count ?? 4;
+    const qCount3 = state.exam?.part3_count ?? 6;
 
     // Read P1
     let p1Answers = '';
@@ -11681,6 +11762,30 @@ window.renderDownloadsTab = () => {
 
     const sheets = [
         {
+            name: 'QM_TLN30 - Chuyên 30 Câu Trả Lời Ngắn (MỚI)',
+            desc: 'Thiết kế đặc biệt dành riêng cho đề chuyên Điền số / Trả lời ngắn (tối đa 30 câu = 5 hàng × 6 câu) trên nền giấy chuẩn BGD · SBD 8 số · Mã đề 4 số.',
+            pdf: './omr/assets/qm-tln30.pdf',
+            preview: './omr/assets/qm-tln30.png',
+            customTplKey: 'qmtln30',
+            badge: 'MỚI · 30 CÂU TLN'
+        },
+        {
+            name: 'QM_TuLuan40 - 40 Câu TN + Tự Luận (MỚI)',
+            desc: 'Kết hợp 40 câu Trắc nghiệm 4 phương án A/B/C/D ở nửa trên + Bảng điểm Tự luận & Vùng trình bày bài làm Tự luận trên cùng 1 mặt giấy A4.',
+            pdf: './omr/assets/qm-tuluan40.pdf',
+            preview: './omr/assets/qm-tuluan40.png',
+            customTplKey: 'qmtuluan40',
+            badge: 'MỚI · TN + TỰ LUẬN'
+        },
+        {
+            name: 'QM_Combo2024 - 20 TN + 2 Đ/S + 4 TLN + Tự Luận (MỚI)',
+            desc: 'Mẫu kết hợp rút gọn: Phần I (tối đa 20 câu TN) + Phần II (tối đa 2 câu Đ/S) + Phần III (tối đa 4 câu TLN) + Phần IV (Tự luận) trên 1 trang A4.',
+            pdf: './omr/assets/qm-combo2024.pdf',
+            preview: './omr/assets/qm-combo2024.png',
+            customTplKey: 'qmcombo2024',
+            badge: 'MỚI · 4 TRONG 1'
+        },
+        {
             name: 'QM 2025 - CV 1239 - Chuẩn Kỳ Thi',
             desc: '40 câu A/B/C/D · 8 câu Đúng/Sai · 6 câu trả lời ngắn · SBD 8 số · Mã đề 4 số.',
             pdf: './omr/assets/qm-cv1239.pdf',
@@ -11713,23 +11818,33 @@ window.renderDownloadsTab = () => {
     ];
 
     cont.innerHTML = sheets.map(s => `
-        <div class="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-2xs flex flex-col justify-between">
+        <div class="bg-white dark:bg-slate-800 rounded-2xl border ${s.badge ? 'border-emerald-400 dark:border-emerald-700 ring-1 ring-emerald-500/20' : 'border-slate-200 dark:border-slate-700'} overflow-hidden shadow-2xs flex flex-col justify-between relative">
+            ${s.badge ? `<span class="absolute top-2.5 right-2.5 z-10 px-2.5 py-0.5 rounded-full text-[10px] font-black bg-emerald-600 text-white shadow-xs">${s.badge}</span>` : ''}
             <div>
                 <div class="h-48 bg-slate-100 dark:bg-slate-900 flex items-center justify-center overflow-hidden p-2">
-                    <img src="${s.preview}" class="max-h-full object-contain shadow-xs rounded">
+                    <img src="${s.preview}" class="max-h-full object-contain shadow-xs rounded" onerror="if(window.renderCustomOmrSheetToCanvas && '${s.customTplKey || ''}'){ const c=window.renderCustomOmrSheetToCanvas('${s.customTplKey || ''}',1.2); if(c) this.src=c.toDataURL('image/png'); }">
                 </div>
                 <div class="p-4 space-y-1.5">
                     <h4 class="font-bold text-sm text-slate-800 dark:text-white">${s.name}</h4>
                     <p class="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">${s.desc}</p>
                 </div>
             </div>
-            <div class="p-4 pt-0 flex gap-2">
+            <div class="p-4 pt-0 flex flex-wrap gap-2">
                 <a href="${s.pdf}" target="_blank" class="flex-1 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold text-center transition-all flex items-center justify-center gap-1.5">
-                    <i class="fa-solid fa-file-pdf"></i> Tải PDF In A4
+                    <i class="fa-solid fa-file-pdf"></i> Tải PDF A4
                 </a>
+                ${s.customTplKey ? `
+                <button type="button" onclick="window.printCustomOmrSheetA4 && window.printCustomOmrSheetA4('${s.customTplKey}')" class="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center gap-1" title="In trực tiếp chuẩn A4 300 DPI">
+                    <i class="fa-solid fa-print"></i> In A4
+                </button>
+                <button type="button" onclick="window.downloadCustomOmrSheetPNG && window.downloadCustomOmrSheetPNG('${s.customTplKey}')" class="px-2.5 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold transition-colors cursor-pointer" title="Tải ảnh PNG 300 DPI">
+                    <i class="fa-solid fa-download"></i>
+                </button>
+                ` : `
                 <a href="${s.preview}" target="_blank" class="px-3 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold transition-colors" title="Xem ảnh">
                     <i class="fa-solid fa-eye"></i>
                 </a>
+                `}
             </div>
         </div>
     `).join('');
@@ -12160,6 +12275,47 @@ window.closeCreateExamModal = () => {
     document.getElementById('createExamModal').classList.add('hidden');
 };
 
+window.applyTemplatePresetCounts = (mode = 'create') => {
+    const prefix = mode === 'create' ? 'newExam' : 'editExam';
+    const tpl = document.getElementById(`${prefix}Template`)?.value || 'qmcv1239';
+    const p1El = document.getElementById(`${prefix}CountP1`);
+    const p1PtEl = document.getElementById(`${prefix}PointP1`);
+    const p2El = document.getElementById(`${prefix}CountP2`);
+    const p3El = document.getElementById(`${prefix}CountP3`);
+    const p3PtEl = document.getElementById(`${prefix}PointP3`);
+    if (!p1El || !p2El || !p3El) return;
+
+    if (tpl === 'qmtln30') {
+        p1El.value = 0;
+        p2El.value = 0;
+        p3El.value = 25;
+        if (p3PtEl) p3PtEl.value = 0.4;
+    } else if (tpl === 'qmtuluan40') {
+        p1El.value = 28;
+        if (p1PtEl) p1PtEl.value = 0.25;
+        p2El.value = 0;
+        p3El.value = 0;
+    } else if (tpl === 'qmcombo2024') {
+        p1El.value = 16;
+        if (p1PtEl) p1PtEl.value = 0.25;
+        p2El.value = 2;
+        p3El.value = 4;
+        if (p3PtEl) p3PtEl.value = 0.5;
+    } else if (tpl === 'tnmaker40' || tpl === 'qm40') {
+        p1El.value = 40;
+        if (p1PtEl) p1PtEl.value = 0.25;
+        p2El.value = 0;
+        p3El.value = 0;
+    } else if (tpl === 'qmcv1239' || tpl === 'bgd2025original') {
+        p1El.value = 12;
+        if (p1PtEl) p1PtEl.value = 0.25;
+        p2El.value = 4;
+        p3El.value = 6;
+        if (p3PtEl) p3PtEl.value = 0.5;
+    }
+    window.calcExamScorePreview(mode);
+};
+
 window.confirmCreateExam = async () => {
     const name = document.getElementById('newExamName')?.value.trim();
     if (!name) {
@@ -12168,10 +12324,10 @@ window.confirmCreateExam = async () => {
     }
     const tpl = document.getElementById('newExamTemplate')?.value || 'qmcv1239';
     const codes = (document.getElementById('newExamCodes')?.value || '101, 102').split(',').map(s => s.trim()).filter(Boolean);
-    const p1Count = parseInt(document.getElementById('newExamCountP1')?.value) || 12;
+    const p1Count = parseSafeIntCount(document.getElementById('newExamCountP1')?.value, 12);
     const p1Point = parseSafeScorePoint(document.getElementById('newExamPointP1')?.value, 0.25);
-    const p2Count = parseInt(document.getElementById('newExamCountP2')?.value) || 4;
-    const p3Count = parseInt(document.getElementById('newExamCountP3')?.value) || 6;
+    const p2Count = parseSafeIntCount(document.getElementById('newExamCountP2')?.value, 4);
+    const p3Count = parseSafeIntCount(document.getElementById('newExamCountP3')?.value, 6);
     const p3Point = parseSafeScorePoint(document.getElementById('newExamPointP3')?.value, 0.5);
     const omrClassId = document.getElementById('newExamOmrClassId')?.value || '';
     const folderId = document.getElementById('newExamFolderSelect')?.value || state.currentFolderId || null;
@@ -12570,10 +12726,10 @@ window.openEditExamSettingsModal = () => {
     document.getElementById('editExamName').value = state.exam.name || '';
     document.getElementById('editExamTemplate').value = state.exam.sheet_template || 'qmcv1239';
     document.getElementById('editExamCodes').value = (state.exam.codes || ['101', '102']).join(', ');
-    document.getElementById('editExamCountP1').value = state.exam.question_count || 12;
+    document.getElementById('editExamCountP1').value = state.exam.question_count ?? 12;
     document.getElementById('editExamPointP1').value = state.exam.part1_point ?? 0.25;
-    document.getElementById('editExamCountP2').value = state.exam.part2_count || 4;
-    document.getElementById('editExamCountP3').value = state.exam.part3_count || 6;
+    document.getElementById('editExamCountP2').value = state.exam.part2_count ?? 4;
+    document.getElementById('editExamCountP3').value = state.exam.part3_count ?? 6;
     document.getElementById('editExamPointP3').value = state.exam.part3_point ?? 0.5;
 
     const folderSelect = document.getElementById('editExamFolderSelect');
@@ -12622,7 +12778,7 @@ window.renderEditExamModalKeys = (code) => {
 
     // P1 Grid
     const p1Cont = document.getElementById('editExamModalP1Grid');
-    const qCount1 = parseInt(document.getElementById('editExamCountP1')?.value) || state.exam?.question_count || 12;
+    const qCount1 = parseSafeIntCount(document.getElementById('editExamCountP1')?.value, state.exam?.question_count ?? 12);
     if (p1Cont) {
         p1Cont.innerHTML = Array.from({ length: qCount1 }, (_, i) => {
             const currentAns = (key.answers || '')[i] || '-';
@@ -12650,7 +12806,7 @@ window.renderEditExamModalKeys = (code) => {
 
     // P2 Grid
     const p2Cont = document.getElementById('editExamModalP2Grid');
-    const qCount2 = parseInt(document.getElementById('editExamCountP2')?.value) || state.exam?.part2_count || 4;
+    const qCount2 = parseSafeIntCount(document.getElementById('editExamCountP2')?.value, state.exam?.part2_count ?? 4);
     if (p2Cont) {
         p2Cont.innerHTML = Array.from({ length: qCount2 }, (_, q) => {
             const currentChunk = (key.part2 && key.part2[q]) ? key.part2[q] : '----';
@@ -12685,7 +12841,7 @@ window.renderEditExamModalKeys = (code) => {
 
     // P3 Grid
     const p3Cont = document.getElementById('editExamModalP3Grid');
-    const qCount3 = parseInt(document.getElementById('editExamCountP3')?.value) || state.exam?.part3_count || 6;
+    const qCount3 = parseSafeIntCount(document.getElementById('editExamCountP3')?.value, state.exam?.part3_count ?? 6);
     if (p3Cont) {
         p3Cont.innerHTML = Array.from({ length: qCount3 }, (_, i) => {
             const val = (key.part3 && key.part3[i]) || '';
@@ -12721,7 +12877,7 @@ window.applyModalBulkKey = () => {
     const text = document.getElementById('editExamModalBulkInput')?.value || '';
     if (!text) return;
     try {
-        const qCount = parseInt(document.getElementById('editExamCountP1')?.value) || 12;
+        const qCount = parseSafeIntCount(document.getElementById('editExamCountP1')?.value, 12);
         const res = window.parseQuickAnswers ? window.parseQuickAnswers(text, qCount) : { answers: text.toUpperCase().replace(/[^ABCD]/g, '') };
         const ansStr = res.answers || '';
         document.querySelectorAll('[data-modal-p1]').forEach((sel, i) => {
@@ -12741,9 +12897,9 @@ window.applyModalBulkKey = () => {
 window.saveCurrentEditModalKey = (code) => {
     state._keysModifiedInModal = true;
     if (!code || !state.exam) return;
-    const qCount1 = parseInt(document.getElementById('editExamCountP1')?.value) || 12;
-    const qCount2 = parseInt(document.getElementById('editExamCountP2')?.value) || 4;
-    const qCount3 = parseInt(document.getElementById('editExamCountP3')?.value) || 6;
+    const qCount1 = parseSafeIntCount(document.getElementById('editExamCountP1')?.value, 12);
+    const qCount2 = parseSafeIntCount(document.getElementById('editExamCountP2')?.value, 4);
+    const qCount3 = parseSafeIntCount(document.getElementById('editExamCountP3')?.value, 6);
 
     let p1Answers = '';
     const bonus_p1 = {};
@@ -12848,10 +13004,10 @@ window.confirmSaveExamSettings = async () => {
     state.exam.name = name;
     state.exam.sheet_template = newSheetTemplate;
     state.exam.codes = (document.getElementById('editExamCodes')?.value || '101').split(',').map(s => s.trim()).filter(Boolean);
-    state.exam.question_count = parseInt(document.getElementById('editExamCountP1')?.value) || 12;
+    state.exam.question_count = parseSafeIntCount(document.getElementById('editExamCountP1')?.value, 12);
     state.exam.part1_point = parseSafeScorePoint(document.getElementById('editExamPointP1')?.value, 0.25);
-    state.exam.part2_count = parseInt(document.getElementById('editExamCountP2')?.value) || 4;
-    state.exam.part3_count = parseInt(document.getElementById('editExamCountP3')?.value) || 6;
+    state.exam.part2_count = parseSafeIntCount(document.getElementById('editExamCountP2')?.value, 4);
+    state.exam.part3_count = parseSafeIntCount(document.getElementById('editExamCountP3')?.value, 6);
     state.exam.part3_point = parseSafeScorePoint(document.getElementById('editExamPointP3')?.value, 0.5);
     state.exam.folderId = document.getElementById('editExamFolderSelect')?.value || null;
 
@@ -12990,9 +13146,9 @@ window.switchEditSubTab = (tab) => {
 window.renderEditSubP1 = () => {
     const cont = document.getElementById('editSubP1Container');
     if (!cont) return;
-    const qCount = state.exam?.question_count || 12;
+    const qCount = state.exam?.question_count ?? 12;
     const sub = editSubState.sub;
-    const key = resolveKeyForCode(sub?.code);
+    const key = resolveKeyForCode(sub?.code) || { answers: '', part2: [], part3: [] };
     const keyAns = key.answers || '';
     const origAns = sub?._original_answers || sub?.answers || '';
 
@@ -13031,9 +13187,9 @@ window.chooseEditSubP1 = (q, val) => {
 window.renderEditSubP2 = () => {
     const cont = document.getElementById('editSubP2Container');
     if (!cont) return;
-    const qCount = state.exam?.part2_count || 4;
+    const qCount = state.exam?.part2_count ?? 4;
     const sub = editSubState.sub;
-    const key = resolveKeyForCode(sub?.code);
+    const key = resolveKeyForCode(sub?.code) || { answers: '', part2: [], part3: [] };
 
     cont.innerHTML = Array.from({ length: qCount }, (_, q) => {
         const sChunk = (editSubState.answersP2 && editSubState.answersP2[q]) ? editSubState.answersP2[q] : '----';
@@ -13074,9 +13230,9 @@ window.chooseEditSubP2 = (q, r, val) => {
 window.renderEditSubP3 = () => {
     const cont = document.getElementById('editSubP3Container');
     if (!cont) return;
-    const qCount = state.exam?.part3_count || 6;
+    const qCount = state.exam?.part3_count ?? 6;
     const sub = editSubState.sub;
-    const key = resolveKeyForCode(sub?.code);
+    const key = resolveKeyForCode(sub?.code) || { answers: '', part2: [], part3: [] };
 
     cont.innerHTML = Array.from({ length: qCount }, (_, i) => {
         let val = '';
@@ -13116,7 +13272,7 @@ window.confirmSaveSubmissionEdit = async () => {
     if (!sub.manual_overrides) sub.manual_overrides = { p1: {}, p2: {}, p3: {} };
 
     // So sánh P1
-    const qCount1 = state.exam?.question_count || 12;
+    const qCount1 = state.exam?.question_count ?? 12;
     for (let i = 0; i < qCount1; i++) {
         const cur = (editSubState.answersP1 || '')[i] || '-';
         const orig = (sub._original_answers || '')[i] || '-';
@@ -13127,7 +13283,7 @@ window.confirmSaveSubmissionEdit = async () => {
     }
 
     // So sánh P2
-    const qCount2 = state.exam?.part2_count || 4;
+    const qCount2 = state.exam?.part2_count ?? 4;
     for (let q = 0; q < qCount2; q++) {
         const curChunk = editSubState.answersP2[q] || '----';
         const origChunk = (sub.part2 && sub.part2[q]) ? sub.part2[q] : '----';
@@ -13140,7 +13296,7 @@ window.confirmSaveSubmissionEdit = async () => {
     }
 
     // So sánh P3
-    const qCount3 = state.exam?.part3_count || 6;
+    const qCount3 = state.exam?.part3_count ?? 6;
     for (let q = 0; q < qCount3; q++) {
         const curVal = editSubState.answersP3[q] || '';
         const origVal = (sub.part3 && sub.part3[q]) ? String(sub.part3[q]) : '';

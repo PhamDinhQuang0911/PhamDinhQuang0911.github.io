@@ -16,10 +16,11 @@
 var OMR = (function () {
   'use strict';
 
-  // ---------- ảnh xám & khử bóng cục bộ 2D (CamScanner Illumination Normalization) ----------
+  // ---------- ảnh xám & khử bóng cục bộ 2D (Decompiled CamScanner scanet::EvaluationIllumination @ 0x00030224) ----------
   function xam(img) {
     var s = img.data, n = img.width * img.height, d = new Uint8Array(n);
-    for (var i = 0, j = 0; i < n; i++, j += 4) d[i] = (s[j] * 77 + s[j + 1] * 150 + s[j + 2] * 29) >> 8;
+    // ITU-R BT.601 integer approximation from CamScanner libscannercs.so: (38*R + 75*G + 15*B) >> 7
+    for (var i = 0, j = 0; i < n; i++, j += 4) d[i] = (s[j] * 38 + s[j + 1] * 75 + s[j + 2] * 15) >> 7;
     return { w: img.width, h: img.height, d: d };
   }
 
@@ -28,59 +29,79 @@ var OMR = (function () {
     if (!G || !G.d || G._daKhuBong) return G;
     var w = G.w, h = G.h, d = G.d;
     if (w < 64 || h < 64) return G;
-    var B = Math.max(20, Math.round(Math.min(w, h) / 22));
+    // Khối 16x16 chuẩn scanet::EvaluationIllumination (tỉ lệ theo kích thước ảnh)
+    var B = Math.max(12, Math.min(20, Math.round(Math.min(w, h) / 48)));
     var gw = Math.ceil(w / B), gh = Math.ceil(h / B);
     var grid = new Float32Array(gw * gh);
-    var step = B >= 28 ? 2 : 1, bx, by, x, y;
+    var bx, by, x, y;
     for (by = 0; by < gh; by++) {
       var y0 = by * B, y1 = Math.min(h, y0 + B);
       for (bx = 0; bx < gw; bx++) {
-        var x0 = bx * B, x1 = Math.min(w, x0 + B), cnt = 0;
+        var x0 = bx * B, x1 = Math.min(w, x0 + B), cnt = 0, total = 0;
         _kbHist.fill(0);
-        for (y = y0; y < y1; y += step) {
+        for (y = y0; y < y1; y++) {
           var row = y * w;
-          for (x = x0; x < x1; x += step) { _kbHist[d[row + x]]++; cnt++; }
-        }
-        var target = (cnt * 0.16) | 0, acc = 0, p84 = 220;
-        for (var v = 255; v >= 0; v--) {
-          acc += _kbHist[v];
-          if (acc > target) { p84 = v; break; }
-        }
-        grid[by * gw + bx] = Math.max(80, p84);
-      }
-    }
-    // 3x3 max-dilation để các mốc vuông đen hoặc vùng chữ đậm không kéo tụt nền giấy cục bộ
-    var dil = new Float32Array(gw * gh);
-    for (by = 0; by < gh; by++) {
-      for (bx = 0; bx < gw; bx++) {
-        var mx = 0;
-        for (var dy = -1; dy <= 1; dy++) {
-          var ny = by + dy; if (ny < 0) ny = 0; else if (ny >= gh) ny = gh - 1;
-          for (var dx = -1; dx <= 1; dx++) {
-            var nx = bx + dx; if (nx < 0) nx = 0; else if (nx >= gw) nx = gw - 1;
-            var val = grid[ny * gw + nx];
-            if (val > mx) mx = val;
+          for (x = x0; x < x1; x++) {
+            var v = d[row + x];
+            total++;
+            if (v > 80) { _kbHist[v]++; cnt++; }
           }
         }
-        dil[by * gw + bx] = mx;
+        if (cnt < total * 0.42) {
+          // Khối chứa mốc vuông đen đặc hoặc viền đen dày: đánh dấu 0 để nội suy từ lân cận
+          grid[by * gw + bx] = 0;
+        } else {
+          // Phân vị 90% (90th percentile) của giấy trong khối — KHÔNG giãn cực đại 3x3 qua ranh giới bóng râm!
+          var target = (cnt * 0.10) | 0, acc = 0, p90 = 220;
+          for (var val = 255; val >= 0; val--) {
+            acc += _kbHist[val];
+            if (acc > target) { p90 = val; break; }
+          }
+          grid[by * gw + bx] = Math.max(70, p90);
+        }
       }
     }
-    // 3x3 box blur làm mượt mặt phẳng chiếu sáng
+    // Lấp các khối mốc đen đặc (grid == 0) từ các khối giấy lân cận
+    for (var pass = 0; pass < 2; pass++) {
+      for (by = 0; by < gh; by++) {
+        for (bx = 0; bx < gw; bx++) {
+          if (grid[by * gw + bx] > 0) continue;
+          var sumN = 0, cntN = 0;
+          for (var dy = -2; dy <= 2; dy++) {
+            var ny = by + dy; if (ny < 0 || ny >= gh) continue;
+            for (var dx = -2; dx <= 2; dx++) {
+              var nx = bx + dx; if (nx < 0 || nx >= gw) continue;
+              var nv = grid[ny * gw + nx];
+              if (nv > 0) { sumN += nv; cntN++; }
+            }
+          }
+          if (cntN > 0) grid[by * gw + bx] = sumN / cntN;
+          else if (pass === 1) grid[by * gw + bx] = 200;
+        }
+      }
+    }
+    // Bộ lọc tích chập lều 5x5 (5x5 tent-weighted smoothing kernel) chuẩn CamScanner EvaluationIllumination
     var sm = new Float32Array(gw * gh);
     for (by = 0; by < gh; by++) {
       for (bx = 0; bx < gw; bx++) {
-        var sum = 0;
-        for (var dy2 = -1; dy2 <= 1; dy2++) {
-          var ny2 = by + dy2; if (ny2 < 0) ny2 = 0; else if (ny2 >= gh) ny2 = gh - 1;
-          for (var dx2 = -1; dx2 <= 1; dx2++) {
-            var nx2 = bx + dx2; if (nx2 < 0) nx2 = 0; else if (nx2 >= gw) nx2 = gw - 1;
-            sum += dil[ny2 * gw + nx2];
+        var sum = 0, wsum = 0;
+        for (var dy2 = -2; dy2 <= 2; dy2++) {
+          var ny2 = by + dy2 < 0 ? 0 : (by + dy2 >= gh ? gh - 1 : by + dy2);
+          var wy2 = 3 - (dy2 < 0 ? -dy2 : dy2);
+          for (var dx2 = -2; dx2 <= 2; dx2++) {
+            var nx2 = bx + dx2 < 0 ? 0 : (bx + dx2 >= gw ? gw - 1 : bx + dx2);
+            var wt = wy2 * (3 - (dx2 < 0 ? -dx2 : dx2));
+            sum += grid[ny2 * gw + nx2] * wt;
+            wsum += wt;
           }
         }
-        sm[by * gw + bx] = sum / 9;
+        // Chặn hiệu ứng lan sáng từ vùng nắng sang vùng bóng râm tại mép bóng điện thoại sắc cạnh:
+        var rawB = grid[by * gw + bx];
+        var smoothB = sum / wsum;
+        sm[by * gw + bx] = smoothB > rawB * 1.03 ? rawB * 1.03 : smoothB;
       }
     }
-    // Nội suy song tuyến tính nền giấy bg(x,y) và chuẩn hoá độ sáng về nền giấy chuẩn 240
+    // Nội suy song tuyến tính nền giấy bg(x,y) và chuẩn hoá chia chiếu sáng (wb_IoOOo @ 0x00037234)
     var invB = 1 / B, maxBx = gw - 1, maxBy = gh - 1;
     for (y = 0; y < h; y++) {
       var fy = (y + 0.5) * invB - 0.5;
@@ -99,8 +120,8 @@ var OMR = (function () {
         var bg1 = sm[r1 + bx0] * (1 - wx) + sm[r1 + bx1] * wx;
         var bg = bg0 * (1 - wy) + bg1 * wy;
         var pxVal = d[rowOff + x];
-        var norm = ((pxVal * 240) / bg + 0.5) | 0;
-        d[rowOff + x] = norm > 255 ? 255 : norm;
+        var norm = ((pxVal * 248) / (bg < 45 ? 45 : bg) + 0.5) | 0;
+        d[rowOff + x] = norm >= 224 ? 255 : (norm > 255 ? 255 : norm);
       }
     }
     G._daKhuBong = true;

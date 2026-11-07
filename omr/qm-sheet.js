@@ -47,7 +47,7 @@
     const allBlocks=OMR.timKhoi(g).filter(b=>b.c>minDim*0.0072&&b.c<minDim*0.075);
     if(allBlocks.length<4)return null;
     allBlocks.sort((a,b)=>b.c-a.c);
-    const blocks=allBlocks.slice(0,65);
+    const blocks=allBlocks.slice(0,140);
 
     const m=tpl.moc;
     const tplW=Math.hypot(m[1].x-m[0].x,m[1].y-m[0].y);
