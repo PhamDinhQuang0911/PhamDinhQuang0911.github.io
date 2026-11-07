@@ -5666,7 +5666,7 @@ function cropCandidateHandwrittenName(rectifiedSource, tplKey = null, isStamped 
     else if (activeKey === 'phutho') rect = [390/1654, 410/2339, 540/1654, 75/2339];
     else if (activeKey === 'tnmaker40') rect = [1020/2479, 440/1746, 580/2479, 140/1746];
     else if (activeKey === 'qm40') rect = [1050/1735, 10/919, 550/1735, 170/919];
-    else if (['qmtln30', 'qmtuluan40', 'qmcombo2024'].includes(activeKey)) rect = [395/1653, 250/2339, 635/1653, 52/2339];
+    else if (['qmtln30', 'qmtuluan40', 'qmcombo2024'].includes(activeKey)) rect = [445/1653, 376/2339, 575/1653, 62/2339];
 
     return new Promise(resolve => {
         const processSource = (source) => {
