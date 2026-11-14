@@ -14,7 +14,7 @@
  * (network-first) nhÆ°ng nÃªn tÄƒng khi Ä‘á»•i styles.css/utils.js Ä‘á»ƒ cháº¯c cháº¯n.
  */
 
-const VERSION = 'qmath-v177-fix-fan-unit-20261113';
+const VERSION = 'qmath-v180-short-link-20261114';
 const STATIC_CACHE = `${VERSION}-static`;
 const PAGE_CACHE = `${VERSION}-pages`;
 const CDN_CACHE = `${VERSION}-cdn`;
@@ -87,8 +87,10 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       fetch(req, { cache: 'no-cache' })
         .then((res) => {
-          const copy = res.clone();
-          caches.open(PAGE_CACHE).then((c) => c.put(req, copy));
+          if (res && res.ok && !url.pathname.startsWith('/go')) {
+            const copy = res.clone();
+            caches.open(PAGE_CACHE).then((c) => c.put(req, copy));
+          }
           return res;
         })
         .catch(() =>
@@ -101,7 +103,7 @@ self.addEventListener('fetch', (event) => {
   }
 
   // 3. File code adapter DB Supabase & core utils: luÃ´n NETWORK-FIRST Ä‘á»ƒ khÃ´ng bao giá» bá»‹ lá»‡ch phiÃªn báº£n module
-  if (url.origin === self.location.origin && (url.pathname.includes('omr-grader') || url.pathname.includes('/omr/') || url.pathname.includes('supabase-db-compat') || url.pathname.includes('supabase-client') || url.pathname.includes('supabase.esm') || url.pathname.includes('live-tracker') || url.pathname.includes('utils.js') || url.pathname.includes('security-shield'))) {
+  if (url.origin === self.location.origin && (url.pathname.includes('omr-grader') || url.pathname.includes('/omr/') || url.pathname.includes('short-link') || url.pathname.includes('supabase-db-compat') || url.pathname.includes('supabase-client') || url.pathname.includes('supabase.esm') || url.pathname.includes('live-tracker') || url.pathname.includes('utils.js') || url.pathname.includes('security-shield'))) {
     event.respondWith(
       fetch(req, { cache: 'no-cache' })
         .then((res) => {

@@ -1716,7 +1716,8 @@ const VIRTUAL_CONFIG_PREFIX = {
     omr_keys: 'omrkey_',
     omr_students: 'omrstu_',
     omr_submissions: 'omrsub_',
-    omr_local_classes: 'omrcls_'
+    omr_local_classes: 'omrcls_',
+    short_links: 'surl_'
 };
 
 export async function getDoc(docRef) {
