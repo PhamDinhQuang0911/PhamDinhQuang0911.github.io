@@ -16,7 +16,7 @@
     'use strict';
 
     const LOCAL_BRIDGE_URL = 'http://127.0.0.1:8765';
-    const DATA_VERSION = '20261113-v4';
+    const DATA_VERSION = '20261114-v2';
     const CATALOG_URL = `data/imath/catalog_mapped.json?v=${DATA_VERSION}`;
 
     const state = {
@@ -1489,7 +1489,8 @@
             badge.innerHTML = '<i class="fa-solid fa-bolt"></i><span>Engine Python Local</span>';
         } else {
             badge.className = 'ims-status-badge';
-            badge.innerHTML = '<i class="fa-solid fa-database"></i><span>2.476 mẫu × 150 biến thể</span>';
+            const nForms = (state.catalog && state.catalog.length) ? state.catalog.length.toLocaleString('vi-VN') : '2.519';
+            badge.innerHTML = `<i class="fa-solid fa-database"></i><span>${nForms} mẫu × tối đa 150 biến thể</span>`;
         }
     }
 
@@ -1711,7 +1712,7 @@
                         <div style="min-width:0;flex:1;">
                             <div class="ims-header-title-row">
                                 <h2 class="ims-header-title">Tạo câu hỏi theo dạng (Đổi số chuẩn MapID)</h2>
-                                <span id="imathEngineStatusBadge" onclick="window.pingIMathLocalEngine()" class="ims-status-badge" title="Bấm để kiểm tra kết nối Python Local Engine">2.473 mẫu chuẩn MapID</span>
+                                <span id="imathEngineStatusBadge" onclick="window.pingIMathLocalEngine()" class="ims-status-badge" title="Bấm để kiểm tra kết nối Python Local Engine">2.519 mẫu chuẩn MapID</span>
                             </div>
                             <p class="ims-header-sub">Lọc theo cấu trúc MapID (Khối • Phân môn • Chương • Bài • Dạng toán) & nạp thẳng vào Ngân hàng câu hỏi / Đề thi</p>
                         </div>
@@ -1922,7 +1923,10 @@
     window.pingIMathLocalEngine = function () {
         checkLocalBridge(true).then(online => {
             if (online) notify('Đã kết nối Engine Python Local (http://127.0.0.1:8765)!', 'success');
-            else notify('Đang sử dụng Kho dữ liệu chuẩn MapID trên Web (2.476 mẫu × 150 biến thể).', 'info');
+            else {
+                const nForms = (state.catalog && state.catalog.length) ? state.catalog.length.toLocaleString('vi-VN') : '2.519';
+                notify(`Đang sử dụng Kho dữ liệu chuẩn MapID trên Web (${nForms} mẫu, tối đa 150 biến thể/mẫu).`, 'info');
+            }
         });
     };
 
